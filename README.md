@@ -1,5 +1,7 @@
 # Fail-closed Tailscale exit router
 
+![Conceptual vprouter traffic flow](overview.png)
+
 This Linux-only router advertises a Tailscale exit node after it verifies a
 Mullvad WireGuard tunnel. The router container starts with **no ordinary
 network interface**. A root-owned host service creates WireGuard in a separate

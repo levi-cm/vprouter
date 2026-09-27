@@ -1,0 +1,26 @@
+table inet vprouter {
+    chain input {
+        type filter hook input priority -150; policy drop;
+        iifname "lo" accept
+        iifname "wg0" meta iifkind "wireguard" ct state established,related accept
+    }
+
+    chain output {
+        type filter hook output priority -150; policy drop;
+        oifname "lo" accept
+        oifname "wg0" meta oifkind "wireguard" accept
+        oifname "tailscale0" ip daddr 100.100.100.100 accept
+    }
+
+    chain forward {
+        type filter hook forward priority -150; policy drop;
+        iifname "tailscale0" meta nfproto ipv6 drop
+        iifname "tailscale0" oifname "wg0" meta oifkind "wireguard" ip saddr 100.64.0.0/10 accept
+        iifname "wg0" meta iifkind "wireguard" oifname "tailscale0" ct state established,related accept
+    }
+
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        oifname "wg0" meta oifkind "wireguard" ip saddr 100.64.0.0/10 masquerade
+    }
+}

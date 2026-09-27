@@ -1,0 +1,19 @@
+[Unit]
+Description=Fail-closed Tailscale via WireGuard router (%i)
+Requires=docker.service
+After=docker.service network-online.target
+PartOf=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/vprouter/current/host/orchestrate.py serve --config /etc/vprouter/%i.json
+ExecStopPost=-/usr/bin/python3 /opt/vprouter/current/host/orchestrate.py cleanup --name %i
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=120s
+KillMode=control-group
+NotifyAccess=main
+
+[Install]
+WantedBy=multi-user.target

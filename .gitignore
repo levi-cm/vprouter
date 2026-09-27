@@ -1,4 +1,7 @@
-.env
-docker-compose.yaml
+.env*
+*.zip
+*.key
 conf/
 tailscale/
+.worktrees/
+__pycache__/

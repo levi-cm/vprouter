@@ -1,0 +1,58 @@
+services:
+  router:
+    image: ${ROUTER_IMAGE:-vprouter-hardened:staged}
+    container_name: ${ROUTER_NAME:-max-vprouter}
+    entrypoint: ["/usr/local/bin/router-runtime"]
+    network_mode: none
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_BIND_SERVICE, SETUID, SETGID]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 1g
+    memswap_limit: 1g
+    stop_grace_period: 10s
+    dns: [9.9.9.9]
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv6.conf.all.forwarding: "1"
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TS_HOSTNAME: ${ROUTER_NAME:-max-vprouter}
+      VPN_DNS: ${VPN_DNS:-9.9.9.9}
+    tmpfs:
+      - /run:rw,noexec,nosuid,nodev,size=16m
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    volumes:
+      - ${TS_STATE_PATH:-./tailscale}:/var/lib/tailscale
+
+  transport:
+    image: ${ROUTER_IMAGE:-vprouter-hardened:staged}
+    container_name: ${ROUTER_NAME:-max-vprouter}-uplink
+    entrypoint: ["/bin/sleep", "infinity"]
+    healthcheck:
+      disable: true
+    user: "65534:65534"
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 16
+    mem_limit: 64m
+    memswap_limit: 64m
+    networks:
+      uplink:
+        ipv4_address: 10.255.240.2
+
+networks:
+  uplink:
+    name: ${UPLINK_NETWORK:-vprouter-uplink}
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: br-vpr-uplink
+    ipam:
+      config:
+        - subnet: 10.255.240.0/29

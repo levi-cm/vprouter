@@ -1,0 +1,16 @@
+.env*
+conf/
+tailscale/
+*.zip
+*.key
+*.conf
+audit/
+tests/
+.git/
+.worktrees/
+SECURITY-AUDIT-*.md
+VERIFICATION-*.md
+docker-compose*.yaml
+README.md
+bootstrap.sh
+load-wireguard-env.sh

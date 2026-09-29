@@ -1,0 +1,12 @@
+Starting tailscaled
+TS_AUTHKEY is not set; starting interactive Tailscale login
+Waiting for tailscale status
+Tailscale connected
+Setting up WireGuard
+Adding WireGuard route
+Setting up WireGuard firewall
+WireGuard setup complete
+Setting up split DNS
+Current tailnet domain: audit.invalid
+AUDIT_INJECTED_DNS_FAILURE
+Split DNS setup complete

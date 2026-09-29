@@ -11,9 +11,11 @@ import socket
 import subprocess
 import sys
 import time
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from host.orchestrate import Provider, Site, guard_snapshot, install_guard, verify_bridge
+from host.orchestrate import (Provider, Site, SiteError, cleanup_owned, guard_snapshot,
+                              install_guard, release_quarantine, verify_bridge)
 
 
 def call(*args):
@@ -80,6 +82,16 @@ print(','.join(seen),flush=True)
     server = subprocess.Popen(["nsenter", "-t", str(endpoint.pid), "-n", sys.executable, "-c", server_code],
                               stdout=subprocess.PIPE, text=True)
     time.sleep(.1)
+    with patch("host.orchestrate.container_info", side_effect=OSError("Docker API unavailable")):
+        try:
+            cleanup_owned("probe")
+            raise AssertionError("Docker failure was incorrectly accepted")
+        except SiteError:
+            pass
+    call("nft", "list", "table", "inet", "vprouter_quarantine")
+    call("nsenter", "-t", str(transport.pid), "-n", sys.executable, "-c",
+         "import socket;socket.socket(socket.AF_INET,socket.SOCK_DGRAM).sendto(b'quarantine-test',('192.0.2.77',51820))")
+    release_quarantine()
     client_code = """import socket
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(1)
 s.sendto(b'allowed',('192.0.2.77',51820))
@@ -94,7 +106,7 @@ s.sendto(b'host-input',('10.255.240.1',51820))
     host_listener.close()
     result = {"allowed_endpoint_received": received.strip() == "allowed",
               "return_packet_received": "reply" in response,
-              "other_payload_received": "wrong-port" in received or host_input_received}
+              "other_payload_received": "wrong-port" in received or "quarantine-test" in received or host_input_received}
     print(json.dumps(result))
     assert result == {"allowed_endpoint_received": True, "return_packet_received": True,
                       "other_payload_received": False}, result

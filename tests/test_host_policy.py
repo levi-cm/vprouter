@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 
-from host.orchestrate import load_site, render_host_guard, SiteError
+from host.orchestrate import _normalized_nft, load_site, render_host_guard, render_quarantine, SiteError
 
 
 def fake_key():
@@ -13,6 +13,33 @@ def fake_key():
 
 
 class HostPolicyContract(unittest.TestCase):
+    def test_quarantine_blocks_bridge_and_subnet_before_guard(self):
+        policy = render_quarantine()
+        self.assertIn("hook forward priority -310", policy)
+        self.assertIn('iifname "br-vpr-uplink" drop', policy)
+        self.assertIn('oifname "br-vpr-uplink" drop', policy)
+        self.assertIn("ip saddr 10.255.240.0/29 drop", policy)
+        self.assertIn("ip daddr 10.255.240.0/29 drop", policy)
+        with tempfile.NamedTemporaryFile(mode="w") as stream:
+            stream.write(policy)
+            stream.flush()
+            result = subprocess.run(["sudo", "-n", "unshare", "--net", "/usr/sbin/nft", "-f", stream.name],
+                                    capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_router_policy_comparison_ignores_only_handles_and_counters(self):
+        expected = {"nftables": [{"rule": {"handle": 1, "expr": [
+            {"counter": {"packets": 0, "bytes": 0}}, {"drop": None}]}}]}
+        changed_counter = {"nftables": [{"rule": {"handle": 9, "expr": [
+            {"counter": {"packets": 100, "bytes": 5000}}, {"drop": None}]}}]}
+        changed_rule = {"nftables": [{"rule": {"handle": 9, "expr": [
+            {"counter": {"packets": 100, "bytes": 5000}}, {"accept": None}]}}]}
+        changed_counter_semantics = {"nftables": [{"rule": {"handle": 9, "expr": [
+            {"counter": {"packets": 100, "bytes": 5000, "name": "different"}}, {"drop": None}]}}]}
+        self.assertEqual(_normalized_nft(expected), _normalized_nft(changed_counter))
+        self.assertNotEqual(_normalized_nft(expected), _normalized_nft(changed_rule))
+        self.assertNotEqual(_normalized_nft(expected), _normalized_nft(changed_counter_semantics))
+
     def make_site(self, profile_extra=""):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

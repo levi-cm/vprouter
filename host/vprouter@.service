@@ -6,14 +6,15 @@ PartOf=docker.service
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=notify
 ExecStart=/usr/bin/python3 /opt/vprouter/current/host/orchestrate.py serve --config /etc/vprouter/%i.json
-ExecStopPost=-/usr/bin/python3 /opt/vprouter/current/host/orchestrate.py cleanup --name %i
+ExecStopPost=/usr/bin/python3 /opt/vprouter/current/host/orchestrate.py cleanup --name %i
 Restart=on-failure
-RestartSec=5s
+RestartSec=1s
 TimeoutStopSec=120s
 KillMode=control-group
 NotifyAccess=main
+WatchdogSec=90s
 
 [Install]
 WantedBy=multi-user.target

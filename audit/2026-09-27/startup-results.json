@@ -1,0 +1,30 @@
+[
+  {
+    "test": "invalid_key",
+    "injected_failure_observed": true,
+    "reported_wireguard_complete": true,
+    "reported_dns_complete": true,
+    "supervisor_still_running": true
+  },
+  {
+    "test": "route_failure",
+    "injected_failure_observed": true,
+    "reported_wireguard_complete": true,
+    "reported_dns_complete": true,
+    "supervisor_still_running": true
+  },
+  {
+    "test": "firewall_failure",
+    "injected_failure_observed": true,
+    "reported_wireguard_complete": true,
+    "reported_dns_complete": true,
+    "supervisor_still_running": true
+  },
+  {
+    "test": "dns_failure",
+    "injected_failure_observed": true,
+    "reported_wireguard_complete": true,
+    "reported_dns_complete": true,
+    "supervisor_still_running": true
+  }
+]

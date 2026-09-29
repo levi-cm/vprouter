@@ -1,0 +1,98 @@
+[
+  {
+    "test": "startup_before_firewall",
+    "plaintext_on_wan": true,
+    "wan_packets": 4,
+    "expected_plaintext": true
+  },
+  {
+    "test": "dead_or_invalid_wireguard_peer_default_route_intact",
+    "plaintext_on_wan": false,
+    "wan_packets": 1,
+    "expected_plaintext": false
+  },
+  {
+    "test": "healthy_rules_endpoint_host_route_bypass",
+    "plaintext_on_wan": true,
+    "wan_packets": 1,
+    "expected_plaintext": true
+  },
+  {
+    "test": "healthy_rules_endpoint_dns_bypass",
+    "plaintext_on_wan": true,
+    "wan_packets": 1,
+    "expected_plaintext": true
+  },
+  {
+    "test": "healthy_rules_docker_lan_bypass",
+    "plaintext_on_wan": true,
+    "wan_packets": 1,
+    "expected_plaintext": true
+  },
+  {
+    "test": "local_endpoint_udp_443_bypass",
+    "plaintext_on_wan": true,
+    "wan_packets": 1,
+    "expected_plaintext": true
+  },
+  {
+    "test": "wg_link_down_without_fallback",
+    "plaintext_on_wan": false,
+    "wan_packets": 0,
+    "expected_plaintext": false
+  },
+  {
+    "test": "wg_deleted_without_fallback",
+    "plaintext_on_wan": false,
+    "wan_packets": 0,
+    "expected_plaintext": false
+  },
+  {
+    "test": "wg_deleted_endpoint_route_remains",
+    "plaintext_on_wan": true,
+    "wan_packets": 1,
+    "expected_plaintext": true
+  },
+  {
+    "test": "wg_deleted_ethernet_default_restored",
+    "plaintext_on_wan": true,
+    "wan_packets": 1,
+    "expected_plaintext": true
+  },
+  {
+    "test": "forwarded_dns_default_restored",
+    "plaintext_on_wan": true,
+    "wan_packets": 1,
+    "expected_plaintext": true
+  },
+  {
+    "test": "forwarded_udp_853_default_restored",
+    "plaintext_on_wan": true,
+    "wan_packets": 1,
+    "expected_plaintext": true
+  },
+  {
+    "test": "local_dns_53_default_restored",
+    "plaintext_on_wan": false,
+    "wan_packets": 0,
+    "expected_plaintext": false
+  },
+  {
+    "test": "local_udp_443_default_restored",
+    "plaintext_on_wan": true,
+    "wan_packets": 1,
+    "expected_plaintext": true
+  },
+  {
+    "test": "local_doq_853_default_restored",
+    "plaintext_on_wan": true,
+    "wan_packets": 1,
+    "expected_plaintext": true
+  },
+  {
+    "test": "ipv6_uplink_enabled_no_killswitch",
+    "plaintext_on_wan": true,
+    "wan_packets": 2,
+    "expected_plaintext": true
+  }
+]

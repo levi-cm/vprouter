@@ -41,7 +41,8 @@ peer_key = subprocess.run(["wg", "pubkey"], input=peer_private + "\n", text=True
                           check=True, capture_output=True).stdout.strip()
 with tempfile.TemporaryDirectory(prefix="vprouter-stage-") as directory:
     site = Site("vprouter-stage", Path("/dev/null"), Path(directory) / "state",
-                command("docker", "image", "inspect", "--format", "{{.Id}}", "vprouter-hardened:staged"),
+                command("docker", "image", "inspect", "--format", "{{.Id}}",
+                        os.environ.get("ROUTER_TEST_IMAGE", "vprouter-hardened:staged")),
                 root, Provider("10.1.1.1/32", "192.0.2.77", 51820, client_key, peer_key))
     site.state_dir.mkdir(mode=0o700)
     runtime = Path("/run/vprouter") / site.name

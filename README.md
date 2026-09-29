@@ -1,5 +1,7 @@
 # Fail-closed Tailscale exit router
 
+Current first-site results: [revision 3 verification](VERIFICATION-FIRST-SITE-2026-09-27.md).
+
 ![Conceptual vprouter traffic flow](overview.png)
 
 This Linux-only router advertises a Tailscale exit node after it verifies a
@@ -63,11 +65,17 @@ fixed, so this release supports one router per Linux host.
    /etc/vprouter/max-vprouter.json`. Install `host/vprouter@.service` as
    `/etc/systemd/system/vprouter@.service`; run `systemctl daemon-reload`,
    then `systemctl enable --now vprouter@max-vprouter.service`. The host service
-   applies the guard before starting either container and stops both containers
-   when it exits. Docker restart is deliberately disabled.
+   installs a higher-priority host quarantine before Docker cleanup, then
+   applies the endpoint guard. It releases quarantine only after checking the
+   bridge, complete router nftables policy, and WireGuard interface. On stop it
+   reinstalls quarantine before attempting Docker cleanup. Docker restart is
+   deliberately disabled.
 5. Enroll the new Tailscale node through the normal protected session if its
    state directory is new. Approve the exit-node advertisement in the Tailscale
-   admin console. Verify `docker inspect` reports `network_mode=none` for the
+   admin console. READY requires Tailscale `Self.ExitNodeOption=true`, online
+   state, advertised default routes, a fresh provider check, and the WireGuard
+   handshake. Pending approval remains BLOCKED and can be approved without
+   restarting the host. Verify `docker inspect` reports `network_mode=none` for the
    router and verify its only non-loopback interfaces are `wg0` and
    `tailscale0`. A healthy container status alone is insufficient: send
    traffic from a **test client using this exit node**, confirm the provider
@@ -93,9 +101,10 @@ protected client traffic.
 python3 -m unittest discover -s tests -v
 sudo env VPROUTER_LAB_ISOLATED=1 unshare --net python3 tests/host_packet_probe.py
 sudo env VPROUTER_LAB_ISOLATED=1 unshare --net python3 tests/wireguard_namespace_probe.py
-sudo env VPROUTER_LAB_ISOLATED=1 python3 tests/compose_provision_probe.py
-# Run tests/leak_probe.py only through stdin in a disposable --network none
-# router container. The script refuses any pre-existing non-loopback interface.
+# On an empty lab host without the production bridge or guard:
+sudo env VPROUTER_LAB_ISOLATED=1 ROUTER_TEST_IMAGE=vprouter-hardened:staged python3 tests/compose_provision_probe.py
+# Run tests/leak_probe.py through stdin in a disposable --network none
+# container after loading router.nft. It rejects a pre-existing uplink.
 ```
 
 `tests/host_packet_probe.py` verifies that only the provider tuple crosses the
@@ -106,18 +115,20 @@ faults. These checks are necessary but do not replace live end-to-end tests.
 
 ## Operations
 
-`router-runtime --status` reports readiness only after current provider and
-Tailscale checks. Monitor the systemd unit, both containers, the WireGuard
-handshake, the router's health file, the advertised exit-node state, and a real
-test client's provider egress. Alert when any check fails. A blocked router is
-safer than silently falling back to direct egress. For planned upgrades,
-rotate one site at a time, keep the other site serving, and repeat the client
-failure matrix before restoring redundancy.
+`router-runtime --status` requires a fresh READY heartbeat. The host checks
+the full live router nftables table against the policy compiled from the
+root-owned release on every monitor cycle and in its status command. It
+quarantines transport traffic and restarts on policy drift, malformed health,
+or a heartbeat older than 45 seconds. A fresh BLOCKED state during provider
+or authentication trouble stays blocked without a restart. systemd restarts a
+host monitor that misses its 90-second watchdog. Monitor the systemd unit,
+both containers, WireGuard handshake, approval state, and a real test client's
+provider egress. Keep a verified hardened image for rollback.
 
 `python3 /opt/vprouter/current/host/orchestrate.py status --name <site>` exits
-nonzero unless both containers, the dedicated bridge, host guard, and the
-router's fresh READY record are present. Use it as one monitoring signal; a
+nonzero unless both containers, the dedicated bridge, host guard, router
+firewall, WireGuard tunnel, and fresh READY record are present. Use it as one monitoring signal; a
 real protected-client egress probe is still required.
 
-The older `bootstrap.sh` is retained as historical code but is not used by
-the hardened image or Compose deployment.
+The older `bootstrap.sh` and `load-wireguard-env.sh` are retained as historical
+code but are not used by the hardened image or Compose deployment.

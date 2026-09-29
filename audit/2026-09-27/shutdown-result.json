@@ -1,0 +1,9 @@
+{
+  "test": "bootstrap_pid1_sigterm",
+  "commands": "Tailscale/WireGuard/ip/firewall/DNS are stubs; original bootstrap PID1",
+  "reached_setup_complete": true,
+  "stop_grace_seconds": 3,
+  "elapsed_seconds": 3.11,
+  "exit_code": 137,
+  "oom_killed": false
+}

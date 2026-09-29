@@ -78,7 +78,9 @@ def provider_probe():
 
 def tailscale_ready():
     status = json.loads(run("tailscale", "status", "--json"))
-    if status.get("BackendState") != "Running" or status.get("Self", {}).get("Online") is not True:
+    node = status.get("Self")
+    if (status.get("BackendState") != "Running" or not isinstance(node, dict)
+            or node.get("Online") is not True or node.get("ExitNodeOption") is not True):
         return False
     prefs = json.loads(run("tailscale", "debug", "prefs"))
     return set(prefs.get("AdvertiseRoutes", [])) == {"0.0.0.0/0", "::/0"} and prefs.get("NetfilterMode") == 0
@@ -87,7 +89,16 @@ def tailscale_ready():
 def set_health(state, reason):
     HEALTH.parent.mkdir(parents=True, exist_ok=True)
     temp = HEALTH.with_suffix(".tmp")
-    temp.write_text(json.dumps({"state": state, "reason": reason, "time": int(time.time())}) + "\n")
+    now = int(time.time())
+    temp.write_text(json.dumps({"state": state, "reason": reason, "time": now, "heartbeat": now}) + "\n")
+    temp.replace(HEALTH)
+
+
+def beat():
+    data = json.loads(HEALTH.read_text())
+    data["heartbeat"] = int(time.time())
+    temp = HEALTH.with_suffix(".tmp")
+    temp.write_text(json.dumps(data) + "\n")
     temp.replace(HEALTH)
 
 
@@ -131,7 +142,9 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--status":
         try:
             data = json.loads(HEALTH.read_text())
-            return 0 if data["state"] == "READY" and time.time() - data["time"] < 45 else 1
+            heartbeat = data["heartbeat"]
+            return 0 if (data["state"] == "READY" and type(heartbeat) is int
+                         and 0 <= time.time() - heartbeat < 45) else 1
         except (OSError, ValueError, KeyError):
             return 1
 
@@ -143,6 +156,7 @@ def main():
     Path("/run/vprouter-firewall-ready").touch()
     set_health("BLOCKED", "waiting for WireGuard")
     while RUNNING and not Path("/run/vprouter-provisioned").is_file():
+        beat()
         time.sleep(1)
     if not RUNNING:
         return 0
@@ -161,10 +175,11 @@ def main():
         wait_for_tailscaled(daemon)
         run("tailscale", "down", timeout=20)
         while RUNNING:
+            beat()
             if daemon.poll() is not None:
                 raise RuntimeErrorClosed("tailscaled exited")
             now = time.monotonic()
-            if now - previous_check >= 10:
+            if now - previous_check >= 5:
                 previous_check = now
                 try:
                     provider_probe()

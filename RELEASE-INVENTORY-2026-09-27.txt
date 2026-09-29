@@ -1,4 +1,6 @@
-Staged Linux image ID: sha256:5e005133781efb99ae9c8687b6ad442c76905d3d65b464c08387300f76e0c893
+First-site r3 Linux image ID: sha256:18c1d8c5c87df13ed665a6bf72511115dee288caa24854193400918d1879dd1f
+Retained hardened r2 image ID: sha256:1648a13ad7c7a2e9d08b055fb5945b4b40bad0bd7212b17ca5fe9fdc94fb0e16
+Retained hardened r1 image ID: sha256:5e005133781efb99ae9c8687b6ad442c76905d3d65b464c08387300f76e0c893
 Tailscale version: 1.102.5
 Base image digests: see Dockerfile
 

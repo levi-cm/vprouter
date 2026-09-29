@@ -1,0 +1,80 @@
+{
+  "captured_utc": "2026-09-27T11:30:24.175350+00:00",
+  "image": "sha256:cacc8337f3ba82fcb18e9ad7f847f38646ff36b1d3b568988c3caf54a8ea2670",
+  "state": {
+    "Status": "running",
+    "StartedAt": "2026-09-20T10:33:37.518919462Z",
+    "OOMKilled": false,
+    "ExitCode": 0
+  },
+  "restart_count": 0,
+  "host_config": {
+    "Privileged": false,
+    "CapAdd": [
+      "CAP_NET_ADMIN"
+    ],
+    "CapDrop": null,
+    "NetworkMode": "vprouter_default",
+    "RestartPolicy": {
+      "Name": "unless-stopped",
+      "MaximumRetryCount": 0
+    },
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "Sysctls": {
+      "net.ipv4.ip_forward": "1",
+      "net.ipv6.conf.all.forwarding": "1"
+    },
+    "Memory": 0,
+    "PidsLimit": null,
+    "LogConfig": {
+      "Type": "json-file",
+      "Config": {}
+    }
+  },
+  "healthcheck": null,
+  "tailscale": {
+    "Version": "1.98.5-AlpineLinux",
+    "BackendState": "Running",
+    "Health": []
+  },
+  "prefs": {
+    "AutoUpdate": {
+      "Check": true,
+      "Apply": null
+    },
+    "RunSSH": false,
+    "RunWebClient": false,
+    "AdvertiseServices": null,
+    "AdvertiseRoutes": [
+      "0.0.0.0/0",
+      "::/0"
+    ],
+    "AppConnector": {
+      "Advertise": false
+    },
+    "ExitNodeID": ""
+  },
+  "source_sha256": {
+    "bootstrap.sh": "8d7d443dd5f33953203f5be72296a31e9ee5990e5b2644a9fd5a2f75ef2a3e43",
+    "load-wireguard-env.sh": "a4997ef217bbe92c9d65779cccb330ca4eb9f4d5186fb701345805ecd88c7c63",
+    "docker-compose.yaml": "9652172c120fa6b51597e5456182dafee75093e4b78179448cea07d0633812ed",
+    "Dockerfile": "57b2bd5d6657f51909b07857ea19c5efde7403631f72b3c0c84b5aff42eca2ae"
+  },
+  "secdb_sources": [
+    {
+      "url": "https://secdb.alpinelinux.org/v3.24/main.json",
+      "sha256": "9903ae503688fa920fbc2e6d03a41cd7a746559b71dc0a632e22b16be9484a8d"
+    },
+    {
+      "url": "https://secdb.alpinelinux.org/v3.24/community.json",
+      "sha256": "e3abc059043188b3e76d75ed7cdf5b6cc509ceb6d6b419a9bd6a27e69183dccb"
+    }
+  ],
+  "load_test": {
+    "cpu_limit": 0.25,
+    "memory_limit_bytes": 402653184,
+    "background_workload": "15 seconds busy loop touching 64 MiB",
+    "scope": "isolated container only; not host saturation or OOM"
+  }
+}

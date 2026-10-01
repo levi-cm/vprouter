@@ -69,11 +69,21 @@ def provider_probe():
     verify_interfaces(interface_names())
     verify_default_route()
     with urllib.request.urlopen(PROVIDER_CHECK, timeout=12) as response:
-        verify_egress_response(json.load(response))
+        data = json.load(response)
+        verify_egress_response(data)
     rows = run("wg", "show", "wg0", "latest-handshakes").splitlines()
     now = time.time()
     if len(rows) != 1 or not 0 < now - int(rows[0].split()[-1]) < 120:
         raise RuntimeErrorClosed("WireGuard handshake is stale")
+    return data
+
+
+def collector_probe():
+    data = provider_probe()
+    if not tailscale_ready():
+        raise RuntimeErrorClosed("Tailscale exit is not approved and online")
+    return {"public_exit": data["ip"], "relay": data["mullvad_exit_ip_hostname"],
+            "tunnel_healthy": True, "dns_guard": True, "ipv6_guard": True}
 
 
 def tailscale_ready():
@@ -147,6 +157,10 @@ def main():
                          and 0 <= time.time() - heartbeat < 45) else 1
         except (OSError, ValueError, KeyError):
             return 1
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--probe":
+        print(json.dumps(collector_probe(), sort_keys=True))
+        return 0
 
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)

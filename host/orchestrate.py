@@ -45,6 +45,7 @@ class Site:
     image_ref: str
     compose_dir: Path
     provider: Provider = field(repr=False)
+    tailscale_hostname: str = ""
 
 
 def _key(value: str) -> str:
@@ -90,7 +91,8 @@ def _provider(path: Path) -> Provider:
 def load_site(path: Path) -> Site:
     try:
         cfg = json.loads(Path(path).read_text(encoding="utf-8"))
-        if set(cfg) != {"name", "profile", "state_dir", "image_ref", "compose_dir"}:
+        required = {"name", "profile", "state_dir", "image_ref", "compose_dir"}
+        if not required <= set(cfg) or set(cfg) - required - {"tailscale_hostname"}:
             raise SiteError("unexpected or missing site configuration field")
         name = cfg["name"]
         if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]{1,49}", name):
@@ -101,7 +103,10 @@ def load_site(path: Path) -> Site:
         paths = [Path(cfg[key]) for key in ("profile", "state_dir", "compose_dir")]
         if any(not item.is_absolute() for item in paths):
             raise SiteError("all site paths must be absolute")
-        return Site(name, paths[0], paths[1], image, paths[2], _provider(paths[0]))
+        hostname = cfg.get("tailscale_hostname", name)
+        if not isinstance(hostname, str) or not re.fullmatch(r"[a-z][a-z0-9-]{1,49}", hostname):
+            raise SiteError("invalid Tailscale hostname")
+        return Site(name, paths[0], paths[1], image, paths[2], _provider(paths[0]), hostname)
     except (OSError, ValueError, TypeError, KeyError) as exc:
         if isinstance(exc, SiteError):
             raise
@@ -168,6 +173,7 @@ def compose_env(site: Site):
         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "HOME": "/root",
         "ROUTER_NAME": site.name,
+        "TS_HOSTNAME": site.tailscale_hostname or site.name,
         "ROUTER_IMAGE": site.image_ref,
         "TS_STATE_PATH": str(site.state_dir),
         "VPN_DNS": "9.9.9.9",

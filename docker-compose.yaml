@@ -20,8 +20,10 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     environment:
-      TS_HOSTNAME: ${ROUTER_NAME:-max-vprouter}
+      TS_HOSTNAME: ${TS_HOSTNAME:-${ROUTER_NAME:-max-vprouter}}
       VPN_DNS: ${VPN_DNS:-9.9.9.9}
+    labels:
+      immo.gateway.backend: vprouter
     tmpfs:
       - /run:rw,noexec,nosuid,nodev,size=16m
       - /tmp:rw,noexec,nosuid,nodev,size=16m

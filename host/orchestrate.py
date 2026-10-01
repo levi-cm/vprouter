@@ -566,7 +566,7 @@ def monitor(site: Site, expected_guard: str, expected_router: str):
             install_quarantine()
             raise
         if state != last_health:
-            print(f"vprouter {site.name}: {state}", flush=True)
+            print(f"vprouter {site.name}: {state} ({health.get('reason', 'unspecified')})", flush=True)
             notify_systemd("STATUS=" + site.name + ": " + state)
             last_health = state
         notify_systemd("WATCHDOG=1")

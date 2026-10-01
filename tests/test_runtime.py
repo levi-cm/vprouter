@@ -2,14 +2,39 @@ import json
 import tempfile
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
-from router_runtime import (beat, block_failed_provider, set_health, tailscale_ready,
+from router_runtime import (beat, block_failed_provider, failure_reason, provider_probe, set_health, tailscale_ready,
                             verify_boot_interfaces, verify_interfaces, verify_egress_response,
                             withdraw_exit_node, RuntimeErrorClosed)
 
 
 class RuntimePreflight(unittest.TestCase):
+    def test_failure_reason_preserves_check_detail_without_external_error_data(self):
+        self.assertEqual(failure_reason(RuntimeErrorClosed("WireGuard handshake is stale")),
+                         "WireGuard handshake is stale")
+        self.assertEqual(failure_reason(OSError("sensitive external error")), "OSError")
+
+    def test_provider_probe_allows_wireguard_renewal_window(self):
+        for age in (0, 119, 120, 121, 165, 179):
+            with self.subTest(age=age):
+                self.assertEqual(self.probe_at_age(age), {"mullvad_exit_ip": True})
+
+    def test_provider_probe_rejects_expired_or_invalid_handshakes(self):
+        for age in (180, 181, 2000000000, -1):
+            with self.subTest(age=age), self.assertRaises(RuntimeErrorClosed):
+                self.probe_at_age(age)
+
+    def probe_at_age(self, age):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"mullvad_exit_ip": true}'
+        with patch("router_runtime.interface_names", return_value={"lo", "wg0"}), \
+                patch("router_runtime.verify_default_route"), \
+                patch("router_runtime.urllib.request.urlopen", return_value=response), \
+                patch("router_runtime.time.time", return_value=2000000000), \
+                patch("router_runtime.run", return_value=f"peer\t{2000000000-age}\n"):
+            return provider_probe()
+
     def test_exit_node_approval_required_for_ready_and_revocation_blocks(self):
         prefs = {"AdvertiseRoutes": ["0.0.0.0/0", "::/0"], "NetfilterMode": 0}
         for approval, ready in ((None, False), (False, False), (True, True)):

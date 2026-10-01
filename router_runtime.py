@@ -14,6 +14,9 @@ import urllib.request
 POLICY = "/usr/local/share/vprouter/router.nft"
 HEALTH = Path("/run/vprouter-health.json")
 PROVIDER_CHECK = "https://am.i.mullvad.net/json"
+# WireGuard starts rekeying at 120s but accepts the session until 180s.
+# Rejecting at the rekey boundary disconnects a healthy, renewing tunnel.
+HANDSHAKE_MAX_AGE = 180
 RUNNING = True
 
 
@@ -73,7 +76,7 @@ def provider_probe():
         verify_egress_response(data)
     rows = run("wg", "show", "wg0", "latest-handshakes").splitlines()
     now = time.time()
-    if len(rows) != 1 or not 0 < now - int(rows[0].split()[-1]) < 120:
+    if len(rows) != 1 or not 0 <= now - int(rows[0].split()[-1]) < HANDSHAKE_MAX_AGE:
         raise RuntimeErrorClosed("WireGuard handshake is stale")
     return data
 
@@ -122,6 +125,11 @@ def withdraw_exit_node(reason):
 def block_failed_provider(up, reason):
     stop_process(up)
     withdraw_exit_node(reason)
+
+
+def failure_reason(exc):
+    # Internal check messages are safe; external errors can contain URLs.
+    return str(exc) if isinstance(exc, RuntimeErrorClosed) else type(exc).__name__
 
 
 def on_signal(_signum, _frame):
@@ -200,7 +208,7 @@ def main():
                     successes += 1
                 except (OSError, ValueError, subprocess.SubprocessError, RuntimeErrorClosed) as exc:
                     successes = 0
-                    block_failed_provider(up, type(exc).__name__)
+                    block_failed_provider(up, failure_reason(exc))
                     up = None
                     serving = False
             if successes >= 3 and up is None and not serving and now >= next_up_at:

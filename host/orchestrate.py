@@ -372,12 +372,14 @@ def wait_for_firewall(site: Site, timeout=30):
     while time.monotonic() < deadline:
         if command("docker", "inspect", "--format", "{{.State.Running}}", site.name) != "true":
             raise SiteError("router exited before installing its firewall")
-        ready = subprocess.run(
+        result = subprocess.run(
             ["docker", "exec", site.name, "/bin/sh", "-c", "test -f /run/vprouter-firewall-ready"],
-            capture_output=True, timeout=5,
-        ).returncode == 0
-        if ready:
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
             return
+        if "no space left on device" in result.stderr.lower():
+            raise SiteError("Docker runtime temporary storage exhausted (ENOSPC); check runtime TMPDIR")
         time.sleep(.5)
     raise SiteError("router firewall was not ready before provisioning")
 
@@ -612,5 +614,8 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except (OSError, ValueError, subprocess.SubprocessError, SiteError) as exc:
-        print(f"vprouter host guard stopped: {type(exc).__name__}", file=sys.stderr)
+        # SiteError messages are authored here; subprocess output may contain
+        # configuration or credentials and must not be copied to the journal.
+        detail = str(exc) if isinstance(exc, SiteError) else type(exc).__name__
+        print(f"vprouter host guard stopped: {detail}", file=sys.stderr)
         sys.exit(1)

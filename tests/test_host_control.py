@@ -11,13 +11,27 @@ from test_host_policy import fake_key
 from host.orchestrate import (SiteError, cleanup_owned, load_site, monitor, render_wg_config,
                               router_health,
                               runtime_health_state, stop_owned_container,
-                              verify_router_policy, verify_router_tunnel)
+                              verify_router_policy, verify_router_tunnel, wait_for_firewall)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class HostControlContract(unittest.TestCase):
+    def test_firewall_wait_reports_runtime_storage_exhaustion_without_retrying(self):
+        # A failed exec is not evidence that the firewall is absent. Retrying
+        # it for 30 seconds concealed the host's exhausted /tmp during boot.
+        failure = SimpleNamespace(returncode=1, stderr=(
+            'OCI runtime exec failed: write /tmp/runc-process123: '
+            'no space left on device'), stdout='')
+        with patch('host.orchestrate.command', return_value='true'), patch(
+            'host.orchestrate.subprocess.run', return_value=failure
+        ) as execute, patch('host.orchestrate.time.sleep') as sleep:
+            with self.assertRaisesRegex(SiteError, 'temporary storage exhausted'):
+                wait_for_firewall(SimpleNamespace(name='max-vprouter'), timeout=.01)
+        execute.assert_called_once()
+        sleep.assert_not_called()
+
     def test_monitor_restarts_after_status_command_quarantines(self):
         with patch("host.orchestrate.STOP", False), patch(
             "host.orchestrate.quarantine_active", return_value=True

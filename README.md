@@ -115,6 +115,33 @@ faults. These checks are necessary but do not replace live end-to-end tests.
 
 ## Operations
 
+### Keep runtime temporary files off shared tmpfs
+
+On hosts with a RAM-backed `/tmp`, install `host/containerd-tmp.conf` as
+`/etc/systemd/system/containerd.service.d/vprouter-tmp.conf`, then run
+`systemctl daemon-reload` and restart `containerd`. This gives new runtime
+shims a root-only, disk-backed `/var/lib/containerd-tmp` for their `runc-process`
+exec specifications. Check that `/var/lib` has free disk space and is not on
+the same temporary filesystem. Before restarting, verify the containerd unit
+uses `KillMode=process` so existing shims and unrelated containers survive.
+Restarting only Docker or changing only
+Docker's `DOCKER_TMPDIR` does not change the existing containerd shims.
+
+Existing containers keep their old shim environment. Drain router dependents
+and recreate the router through its host service under the site's gateway
+lock; rebind dependents to the new namespace before resuming them. Do not
+restart unrelated containers just to apply this setting. Verify the new
+router shim's `TMPDIR` and actual `runc-process` file path before considering
+the mitigation deployed. Monitor free space on both filesystems. A full disk
+can still prevent runtime operations; this isolates them from shared tmpfs
+exhaustion rather than making storage unlimited.
+
+An October 2026 incident exhausted shared `/tmp`; Docker exec failed with
+`no space left on device`, the router could not pass its firewall-ready check,
+and systemd repeatedly recreated it. Its no-network boot and host quarantine
+remained the intended failure behavior. Absence of historical packet captures
+means this incident alone cannot establish that no historical IP leak occurred.
+
 `router-runtime --status` requires a fresh READY heartbeat. The host checks
 the full live router nftables table against the policy compiled from the
 root-owned release on every monitor cycle and in its status command. It

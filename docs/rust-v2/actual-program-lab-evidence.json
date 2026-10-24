@@ -882,10 +882,104 @@
         }
       ],
       "observation": "Diagnostic07 confirms first rejected descriptors are private null stdio alias /null; one paired daemon FIFO is also present with read CLOEXEC/write NONBLOCK CLOEXEC. Snapshot is evidence, not adopted baseline or authority. Actual TUN/rules require pinned-live-daemon binding and exact shape validation."
+    },
+    {
+      "attempt": 12,
+      "source_binding": {
+        "source_commit": "7bac46d110237357a863d2d455c745bf70908cfc",
+        "source_archive_sha256": "0cd0854a643b5b9bc403ec66daaf750a938f4a1e21a9ba0887afc203c6b68f0a",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "509f9c2f7e473c4fe71fc3be315c0da8755bfe6b2038021b124adf0087e753de"
+      },
+      "artifact_sha256": "6986222dc79a5022050ab6a8fa3314dc7dde5d4986d90a89efc4c232c385123f",
+      "context_sha256": "8d81b3ef91e94a15b4d8939662a3b3692263207b9df08c3ba69a1f3b502414a1",
+      "manifest_sha256": "773f8757938bde28e0ee393685bb2c54df1612826a9a464f8fa9d8c11def6c74",
+      "image_id": "sha256:75305d096f9cb2c4f741e94a5ca899370df24c86a979f64182d23d2a13f636b1",
+      "image_layers": [
+        "sha256:67b608f3fd126d081b7a1d09bd8e8abbfeccd727a7690d3ebde68954cbb4b404"
+      ],
+      "runner_sha256": "6d869dd87520efab0bd3d72ff6bb9d1dbc32b8fbb3c4125652049e464477c3a4",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 5.193,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "LAB_STAGE actual_observer_authenticated_launch",
+        "actual_lab: mount_isolation"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": true,
+      "actual_daemon_exec": "LIVE_DAEMON_CONFINEMENT_INSPECTION_PASS",
+      "actual_observer_exec": "SETUP_FAILED_BEFORE_EXEC",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-12.json",
+      "private_run_record_sha256": "f1d3baf868c7dfe08379806f54a4b161382d798a43a25d651bbfa527e5e42ea2",
+      "private_inventory": "target/lab-state/actual-program-inspect-12.json",
+      "private_inventory_sha256": "bec136907860fef9993c13d40bf94454574eb15bb1eae578035ee5d1aeebd6ae",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-trace-12-summary.json",
+      "trace_summary_sha256": "589918ac472a87670c37dc02fd086d12fb671d7add98a43c0d1d4912264b3152",
+      "trace_files": 52,
+      "daemon_process_proof_sha256": "4fa8869398af0007d65fff025af6461e6c9bb63601e58eb455e2281da78c24dc",
+      "failure_witness": {
+        "file": "syscall.37614",
+        "bytes": 5879,
+        "sha256": "07a416aeca8b2d6655ea1df807b97ac9dd6932ff93dbc7737b3ea9e7f0a64fab",
+        "lines": 123,
+        "last_errors": [
+          {
+            "line": 117,
+            "syscall": "open_tree(0x5, 0x7ffe6f2b4a80, 0x81001) = -1 EINVAL (Invalid argument)"
+          }
+        ],
+        "tail": [
+          "munmap(0x7f3481aa2000, 0x1000)          = 0",
+          "getdents64(0x36, 0x7f3481a93060, 0x600) = 0",
+          "close(0x36)                             = 0",
+          "munmap(0x7f3481a93000, 0x2000)          = 0",
+          "close(0x35)                             = 0",
+          "close(0x34)                             = 0",
+          "close(0x33)                             = 0",
+          "setns(0xb, 0x20000)                     = 0",
+          "open_tree(0xa, 0x7ffe6f2b4a80, 0x81001) = 0x33",
+          "open(0x7ffe6f2b4a80, 0x288000, 0)       = 0x34",
+          "fstat(0x34, 0x7ffe6f2b4a80)             = 0",
+          "open_tree(0x29, 0x7ffe6f2b4a80, 0x81001) = 0x35",
+          "open_tree(0x5, 0x7ffe6f2b4a80, 0x81001) = -1 EINVAL (Invalid argument)",
+          "close(0x35)                             = 0",
+          "close(0x34)                             = 0",
+          "close(0x33)                             = 0",
+          "write(0x32, 0x7ffe6f2b4baf, 0x1)        = 0x1",
+          "exit_group(0x76)                        = ?"
+        ],
+        "execveat_calls": []
+      },
+      "observation": "Exact null identity and one paired FIFO inspection passes real Go role. Observer setup helper37614 open_tree of host-owned placement FD5 EINVAL after entering container mount namespace. Host tree cloning order needs provenance-preserving fix; parent-only scan was insufficient."
     }
   ],
   "diagnosis": {
-    "status": "EXACT_NULL_ALIAS_PIPE_PAIR_AND_KERNEL_SHAPES_CAPTURED_VALIDATION_PENDING",
+    "status": "ACTUAL_GO_CONFINEMENT_PASS_OBSERVER_HOST_TREE_CLONE_ORDER_PENDING",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

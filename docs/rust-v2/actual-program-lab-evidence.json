@@ -1274,10 +1274,117 @@
       "expanded_raw_summary": "target/lab-state/actual-program-trace-16-expanded-summary.json",
       "expanded_raw_summary_sha256": "81fde6964cded5b66bdc82e9499120bb6f02bd8d890f384165d5866ee287caae",
       "observation": "Observer39244 completes authentication and native metadata, then two LocalAPI HTTP exchanges without new denied syscalls (allocator fallback earlier). Refuses before observation record; typed parsing/unenrolled predicate diagnosis pending. No decoded LocalAPI body captured."
+    },
+    {
+      "attempt": 17,
+      "source_binding": {
+        "source_commit": "ed22053c24f2a292e9cd5c229198ff58ee6d3b39",
+        "source_archive_sha256": "32a7401f7128d0ecca2deb86a5f2e1f2dfd36b954cc423a854ce3f0c452453c3",
+        "tracked_build_inputs_verified": 102,
+        "source_aggregate_sha256": "bef6b9faae8a81ba8438738921e855e67c412e936a80f286bc9fd157e0b9b7f7"
+      },
+      "artifact_sha256": "34ade6f74762e773e8a0f49dfaf97f8c962914a9402ac1418a33b2d53f225909",
+      "context_sha256": "d75f62adab2c645f899f83dd7323b6d1d808fd20461f6f275e02de6e2448e054",
+      "manifest_sha256": "71b1cebdc3862a2af64981b9f9901a30dfbdf4a75053007aa49c7677f99dc119",
+      "image_id": "sha256:1730d3ca0a971c2d45732f534fbe88f3efaa2ec35079c1eb7f8c6438c2056e1c",
+      "image_layers": [
+        "sha256:ce399baab511a30b073aabe1105369b51132ef9e64cfbbea446f303d490bc32c"
+      ],
+      "runner_sha256": "65dc3e0055bb61094a3e447d37f3a26b7fda5a81c8423513da14ca5fff215513",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 6.697,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "LAB_STAGE actual_daemon_identity_pinned",
+        "LAB_STAGE actual_observer_authenticated_launch",
+        "actual_lab: child_failed"
+      ],
+      "result": "FAIL",
+      "stderr_diagnostic": true,
+      "actual_daemon_exec": "LIVE_DAEMON_CONFINEMENT_INSPECTION_PASS",
+      "actual_observer_exec": "AUTHENTICATED_REQUEST_INSPECTION_PASS_STATUS_PARSE_REFUSED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-17.json",
+      "private_run_record_sha256": "118d76e1f2e2a566db739873ace4fde326c2283d9006112dac080d5cbb51e946",
+      "private_inventory": "target/lab-state/actual-program-inspect-17.json",
+      "private_inventory_sha256": "260b59c056b4c8998b603b0fb30c557c8ad8f2f85c4ca9bd860c3cb4613ffd77",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-stderr-trace-17-summary.json",
+      "trace_summary_sha256": "0912f878c0025c7c349133598fc31179a250e9941bdf061944b2f7c52f9e2d80",
+      "trace_files": 54,
+      "closed_codebook_witness": {
+        "file": "syscall.39758",
+        "sha256": "565e88bdac2d2b55af5595abac8cbb6b2cc1041b029b55194c2869a999479a98",
+        "bytes": 2182,
+        "lines": 49,
+        "classifications": [],
+        "public_observations": [
+          {
+            "code": "status_types",
+            "values": [
+              4,
+              4,
+              6,
+              1
+            ]
+          },
+          {
+            "code": "status_node_types",
+            "values": [
+              4,
+              2,
+              2,
+              1
+            ]
+          },
+          {
+            "code": "prefs_types",
+            "values": [
+              2,
+              2,
+              2,
+              2,
+              5,
+              3,
+              4,
+              4,
+              2,
+              2,
+              2
+            ]
+          },
+          {
+            "code": "observation_status_parse_refused"
+          }
+        ]
+      },
+      "observation": "Pinned fresh disabled daemon emits Self object and null top-level/Self TailscaleIPs. Required Vec parser rejects null. Fixed type vectors only; no API values, bodies, IDs or parser error text emitted. Strict unenrolled semantics still required; no admission relaxation."
     }
   ],
   "diagnosis": {
-    "status": "ACTUAL_GO_AND_OBSERVER_CONFINEMENT_AUTHENTICATION_PASS_LOCALAPI_OBSERVATION_PENDING",
+    "status": "ACTUAL_CONFINEMENT_AUTHENTICATION_PASS_UNENROLLED_NULL_IP_PARSER_MISMATCH",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

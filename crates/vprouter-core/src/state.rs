@@ -106,6 +106,15 @@ impl HealthMachine {
         if matches!(self.state, HealthState::Stopping | HealthState::Failed) {
             return Err(err(Reason::InvalidTransition));
         }
+        // Status is observational. Revoke expired cached success here before a
+        // new healthy sample can extend an old streak or preserve READY.
+        let expired = self
+            .evidence
+            .as_ref()
+            .and_then(|previous| self.check(now, previous, false).err());
+        if let Some(error) = expired {
+            self.block(error.reason());
+        }
         if let Err(error) = self.check(now, &evidence, true) {
             self.block(error.reason());
             return Err(error);

@@ -97,8 +97,10 @@ Profiles are limited to 64 KiB, UTF-8, exactly one `[Interface]` followed by one
 
 Keys are canonical base64 encoding exactly 32 nonzero bytes. A private key is
 never `Debug` or `Serialize`; a parsed `Profile` and validated fleet also have no
-such implementations. Duplicate private keys across the entire configured
-fleet, including disabled exits, are rejected with a fixed code; no key or
+such implementations. Private-key identity comparisons normalize the scalar bits ignored by X25519;
+alternative encodings of the same effective key are duplicates. Duplicate
+private keys across the entire configured fleet, including disabled exits,
+are rejected with a fixed code; no key or
 fingerprint is included in errors. Different server files exported from one
 Mullvad device often share a key and therefore cannot serve as independent
 exit identities.
@@ -179,7 +181,10 @@ stale observations, a handshake age of 180 seconds or more, wrong server/node,
 nonpublic egress, and explicit DNS/IPv6 failures. Heartbeat, provider, structural
 and verification age must be strictly less than 45 seconds. Cached readiness is
 rechecked when `status(now)` is requested; stale READY evidence returns an
-error and must be treated as fail closed by the caller.
+error and must be treated as fail closed by the caller. Status remains
+observational. Before accepting the next observation, expired cached checks
+or a cached handshake revoke readiness and clear every partial success streak;
+three new successful checks and a subsequent approved observation are required.
 
 DNS and IPv6 verification separately serialize as `verified`, `failed` or
 `not_tested`. READY does not imply either check ran. Direct status always uses
@@ -224,7 +229,10 @@ when locking and before record reads/commits. The current-user temporary-root
 constructor exists only in `cfg(test)` unit tests.
 
 A transaction obtains an exclusive **nonblocking** `flock`; contention returns
-`lock_busy`. The lock file is never removed. Creation uses expected generation
+`lock_busy`. The lock file is never removed. `commit` requires an exclusive
+mutable transaction reference; sharing a transaction across threads requires
+caller synchronization, so same-guard commits cannot race the generation check.
+Creation uses expected generation
 `None` and generation `1`; updates use `Some(g)` and exactly `g+1`. An incorrect
 expected/current generation returns `generation_conflict`. Writes use a unique
 `create_new`/`O_EXCL` `0600` temporary file, write-all, file fsync, atomic rename,

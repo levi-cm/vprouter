@@ -157,3 +157,98 @@ fn cached_handshake_ages_even_before_heartbeat_expires() {
     assert!(m.status(115.5).is_ok());
     assert!(m.status(116.0).is_err());
 }
+
+#[test]
+fn observation_after_any_long_gap_requires_three_new_checks_and_recovery() {
+    // Cover partial STARTING and BLOCKED streaks, RECOVERING, and READY.
+    for scenario in 0..4 {
+        let mut m = machine();
+        let last = match scenario {
+            0 => {
+                m.observe(110.0, healthy(110.0)).unwrap();
+                115.0
+            }
+            1 => {
+                m.block(vprouter_core::reason::Reason::ProviderFailure);
+                m.observe(110.0, healthy(110.0)).unwrap();
+                115.0
+            }
+            2 => {
+                for at in [105.0, 110.0] {
+                    m.observe(at, healthy(at)).unwrap();
+                }
+                115.0
+            }
+            _ => {
+                for at in [100.0, 105.0, 110.0] {
+                    m.observe(at, healthy(at)).unwrap();
+                }
+                115.0
+            }
+        };
+        m.observe(last, healthy(last)).unwrap();
+        let before = m.state();
+        if before == HealthState::Ready {
+            assert!(m.status(160.0).is_err());
+        }
+        assert_eq!(m.state(), before, "status must stay observational");
+        assert_eq!(
+            m.observe(161.0, healthy(161.0)).unwrap(),
+            HealthState::Blocked,
+            "scenario {scenario}"
+        );
+        assert_eq!(
+            m.observe(166.0, healthy(166.0)).unwrap(),
+            HealthState::Blocked
+        );
+        assert_eq!(
+            m.observe(171.0, healthy(171.0)).unwrap(),
+            HealthState::Recovering
+        );
+        assert_eq!(
+            m.observe(176.0, healthy(176.0)).unwrap(),
+            HealthState::Ready
+        );
+    }
+}
+#[test]
+fn expired_cached_handshake_resets_recovery_before_new_healthy_sample() {
+    for scenario in 0..4 {
+        let mut m = machine();
+        if scenario == 1 {
+            m.block(vprouter_core::reason::Reason::ProviderFailure);
+        }
+        let count = match scenario {
+            0 | 1 => 2,
+            2 => 3,
+            _ => 4,
+        };
+        for i in 0..count {
+            let at = 100.0 + f64::from(i) * 5.0;
+            let mut e = healthy(at);
+            if i == count - 1 {
+                e.handshake_age_seconds = Some(179.0);
+            }
+            m.observe(at, e).unwrap();
+        }
+        // The cached handshake expires after1s; all other cached checks stay fresh.
+        let next = 100.0 + f64::from(count - 1) * 5.0 + 2.0;
+        assert_eq!(
+            m.observe(next, healthy(next)).unwrap(),
+            HealthState::Blocked,
+            "scenario {scenario}"
+        );
+        assert_eq!(
+            m.observe(next + 5.0, healthy(next + 5.0)).unwrap(),
+            HealthState::Blocked
+        );
+        assert_eq!(
+            m.observe(next + 10.0, healthy(next + 10.0)).unwrap(),
+            HealthState::Recovering
+        );
+        assert_eq!(
+            m.observe(next + 15.0, healthy(next + 15.0)).unwrap(),
+            HealthState::Ready
+        );
+    }
+}

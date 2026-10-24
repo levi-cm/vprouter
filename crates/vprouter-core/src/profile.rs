@@ -203,7 +203,14 @@ impl Profile {
         &self.public_key
     }
     pub(crate) fn private_key_identity(&self) -> [u8; 32] {
-        self.private_key.0
+        // WireGuard uses X25519, which ignores these scalar bits. Compare the
+        // effective scalar so alternative encodings cannot create another exit
+        // with the same cryptographic identity. This never leaves the crate.
+        let mut identity = self.private_key.0;
+        identity[0] &= 248;
+        identity[31] &= 127;
+        identity[31] |= 64;
+        identity
     }
 }
 fn check_hint(hint: &str, expected: &str) -> Result<()> {

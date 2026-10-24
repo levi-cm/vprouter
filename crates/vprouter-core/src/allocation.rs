@@ -384,7 +384,19 @@ impl AllocationTransaction<'_> {
     }
     /// None creates generation 1; Some(g) commits precisely g+1. A parent-fsync
     /// failure after rename returns DurabilityUncertain: re-inspect before retrying.
-    pub fn commit(&self, expected: Option<u64>, record: &AllocationRecord) -> Result<()> {
+    /// Shared references cannot commit: a single flock guard must not allow
+    /// concurrent compare-and-swap operations through the same transaction.
+    ///
+    /// ```compile_fail
+    /// use vprouter_core::allocation::{AllocationRecord,AllocationTransaction};
+    /// fn concurrent_commit(tx: &AllocationTransaction<'_>, record: &AllocationRecord) {
+    ///     std::thread::scope(|scope| {
+    ///         scope.spawn(|| tx.commit(None,record));
+    ///         scope.spawn(|| tx.commit(None,record));
+    ///     });
+    /// }
+    /// ```
+    pub fn commit(&mut self, expected: Option<u64>, record: &AllocationRecord) -> Result<()> {
         record.validate(&self.store.deployment, &[])?;
         let previous = self.read()?;
         if previous.as_ref().map(|r| r.generation) != expected
@@ -518,7 +530,7 @@ mod storage_tests {
                     b.wait();
                     for _ in 0..10000 {
                         match store.lock() {
-                            Ok(tx) => return tx.commit(None, &record(1)),
+                            Ok(mut tx) => return tx.commit(None, &record(1)),
                             Err(e) if e.reason() == Reason::LockBusy => std::thread::yield_now(),
                             Err(e) => return Err(e),
                         }
@@ -544,11 +556,60 @@ mod storage_tests {
         assert_eq!(root.store().read().unwrap().unwrap().generation, 1);
     }
     #[test]
+    fn shared_transaction_writers_must_serialize_and_cannot_lose_an_update() {
+        use std::sync::Mutex;
+        let root = TempRoot::new();
+        let store = root.store();
+        let shared = Mutex::new(store.lock().unwrap());
+        let barrier = Barrier::new(2);
+        let results = std::thread::scope(|scope| {
+            let mut threads = Vec::new();
+            for id in ["alpha", "beta"] {
+                let shared = &shared;
+                let barrier = &barrier;
+                threads.push(scope.spawn(move || {
+                    let candidate = AllocationRecord {
+                        schema_version: 2,
+                        deployment_id: "fleet".into(),
+                        generation: 1,
+                        exits: vec![allocation(
+                            "fleet",
+                            id,
+                            ExitMode::Direct,
+                            format!("/state/{id}").into(),
+                        )],
+                    };
+                    barrier.wait();
+                    (id, shared.lock().unwrap().commit(None, &candidate))
+                }));
+            }
+            threads
+                .into_iter()
+                .map(|t| t.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(results.iter().filter(|(_, r)| r.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|(_, r)| r
+                    .as_ref()
+                    .is_err_and(|e| e.reason() == Reason::GenerationConflict))
+                .count(),
+            1
+        );
+        let winner = results.iter().find(|(_, r)| r.is_ok()).unwrap().0;
+        assert_eq!(
+            shared.lock().unwrap().read().unwrap().unwrap().exits[0].exit_id,
+            winner
+        );
+    }
+    #[test]
     fn cas_and_interrupted_temp_preserve_last_commit() {
         let root = TempRoot::new();
         let store = root.store();
         {
-            let tx = store.lock().unwrap();
+            let mut tx = store.lock().unwrap();
             tx.commit(None, &record(1)).unwrap();
             assert!(tx.commit(None, &record(1)).is_err());
             assert!(tx.commit(Some(1), &record(3)).is_err());
@@ -599,7 +660,7 @@ mod storage_tests {
     fn permissions_changed_after_open_revoke_storage_access() {
         let root = TempRoot::new();
         let store = root.store();
-        let tx = store.lock().unwrap();
+        let mut tx = store.lock().unwrap();
         fs::set_permissions(&root.0, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(tx.commit(None, &record(1)).is_err());
         drop(tx);

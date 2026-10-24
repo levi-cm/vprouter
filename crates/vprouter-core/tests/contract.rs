@@ -270,3 +270,35 @@ fn device_name_comments_do_not_claim_server_identity() {
     let parsed = Profile::parse(p.as_bytes(), "de-fra-wg-404", None).unwrap();
     assert!(!parsed.has_matching_server_hint());
 }
+
+#[test]
+fn clamp_equivalent_wireguard_keys_are_one_identity_even_when_disabled() {
+    // These synthetic encodings differ only in scalar bits ignored by X25519.
+    let variants = [
+        "AAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAYE=",
+        "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAUE=",
+    ];
+    for key in variants {
+        for enabled in [true, false] {
+            let two = input(&format!(
+                "{},{}",
+                exit("a", "/state/a"),
+                exit("b", "/state/b").replace("true", if enabled { "true" } else { "false" })
+            ));
+            let mut n = 0;
+            let result =
+                Configuration::parse(two.as_bytes())
+                    .unwrap()
+                    .validate_with(|_, server| {
+                        n += 1;
+                        Profile::parse(
+                            profile(if n == 1 { KEY } else { key }).as_bytes(),
+                            server,
+                            None,
+                        )
+                    });
+            assert_eq!(result.err().unwrap().reason(), Reason::DuplicatePrivateKey);
+        }
+    }
+}

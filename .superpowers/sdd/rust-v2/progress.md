@@ -294,3 +294,13 @@ source archives/payloads and all unsuccessful runs; no runtime acceptance claim.
 Task8b brief prepared but undispatched pending8a approval. Current8a cgroup profile
 is exactsystem.slice/Docker level3; derive from verified hierarchy or explicitly
 retain runit/nonmatchingprofile certification as an unperformed release gate.
+Task8a attempts2-4 (candidates03/04/05) retained: each failed before native
+owned links, create_veth_down Unsupported then exactattrs54/56. Existing host
+Docker slave promisc/master/bridge metadata and physical permanent-address/parent
+metadata surfaced strict projector gaps; protected-link checks remain strict.
+Controller initially guessedattr54 PROP_LIST incorrectly; implementer confirmed
+IFLA_PERM_ADDRESS against pinned crate/UAPI, public evidence corrected. Complete
+read-only RTM_GETLINK attribute inventory collected afterattr56 to avoid further
+per-attribute mutation cycles. Only exact failed synthetic WAN veths removed with
+snapshot identity/ownership checks; all quarantines/container/ns/group state
+retained. Attempts and exact binaries/source archives kept, capturesNOT_RUN.

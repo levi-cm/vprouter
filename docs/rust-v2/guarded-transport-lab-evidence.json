@@ -25,7 +25,77 @@
         "target/lab-state/guarded-transport-inspect-1.json",
         "target/lab-state/guarded-transport-wan-cleanup-1.json"
       ]
+    },
+    {
+      "attempt": 2,
+      "candidate": 3,
+      "observed_at_utc": "2026-10-24T15:33:23.052342+00:00",
+      "artifact_sha256": "e136422ff04eb4eaa68c86ca5dde65122fb6af599496821a2271f21ee4d00d58",
+      "source_archive_sha256": "dae8342e678b4b81be5bdd02e88393c0cf91dac44673f7903d36d7eeaadf53a5",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "result": "FAIL_CREATE_VETH_HOST_PROJECTION_UNSUPPORTED",
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_NATIVE_FAILURE stage=create_veth_down reason=Unsupported\ntransport_lab: network_operation\n",
+      "quarantine_observation": "all three scopes retain main+emergency tables; no owned veth/WG created",
+      "docker_forward_preserved": "same chain/rules ignoring counters",
+      "capture_or_traffic": "NOT_RUN",
+      "diagnosis": "additional strict host projection mismatch; known existing Docker slave has promiscuity1 and altnames on physical link",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; namespace pins, empty producer, test container and quarantine retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-2.json",
+        "target/lab-state/guarded-transport-inspect-2.json",
+        "target/lab-state/guarded-transport-wan-cleanup-2.json"
+      ]
+    },
+    {
+      "attempt": 3,
+      "candidate": 4,
+      "observed_at_utc": "2026-10-24T15:35:11.132710+00:00",
+      "artifact_sha256": "03057996523490351d434e219aaac5c751692237052736d8feb827c48e0452ba",
+      "source_archive_sha256": "c77c2f9cbeba0de658ea8d3276e49347068007181354378f3ab5d7ebbef17553",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "result": "FAIL_CREATE_VETH_HOST_PERM_ADDRESS_UNSUPPORTED",
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_NATIVE_FAILURE stage=create_veth_down reason=UnsupportedLinkAttribute(54)\ntransport_lab: network_operation\n",
+      "quarantine_observation": "all three scopes retain main+emergency tables; no owned veth/WG created",
+      "docker_forward_preserved": "same chain/rules ignoring counters",
+      "capture_or_traffic": "NOT_RUN",
+      "diagnosis": "explicit unsupported link attribute54; implementer verified UAPI and pinned crate identify IFLA_PERM_ADDRESS (controller initial PROP_LIST hypothesis was incorrect)",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; namespace pins, empty producer, test container and quarantine retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-3.json",
+        "target/lab-state/guarded-transport-inspect-3.json",
+        "target/lab-state/guarded-transport-wan-cleanup-3.json"
+      ]
+    },
+    {
+      "attempt": 4,
+      "candidate": 5,
+      "observed_at_utc": "2026-10-24T15:37:11.968238+00:00",
+      "artifact_sha256": "d6fb1ca62f55ad541207d00c8298ccca6702e5335be443905ba41860347a162f",
+      "source_archive_sha256": "5ae23e2254ae90bd2a219f05d9383fcdc8a93c0a4fd5f3909fdad36a4a69fc39",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "result": "FAIL_CREATE_VETH_HOST_ATTRIBUTE56_UNSUPPORTED",
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_NATIVE_FAILURE stage=create_veth_down reason=UnsupportedLinkAttribute(56)\ntransport_lab: network_operation\n",
+      "quarantine_observation": "all three scopes retain main+emergency tables; no owned veth/WG created",
+      "docker_forward_preserved": "same chain/rules ignoring counters",
+      "capture_or_traffic": "NOT_RUN",
+      "diagnosis": "explicit unsupported link attribute56; complete read-only RTM_GETLINK shape inventory collected to end per-attribute mutation cycles",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; namespace pins, empty producer, test container and quarantine retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-4.json",
+        "target/lab-state/guarded-transport-inspect-4.json",
+        "target/lab-state/guarded-transport-wan-cleanup-4.json",
+        "target/lab-state/host-link-attribute-oracle-1.json"
+      ]
     }
   ],
-  "production_changes": false
+  "production_changes": false,
+  "unexecuted_candidates": [
+    {
+      "candidate": 2,
+      "status": "diagnostic build not dispatched or run"
+    }
+  ]
 }

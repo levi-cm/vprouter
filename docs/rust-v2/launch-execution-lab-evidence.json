@@ -1,0 +1,132 @@
+{
+  "environment": "owned disposable Debian13 KVM guest",
+  "command": "sudo timeout --kill-after=3s 42s unshare --net /var/lib/vprouter-v2-lab/launch-execution-lab --ignored",
+  "attempts": [
+    {
+      "observed_at_utc": "2026-10-24T13:38:37.630179+00:00",
+      "implementation_commit": "e9e5a47d3a0f0795b9099f772f5838e60d35636e",
+      "artifacts": {
+        "launch-execution-lab": "67de069492688ef107fc3005a80ab20d69e898ee02a845153d4538b257cc59b4",
+        "launch-execution-probe": "c86e313afb12be1e7c2d91316edce61124058e2a35e58d00465f23f172e558c1"
+      },
+      "exit_code": 1,
+      "wall_seconds": 0.909,
+      "stdout": "{\"case\":\"owned_generation_locked_primary_base_and_independent_extra_namespaces\",\"result\":\"pass\"}\n",
+      "stderr": "LAB_STAGE execution_lab_admitted_owned_guest\nLAB_STAGE launch_first_private_probe\nexecution_lab: mount_isolation\n",
+      "result": "FAIL",
+      "release_acceptance": "NOT_RUN",
+      "production_changes": false
+    },
+    {
+      "observed_at_utc": "2026-10-24T13:40:22.270635+00:00",
+      "implementation_commit": "5c495a0",
+      "artifacts": {
+        "launch-execution-lab": "56b4d0f8fd7f5ee205d5e021d36c90c0f68f4c07cef7c72c5173478e1a949c5f",
+        "launch-execution-probe": "793bc16212794848300023fe63ad454d0f9907d43f04903aed493aa7dd4d2f9a"
+      },
+      "exit_code": 1,
+      "wall_seconds": 0.851,
+      "stdout": "{\"case\":\"owned_generation_locked_primary_base_and_independent_extra_namespaces\",\"result\":\"pass\"}\n",
+      "stderr": "LAB_STAGE execution_lab_admitted_owned_guest\nLAB_STAGE launch_first_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nexecution_lab: mount_isolation\n",
+      "result": "FAIL",
+      "release_acceptance": "NOT_RUN",
+      "production_changes": false
+    }
+  ],
+  "cleanups": [
+    {
+      "task_directory": "/var/lib/vprouter-v2-lab/task6b-6229",
+      "ownership_snapshot": {
+        "schema_version": 1,
+        "allocation": {
+          "schema_version": 2,
+          "deployment_id": "launchlab",
+          "generation": 1,
+          "exits": [
+            {
+              "exit_id": "one",
+              "mode": "direct",
+              "state_dir": "/var/lib/vprouter-v2-lab/task6b-6229/one",
+              "data_namespace": "vr-data-f75016890123b845",
+              "transport_namespace": "vr-trans-f75016890123b845",
+              "nft_table": "vr_f75016890123b845",
+              "host_interface": "vh16890123b845",
+              "data_interface": "vd16890123b845",
+              "wireguard_interface": null,
+              "transport_subnet": "10.202.225.20/30"
+            },
+            {
+              "exit_id": "two",
+              "mode": "direct",
+              "state_dir": "/var/lib/vprouter-v2-lab/task6b-6229/two",
+              "data_namespace": "vr-data-5899ff8938d06f4f",
+              "transport_namespace": "vr-trans-5899ff8938d06f4f",
+              "nft_table": "vr_5899ff8938d06f4f",
+              "host_interface": "vhff8938d06f4f",
+              "data_interface": "vdff8938d06f4f",
+              "wireguard_interface": null,
+              "transport_subnet": "10.201.189.60/30"
+            }
+          ]
+        },
+        "primary_exit_id": "one",
+        "base_network": {
+          "dev": 4,
+          "ino": 4026532321
+        },
+        "entries": [
+          {
+            "exit_id": "one",
+            "data_name": "vr-data-f75016890123b845",
+            "transport_name": "vr-trans-f75016890123b845",
+            "phase": "offline",
+            "data": {
+              "dev": 4,
+              "ino": 4026532321
+            },
+            "transport": {
+              "dev": 4,
+              "ino": 4026532379
+            }
+          },
+          {
+            "exit_id": "two",
+            "data_name": "vr-data-5899ff8938d06f4f",
+            "transport_name": "vr-trans-5899ff8938d06f4f",
+            "phase": "offline",
+            "data": {
+              "dev": 4,
+              "ino": 4026532436
+            },
+            "transport": {
+              "dev": 4,
+              "ino": 4026532493
+            }
+          }
+        ]
+      },
+      "live_netns_users": [],
+      "only_loopback_and_no_default_verified": true,
+      "exact_owned_pins_unmounted": [
+        "vr-data-5899ff8938d06f4f",
+        "vr-data-f75016890123b845",
+        "vr-trans-5899ff8938d06f4f",
+        "vr-trans-f75016890123b845"
+      ],
+      "remaining_pins": [],
+      "records_retained": true,
+      "production_changes": false
+    }
+  ],
+  "component_acceptance": "FAIL_IN_PROGRESS",
+  "production_changes": false,
+  "real_worker_execution": "NOT_RUN",
+  "real_client_leakage_acceptance": "NOT_RUN",
+  "release_acceptance": "NOT_RUN",
+  "limitations": [
+    "Test-only synthetic direct-mode allocation has no usable network path, addresses/defaults/link activation or direct exposure.",
+    "No provider credentials or real Tailscale identity state used by launch harness.",
+    "First two attempts failed before any successful post-exec worker case.",
+    "Offline ownership records retained after exact test-only pin cleanup."
+  ]
+}

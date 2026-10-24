@@ -9,8 +9,8 @@
   "state_path_guest": "/var/lib/vprouter-v2-lab/gateway-primary",
   "state_owner": 0,
   "state_mode": "0700",
-  "backend": "NeedsLogin",
-  "approval": "PENDING",
+  "backend": "Running",
+  "approval": "APPROVED",
   "advertised_routes": [],
   "selected_exit_node_id": null,
   "read_only_root": true,
@@ -31,12 +31,17 @@
     "The previously approved disposable client identity is unchanged.",
     "Login URLs are presented only to the operator and omitted from evidence."
   ],
-  "last_rechecked_at_utc": "2026-10-24T13:29:56.253312+00:00",
+  "last_rechecked_at_utc": "2026-10-24T13:40:51.373109+00:00",
   "last_recheck": {
-    "backend": "NeedsLogin",
-    "node_id": null,
-    "tailscale_ips": [],
-    "approval": "PENDING",
-    "existing_login_link_presented": true
+    "backend": "Running",
+    "node_id": "n8P8U86ryZ11CNTRL",
+    "tailscale_ips": [
+      "100.101.230.31",
+      "fd7a:115c:a1e0::9438:e621"
+    ],
+    "online": true,
+    "exit_node_option": false,
+    "approval": "APPROVED",
+    "enrollment": "user interactive login link; no credential/state recreation"
   }
 }

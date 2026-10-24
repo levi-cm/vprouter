@@ -559,10 +559,70 @@
       "trace_summary_sha256": "757327e0b83491fc8c3168d892d0ae69869601c2c13375e15580934693ea8419",
       "trace_files": 42,
       "observation": "Same frozen05 with fixed file-metadata tracing reports confinement_policy; helper36147 opens own LSM label. No durable daemon/observer proof or acceptance verdict."
+    },
+    {
+      "attempt": 9,
+      "source_binding": {
+        "source_commit": "3ff8431b4a64e9675afebcbab6635130a3856123",
+        "source_archive_sha256": "500c9acf00cfc98aa29d2c0b7372842dd224042a493686ba77ff06aff1ab6204",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "49f565aa7fbcc3dfb39941a6ec68ded08b0952090879a7877ba8381675d31eb0"
+      },
+      "artifact_sha256": "4886ae9cd61fbf10f8cfcca0b9a840e5c54a91c06c6e536ddc28e341691502d7",
+      "context_sha256": "12d17a5d716801b2d20be4719bdaa826bd453597b9be01b16bcbae909f8a9da4",
+      "manifest_sha256": "98ee95b13ebdd5db59d19c840fd90b964c74664a6b43c661728bf87ae2f07c62",
+      "image_id": "sha256:7083a2796823e4da925ca4ba9273e91c0d47f4fbcf09b9cb1ae0f5afc2d00d9b",
+      "image_layers": [
+        "sha256:1e4eec2b7f691a4f7a78aa4618549240a7d706ec76f4058f8697ef476b1ad780"
+      ],
+      "runner_sha256": "b5e86679458030354e04965079b574ed0118a776bb5f6e12df46b0eb60f86c98",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 4.005,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "actual_lab: mount_isolation"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": false,
+      "file_path_metadata": false,
+      "stderr_diagnostic": true,
+      "decoded_log_output": "NONE_PREDEFINED_PUBLIC_TOKENS_ONLY",
+      "actual_daemon_exec": "REACHED_NOT_HEALTHY",
+      "actual_observer_exec": "NOT_REACHED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-9.json",
+      "private_run_record_sha256": "1792dd163356c586245a5ffa7c96d19e91ea0ee1a83e2a3388b119680e07ea87",
+      "private_inventory": "target/lab-state/actual-program-inspect-9.json",
+      "private_inventory_sha256": "eb70703b1841714554ec23ba62fdc75ac042c0f9a66776aac44a6d01120e9371",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-stderr-trace-9-summary.json",
+      "trace_summary_sha256": "0dd607cf7fb83e91a3a01d5ba3086e474ace62b2c4adc6ce888b4d4b8f483e3c",
+      "trace_files": 42,
+      "failure_witness": {
+        "file": "syscall.36536",
+        "sha256": "487556df4abd722596e641282e568d522c78802406c766f3d8924db5f29241e7",
+        "observation": "FD2-only tokens identify Go TUN engine operation-not-permitted error. Prior raw7 thread35771 witnesses successful TUN ioctls then pipe2 O_CLOEXEC EPERM three times; no need to decode payloads or broaden general exec."
+      }
     }
   ],
   "diagnosis": {
-    "status": "FIXED_LOG_STATE_LATER_GO_FATAL_OR_CONFINEMENT_CHECK_PENDING",
+    "status": "NARROW_PRIVATE_PROC_AND_DAEMON_CLOEXEC_PIPE_FIX_PENDING",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "component": "public_pinned_tailscale_program_inventory",
+  "tailscale_version": "1.102.5",
+  "source_index": "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065",
+  "inventory_method": "Docker verifies pinned platform image content; copy only fixed public program/CA files from a fresh stopped network-none state-free container; exact owned container removed",
+  "platforms": [
+    {
+      "schema_version": 1,
+      "tailscale_version": "1.102.5",
+      "source_index": "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065",
+      "inventory_tool_sha256": "38df6025d7e7bec81cbbf5dc197536d9ea97b5347841ee578013280415c8bca6",
+      "platform": {
+        "container_id": "1896493f973da4f11a4227134f7b9680a12f0f844538cbecb5e575707dc05674",
+        "image_id": "sha256:94603a5a98fa75ef53c4c5b5401c4025b25cd2e54ad2609720ba8d0e5a3febda",
+        "platform_manifest": "tailscale/tailscale@sha256:08a1bc6c82fee62d1a135788fb67fefa9d22deea3830e8a45ebe1a3cb116e325",
+        "architecture": "amd64",
+        "os": "linux",
+        "container_stopped": true,
+        "identity_state_mounted": false
+      },
+      "public_files": [
+        {
+          "source_path": "/usr/local/bin/tailscaled",
+          "local_path": "target/program-inventory/tailscale-1.102.5-amd64/tailscaled",
+          "bytes": 42902060,
+          "sha256": "b2ec98126c6ee19d7b3603b0cfee97c5dd646874065aed7016653d30ff92a9cd",
+          "elf_machine": 62
+        },
+        {
+          "source_path": "/usr/local/bin/tailscale",
+          "local_path": "target/program-inventory/tailscale-1.102.5-amd64/tailscale",
+          "bytes": 33116853,
+          "sha256": "344ac0aadfcc98aa2567aa4ce96b38b3faa9c5fbc849b7b1bd5feaa6c1563a2f",
+          "elf_machine": 62
+        },
+        {
+          "source_path": "/etc/ssl/certs/ca-certificates.crt",
+          "local_path": "target/program-inventory/tailscale-1.102.5-amd64/ca-certificates.crt",
+          "bytes": 181724,
+          "sha256": "028fca5150ee1915c4474489985d55c54fceaa680c754cc8d1301734f01b2232",
+          "elf_machine": null
+        }
+      ],
+      "cleanup": {
+        "exact_owned_stopped_container_removed": true
+      },
+      "runtime_execution": "NOT_RUN",
+      "production_changes": false
+    },
+    {
+      "schema_version": 1,
+      "tailscale_version": "1.102.5",
+      "source_index": "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065",
+      "inventory_tool_sha256": "38df6025d7e7bec81cbbf5dc197536d9ea97b5347841ee578013280415c8bca6",
+      "platform": {
+        "container_id": "77c9dd9d070c57a9070a4501a069594b39d6bd2316a651a0cb078fc948c3bf3c",
+        "image_id": "sha256:5d3dd33a5cd5ed29514fdada176fa2226d122f19bddd8fe06bc974633083e90e",
+        "platform_manifest": "tailscale/tailscale@sha256:472c549d2ef8cebc000de2c8a94061bbdc864d2454177b2ada713262475449ef",
+        "architecture": "arm64",
+        "os": "linux",
+        "container_stopped": true,
+        "identity_state_mounted": false
+      },
+      "public_files": [
+        {
+          "source_path": "/usr/local/bin/tailscaled",
+          "local_path": "target/program-inventory/tailscale-1.102.5-arm64/tailscaled",
+          "bytes": 40133663,
+          "sha256": "3cf2640069ded59322dc2113be5fa90540937410be22bb40873a614773ab27cc",
+          "elf_machine": 183
+        },
+        {
+          "source_path": "/usr/local/bin/tailscale",
+          "local_path": "target/program-inventory/tailscale-1.102.5-arm64/tailscale",
+          "bytes": 30825099,
+          "sha256": "b01efc25199dd023e1c9b93e8166b7afbc56dd941f18d4a8f9401933d258ddd7",
+          "elf_machine": 183
+        },
+        {
+          "source_path": "/etc/ssl/certs/ca-certificates.crt",
+          "local_path": "target/program-inventory/tailscale-1.102.5-arm64/ca-certificates.crt",
+          "bytes": 181724,
+          "sha256": "028fca5150ee1915c4474489985d55c54fceaa680c754cc8d1301734f01b2232",
+          "elf_machine": null
+        }
+      ],
+      "cleanup": {
+        "exact_owned_stopped_container_removed": true
+      },
+      "runtime_execution": "NOT_RUN",
+      "production_changes": false
+    }
+  ],
+  "programs_runtime_certification": "NOT_RUN",
+  "release_provenance_gate": "NOT_RUN",
+  "release_ready": false,
+  "approved_identities_accessed": false,
+  "production_changes": false
+}

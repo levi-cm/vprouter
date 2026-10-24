@@ -271,6 +271,36 @@
       "result": "FAIL",
       "release_acceptance": "NOT_RUN",
       "production_changes": false
+    },
+    {
+      "observed_at_utc": "2026-10-24T14:18:54.112990+00:00",
+      "implementation_commit": "97fd1b8",
+      "artifacts": {
+        "launch-execution-lab": "4ec0f31a31c42d60518b8fab6345590f340a67789dc2e99a0baac5d350de3f0f",
+        "launch-execution-probe": "acd54e5961eb3833be704bf3642499c357567ab11028e41e5805e6f402930dd0"
+      },
+      "exit_code": 1,
+      "wall_seconds": 2.014,
+      "stdout": "{\"case\":\"owned_generation_locked_primary_base_and_independent_extra_namespaces\",\"result\":\"pass\"}\n{\"case\":\"wrong_selected_exit_namespace_token_executes_nothing\",\"result\":\"pass\"}\n{\"case\":\"unexpected_host_directory_peer_namespace_socket_execute_nothing\",\"result\":\"pass\"}\n{\"case\":\"killed_placement_gated_child_never_released_or_executed\",\"result\":\"pass\"}\n{\"case\":\"actual_cgroup_nested_pid_proc_private_root_state_fd_cap_seccomp_apparmor\",\"result\":\"pass\"}\n{\"case\":\"post_exec_adversarial_proc_root_and_two_exit_state_isolation\",\"result\":\"pass\"}\n{\"case\":\"all_surviving_wrappers_empty_ro_roots_cwd_exact_pidfd_null_caps_lsm_seccomp\",\"result\":\"pass\"}\n{\"case\":\"signal_forwarding_pid1_reaping_frozen_descendants\",\"result\":\"pass\"}\n{\"case\":\"launcher_parent_death_kills_and_reaps_namespace_descendants\",\"result\":\"pass\"}\n{\"case\":\"container_death_kills_all_launch_children\",\"result\":\"pass\"}\n",
+      "stderr": "LAB_STAGE execution_lab_admitted_owned_guest\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_STAGE launch_first_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE launch_second_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE parent_loss_kills_actual_launch_tree\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE container_death_kills_actual_launch_tree\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE cleanup_exact_namespace_pins\nLAB_UNPIN_RECORD exit_index=0 kind=data\nLAB_UNPIN_FAILURE unmount busy\nexecution_lab: ownership_mismatch\n",
+      "result": "FAIL",
+      "release_acceptance": "NOT_RUN",
+      "production_changes": false
+    },
+    {
+      "observed_at_utc": "2026-10-24T14:20:51.053726+00:00",
+      "implementation_commit": "bff77724213f0c275ecc1b1b119a3fcb605871fe",
+      "artifacts": {
+        "launch-execution-lab": "a49a89a3e5db007e20242615422fed039f06bdf7e9dd32a33e324b9285e38be8",
+        "launch-execution-probe": "7c6a7d16c02a48963dfbe79babbc353d46d37c78c2202dd28f85cd82ab42ae1c"
+      },
+      "exit_code": 0,
+      "wall_seconds": 2.187,
+      "stdout": "{\"case\":\"owned_generation_locked_primary_base_and_independent_extra_namespaces\",\"result\":\"pass\"}\n{\"case\":\"wrong_selected_exit_namespace_token_executes_nothing\",\"result\":\"pass\"}\n{\"case\":\"unexpected_host_directory_peer_namespace_socket_execute_nothing\",\"result\":\"pass\"}\n{\"case\":\"killed_placement_gated_child_never_released_or_executed\",\"result\":\"pass\"}\n{\"case\":\"actual_cgroup_nested_pid_proc_private_root_state_fd_cap_seccomp_apparmor\",\"result\":\"pass\"}\n{\"case\":\"post_exec_adversarial_proc_root_and_two_exit_state_isolation\",\"result\":\"pass\"}\n{\"case\":\"all_surviving_wrappers_empty_ro_roots_cwd_exact_pidfd_null_caps_lsm_seccomp\",\"result\":\"pass\"}\n{\"case\":\"signal_forwarding_pid1_reaping_frozen_descendants\",\"result\":\"pass\"}\n{\"case\":\"launcher_parent_death_kills_and_reaps_namespace_descendants\",\"result\":\"pass\"}\n{\"case\":\"container_death_kills_all_launch_children\",\"result\":\"pass\"}\n{\"case\":\"launch_execution_isolated_acceptance\",\"result\":\"pass\",\"guard_runtime\":false,\"activation\":false}\n",
+      "stderr": "LAB_STAGE execution_lab_admitted_owned_guest\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_STAGE launch_first_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE launch_second_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE parent_loss_kills_actual_launch_tree\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE container_death_kills_actual_launch_tree\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE cleanup_exact_namespace_pins\nLAB_UNPIN_RECORD exit_index=0 kind=data\nLAB_UNPIN_RECORD exit_index=0 kind=transport\nLAB_UNPIN_RECORD exit_index=1 kind=data\nLAB_UNPIN_RECORD exit_index=1 kind=transport\nLAB_STAGE cleanup_exact_container\nLAB_STAGE cleanup_exact_synthetic_directory\n",
+      "result": "PASS_PARTIAL_SMOKE",
+      "release_acceptance": "NOT_RUN",
+      "production_changes": false
     }
   ],
   "cleanups": [
@@ -1767,9 +1797,100 @@
       "remaining_pins": [],
       "records_retained": true,
       "production_changes": false
+    },
+    {
+      "task_directory": "/var/lib/vprouter-v2-lab/task6b-15518",
+      "ownership_snapshot": {
+        "schema_version": 1,
+        "allocation": {
+          "schema_version": 2,
+          "deployment_id": "launchlab",
+          "generation": 1,
+          "exits": [
+            {
+              "exit_id": "one",
+              "mode": "direct",
+              "state_dir": "/var/lib/vprouter-v2-lab/task6b-15518/one",
+              "data_namespace": "vr-data-f75016890123b845",
+              "transport_namespace": "vr-trans-f75016890123b845",
+              "nft_table": "vr_f75016890123b845",
+              "host_interface": "vh16890123b845",
+              "data_interface": "vd16890123b845",
+              "wireguard_interface": null,
+              "transport_subnet": "10.202.225.20/30"
+            },
+            {
+              "exit_id": "two",
+              "mode": "direct",
+              "state_dir": "/var/lib/vprouter-v2-lab/task6b-15518/two",
+              "data_namespace": "vr-data-5899ff8938d06f4f",
+              "transport_namespace": "vr-trans-5899ff8938d06f4f",
+              "nft_table": "vr_5899ff8938d06f4f",
+              "host_interface": "vhff8938d06f4f",
+              "data_interface": "vdff8938d06f4f",
+              "wireguard_interface": null,
+              "transport_subnet": "10.201.189.60/30"
+            }
+          ]
+        },
+        "primary_exit_id": "one",
+        "base_network": {
+          "dev": 4,
+          "ino": 4026532321
+        },
+        "entries": [
+          {
+            "exit_id": "one",
+            "data_name": "vr-data-f75016890123b845",
+            "transport_name": "vr-trans-f75016890123b845",
+            "phase": "offline",
+            "data": {
+              "dev": 4,
+              "ino": 4026532321
+            },
+            "transport": {
+              "dev": 4,
+              "ino": 4026532379
+            }
+          },
+          {
+            "exit_id": "two",
+            "data_name": "vr-data-5899ff8938d06f4f",
+            "transport_name": "vr-trans-5899ff8938d06f4f",
+            "phase": "offline",
+            "data": {
+              "dev": 4,
+              "ino": 4026532436
+            },
+            "transport": {
+              "dev": 4,
+              "ino": 4026532493
+            }
+          }
+        ]
+      },
+      "live_netns_users": [],
+      "only_loopback_and_no_default_verified": true,
+      "exact_owned_pins_unmounted": [
+        "vr-data-5899ff8938d06f4f",
+        "vr-data-f75016890123b845",
+        "vr-trans-5899ff8938d06f4f",
+        "vr-trans-f75016890123b845"
+      ],
+      "remaining_pins": [],
+      "records_retained": true,
+      "production_changes": false
+    },
+    {
+      "remaining_pins": [],
+      "residual_containers": 0,
+      "post_run_absence_verified": true,
+      "harness_self_cleanup": true,
+      "controller_removed_resources": false,
+      "production_changes": false
     }
   ],
-  "component_acceptance": "FAIL_IN_PROGRESS",
+  "component_acceptance": "PASS_ISOLATED_SYNTHETIC_EXECUTION_PENDING_INDEPENDENT_REVIEW",
   "production_changes": false,
   "real_worker_execution": "NOT_RUN",
   "real_client_leakage_acceptance": "NOT_RUN",
@@ -1778,6 +1899,10 @@
     "Test-only synthetic direct-mode allocation has no usable network path, addresses/defaults/link activation or direct exposure.",
     "No provider credentials or real Tailscale identity state used by launch harness.",
     "First two attempts failed before any successful post-exec worker case.",
-    "Offline ownership records retained after exact test-only pin cleanup."
-  ]
+    "Offline ownership records retained after exact test-only pin cleanup.",
+    "Nineteen failed attempts retained, including successful runtime checks with final cleanup failure.",
+    "Successful test-built static probe does not implement or certify the actual Rust worker, Go tailscaled policy, running host guard, usable transport, client no-fallback or release traffic gates."
+  ],
+  "passed_source_commit": "bff77724213f0c275ecc1b1b119a3fcb605871fe",
+  "passed_attempt": 20
 }

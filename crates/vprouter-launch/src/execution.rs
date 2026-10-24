@@ -136,8 +136,14 @@ pub(super) fn launch(
     // All Docker revalidation runtimes are created and dropped in this function;
     // none exists across fork or namespace entry. No caller-controlled runtime.
     revalidate(a)?;
+    #[cfg(test)]
+    eprintln!("LAB_EXEC_STAGE selected_state_admission");
     let state = state(a)?;
+    #[cfg(test)]
+    eprintln!("LAB_EXEC_STAGE descriptor_admission");
     inherited_descriptors()?;
+    #[cfg(test)]
+    eprintln!("LAB_EXEC_STAGE placement_gated_spawn");
     let mut child = kernel::spawn(a.process.launch_fds(), ns.data.as_fd(), state.as_fd())?;
     if a.process
         .place(child.pid(), &a.spec)
@@ -152,6 +158,8 @@ pub(super) fn launch(
     child.release()?;
     // PID1 readiness requires successful post-exec probe verification, not merely
     // child creation or Docker status. An error kills/reaps boundedly in Drop.
+    #[cfg(test)]
+    eprintln!("LAB_EXEC_STAGE post_exec_readiness");
     child.ready()?;
     a.process.verify_placement(child.pid(), &a.spec)?;
     Ok(Running { child })

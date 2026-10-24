@@ -27,6 +27,14 @@ fn stage_byte(e: Error) -> u8 {
     match e {
         Error::NamespaceOperation => 201,
         Error::MountIsolation => 202,
+        Error::MountContainerRoot => 210,
+        Error::MountPrivate => 211,
+        Error::MountTmp => 212,
+        Error::MountExecutable => 213,
+        Error::MountState => 214,
+        Error::MountPivot => 215,
+        Error::MountProc => 216,
+        Error::MountReadonly => 217,
         Error::DescriptorPolicy => 203,
         Error::CapabilityPolicy => 204,
         Error::ConfinementPolicy => 205,
@@ -195,6 +203,14 @@ impl Child {
             1 => Ok(()),
             201 => Err(Error::NamespaceOperation),
             202 => Err(Error::MountIsolation),
+            210 => Err(Error::MountContainerRoot),
+            211 => Err(Error::MountPrivate),
+            212 => Err(Error::MountTmp),
+            213 => Err(Error::MountExecutable),
+            214 => Err(Error::MountState),
+            215 => Err(Error::MountPivot),
+            216 => Err(Error::MountProc),
+            217 => Err(Error::MountReadonly),
             203 => Err(Error::DescriptorPolicy),
             204 => Err(Error::CapabilityPolicy),
             205 => Err(Error::ConfinementPolicy),
@@ -375,13 +391,16 @@ fn setup(
     // SAFETY: pinned admitted root fd is a directory. chroot/fchdir affect this child only.
     cv(
         unsafe { libc::fchdir(container.root.as_raw_fd()) },
-        Error::MountIsolation,
+        Error::MountContainerRoot,
     )?;
     cv(
         unsafe { libc::chroot(c".".as_ptr()) },
-        Error::MountIsolation,
+        Error::MountContainerRoot,
     )?;
-    cv(unsafe { libc::chdir(c"/".as_ptr()) }, Error::MountIsolation)?;
+    cv(
+        unsafe { libc::chdir(c"/".as_ptr()) },
+        Error::MountContainerRoot,
+    )?;
     unshare(libc::CLONE_NEWNS | libc::CLONE_NEWPID)?;
     mount(None, c"/", None, libc::MS_REC | libc::MS_PRIVATE, None)?;
     // Original readonly container root remains provenance source only; new root
@@ -392,30 +411,32 @@ fn setup(
         Some(c"tmpfs"),
         libc::MS_NOSUID | libc::MS_NODEV,
         Some(c"mode=0755,size=8m"),
-    )?;
-    std::fs::create_dir("/tmp/root").map_err(|_| Error::MountIsolation)?;
+    )
+    .map_err(|_| Error::MountTmp)?;
+    std::fs::create_dir("/tmp/root").map_err(|_| Error::MountPivot)?;
     mount(
         Some(c"tmpfs"),
         c"/tmp/root",
         Some(c"tmpfs"),
         libc::MS_NOSUID | libc::MS_NODEV,
         Some(c"mode=0755,size=8m"),
-    )?;
+    )
+    .map_err(|_| Error::MountTmp)?;
     for d in ["bin", "proc", "state", "etc", "old"] {
-        std::fs::create_dir(format!("/tmp/root/{d}")).map_err(|_| Error::MountIsolation)?;
+        std::fs::create_dir(format!("/tmp/root/{d}")).map_err(|_| Error::MountPivot)?;
     }
-    std::fs::File::create("/tmp/root/bin/vprouter-worker").map_err(|_| Error::MountIsolation)?;
+    std::fs::File::create("/tmp/root/bin/vprouter-worker").map_err(|_| Error::MountPivot)?;
     bind(
         &fdpath(container.executable)?,
         "/tmp/root/bin/vprouter-worker",
         true,
     )?;
-    bind(&fdpath(state)?, "/tmp/root/state", false)?;
+    bind(&fdpath(state)?, "/tmp/root/state", false).map_err(|_| Error::MountState)?;
     std::fs::write(
         "/tmp/root/etc/resolv.conf",
         b"nameserver 192.0.2.53\noptions attempts:1 timeout:1\n",
     )
-    .map_err(|_| Error::MountIsolation)?;
+    .map_err(|_| Error::MountPivot)?;
     let null = fs::open("/dev/null", OFlags::RDWR | OFlags::CLOEXEC, Mode::empty())
         .map_err(|_| Error::DescriptorPolicy)?;
     for fd in 0..3 {
@@ -455,21 +476,22 @@ fn init_root() -> Result<()> {
                 c"/tmp/root/old".as_ptr(),
             ) as i32
         },
-        Error::MountIsolation,
+        Error::MountPivot,
     )?;
-    cv(unsafe { libc::chdir(c"/".as_ptr()) }, Error::MountIsolation)?;
+    cv(unsafe { libc::chdir(c"/".as_ptr()) }, Error::MountPivot)?;
     cv(
         unsafe { libc::umount2(c"/old".as_ptr(), libc::MNT_DETACH) },
-        Error::MountIsolation,
+        Error::MountPivot,
     )?;
-    std::fs::remove_dir("/old").map_err(|_| Error::MountIsolation)?;
+    std::fs::remove_dir("/old").map_err(|_| Error::MountPivot)?;
     mount(
         Some(c"proc"),
         c"/proc",
         Some(c"proc"),
         libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
         Some(c"hidepid=2"),
-    )?;
+    )
+    .map_err(|_| Error::MountProc)?;
     mount(
         None,
         c"/",
@@ -477,6 +499,7 @@ fn init_root() -> Result<()> {
         libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV,
         None,
     )
+    .map_err(|_| Error::MountReadonly)
 }
 fn blocked_signals() -> Result<libc::sigset_t> {
     // SAFETY: zero is initialized storage subsequently initialized by sigemptyset; libc consumes exact sigset size.

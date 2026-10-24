@@ -31,6 +31,8 @@ fn stage_byte(e: Error) -> u8 {
         Error::MountPrivate => 211,
         Error::MountTmp => 212,
         Error::MountExecutable => 213,
+        Error::MountExecutableBind => 218,
+        Error::MountExecutableReadonly => 219,
         Error::MountState => 214,
         Error::MountPivot => 215,
         Error::MountProc => 216,
@@ -207,6 +209,8 @@ impl Child {
             211 => Err(Error::MountPrivate),
             212 => Err(Error::MountTmp),
             213 => Err(Error::MountExecutable),
+            218 => Err(Error::MountExecutableBind),
+            219 => Err(Error::MountExecutableReadonly),
             214 => Err(Error::MountState),
             215 => Err(Error::MountPivot),
             216 => Err(Error::MountProc),
@@ -317,7 +321,7 @@ fn mount(
     data: Option<&CStr>,
 ) -> Result<()> {
     // SAFETY: all optional C strings live across synchronous mount; no borrowed kernel buffers retained.
-    cv(
+    let result = cv(
         unsafe {
             libc::mount(
                 source.map_or(std::ptr::null(), CStr::as_ptr),
@@ -328,7 +332,20 @@ fn mount(
             )
         },
         Error::MountIsolation,
-    )
+    );
+    #[cfg(test)]
+    if result.is_err() {
+        let category = match std::io::Error::last_os_error().raw_os_error() {
+            Some(libc::EPERM | libc::EACCES) => "denied",
+            Some(libc::ENOENT) => "missing",
+            Some(libc::EINVAL) => "invalid",
+            Some(libc::EBUSY) => "busy",
+            Some(libc::EROFS) => "readonly",
+            _ => "other",
+        };
+        eprintln!("LAB_NATIVE_MOUNT_REASON {category}");
+    }
+    result
 }
 fn bind(source: &CStr, target: &str, readonly: bool) -> Result<()> {
     let t = c(target)?;
@@ -427,12 +444,22 @@ fn setup(
         std::fs::create_dir(format!("/tmp/root/{d}")).map_err(|_| Error::MountPivot)?;
     }
     std::fs::File::create("/tmp/root/bin/vprouter-worker").map_err(|_| Error::MountPivot)?;
-    bind(
-        &fdpath(container.executable)?,
-        "/tmp/root/bin/vprouter-worker",
-        true,
+    mount(
+        Some(&fdpath(container.executable)?),
+        c"/tmp/root/bin/vprouter-worker",
+        None,
+        libc::MS_BIND,
+        None,
     )
-    .map_err(|_| Error::MountExecutable)?;
+    .map_err(|_| Error::MountExecutableBind)?;
+    mount(
+        None,
+        c"/tmp/root/bin/vprouter-worker",
+        None,
+        libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV,
+        None,
+    )
+    .map_err(|_| Error::MountExecutableReadonly)?;
     bind(&fdpath(state)?, "/tmp/root/state", false).map_err(|_| Error::MountState)?;
     std::fs::write(
         "/tmp/root/etc/resolv.conf",
@@ -822,6 +849,68 @@ fn filter() -> Vec<libc::sock_filter> {
             k: 0,
         }, // syscall nr, x32 unlisted
     ];
+    out.extend([
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 8,
+            k: libc::SYS_clone as u32,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 20,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 1,
+            jf: 0,
+            k: 0,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x00050001,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 16,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 2,
+            jf: 0,
+            k: libc::SIGCHLD as u32,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 1,
+            jf: 0,
+            k: (libc::CLONE_CHILD_SETTID | libc::CLONE_CHILD_CLEARTID | libc::SIGCHLD) as u32,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x00050001,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x7fff0000,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+    ]);
     let syscalls = [
         libc::SYS_read,
         libc::SYS_write,
@@ -864,7 +953,6 @@ fn filter() -> Vec<libc::sock_filter> {
         libc::SYS_exit,
         libc::SYS_exit_group,
         libc::SYS_execveat,
-        libc::SYS_clone,
         libc::SYS_wait4,
         libc::SYS_kill,
         libc::SYS_sched_yield,

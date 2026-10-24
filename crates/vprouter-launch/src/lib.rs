@@ -55,6 +55,8 @@ pub enum Error {
     MountPrivate,
     MountTmp,
     MountExecutable,
+    MountExecutableBind,
+    MountExecutableReadonly,
     MountState,
     MountPivot,
     MountProc,

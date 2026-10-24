@@ -505,10 +505,64 @@
         "sha256": "316981a0e198540132afad4a864c5b27333fbc9963dcaee6fc12b1c0bedfadab",
         "observation": "Fixed daemon private logs/native firewall env passes startup panic. Exec reaches epoll loop; harness reports process_unavailable before durable process/metadata witness. Stable health not established."
       }
+    },
+    {
+      "attempt": 8,
+      "source_binding": {
+        "source_commit": "3ff8431b4a64e9675afebcbab6635130a3856123",
+        "source_archive_sha256": "500c9acf00cfc98aa29d2c0b7372842dd224042a493686ba77ff06aff1ab6204",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "49f565aa7fbcc3dfb39941a6ec68ded08b0952090879a7877ba8381675d31eb0"
+      },
+      "artifact_sha256": "4886ae9cd61fbf10f8cfcca0b9a840e5c54a91c06c6e536ddc28e341691502d7",
+      "context_sha256": "12d17a5d716801b2d20be4719bdaa826bd453597b9be01b16bcbae909f8a9da4",
+      "manifest_sha256": "98ee95b13ebdd5db59d19c840fd90b964c74664a6b43c661728bf87ae2f07c62",
+      "image_id": "sha256:7083a2796823e4da925ca4ba9273e91c0d47f4fbcf09b9cb1ae0f5afc2d00d9b",
+      "image_layers": [
+        "sha256:1e4eec2b7f691a4f7a78aa4618549240a7d706ec76f4058f8697ef476b1ad780"
+      ],
+      "runner_sha256": "5d71bd627abdeed0515e0f2ff07f52af9f54d60ace564155449c2bffd9ba8583",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 3.556,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "actual_lab: confinement_policy"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": false,
+      "file_path_metadata": true,
+      "actual_daemon_exec": "REACHED_NOT_HEALTHY",
+      "actual_observer_exec": "NOT_REACHED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-8.json",
+      "private_run_record_sha256": "245227bad93617b1bc5b30d7878f26cd55f76fdd272465baf87a81604fbbc46f",
+      "private_inventory": "target/lab-state/actual-program-inspect-8.json",
+      "private_inventory_sha256": "2e1fafe0f72de7e7656f3bb6a812786843b6810d69aaa31e372fa7f98de3b9a0",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-path-trace-8-summary.json",
+      "trace_summary_sha256": "757327e0b83491fc8c3168d892d0ae69869601c2c13375e15580934693ea8419",
+      "trace_files": 42,
+      "observation": "Same frozen05 with fixed file-metadata tracing reports confinement_policy; helper36147 opens own LSM label. No durable daemon/observer proof or acceptance verdict."
     }
   ],
   "diagnosis": {
-    "status": "FIXED_LOG_STATE_REACHES_GO_EVENT_LOOP_PROCESS_CHECK_PENDING",
+    "status": "FIXED_LOG_STATE_LATER_GO_FATAL_OR_CONFINEMENT_CHECK_PENDING",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

@@ -277,8 +277,120 @@
       "private_evidence": [
         "target/lab-state/guarded-transport-run-12.json",
         "target/lab-state/guarded-transport-inspect-12.json",
-        "target/lab-state/guarded-transport-wan-cleanup-12.json"
-      ]
+        "target/lab-state/guarded-transport-wan-cleanup-12.json",
+        "target/lab-state/guarded-transport-captures-12.json"
+      ],
+      "independent_capture_metadata": [
+        {
+          "file": "positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 162,
+          "sha256": "573ac5d1c8a493e2c9f60097b902a0569b4ac43817d1a948afbce1aa730481a8",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 2,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 893,
+          "sha256": "305214c8c3aabff41e794abc9b96b6c74cbe1522f1ce8f829c3286b596e0c765",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 1196,
+          "sha256": "1096e6487848eb3e1cfc5d65cc5b6a72d5d16535a9b97e0a6b4bf22cf5f8e4fb",
+          "linktype": 1,
+          "records": 10,
+          "capture_counters": {
+            "captured": 10,
+            "received_by_filter": 10,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 2600,
+          "sha256": "bde917be1f380ef1512071322eed4d92483e071ce27930ad2ddcf795564db19b",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4664,
+          "sha256": "86cc60dd12335b9a6eb729718882f64eb159dea37a1d3c2726d9ded7d8d1daa9",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4592,
+          "sha256": "1821a042d2a6c9da75b3b0357ae3a7091c1b82b25f6c081fd95a00bfe0024fff",
+          "linktype": 1,
+          "records": 30,
+          "capture_counters": {
+            "captured": 30,
+            "received_by_filter": 30,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "capture_oracle_sha256": "f9defc937ad2d0835c02e2621e50e7c342e1b1ec893047b8c2f2eec4cd4c275e"
     }
   ],
   "production_changes": false,

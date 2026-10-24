@@ -98,6 +98,46 @@
         "root0600 terminal result reports observer and Go NOT_RUN"
       ],
       "namespace_bind_mount_persistence_after_private_runner_exit": "NOT_VERIFIED"
+    },
+    {
+      "attempt": 4,
+      "source_commit": "45114766f6b20986098f3ad982ab92b2877ae349",
+      "source_binding": {
+        "source_commit": "45114766f6b20986098f3ad982ab92b2877ae349",
+        "source_archive_sha256": "73b5eabdd5a15a9d32f08e9ce939572e78a24a4131c2c5468d49dd3cd5de3c3d",
+        "tracked_build_inputs_verified": 97,
+        "source_aggregate_sha256": "6bf9ab58d798f9fa724f716e67489d219e8dffde73757347ec0304779d5a033b"
+      },
+      "observed_at_utc": "2026-10-24T16:49:08.501882+00:00",
+      "artifact_sha256": "09c6f9b0515eccaa2085e08344e88569a66fc271bf69853a5bacb56a985a24f1",
+      "source_archive_sha256": "73b5eabdd5a15a9d32f08e9ce939572e78a24a4131c2c5468d49dd3cd5de3c3d",
+      "runner_sha256": "321b75faaea873e40ab16ab217d77dae27f7f51ff4aacdb84714de591b5f2fc1",
+      "exit_code": 0,
+      "wall_seconds": 2.154,
+      "result": "PASS_PARTIAL_PRODUCER_GATE",
+      "stdout": "{\"preflight\": \"PASS\", \"network_namespace\": {\"dev\": 4, \"ino\": 4026535957}, \"probe_sha256\": \"808789d0d5d59b673c7f6fd55b306c3ecfc05ef0bbdd65731cff2ae7695bd828\"}\n{\"case\":\"producer_killed_gated_child_never_released_or_executes\",\"result\":\"pass\"}\n{\"case\":\"producer_wrong_exit_namespace_refuses_before_fork_and_exec\",\"result\":\"pass\"}\n{\"case\":\"producer_exact_subgroup_pre_exec_four_roles_frozen_descendant_private_worker_state\",\"result\":\"pass\"}\n{\"case\":\"producer_bounded_signal_reap_empty_group_parent_controls_unchanged\",\"result\":\"pass\"}\n{\"case\":\"producer_normal_owned_group_cleanup_offline_record\",\"result\":\"pass\"}\n{\"case\":\"producer_container_death_all_confined_roles_gone_bounded_reap\",\"result\":\"pass\"}\n{\"case\":\"producer_container_cgroup_loss_retains_intent_and_refuses_adoption\",\"result\":\"pass\"}\n{\"case\":\"producer_exact_owned_cleanup_terminal_acceptance\",\"result\":\"pass\"}\n{\"harness_exit_code\": 0}\n",
+      "stderr": "LAB_STAGE producer_exact_hash_owned_guest_admitted\nLAB_EXEC_STAGE fixed_program_binding\nLAB_EXEC_STAGE allocation_revalidation\nLAB_EXEC_STAGE namespace_binding\nLAB_EXEC_STAGE container_revalidation\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE fixed_program_binding\nLAB_EXEC_STAGE allocation_revalidation\nLAB_EXEC_STAGE namespace_binding\nLAB_EXEC_STAGE fixed_program_binding\nLAB_EXEC_STAGE allocation_revalidation\nLAB_EXEC_STAGE namespace_binding\nLAB_EXEC_STAGE container_revalidation\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_EXEC_STAGE fixed_program_binding\nLAB_EXEC_STAGE allocation_revalidation\nLAB_EXEC_STAGE namespace_binding\nLAB_EXEC_STAGE container_revalidation\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_PRODUCER_CLEANUP interrupted_pins_retained=true\n",
+      "ownership_after": "all four exact disposable containers and parent cgroups absent; Activating ownership records retained; temporary approval marker removed",
+      "completed_cases": [
+        "producer_killed_gated_child_never_released_or_executes",
+        "producer_wrong_exit_namespace_refuses_before_fork_and_exec",
+        "producer_exact_subgroup_pre_exec_four_roles_frozen_descendant_private_worker_state",
+        "producer_bounded_signal_reap_empty_group_parent_controls_unchanged",
+        "producer_normal_owned_group_cleanup_offline_record",
+        "producer_container_death_all_confined_roles_gone_bounded_reap",
+        "producer_container_cgroup_loss_retains_intent_and_refuses_adoption",
+        "producer_exact_owned_cleanup_terminal_acceptance"
+      ],
+      "root_postrun_inventory_sha256": "a39f935da35fceffeaa57644f8ae3ab409ee3d5ed00de1a0655e24a23ec81772",
+      "root_independent_checks": [
+        "all eight case objects match candidate03 exactly",
+        "exit zero",
+        "all four exact containers and parent cgroups absent",
+        "Activating journal records retained",
+        "approval marker removed"
+      ],
+      "namespace_bind_mount_persistence_after_private_runner_exit": "NOT_VERIFIED",
+      "observer_deadline_and_replay_evidence": "separate focused unprivileged regressions recorded in task8b1 report; this producer payload does not test them"
     }
   ],
   "actual_observer_execution": "NOT_RUN",
@@ -105,14 +145,14 @@
   "real_client_acceptance": "NOT_RUN",
   "release_ready": false,
   "production_changes": false,
-  "final_arm64_build_only": {
+  "candidate03_arm64_build_only": {
     "sha256": "c0f74c26f1bb01cc219fc6347a53932915c805adf120a1c22210f14c36d4a0bd",
     "bytes": 2982168,
     "elf_machine": 183,
     "no_elf_interp_or_dynamic": true,
     "runtime": "NOT_RUN"
   },
-  "observer_build_inputs_verified": [
+  "candidate03_observer_build_inputs_verified": [
     {
       "architecture": "amd64",
       "sha256": "6ccb35685cbf9f62997d74ca341cf518d2d996a61d2dfcbf829cf1d80d448dd2",
@@ -122,6 +162,25 @@
       "architecture": "arm64",
       "sha256": "f6b923d25ab310bbaefbc3cd9738d37d69c8d52a2765ae6e47b70931388d77d5",
       "bytes": 2390984
+    }
+  ],
+  "final_arm64_build_only": {
+    "sha256": "8dcbcc2a97692e9d77491e47acc46123f8403eef3038c3471578b5a15599f934",
+    "bytes": 2982200,
+    "elf_machine": 183,
+    "no_elf_interp_or_dynamic": true,
+    "runtime": "NOT_RUN"
+  },
+  "final_observer_build_inputs_verified": [
+    {
+      "architecture": "amd64",
+      "sha256": "fcc6552f8b244d72f37351dd6f1a5c39c08b76c438d12d40f886893a26ef1d19",
+      "bytes": 2077376
+    },
+    {
+      "architecture": "arm64",
+      "sha256": "edb80289a1bd0512fc62da6c395ba3812d8e170ca97097aea2ac6e73cd5ce6a0",
+      "bytes": 2390168
     }
   ]
 }

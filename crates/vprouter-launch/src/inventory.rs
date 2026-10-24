@@ -109,29 +109,37 @@ impl Drop for Registration {
     }
 }
 fn numbers() -> Result<Vec<i32>> {
-    // Collect then drop read_dir before observing descriptors, so its temporary
-    // fd is absent and cannot be mistaken for inherited authority.
-    let entries = std::fs::read_dir("/proc/self/fd").map_err(|_| Error::DescriptorPolicy)?;
-    let numbers = entries
-        .map(|e| {
-            e.map_err(|_| Error::DescriptorPolicy)?
-                .file_name()
-                .to_str()
-                .and_then(|s| s.parse().ok())
-                .ok_or(Error::DescriptorPolicy)
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let fd = fs::openat(
+        fs::CWD,
+        "/proc/self/fd",
+        fs::OFlags::RDONLY | fs::OFlags::DIRECTORY | fs::OFlags::CLOEXEC,
+        fs::Mode::empty(),
+    )
+    .map_err(|_| Error::DescriptorPolicy)?;
+    let scan_fd = fd.as_raw_fd();
+    let mut numbers = Vec::new();
+    for entry in fs::Dir::new(fd).map_err(|_| Error::DescriptorPolicy)? {
+        let entry = entry.map_err(|_| Error::DescriptorPolicy)?;
+        let name = entry.file_name().to_bytes();
+        if name == b"." || name == b".." {
+            continue;
+        }
+        let number = std::str::from_utf8(name)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .ok_or(Error::DescriptorPolicy)?;
+        // Exclude only our exact owned scan descriptor, never a failed lookup.
+        if number != scan_fd {
+            numbers.push(number);
+        }
+    }
     Ok(numbers)
 }
 pub(super) fn verify() -> Result<()> {
     let expected = OWNED.with(|o| o.borrow().clone());
     let mut seen = std::collections::BTreeSet::new();
     for fd in numbers()? {
-        let id = match observed(fd) {
-            Ok(v) => v,
-            Err(_) if !std::path::Path::new(&format!("/proc/self/fd/{fd}")).exists() => continue,
-            Err(e) => return Err(e),
-        };
+        let id = observed(fd)?;
         if fd <= 2 {
             if id.mode == libc::S_IFSOCK {
                 return Err(Error::DescriptorPolicy);

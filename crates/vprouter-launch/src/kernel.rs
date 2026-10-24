@@ -277,6 +277,41 @@ impl Child {
                     let _ = role;
                     return Err(error);
                 }
+                254 => {
+                    let role = read_byte(&self.health)?;
+                    let field = read_byte(&self.health)?;
+                    #[cfg(test)]
+                    eprintln!(
+                        "LAB_CREDENTIAL_ROLE {} {}",
+                        match role {
+                            4 => "outer",
+                            8 => "intermediate",
+                            16 => "init",
+                            32 => "worker_before_exec",
+                            64 => "probe_after_exec",
+                            _ => "invalid",
+                        },
+                        match field {
+                            0 => "uid",
+                            1 => "gid",
+                            2 => "groups",
+                            3 => "nnp_status",
+                            4 => "cap_inh",
+                            5 => "cap_prm",
+                            6 => "cap_eff",
+                            7 => "cap_bnd",
+                            8 => "cap_amb",
+                            9 => "nnp_query",
+                            10 => "securebits_query",
+                            11 => "status_read",
+                            12 => "status_utf8",
+                            _ => "invalid",
+                        }
+                    );
+                    #[cfg(not(test))]
+                    let _ = (role, field);
+                    return Err(Error::CapabilityPolicy);
+                }
                 201 => return Err(Error::NamespaceOperation),
                 202 => return Err(Error::MountIsolation),
                 203 => return Err(Error::DescriptorPolicy),
@@ -797,6 +832,8 @@ fn wait_role(
             .map_err(|_| Error::CapabilityPolicy)?;
         verify_credentials_text(
             std::str::from_utf8(&bytes[..size]).map_err(|_| Error::CapabilityPolicy)?,
+            ready,
+            unsafe { BorrowedFd::borrow_raw(4) },
         )?;
         // reduce_privileges re-arms PDEATHSIG after setresuid/setresgid cleared it.
         // The pidfd check closes the interval where the parent could have died.
@@ -899,7 +936,7 @@ fn supervise(
     // Close ALL inherited host handles in PID1 too; Rust FD owners are never
     // dropped here. Namespace init must not remain a privileged escape target.
     lsm_supervisor()?;
-    reduce_privileges()?;
+    reduce_privileges(16, health)?;
     if wait_ready(parent, Duration::ZERO)? {
         return Err(Error::ChildFailed);
     }
@@ -989,9 +1026,9 @@ fn close_except(keep: &[i32]) -> Result<()> {
     }
     Ok(())
 }
-fn reduce_privileges() -> Result<()> {
+fn reduce_privileges(role: u8, health: BorrowedFd<'_>) -> Result<()> {
     drop_privileges()?;
-    verify_credentials()
+    verify_credentials(role, health)
 }
 fn drop_privileges() -> Result<()> {
     // SAFETY: scalar prctl calls on current child only. Securebits lock all
@@ -1077,42 +1114,59 @@ fn drop_privileges() -> Result<()> {
     )?;
     Ok(())
 }
-pub(super) fn verify_credentials() -> Result<()> {
-    let s = std::fs::read_to_string("/proc/self/status").map_err(|_| Error::CapabilityPolicy)?;
-    verify_credentials_text(&s)
+fn credential_failure(health: BorrowedFd<'_>, role: u8, field: u8) -> Error {
+    let bytes = [254u8, role, field];
+    // SAFETY: fixed three-byte diagnostic is atomically written to owned pipe;
+    // no process contents or variable external data is emitted.
+    unsafe {
+        libc::write(health.as_raw_fd(), bytes.as_ptr().cast(), bytes.len());
+    }
+    Error::CapabilityPolicy
 }
-fn verify_credentials_text(s: &str) -> Result<()> {
-    for (key, expected) in [
+fn verify_credentials(role: u8, health: BorrowedFd<'_>) -> Result<()> {
+    let s = std::fs::read_to_string("/proc/self/status")
+        .map_err(|_| credential_failure(health, role, 11))?;
+    verify_credentials_text(&s, role, health)
+}
+fn verify_credentials_text(s: &str, role: u8, health: BorrowedFd<'_>) -> Result<()> {
+    for (field, (key, expected)) in [
         ("Uid:", vec!["65534"; 4]),
         ("Gid:", vec!["65534"; 4]),
         ("Groups:", vec![]),
         ("NoNewPrivs:", vec!["1"]),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let parts = s
             .lines()
             .find_map(|l| l.strip_prefix(key))
-            .ok_or(Error::CapabilityPolicy)?
+            .ok_or_else(|| credential_failure(health, role, field as u8))?
             .split_whitespace()
             .collect::<Vec<_>>();
         if parts != expected {
-            return Err(Error::CapabilityPolicy);
+            return Err(credential_failure(health, role, field as u8));
         }
     }
-    for key in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"] {
+    for (field, key) in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"]
+        .into_iter()
+        .enumerate()
+    {
         let v = s
             .lines()
             .find_map(|l| l.strip_prefix(key))
-            .ok_or(Error::CapabilityPolicy)?
+            .ok_or_else(|| credential_failure(health, role, field as u8 + 4))?
             .trim();
         if u64::from_str_radix(v, 16).ok() != Some(0) {
-            return Err(Error::CapabilityPolicy);
+            return Err(credential_failure(health, role, field as u8 + 4));
         }
     }
     // SAFETY: GET operations have scalar results and no pointer parameters.
-    if unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) } != 1
-        || unsafe { libc::prctl(libc::PR_GET_SECUREBITS, 0, 0, 0, 0) } != 0xef
-    {
-        return Err(Error::CapabilityPolicy);
+    if unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) } != 1 {
+        return Err(credential_failure(health, role, 9));
+    }
+    if unsafe { libc::prctl(libc::PR_GET_SECUREBITS, 0, 0, 0, 0) } != 0xef {
+        return Err(credential_failure(health, role, 10));
     }
     Ok(())
 }
@@ -1463,7 +1517,7 @@ fn worker_exec(
     let result = (|| -> Result<()> {
         close_except(&[3, 4])?;
         lsm_exec()?;
-        reduce_privileges()?;
+        reduce_privileges(32, unsafe { BorrowedFd::borrow_raw(3) })?;
         if unsafe { libc::getppid() } != 1 {
             return Err(Error::ChildFailed);
         }
@@ -1601,7 +1655,7 @@ fn final_fds(before_exec: bool, expected_null: Option<StdioIdentity>) -> Result<
 }
 #[cfg(test)]
 pub(super) fn probe_verify() -> Result<()> {
-    verify_credentials()?;
+    verify_credentials(64, unsafe { BorrowedFd::borrow_raw(3) })?;
     lsm_current()?;
     final_fds(false, None)?;
     let s = std::fs::read_to_string("/proc/self/status").map_err(|_| Error::ConfinementPolicy)?;

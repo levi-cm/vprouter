@@ -1,0 +1,34 @@
+{
+  "observed_at_utc": "2026-10-24T12:40:24.550992+00:00",
+  "environment": "isolated Debian 13 KVM guest",
+  "purpose": "fresh future single-exit lab gateway identity; enrollment only",
+  "container": "vprouter-v2-lab-primary-enrollment",
+  "image": "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065",
+  "tailscale_version": "1.102.5",
+  "temporary_hostname": "vprouter-v2-debdev-lab-primary",
+  "state_path_guest": "/var/lib/vprouter-v2-lab/gateway-primary",
+  "state_owner": 0,
+  "state_mode": "0700",
+  "backend": "NeedsLogin",
+  "approval": "PENDING",
+  "advertised_routes": [],
+  "selected_exit_node_id": null,
+  "read_only_root": true,
+  "cap_drop": [
+    "ALL"
+  ],
+  "privileged": false,
+  "published_ports": {},
+  "log_driver": "none",
+  "userspace_networking": true,
+  "protected_workloads": false,
+  "cloned_identity": false,
+  "production_changes": false,
+  "limits": [
+    "This temporary node is not an advertised exit or proof of protected egress.",
+    "No provider credentials were copied to the guest.",
+    "No Rust runtime or client-fallback policy is active.",
+    "The previously approved disposable client identity is unchanged.",
+    "Login URLs are presented only to the operator and omitted from evidence."
+  ]
+}

@@ -56,6 +56,13 @@ fn stage_byte(e: Error) -> u8 {
         Error::WaitLsmRead => 243,
         Error::WaitLsmLabel => 244,
         Error::WaitFilter => 245,
+        Error::ProbeProcHiddenInit => 246,
+        Error::ProbeProcSet => 247,
+        Error::ProbeProcRoot => 248,
+        Error::ProbeResolver => 249,
+        Error::ProbeStateWrite => 250,
+        Error::ProbeReadonly => 251,
+        Error::ProbeForbiddenRoot => 252,
         Error::CapabilityPolicy => 204,
         Error::ConfinementPolicy => 205,
         _ => 206,
@@ -260,6 +267,13 @@ impl Child {
                 243 => return Err(Error::WaitLsmRead),
                 244 => return Err(Error::WaitLsmLabel),
                 245 => return Err(Error::WaitFilter),
+                246 => return Err(Error::ProbeProcHiddenInit),
+                247 => return Err(Error::ProbeProcSet),
+                248 => return Err(Error::ProbeProcRoot),
+                249 => return Err(Error::ProbeResolver),
+                250 => return Err(Error::ProbeStateWrite),
+                251 => return Err(Error::ProbeReadonly),
+                252 => return Err(Error::ProbeForbiddenRoot),
                 204 => return Err(Error::CapabilityPolicy),
                 205 => return Err(Error::ConfinementPolicy),
                 210 => return Err(Error::MountContainerRoot),
@@ -1571,10 +1585,10 @@ pub(super) fn probe_verify() -> Result<()> {
     {
         return Err(Error::ConfinementPolicy);
     }
-    if std::fs::read_to_string("/etc/resolv.conf").map_err(|_| Error::MountIsolation)?
+    if std::fs::read_to_string("/etc/resolv.conf").map_err(|_| Error::ProbeResolver)?
         != "nameserver 192.0.2.53\noptions attempts:1 timeout:1\n"
     {
-        return Err(Error::MountIsolation);
+        return Err(Error::ProbeResolver);
     }
     for path in [
         "/old",
@@ -1583,50 +1597,65 @@ pub(super) fn probe_verify() -> Result<()> {
         "/sys/fs/cgroup",
     ] {
         if std::fs::metadata(path).is_ok() {
-            return Err(Error::MountIsolation);
+            return Err(Error::ProbeForbiddenRoot);
         }
     }
-    std::fs::write("/state/probe", b"selected-exit-only").map_err(|_| Error::MountIsolation)?;
+    std::fs::write("/state/probe", b"selected-exit-only").map_err(|_| Error::ProbeStateWrite)?;
     if std::fs::write("/etc/forbidden", b"x").is_ok() {
-        return Err(Error::MountIsolation);
+        return Err(Error::ProbeReadonly);
     }
     // Before creating any descendant the private procfs must expose exactly
     // the confined init and this worker, never host/container/peer processes.
     use std::os::unix::fs::MetadataExt;
-    let own_root = std::fs::metadata("/").map_err(|_| Error::MountIsolation)?;
+    let own_root = std::fs::metadata("/").map_err(|_| Error::ProbeProcRoot)?;
     let mut visible = std::collections::BTreeSet::new();
     let proc = fs::open(
         "/proc",
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
     )
-    .map_err(|_| Error::MountIsolation)?;
-    for entry in fs::Dir::new(proc).map_err(|_| Error::MountIsolation)? {
-        let e = entry.map_err(|_| Error::MountIsolation)?;
+    .map_err(|_| Error::ProbeProcSet)?;
+    for entry in fs::Dir::new(proc).map_err(|_| Error::ProbeProcSet)? {
+        let e = entry.map_err(|_| Error::ProbeProcSet)?;
         if e.file_name().to_bytes().iter().all(u8::is_ascii_digit) {
             let pid = e
                 .file_name()
                 .to_str()
                 .ok()
                 .and_then(|s| s.parse::<u32>().ok())
-                .ok_or(Error::MountIsolation)?;
+                .ok_or(Error::ProbeProcSet)?;
             visible.insert(pid);
             match std::fs::metadata(format!("/proc/{pid}/root")) {
                 Ok(root) if (root.dev(), root.ino()) == (own_root.dev(), own_root.ino()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
-                _ => return Err(Error::MountIsolation),
+                _ => return Err(Error::ProbeProcRoot),
             }
         }
     }
-    if visible != [1, std::process::id()].into() || std::process::id() != 2 {
-        return Err(Error::MountIsolation);
+    if visible == [2].into() && std::process::id() == 2 {
+        return Err(Error::ProbeProcHiddenInit);
+    }
+    if visible != [1, 2].into() || std::process::id() != 2 {
+        return Err(Error::ProbeProcSet);
     }
     Ok(())
 }
 #[cfg(test)]
 pub(super) fn probe_descendant() -> Result<()> {
-    // SAFETY: one-task post-exec test probe, child only freezes then _exits.
-    let p = unsafe { libc::fork() };
+    // SAFETY: one-task post-exec test probe; SIGCHLD alone copies address space
+    // and current stack, never CLONE_VM. x86_64/ARM64 order the ancillary tid/tls
+    // arguments differently, but every such argument is the same null value.
+    // Child only freezes then _exits; no libc atfork state is used after clone.
+    let p = unsafe {
+        libc::syscall(
+            libc::SYS_clone,
+            libc::SIGCHLD,
+            0usize,
+            0usize,
+            0usize,
+            0usize,
+        )
+    };
     if p < 0 {
         return Err(Error::ChildFailed);
     }

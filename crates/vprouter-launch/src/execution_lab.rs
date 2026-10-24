@@ -201,6 +201,13 @@ fn verify_launch_tree(id: &str) -> Result<()> {
                 return Err(Error::CapabilityPolicy);
             }
         }
+        if !status
+            .lines()
+            .find_map(|s| s.strip_prefix("Groups:"))
+            .is_some_and(|s| s.trim().is_empty())
+        {
+            return Err(Error::CapabilityPolicy);
+        }
         for key in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"] {
             if status
                 .lines()
@@ -244,6 +251,18 @@ fn verify_launch_tree(id: &str) -> Result<()> {
                     != Path::new("anon_inode:[pidfd]")
             {
                 return Err(Error::DescriptorPolicy);
+            }
+            for fd in 0..4 {
+                let info = fs::read_to_string(base.join(format!("fdinfo/{fd}")))
+                    .map_err(|_| Error::DescriptorFlags)?;
+                let flags = info
+                    .lines()
+                    .find_map(|s| s.strip_prefix("flags:"))
+                    .and_then(|s| u32::from_str_radix(s.trim(), 8).ok())
+                    .ok_or(Error::DescriptorFlags)?;
+                if (flags & libc::O_CLOEXEC as u32 != 0) != (fd == 3) {
+                    return Err(Error::DescriptorFlags);
+                }
             }
             let root = fs::metadata(base.join("root")).map_err(|_| Error::MountIsolation)?;
             let cwd = fs::metadata(base.join("cwd")).map_err(|_| Error::MountIsolation)?;

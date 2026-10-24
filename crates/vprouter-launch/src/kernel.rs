@@ -285,7 +285,13 @@ impl Child {
     #[cfg(test)]
     pub fn kill_gated(&mut self) -> Result<()> {
         send(&self.pidfd, libc::SIGKILL)?;
-        self.reap()
+        // Leave the dead child unreaped until normal failed-placement cleanup;
+        // its numeric PID cannot be reused before the cgroup write is attempted.
+        if wait_ready(&self.pidfd, Duration::from_secs(3))? {
+            Ok(())
+        } else {
+            Err(Error::Deadline)
+        }
     }
     fn reap(&mut self) -> Result<()> {
         if self.reaped {
@@ -1498,18 +1504,43 @@ fn final_fds(before_exec: bool, expected_null: Option<StdioIdentity>) -> Result<
             return Err(Error::DescriptorExecutable);
         }
     }
-    let entries: Vec<_> = std::fs::read_dir("/proc/self/fd")
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::PermissionDenied {
-                Error::DescriptorScanDenied
-            } else {
-                Error::DescriptorScanOpen
-            }
-        })?
-        .collect::<std::io::Result<_>>()
-        .map_err(|_| Error::DescriptorInventory)?;
-    // read_dir temporarily opens one extra fd; no gap/external fd is permitted.
-    if entries.len() != expected as usize + 1 {
+    // Native openat+getdents avoids musl opendir's legacy SYS_open, which the
+    // manifest-bound probe policy deliberately does not permit.
+    let directory = fs::open(
+        "/proc/self/fd",
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| {
+        if error == rustix::io::Errno::PERM || error == rustix::io::Errno::ACCESS {
+            Error::DescriptorScanDenied
+        } else {
+            Error::DescriptorScanOpen
+        }
+    })?;
+    let mut scan = fs::Dir::new(directory).map_err(|_| Error::DescriptorInventory)?;
+    let mut entries = std::collections::BTreeSet::new();
+    for entry in &mut scan {
+        let entry = entry.map_err(|_| Error::DescriptorInventory)?;
+        let name = entry.file_name().to_bytes();
+        if name == b"." || name == b".." {
+            continue;
+        }
+        let number = std::str::from_utf8(name)
+            .ok()
+            .and_then(|s| s.parse::<i32>().ok())
+            .ok_or(Error::DescriptorInventory)?;
+        entries.insert(number);
+    }
+    // The one temporary directory FD must be exactly the next available slot;
+    // require the complete numeric set, not merely an equal descriptor count.
+    if scan
+        .fd()
+        .map_err(|_| Error::DescriptorInventory)?
+        .as_raw_fd()
+        != expected
+        || entries != (0..=expected).collect()
+    {
         return Err(Error::DescriptorScanCount);
     }
     Ok(())
@@ -1564,19 +1595,23 @@ pub(super) fn probe_verify() -> Result<()> {
     use std::os::unix::fs::MetadataExt;
     let own_root = std::fs::metadata("/").map_err(|_| Error::MountIsolation)?;
     let mut visible = std::collections::BTreeSet::new();
-    for entry in std::fs::read_dir("/proc").map_err(|_| Error::MountIsolation)? {
+    let proc = fs::open(
+        "/proc",
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| Error::MountIsolation)?;
+    for entry in fs::Dir::new(proc).map_err(|_| Error::MountIsolation)? {
         let e = entry.map_err(|_| Error::MountIsolation)?;
-        if e.file_name()
-            .to_str()
-            .is_some_and(|s| s.bytes().all(|b| b.is_ascii_digit()))
-        {
+        if e.file_name().to_bytes().iter().all(u8::is_ascii_digit) {
             let pid = e
                 .file_name()
                 .to_str()
+                .ok()
                 .and_then(|s| s.parse::<u32>().ok())
                 .ok_or(Error::MountIsolation)?;
             visible.insert(pid);
-            match std::fs::metadata(e.path().join("root")) {
+            match std::fs::metadata(format!("/proc/{pid}/root")) {
                 Ok(root) if (root.dev(), root.ino()) == (own_root.dev(), own_root.ino()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
                 _ => return Err(Error::MountIsolation),

@@ -176,6 +176,111 @@ fn verify_worker(a: &Admission, pid: u32, data: &owned::OwnedNamespaces) -> Resu
     }
     Ok(())
 }
+fn verify_launch_tree(id: &str) -> Result<()> {
+    let pids = container_pids(id)?;
+    let mut wrappers = 0;
+    for pid in pids {
+        let base = PathBuf::from(format!("/proc/{pid}"));
+        let status =
+            fs::read_to_string(base.join("status")).map_err(|_| Error::ProcessUnavailable)?;
+        let ids: Vec<_> = status
+            .lines()
+            .find_map(|s| s.strip_prefix("NSpid:"))
+            .ok_or(Error::NamespaceMismatch)?
+            .split_whitespace()
+            .collect();
+        if ids.len() == 2 && ids[1] == "1" {
+            continue;
+        } // admitted container init
+        for key in ["Uid:", "Gid:"] {
+            if !status
+                .lines()
+                .find_map(|s| s.strip_prefix(key))
+                .is_some_and(|s| s.split_whitespace().eq(["65534"; 4]))
+            {
+                return Err(Error::CapabilityPolicy);
+            }
+        }
+        for key in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"] {
+            if status
+                .lines()
+                .find_map(|s| s.strip_prefix(key))
+                .and_then(|s| u64::from_str_radix(s.trim(), 16).ok())
+                != Some(0)
+            {
+                return Err(Error::CapabilityPolicy);
+            }
+        }
+        if !status.contains("NoNewPrivs:\t1") || !status.contains("Seccomp:\t2") {
+            return Err(Error::ConfinementPolicy);
+        }
+        if fs::read_to_string(base.join("attr/current"))
+            .map_err(|_| Error::ConfinementPolicy)?
+            .trim()
+            != "docker-default (enforce)"
+        {
+            return Err(Error::ConfinementPolicy);
+        }
+        let mut fds = fs::read_dir(base.join("fd"))
+            .map_err(|_| Error::DescriptorPolicy)?
+            .map(|e| e.map(|e| e.file_name()))
+            .collect::<std::io::Result<Vec<_>>>()
+            .map_err(|_| Error::DescriptorPolicy)?;
+        fds.sort();
+        for fd in 0..3 {
+            let dev =
+                fs::metadata(base.join(format!("fd/{fd}"))).map_err(|_| Error::DescriptorPolicy)?;
+            if !std::os::unix::fs::FileTypeExt::is_char_device(&dev.file_type())
+                || rustix::fs::major(dev.rdev()) != 1
+                || rustix::fs::minor(dev.rdev()) != 3
+            {
+                return Err(Error::DescriptorStdio);
+            }
+        }
+        if ids.len() < 3 {
+            wrappers += 1;
+            if fds != ["0", "1", "2", "3"]
+                || fs::read_link(base.join("fd/3")).map_err(|_| Error::DescriptorPolicy)?
+                    != Path::new("anon_inode:[pidfd]")
+            {
+                return Err(Error::DescriptorPolicy);
+            }
+            let root = fs::metadata(base.join("root")).map_err(|_| Error::MountIsolation)?;
+            let cwd = fs::metadata(base.join("cwd")).map_err(|_| Error::MountIsolation)?;
+            if (root.dev(), root.ino()) != (cwd.dev(), cwd.ino())
+                || fs::read_dir(base.join("root"))
+                    .map_err(|_| Error::MountIsolation)?
+                    .next()
+                    .is_some()
+            {
+                return Err(Error::MountIsolation);
+            }
+            let mounts =
+                fs::read_to_string(base.join("mountinfo")).map_err(|_| Error::MountIsolation)?;
+            let lines: Vec<_> = mounts.lines().collect();
+            let fields: Vec<_> = lines
+                .first()
+                .ok_or(Error::MountIsolation)?
+                .split_whitespace()
+                .collect();
+            if lines.len() != 1
+                || fields.get(4) != Some(&"/")
+                || !fields
+                    .get(5)
+                    .is_some_and(|s| s.split(',').any(|f| f == "ro"))
+                || !lines[0].contains(" - tmpfs ")
+            {
+                return Err(Error::MountIsolation);
+            }
+        } else if fds != ["0", "1", "2"] && fds != ["0", "1", "2", "3"] {
+            return Err(Error::DescriptorPolicy);
+        }
+    }
+    if wrappers != 4 {
+        return Err(Error::ChildFailed);
+    }
+    Ok(())
+}
 fn wait_absent(pids: &[u32]) -> Result<()> {
     let end = Instant::now() + Duration::from_secs(4);
     loop {
@@ -309,6 +414,18 @@ pub fn run() -> Result<()> {
         drop((directory, peer, socket));
     }
     lab::case("unexpected_host_directory_peer_namespace_socket_execute_nothing");
+    if execution::lab_failed_placement(&one, &tx, &first).err() != Some(Error::PlacementFailed)
+        || container_pids(&id)?.len() != 1
+    {
+        return Err(Error::PlacementFailed);
+    }
+    for exit in &record.exits {
+        match fs::metadata(exit.state_dir.join("worker/probe")) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            _ => return Err(Error::PlacementFailed),
+        }
+    }
+    lab::case("killed_placement_gated_child_never_released_or_executed");
     lab::stage("launch_first_private_probe");
     let running_one =
         execution::launch(&one, &tx, &first, execution::VerifiedProgram::probe(&one)?)?;
@@ -349,6 +466,8 @@ pub fn run() -> Result<()> {
     }
     lab::case("actual_cgroup_nested_pid_proc_private_root_state_fd_cap_seccomp_apparmor");
     lab::case("post_exec_adversarial_proc_root_and_two_exit_state_isolation");
+    verify_launch_tree(&id)?;
+    lab::case("all_surviving_wrappers_empty_ro_roots_cwd_exact_pidfd_null_caps_lsm_seccomp");
     let old = container_pids(&id)?;
     running_one.signal(libc::SIGTERM)?;
     running_two.signal(libc::SIGTERM)?;

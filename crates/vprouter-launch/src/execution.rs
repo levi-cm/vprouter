@@ -6,7 +6,7 @@ use std::{
     os::fd::{AsFd, OwnedFd},
     path::Path,
 };
-pub(super) const POLICY: &str = "vprouter-static-probe-v1;uid=65534;gid=65534;caps=0;lsm=docker-default;seccomp=probe-v1;resolver=192.0.2.53;env=LANG=C,PATH=/bin;argv=vprouter-worker,--isolated-probe";
+pub(super) const POLICY: &str = "vprouter-static-probe-v1;uid=65534;gid=65534;caps=0;lsm=docker-default;seccomp=probe-v1,wait-empty-root-v1;resolver=192.0.2.53;env=LANG=C,PATH=/bin;argv=vprouter-worker,--isolated-probe";
 pub(super) struct VerifiedProgram {
     digest: String,
     policy_digest: String,
@@ -108,6 +108,36 @@ pub(super) fn launch(
     ns: &owned::OwnedNamespaces,
     program: VerifiedProgram,
 ) -> Result<Running> {
+    launch_inner(
+        a,
+        tx,
+        ns,
+        program,
+        #[cfg(test)]
+        None,
+    )
+}
+#[cfg(test)]
+pub(super) fn lab_failed_placement(
+    a: &Admission,
+    tx: &owned::Transaction<'_>,
+    ns: &owned::OwnedNamespaces,
+) -> Result<Running> {
+    launch_inner(
+        a,
+        tx,
+        ns,
+        VerifiedProgram::probe(a)?,
+        Some(kernel::Child::kill_gated),
+    )
+}
+fn launch_inner(
+    a: &Admission,
+    tx: &owned::Transaction<'_>,
+    ns: &owned::OwnedNamespaces,
+    program: VerifiedProgram,
+    #[cfg(test)] before_place: Option<fn(&mut kernel::Child) -> Result<()>>,
+) -> Result<Running> {
     process::single_threaded()?;
     program.bind(a)?;
     tx.revalidate(&a.spec)?;
@@ -125,6 +155,10 @@ pub(super) fn launch(
     #[cfg(test)]
     eprintln!("LAB_EXEC_STAGE placement_gated_spawn");
     let mut child = kernel::spawn(a.process.launch_fds(), ns.data.as_fd(), state.as_fd())?;
+    #[cfg(test)]
+    if let Some(fault) = before_place {
+        fault(&mut child)?;
+    }
     if a.process
         .place(child.pid(), &a.spec)
         .and_then(|()| revalidate(a))

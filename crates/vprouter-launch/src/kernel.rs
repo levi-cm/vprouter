@@ -48,6 +48,10 @@ fn stage_byte(e: Error) -> u8 {
         Error::DescriptorHealth => 235,
         Error::DescriptorExecutable => 236,
         Error::DescriptorInventory => 237,
+        Error::DescriptorReadlink => 238,
+        Error::DescriptorScanOpen => 239,
+        Error::DescriptorScanDenied => 240,
+        Error::DescriptorScanCount => 241,
         Error::CapabilityPolicy => 204,
         Error::ConfinementPolicy => 205,
         _ => 206,
@@ -221,7 +225,9 @@ impl Child {
         let end = Instant::now() + Duration::from_secs(5);
         let mut worker = false;
         let mut init = false;
-        while !worker || !init {
+        let mut outer = false;
+        let mut intermediate = false;
+        while !worker || !init || !outer || !intermediate {
             let remaining = end.saturating_duration_since(Instant::now());
             if remaining.is_zero() || !wait_ready(&self.health, remaining)? {
                 return Err(Error::Deadline);
@@ -229,6 +235,8 @@ impl Child {
             match read_byte(&self.health)? {
                 1 => worker = true,
                 2 => init = true,
+                4 => outer = true,
+                8 => intermediate = true,
                 201 => return Err(Error::NamespaceOperation),
                 202 => return Err(Error::MountIsolation),
                 203 => return Err(Error::DescriptorPolicy),
@@ -240,6 +248,10 @@ impl Child {
                 235 => return Err(Error::DescriptorHealth),
                 236 => return Err(Error::DescriptorExecutable),
                 237 => return Err(Error::DescriptorInventory),
+                238 => return Err(Error::DescriptorReadlink),
+                239 => return Err(Error::DescriptorScanOpen),
+                240 => return Err(Error::DescriptorScanDenied),
+                241 => return Err(Error::DescriptorScanCount),
                 204 => return Err(Error::CapabilityPolicy),
                 205 => return Err(Error::ConfinementPolicy),
                 210 => return Err(Error::MountContainerRoot),
@@ -261,6 +273,11 @@ impl Child {
     }
     pub fn signal(&self, sig: i32) -> Result<()> {
         send(&self.pidfd, sig)
+    }
+    #[cfg(test)]
+    pub fn kill_gated(&mut self) -> Result<()> {
+        send(&self.pidfd, libc::SIGKILL)?;
+        self.reap()
     }
     fn reap(&mut self) -> Result<()> {
         if self.reaped {
@@ -330,6 +347,8 @@ pub(super) fn spawn(
             libc::close(health_r.as_raw_fd());
         }
         let result = (|| {
+            // SAFETY: one-task fork child; clear only its inherited environment.
+            cv(unsafe { libc::clearenv() }, Error::ChildFailed)?;
             parent_death(parent)?;
             if !wait_ready(&release_r, Duration::from_secs(5))? || read_byte(&release_r)? != 1 {
                 return Err(Error::PlacementFailed);
@@ -421,6 +440,9 @@ fn container_stage(
     health: BorrowedFd<'_>,
 ) -> Result<()> {
     let signals = blocked_signals()?;
+    // Pin the real parent before crossing the PID-for-children boundary.
+    let parent = pidfd(unsafe { libc::getppid() })?;
+    let outer_parent = pidfd(std::process::id() as i32)?;
     enter(container.pid, libc::CLONE_NEWPID)?;
     process::single_threaded()?;
     // SAFETY: single-task child, no runtime; setns PID-for-children becomes the
@@ -432,7 +454,7 @@ fn container_stage(
     if inner == 0 {
         let r = (|| {
             parent_death(0)?;
-            setup(container, data, state, health)
+            setup(container, data, state, health, outer_parent.as_fd())
         })();
         if let Err(e) = r {
             report_failure(health, e);
@@ -441,13 +463,14 @@ fn container_stage(
         die(0);
     }
     let fd = pidfd(inner)?;
-    forward_and_wait(inner, &fd, &signals)
+    wait_role(inner, fd.as_fd(), &signals, parent.as_fd(), health, 4)
 }
 fn setup(
     container: ContainerFds<'_>,
     data: BorrowedFd<'_>,
     state: BorrowedFd<'_>,
     health: BorrowedFd<'_>,
+    parent: BorrowedFd<'_>,
 ) -> Result<()> {
     for (fd, kind) in [
         (container.ipc, libc::CLONE_NEWIPC),
@@ -554,7 +577,7 @@ fn setup(
     let initfd = pidfd(init)?;
     // The intermediate has no purpose beyond preserving parent-death linkage;
     // forward signals to private PID1, boundedly kill even if frozen.
-    forward_and_wait(init, &initfd, &signals)
+    wait_role(init, initfd.as_fd(), &signals, parent, health, 8)
 }
 fn init_root() -> Result<()> {
     // SAFETY: fixed prepared root is a mountpoint in this child's private view;
@@ -614,7 +637,7 @@ fn pending(set: &libc::sigset_t) -> i32 {
     }; // SAFETY: initialized fixed sigset and bounded timespec, no handlers.
     unsafe { libc::sigtimedwait(set, std::ptr::null_mut(), &t) }
 }
-fn forward_and_wait(pid: i32, fd: &OwnedFd, set: &libc::sigset_t) -> Result<()> {
+fn forward_and_wait(pid: i32, fd: BorrowedFd<'_>, set: &libc::sigset_t) -> Result<()> {
     let mut deadline = None;
     loop {
         let sig = pending(set);
@@ -637,6 +660,148 @@ fn forward_and_wait(pid: i32, fd: &OwnedFd, set: &libc::sigset_t) -> Result<()> 
             };
         }
     }
+}
+fn wait_role(
+    pid: i32,
+    child: BorrowedFd<'_>,
+    set: &libc::sigset_t,
+    parent: BorrowedFd<'_>,
+    health: BorrowedFd<'_>,
+    ready: u8,
+) -> Result<()> {
+    let mut report_fd = health.as_raw_fd();
+    let result: Result<()> = (|| {
+        let null = fs::open("/dev/null", OFlags::RDWR | OFlags::CLOEXEC, Mode::empty())
+            .map_err(|_| Error::DescriptorNull)?;
+        let expected_null = approved_null(null.as_fd())?;
+        for n in 0..3 {
+            dup_fixed(&null, n, false)?;
+        }
+        // Preserve source identities above fixed targets before either dup.
+        let saved =
+            rustix::io::fcntl_dupfd_cloexec(child, 110).map_err(|_| Error::DescriptorDuplicate)?;
+        let saved_health =
+            rustix::io::fcntl_dupfd_cloexec(health, 110).map_err(|_| Error::DescriptorDuplicate)?;
+        let saved_parent =
+            rustix::io::fcntl_dupfd_cloexec(parent, 110).map_err(|_| Error::DescriptorDuplicate)?;
+        let status = fs::open(
+            "/proc/self/status",
+            OFlags::RDONLY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::CapabilityPolicy)?;
+        let saved_status = rustix::io::fcntl_dupfd_cloexec(&status, 110)
+            .map_err(|_| Error::DescriptorDuplicate)?;
+        let lsm_read = fs::open(
+            "/proc/self/attr/current",
+            OFlags::RDONLY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::ConfinementPolicy)?;
+        let lsm_write = fs::open(
+            "/proc/self/attr/current",
+            OFlags::WRONLY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::ConfinementPolicy)?;
+        let lsm_read = rustix::io::fcntl_dupfd_cloexec(lsm_read, 110)
+            .map_err(|_| Error::DescriptorDuplicate)?;
+        let lsm_write = rustix::io::fcntl_dupfd_cloexec(lsm_write, 110)
+            .map_err(|_| Error::DescriptorDuplicate)?;
+        dup_fixed(&saved, 3, true)?;
+        dup_fixed(&saved_health, 4, true)?;
+        report_fd = 4;
+        dup_fixed(&saved_parent, 5, true)?;
+        dup_fixed(&saved_status, 6, true)?;
+        wait_root()?;
+        rustix::io::write(&lsm_write, b"changeprofile docker-default")
+            .map_err(|_| Error::ConfinementPolicy)?;
+        let mut label = [0u8; 128];
+        let count =
+            rustix::io::read(&lsm_read, &mut label).map_err(|_| Error::ConfinementPolicy)?;
+        if label[..count]
+            .strip_suffix(b"\n")
+            .unwrap_or(&label[..count])
+            != b"docker-default (enforce)"
+        {
+            return Err(Error::ConfinementPolicy);
+        }
+        // SAFETY: fixed0..6 now hold only validated null, child/health/parent and
+        // current status. All other inherited FD owners stay inert until _exit.
+        cv(
+            unsafe { libc::syscall(libc::SYS_close_range, 7u32, u32::MAX, 0u32) as i32 },
+            Error::DescriptorClose,
+        )?;
+        drop_privileges()?;
+        let mut bytes = [0u8; 16384];
+        let size = rustix::io::read(unsafe { BorrowedFd::borrow_raw(6) }, &mut bytes)
+            .map_err(|_| Error::CapabilityPolicy)?;
+        verify_credentials_text(
+            std::str::from_utf8(&bytes[..size]).map_err(|_| Error::CapabilityPolicy)?,
+        )?;
+        // reduce_privileges re-arms PDEATHSIG after setresuid/setresgid cleared it.
+        // The pidfd check closes the interval where the parent could have died.
+        if wait_ready(unsafe { BorrowedFd::borrow_raw(5) }, Duration::ZERO)? {
+            return Err(Error::ChildFailed);
+        }
+        unsafe {
+            libc::close(5);
+            libc::close(6);
+        }
+        // SAFETY: fixed descriptors were duplicated above and exclusively owned
+        // by this child; no inherited Rust FD owner is dropped after closure.
+        let child = unsafe { BorrowedFd::borrow_raw(3) };
+        let health = unsafe { BorrowedFd::borrow_raw(4) };
+        for n in 0..3 {
+            if approved_null(unsafe { BorrowedFd::borrow_raw(n) })? != expected_null {
+                return Err(Error::DescriptorStdio);
+            }
+        }
+        apply_filter(&wait_filter())?;
+        write_byte(health, ready)?;
+        unsafe {
+            libc::close(4);
+        }
+        let result = forward_and_wait(pid, child, set);
+        die(if result.is_ok() { 0 } else { 112 });
+    })();
+    if let Err(e) = result {
+        report_failure(unsafe { BorrowedFd::borrow_raw(report_fd) }, e);
+    }
+    die(111)
+}
+fn wait_root() -> Result<()> {
+    // The wrapper gets a new mount namespace so neither host nor confined init
+    // sees this empty root. No directory/state/proc survives the pivot.
+    unshare(libc::CLONE_NEWNS)?;
+    mount(None, c"/", None, libc::MS_REC | libc::MS_PRIVATE, None)?;
+    mount(
+        Some(c"tmpfs"),
+        c"/tmp",
+        Some(c"tmpfs"),
+        libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+        Some(c"mode=0755,size=64k"),
+    )?;
+    std::fs::create_dir("/tmp/old").map_err(|_| Error::MountPivot)?;
+    cv(
+        unsafe {
+            libc::syscall(libc::SYS_pivot_root, c"/tmp".as_ptr(), c"/tmp/old".as_ptr()) as i32
+        },
+        Error::MountPivot,
+    )?;
+    cv(unsafe { libc::chdir(c"/".as_ptr()) }, Error::MountPivot)?;
+    cv(
+        unsafe { libc::umount2(c"/old".as_ptr(), libc::MNT_DETACH) },
+        Error::MountPivot,
+    )?;
+    std::fs::remove_dir("/old").map_err(|_| Error::MountPivot)?;
+    mount(
+        None,
+        c"/",
+        None,
+        libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+        None,
+    )
 }
 fn supervise(
     health: BorrowedFd<'_>,
@@ -759,6 +924,10 @@ fn close_except(keep: &[i32]) -> Result<()> {
     Ok(())
 }
 fn reduce_privileges() -> Result<()> {
+    drop_privileges()?;
+    verify_credentials()
+}
+fn drop_privileges() -> Result<()> {
     // SAFETY: scalar prctl calls on current child only. Securebits lock all
     // root/setuid/ambient regain paths; every supported bounding capability drops.
     cv(
@@ -840,10 +1009,13 @@ fn reduce_privileges() -> Result<()> {
         unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) },
         Error::ChildFailed,
     )?;
-    verify_credentials()
+    Ok(())
 }
 pub(super) fn verify_credentials() -> Result<()> {
     let s = std::fs::read_to_string("/proc/self/status").map_err(|_| Error::CapabilityPolicy)?;
+    verify_credentials_text(&s)
+}
+fn verify_credentials_text(s: &str) -> Result<()> {
     for (key, expected) in [
         ("Uid:", vec!["65534"; 4]),
         ("Gid:", vec!["65534"; 4]),
@@ -1080,9 +1252,53 @@ fn filter() -> Vec<libc::sock_filter> {
     }); // EPERM default
     out
 }
+fn wait_filter() -> Vec<libc::sock_filter> {
+    // Exact fixed wait role, no paths, sockets, namespaces, exec or fork.
+    let mut out = filter()[..4].to_vec();
+    let calls = [
+        libc::SYS_ppoll,
+        libc::SYS_rt_sigtimedwait,
+        libc::SYS_pidfd_send_signal,
+        libc::SYS_wait4,
+        libc::SYS_clock_gettime,
+        libc::SYS_write,
+        libc::SYS_close,
+        libc::SYS_brk,
+        libc::SYS_mmap,
+        libc::SYS_munmap,
+        libc::SYS_mprotect,
+        libc::SYS_madvise,
+        libc::SYS_exit,
+        libc::SYS_exit_group,
+        libc::SYS_rt_sigreturn,
+        #[cfg(target_arch = "x86_64")]
+        libc::SYS_poll,
+    ];
+    for nr in calls {
+        out.push(libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 1,
+            k: nr as u32,
+        });
+        out.push(libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x7fff0000,
+        });
+    }
+    out.push(libc::sock_filter {
+        code: 0x06,
+        jt: 0,
+        jf: 0,
+        k: 0x00050001,
+    });
+    out
+}
 pub(super) fn policy_digest() -> String {
     let mut bytes = super::execution::POLICY.as_bytes().to_vec();
-    for instruction in filter() {
+    for instruction in filter().into_iter().chain(wait_filter()) {
         bytes.extend_from_slice(&instruction.code.to_le_bytes());
         bytes.push(instruction.jt);
         bytes.push(instruction.jf);
@@ -1091,7 +1307,9 @@ pub(super) fn policy_digest() -> String {
     vprouter_linux::sha256(&bytes)
 }
 fn seccomp() -> Result<()> {
-    let f = filter();
+    apply_filter(&filter())
+}
+fn apply_filter(f: &[libc::sock_filter]) -> Result<()> {
     let p = libc::sock_fprog {
         len: f.len() as u16,
         filter: f.as_ptr().cast_mut(),
@@ -1212,7 +1430,7 @@ fn final_fds(before_exec: bool, expected_null: Option<StdioIdentity>) -> Result<
             continue;
         }
         let target = std::fs::read_link(format!("/proc/self/fd/{fd}"))
-            .map_err(|_| Error::DescriptorInventory)?;
+            .map_err(|_| Error::DescriptorReadlink)?;
         let name = target.as_os_str().as_encoded_bytes();
         if fd == 3 && !name.starts_with(b"pipe:[") {
             return Err(Error::DescriptorHealth);
@@ -1222,11 +1440,18 @@ fn final_fds(before_exec: bool, expected_null: Option<StdioIdentity>) -> Result<
         }
     }
     let entries: Vec<_> = std::fs::read_dir("/proc/self/fd")
-        .map_err(|_| Error::DescriptorInventory)?
-        .collect();
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::PermissionDenied {
+                Error::DescriptorScanDenied
+            } else {
+                Error::DescriptorScanOpen
+            }
+        })?
+        .collect::<std::io::Result<_>>()
+        .map_err(|_| Error::DescriptorInventory)?;
     // read_dir temporarily opens one extra fd; no gap/external fd is permitted.
     if entries.len() != expected as usize + 1 {
-        return Err(Error::DescriptorInventory);
+        return Err(Error::DescriptorScanCount);
     }
     Ok(())
 }
@@ -1410,6 +1635,8 @@ pub(super) fn lab_parent_loss(
             Ok(_running) => {
                 let _ = write_byte(&w, 1);
                 let _ = write_byte(&w, 2);
+                let _ = write_byte(&w, 4);
+                let _ = write_byte(&w, 8);
                 loop {
                     std::thread::sleep(Duration::from_secs(1));
                 }
@@ -1455,7 +1682,9 @@ pub(super) fn probe_failure(error: Error) {
 mod policy_tests {
     use super::*;
     fn verdict(arch: u32, nr: u32, arg: u64) -> u32 {
-        let instructions = filter();
+        verdict_program(&filter(), arch, nr, arg)
+    }
+    fn verdict_program(instructions: &[libc::sock_filter], arch: u32, nr: u32, arg: u64) -> u32 {
         let mut pc = 0;
         let mut accumulator = 0;
         for _ in 0..2048 {
@@ -1483,6 +1712,42 @@ mod policy_tests {
             }
         }
         panic!("unbounded filter")
+    }
+    #[test]
+    fn wait_role_has_no_path_network_exec_or_fork_authority() {
+        let arch = if cfg!(target_arch = "x86_64") {
+            0xc000003e
+        } else {
+            0xc00000b7
+        };
+        for nr in [
+            libc::SYS_openat,
+            libc::SYS_newfstatat,
+            libc::SYS_readlinkat,
+            libc::SYS_socket,
+            libc::SYS_clone,
+            libc::SYS_execveat,
+            libc::SYS_mount,
+            libc::SYS_unshare,
+            libc::SYS_setns,
+            libc::SYS_capset,
+            libc::SYS_prctl,
+        ] {
+            assert_eq!(
+                verdict_program(&wait_filter(), arch, nr as u32, 0),
+                0x00050001
+            );
+        }
+        for nr in [
+            libc::SYS_wait4,
+            libc::SYS_rt_sigtimedwait,
+            libc::SYS_pidfd_send_signal,
+        ] {
+            assert_eq!(
+                verdict_program(&wait_filter(), arch, nr as u32, 0),
+                0x7fff0000
+            );
+        }
     }
     #[test]
     fn profile_denies_network_namespaces_privilege_and_exec_path_syscalls() {

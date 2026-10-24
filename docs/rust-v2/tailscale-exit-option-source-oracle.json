@@ -1,0 +1,34 @@
+{
+  "observed_at_utc": "2026-10-24T14:43:43.092347+00:00",
+  "kind": "independent official pinned-version public source oracle only",
+  "version": "1.102.5",
+  "commit": "5fb2a81b065b0a0bbbfc67ab20a0d9c6a1108115",
+  "sources": [
+    {
+      "path": "ipn/ipnstate/ipnstate.go",
+      "immutable_url": "https://raw.githubusercontent.com/tailscale/tailscale/5fb2a81b065b0a0bbbfc67ab20a0d9c6a1108115/ipn/ipnstate/ipnstate.go",
+      "sha256": "f0a1ec32918502b0c248a095c5d123704e4ad47a4bbc72db6e3e18f3af084268"
+    },
+    {
+      "path": "ipn/ipnlocal/local.go",
+      "immutable_url": "https://raw.githubusercontent.com/tailscale/tailscale/5fb2a81b065b0a0bbbfc67ab20a0d9c6a1108115/ipn/ipnlocal/local.go",
+      "sha256": "e3f29a92e870ee23fdbecf8d1c0a0ccc1f3b7e0858785d9121224dc290ee403d"
+    }
+  ],
+  "facts": [
+    {
+      "source": "ipn/ipnstate/ipnstate.go:277",
+      "fact": "ExitNodeOption means offered AND approved, rather than independent durable admin approval."
+    },
+    {
+      "source": "ipn/ipnlocal/local.go:1632-1637",
+      "fact": "peerStatusFromNode assigns ExitNodeOption from ContainsExitRoutes(netmap node AllowedIPs)."
+    }
+  ],
+  "runtime_bit_transition": "NOT_RUN",
+  "limits": [
+    "This source evidence does not prove the exact asynchronous control-plane timing or approval persistence after withdrawal.",
+    "Withdrawn recovery must not require an offered-and-approved bit before advertising; stable identity/safe prefs alone never authorize READY.",
+    "READY requires fresh actual advertised routes, online identity and true approved exit option after explicit guarded advertisement."
+  ]
+}

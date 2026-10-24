@@ -52,6 +52,10 @@ fn stage_byte(e: Error) -> u8 {
         Error::DescriptorScanOpen => 239,
         Error::DescriptorScanDenied => 240,
         Error::DescriptorScanCount => 241,
+        Error::WaitLsmTransition => 242,
+        Error::WaitLsmRead => 243,
+        Error::WaitLsmLabel => 244,
+        Error::WaitFilter => 245,
         Error::CapabilityPolicy => 204,
         Error::ConfinementPolicy => 205,
         _ => 206,
@@ -252,6 +256,10 @@ impl Child {
                 239 => return Err(Error::DescriptorScanOpen),
                 240 => return Err(Error::DescriptorScanDenied),
                 241 => return Err(Error::DescriptorScanCount),
+                242 => return Err(Error::WaitLsmTransition),
+                243 => return Err(Error::WaitLsmRead),
+                244 => return Err(Error::WaitLsmLabel),
+                245 => return Err(Error::WaitFilter),
                 204 => return Err(Error::CapabilityPolicy),
                 205 => return Err(Error::ConfinementPolicy),
                 210 => return Err(Error::MountContainerRoot),
@@ -715,16 +723,15 @@ fn wait_role(
         dup_fixed(&saved_status, 6, true)?;
         wait_root()?;
         rustix::io::write(&lsm_write, b"changeprofile docker-default")
-            .map_err(|_| Error::ConfinementPolicy)?;
+            .map_err(|_| Error::WaitLsmTransition)?;
         let mut label = [0u8; 128];
-        let count =
-            rustix::io::read(&lsm_read, &mut label).map_err(|_| Error::ConfinementPolicy)?;
+        let count = rustix::io::read(&lsm_read, &mut label).map_err(|_| Error::WaitLsmRead)?;
         if label[..count]
             .strip_suffix(b"\n")
             .unwrap_or(&label[..count])
             != b"docker-default (enforce)"
         {
-            return Err(Error::ConfinementPolicy);
+            return Err(Error::WaitLsmLabel);
         }
         // SAFETY: fixed0..6 now hold only validated null, child/health/parent and
         // current status. All other inherited FD owners stay inert until _exit.
@@ -757,7 +764,7 @@ fn wait_role(
                 return Err(Error::DescriptorStdio);
             }
         }
-        apply_filter(&wait_filter())?;
+        apply_filter(&wait_filter()).map_err(|_| Error::WaitFilter)?;
         write_byte(health, ready)?;
         unsafe {
             libc::close(4);

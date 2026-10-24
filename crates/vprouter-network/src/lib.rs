@@ -1,14 +1,16 @@
-//! Allocation-bound native observations and DOWN-only resource provisioning.
+//! Allocation-bound native observations, DOWN provisioning and quarantined activation.
 //! No activation, namespace entry, readiness, or quarantine removal API exists.
 #![forbid(unsafe_code)]
 
 mod audit;
+mod guarded;
 mod native;
 mod plan;
 mod project;
 mod socket;
 
 pub use audit::{Audit, Snapshot};
+pub use guarded::ActiveLinks;
 pub use native::{DownLink, NamespaceTarget, NativeNetwork, VethPair};
 pub use plan::Plan;
 pub use project::{Address, Link, Peer, Route, Rule, Wireguard};
@@ -20,14 +22,23 @@ pub enum Error {
     DirectUnsupported,
     Foreign,
     Drifted,
+    HostDrift,
+    TransportDrift,
+    DataDrift,
     Absent,
     Unsupported,
+    UnsupportedLinkAttribute(u16),
+    UnsupportedLinkInfo(u16),
+    UnsupportedAddressAttribute(u16),
+    UnsupportedRouteAttribute(u16),
     Malformed,
     Oversized,
     Deadline,
     SocketUnavailable,
     Io,
     KernelRejected,
+    KernelErrno(i32),
+    ActivationKernel { step: &'static str, errno: i32 },
     SequenceMismatch,
     SenderMismatch,
     Interrupted,

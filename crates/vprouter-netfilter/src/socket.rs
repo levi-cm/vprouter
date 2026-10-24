@@ -38,6 +38,9 @@ impl Socket {
             poisoned: false,
         })
     }
+    pub fn poisoned(&self) -> bool {
+        self.poisoned
+    }
     pub fn seq(&mut self) -> Result<u32> {
         self.seq = self.seq.checked_add(1).ok_or(Error::SequenceMismatch)?;
         Ok(self.seq)
@@ -153,16 +156,25 @@ impl Socket {
         be32(get(&nfattrs(&reply[0])?, 1)?)
     }
     pub fn dump(&mut self, op: u16, a: &[Attr], deadline: Instant) -> Result<Vec<Message>> {
+        self.dump_family(op, a, INET, deadline)
+    }
+    pub fn dump_family(
+        &mut self,
+        op: u16,
+        a: &[Attr],
+        family: u8,
+        deadline: Instant,
+    ) -> Result<Vec<Message>> {
         let seq = self.seq()?;
         let reply = self.exchange(
-            &message(NFT | op, REQUEST | DUMP, seq, INET, 0, a),
+            &message(NFT | op, REQUEST | DUMP, seq, family, 0, a),
             &[seq],
             true,
             deadline,
         )?;
         if reply
             .iter()
-            .any(|m| m.kind != NFT | (op - 1) || m.payload.first() != Some(&INET))
+            .any(|m| m.kind != NFT | (op - 1) || m.payload.first() != Some(&family))
         {
             return Err(Error::Malformed);
         }
@@ -180,13 +192,22 @@ impl Socket {
         generation: u32,
         deadline: Instant,
     ) -> Result<()> {
+        self.batch_family(ops, generation, INET, deadline)
+    }
+    pub fn batch_family(
+        &mut self,
+        ops: &[(u16, u16, Vec<Attr>)],
+        generation: u32,
+        family: u8,
+        deadline: Instant,
+    ) -> Result<()> {
         let begin = self.seq()?;
         let mut packet = message(16, REQUEST, begin, 0, 10, &[u32a(1, generation)]);
         let mut seqs = Vec::new();
         for (kind, flags, a) in ops {
             let seq = self.seq()?;
             seqs.push(seq);
-            packet.extend(message(*kind, REQUEST | ACK | *flags, seq, INET, 0, a));
+            packet.extend(message(*kind, REQUEST | ACK | *flags, seq, family, 0, a));
         }
         let end = self.seq()?;
         packet.extend(message(17, REQUEST, end, 0, 10, &[]));

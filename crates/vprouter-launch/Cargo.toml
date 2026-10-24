@@ -6,6 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+vprouter-network = { path = "../vprouter-network" }
+vprouter-netfilter = { path = "../vprouter-netfilter" }
 vprouter-core = { path = "../vprouter-core" }
 vprouter-linux = { path = "../vprouter-linux" }
 serde.workspace = true
@@ -33,3 +35,11 @@ harness = false
 name = "execution_lab"
 path = "src/execution_lab_main.rs"
 harness = false
+
+[[test]]
+name = "transport_lab"
+path = "src/transport_lab_main.rs"
+harness = false
+
+[dev-dependencies]
+x25519-dalek.workspace = true

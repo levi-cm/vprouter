@@ -30,9 +30,17 @@ pub struct Link {
     pub alias: String,
     pub peer_index: Option<u32>,
     pub hardware_type: u16,
+    pub controller: u32,
+    pub port_kind: String,
+    pub promiscuity: u32,
+    pub all_multicast: u32,
+    pub alternate_names: Vec<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Address {
+    pub broadcast: Option<Ipv4Addr>,
+    pub route_priority: Option<u32>,
+    pub flags: u32,
     pub index: u32,
     pub address: IpAddr,
     pub prefix: u8,
@@ -40,6 +48,8 @@ pub struct Address {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Route {
+    pub nexthop_id: Option<u32>,
+    pub preference: u8,
     pub destination: IpAddr,
     pub prefix: u8,
     pub table: u32,
@@ -143,12 +153,16 @@ pub(crate) fn link(m: netlink_packet_route::link::LinkMessage) -> Result<Link> {
         alias: String::new(),
         peer_index: None,
         hardware_type: m.header.link_layer_type.into(),
+        controller: 0,
+        port_kind: String::new(),
+        promiscuity: 0,
+        all_multicast: 0,
+        alternate_names: Vec::new(),
     };
     if m.header.index == 0 {
         return Err(Error::Malformed);
     }
     for a in m.attributes {
-        #[cfg(test)]
         let attribute_kind = a.kind();
         match a {
             L::IfName(n) => {
@@ -168,14 +182,40 @@ pub(crate) fn link(m: netlink_packet_route::link::LinkMessage) -> Result<Link> {
             L::LinkInfo(infos) => {
                 unique(&infos)?;
                 for i in infos {
+                    let info_kind = i.kind();
                     match i {
                         LinkInfo::Kind(k) => out.kind = k.to_string(),
+                        LinkInfo::PortKind(k) => out.port_kind = k.to_string(),
+                        LinkInfo::PortData(
+                            netlink_packet_route::link::InfoPortData::BridgePort(_),
+                        ) if out.port_kind == "bridge" => {}
                         LinkInfo::Data(netlink_packet_route::link::InfoData::Tun(_)) => {}
+                        // Existing host Docker bridge metadata is observational;
+                        // protected namespace audits reject every bridge kind.
+                        LinkInfo::Data(netlink_packet_route::link::InfoData::Bridge(_))
+                            if out.kind == "bridge" => {}
+                        _ => return Err(Error::UnsupportedLinkInfo(info_kind)),
+                    }
+                }
+            }
+            L::Controller(v) => out.controller = v,
+            L::Promiscuity(v) => out.promiscuity = v,
+            L::AllMulticast(v) => out.all_multicast = v,
+            L::PropList(props) => {
+                for p in props {
+                    match p {
+                        netlink_packet_route::link::Prop::AltIfName(n)
+                            if !n.is_empty()
+                                && n.len() <= 127
+                                && !out.alternate_names.contains(&n) =>
+                        {
+                            out.alternate_names.push(n)
+                        }
                         _ => return Err(Error::Unsupported),
                     }
                 }
             }
-            L::Controller(0) | L::ProtoDown(0) | L::Promiscuity(0) => {}
+            L::ProtoDown(0) => {}
             L::Xdp(v)
                 if v == [netlink_packet_route::link::LinkXdp::Attached(
                     netlink_packet_route::link::XdpAttached::None,
@@ -187,6 +227,11 @@ pub(crate) fn link(m: netlink_packet_route::link::LinkMessage) -> Result<Link> {
             // hardware-clock bookkeeping nest is tolerated.
             L::DpllPin(v) if v.is_empty() => {}
             // Kernel bookkeeping: these do not supply another forwarding path.
+            L::PermAddress(v) if v.len() <= 32 => {} // immutable physical hardware metadata, IFLA54
+            // Observed Debian virtio hardware parent identifiers (IFLA56/57).
+            // These describe hardware provenance, not a network controller.
+            L::ParentDevName(v) | L::ParentDevBusName(v)
+                if !v.is_empty() && v.len() <= 255 && !v.contains('\0') => {}
             L::Address(_)
             | L::Broadcast(_)
             | L::Qdisc(_)
@@ -214,12 +259,11 @@ pub(crate) fn link(m: netlink_packet_route::link::LinkMessage) -> Result<Link> {
             | L::Map(_)
             | L::AfSpecUnspec(_)
             | L::LinkNetNsId(_)
-            | L::AllMulticast(_)
             | L::NetnsImmutable(_) => {}
             _ => {
                 #[cfg(test)]
                 eprintln!("LAB_UNSUPPORTED_LINK_ATTRIBUTE kind={attribute_kind}");
-                return Err(Error::Unsupported);
+                return Err(Error::UnsupportedLinkAttribute(attribute_kind));
             }
         }
     }
@@ -230,18 +274,26 @@ pub(crate) fn link(m: netlink_packet_route::link::LinkMessage) -> Result<Link> {
 }
 pub(crate) fn address(m: netlink_packet_route::address::AddressMessage) -> Result<Address> {
     unique(&m.attributes)?;
-    if m.header.flags.bits() & !0x80 != 0 {
-        return Err(Error::Unsupported);
-    }
+    let mut flags = u32::from(m.header.flags.bits());
     let mut addr = None;
     let mut local = None;
+    let mut broadcast = None;
+    let mut route_priority = None;
     for a in m.attributes {
+        let attribute_kind = a.kind();
         match a {
             A::Address(v) => addr = Some(v),
             A::Local(v) => local = Some(v),
-            A::Flags(f) if f.bits() & !0x80 == 0 => {}
+            A::Broadcast(v) => broadcast = Some(v),
+            A::RoutePriority(v) => route_priority = Some(v),
+            A::Flags(f) => {
+                if f.bits() & 0xff != flags {
+                    return Err(Error::Malformed);
+                }
+                flags = f.bits();
+            }
             A::Label(_) | A::CacheInfo(_) | A::Protocol(_) => {}
-            _ => return Err(Error::Unsupported),
+            _ => return Err(Error::UnsupportedAddressAttribute(attribute_kind)),
         }
     }
     if local.is_some() && addr.is_some() && local != addr {
@@ -255,6 +307,9 @@ pub(crate) fn address(m: netlink_packet_route::address::AddressMessage) -> Resul
         return Err(Error::Malformed);
     }
     Ok(Address {
+        broadcast,
+        route_priority,
+        flags,
         index: m.header.index,
         address,
         prefix: m.header.prefix_len,
@@ -276,6 +331,8 @@ pub(crate) fn route(m: netlink_packet_route::route::RouteMessage) -> Result<Rout
         return Err(Error::Unsupported);
     }
     let mut out = Route {
+        nexthop_id: None,
+        preference: 0,
         destination: if family == 2 {
             Ipv4Addr::UNSPECIFIED.into()
         } else {
@@ -293,6 +350,7 @@ pub(crate) fn route(m: netlink_packet_route::route::RouteMessage) -> Result<Rout
         flags: h.flags.bits(),
     };
     for a in m.attributes {
+        let attribute_kind = a.kind();
         match a {
             R::Destination(v) => out.destination = ip(v)?,
             R::Oif(v) => out.output = v,
@@ -306,10 +364,11 @@ pub(crate) fn route(m: netlink_packet_route::route::RouteMessage) -> Result<Rout
             }
             R::Priority(v) => out.metric = v,
             R::CacheInfo(_) => {}
-            R::Preference(netlink_packet_route::route::RoutePreference::Medium) => {}
+            R::Preference(p) => out.preference = p.into(),
+            R::NhId(id) if id != 0 => out.nexthop_id = Some(id),
             // In particular multipath, gateways-via, encapsulation, source rules,
             // nexthop IDs, marks, metrics/redirects are not silently projected away.
-            _ => return Err(Error::Unsupported),
+            _ => return Err(Error::UnsupportedRouteAttribute(attribute_kind)),
         }
     }
     if out.output == 0
@@ -545,9 +604,13 @@ pub(crate) fn preflight(bytes: &[u8], generic: bool) -> Result<()> {
                 for info in netlink_packet_core::NlasIterator::new(a.value()) {
                     let info = info.map_err(|_| Error::Malformed)?;
                     if info.kind() == 2 {
-                        let tun = netlink_packet_core::NlasIterator::new(a.value())
-                            .any(|v| v.is_ok_and(|v| v.kind() == 1 && v.value() == b"tun\0"));
-                        if !tun {
+                        let observational_data = netlink_packet_core::NlasIterator::new(a.value())
+                            .any(|v| {
+                                v.is_ok_and(|v| {
+                                    v.kind() == 1 && matches!(v.value(), b"tun\0" | b"bridge\0")
+                                })
+                            });
+                        if !observational_data {
                             return Err(Error::Unsupported);
                         }
                     }

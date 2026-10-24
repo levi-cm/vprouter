@@ -103,6 +103,29 @@ fn network() -> Result<OwnedFd> {
     )
     .map_err(|_| Error::NamespaceMismatch)
 }
+/// Open retained native descriptors synchronously in the intended namespace.
+/// No async runtime/task exists; the caller never keeps SYS_ADMIN in a worker.
+pub(super) fn network_scope<T>(handle: impl AsFd, f: impl FnOnce() -> Result<T>) -> Result<T> {
+    process::single_threaded()?;
+    let old = network()?;
+    enter(handle.as_fd(), libc::CLONE_NEWNET)?;
+    struct Restore(OwnedFd);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            if enter(self.0.as_fd(), libc::CLONE_NEWNET).is_err() {
+                die(122);
+            }
+        }
+    }
+    let restore = Restore(old);
+    if super::owned::Identity::network(network()?)? != super::owned::Identity::network(&handle)? {
+        return Err(Error::NamespaceMismatch);
+    }
+    let result = f();
+    process::single_threaded()?;
+    drop(restore);
+    result
+}
 pub(super) fn direct_network(handle: impl AsFd) -> Result<OwnedFd> {
     process::single_threaded()?;
     let old = network()?;
@@ -2172,6 +2195,48 @@ pub(super) fn probe_failure(error: Error) {
     report_failure(fd, error);
 }
 // ---- Offline policy, descriptor-fault and monotonic-deadline regressions ----
+// Test-only socket-origin oracle; single-task process temporarily joins only
+// the retained owned subgroup, restores its EXACT original group before return.
+#[cfg(test)]
+pub(super) fn producer_socket_scope<T>(
+    group: impl AsFd,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    use std::io::Write;
+    process::single_threaded()?;
+    let content =
+        std::fs::read_to_string("/proc/self/cgroup").map_err(|_| Error::CgroupMismatch)?;
+    let path = content
+        .strip_prefix("0::/")
+        .and_then(|s| s.strip_suffix('\n'))
+        .filter(|s| !s.contains('\n') && !s.split('/').any(|v| v == ".." || v == "."))
+        .ok_or(Error::CgroupMismatch)?;
+    let old = fs::open(
+        format!("/sys/fs/cgroup/{path}"),
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|_| Error::CgroupMismatch)?;
+    fn place(fd: impl AsFd) -> Result<()> {
+        let f = fs::openat(
+            fd,
+            "cgroup.procs",
+            OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::CgroupMismatch)?;
+        std::fs::File::from(f)
+            .write_all(std::process::id().to_string().as_bytes())
+            .map_err(|_| Error::CgroupMismatch)
+    }
+    place(group)?;
+    let r = f();
+    if place(old).is_err() {
+        die(122);
+    }
+    r
+}
+
 #[cfg(test)]
 mod policy_tests {
     use super::*;

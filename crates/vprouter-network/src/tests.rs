@@ -27,6 +27,8 @@ fn route(
     metric: u32,
 ) -> Route {
     Route {
+        nexthop_id: None,
+        preference: 0,
         destination: ip.parse().unwrap(),
         prefix,
         table,
@@ -51,6 +53,11 @@ fn snapshot(p: &Plan) -> Snapshot {
             alias: String::new(),
             peer_index: None,
             hardware_type: 772,
+            controller: 0,
+            port_kind: String::new(),
+            promiscuity: 0,
+            all_multicast: 0,
+            alternate_names: Vec::new(),
         },
         Link {
             name: p.wireguard_name().into(),
@@ -61,16 +68,27 @@ fn snapshot(p: &Plan) -> Snapshot {
             alias: p.alias.clone(),
             peer_index: None,
             hardware_type: 65534,
+            controller: 0,
+            port_kind: String::new(),
+            promiscuity: 0,
+            all_multicast: 0,
+            alternate_names: Vec::new(),
         },
     ];
     let addresses = vec![
         Address {
+            broadcast: None,
+            route_priority: None,
+            flags: 0x80,
             index: 1,
             address: Ipv4Addr::LOCALHOST.into(),
             prefix: 8,
             scope: 254,
         },
         Address {
+            broadcast: None,
+            route_priority: None,
+            flags: 0x80,
             index: 4,
             address: p.address.into(),
             prefix: 32,
@@ -300,6 +318,9 @@ fn restored_default_endpoint_docker_extra_routes_rules_interfaces_and_ipv6_rejec
     for address in ["10.64.1.3", "fe80::1", "2001:db8::1", "::1"] {
         let mut s = base.clone();
         s.addresses.push(Address {
+            broadcast: None,
+            route_priority: None,
+            flags: 0x80,
             index: 4,
             address: address.parse().unwrap(),
             prefix: if address.contains(':') { 128 } else { 32 },
@@ -338,6 +359,11 @@ fn local_loopback_and_narrow_tailscale_ipv6_supported_but_no_forward_path() {
         alias: String::new(),
         peer_index: None,
         hardware_type: 65534,
+        controller: 0,
+        port_kind: String::new(),
+        promiscuity: 0,
+        all_multicast: 0,
+        alternate_names: Vec::new(),
     });
     for (index, address, scope) in [
         (1, "::1", 254),
@@ -345,6 +371,9 @@ fn local_loopback_and_narrow_tailscale_ipv6_supported_but_no_forward_path() {
         (5, "fd7a:115c:a1e0::1", 0),
     ] {
         s.addresses.push(Address {
+            broadcast: None,
+            route_priority: None,
+            flags: 0x80,
             index,
             address: address.parse().unwrap(),
             prefix: if address.contains(':') { 128 } else { 32 },
@@ -405,11 +434,21 @@ fn multipath_encapsulation_rules_and_malformed_attributes_fail_closed() {
     let mut route = RouteMessage::default();
     route.header.address_family = netlink_packet_route::AddressFamily::Inet;
     route.attributes.push(R::MultiPath(Vec::new()));
-    assert_eq!(crate::project::route(route), Err(Error::Unsupported));
+    assert!(matches!(
+        crate::project::route(route),
+        Err(Error::UnsupportedRouteAttribute(_))
+    ));
     let mut route = RouteMessage::default();
     route.header.address_family = netlink_packet_route::AddressFamily::Inet;
-    route.attributes.push(R::NhId(7));
-    assert_eq!(crate::project::route(route), Err(Error::Unsupported));
+    route.attributes.extend([R::NhId(7), R::Oif(2)]);
+    assert_eq!(crate::project::route(route).unwrap().nexthop_id, Some(7));
+    let p = plan();
+    let mut protected = snapshot(&p);
+    protected.routes[0].nexthop_id = Some(7);
+    assert_eq!(
+        p.audit(Some(&protected), 4, 1000.0),
+        Audit::Rejected(Error::Drifted)
+    );
     let mut rule = RuleMessage::default();
     rule.header.family = netlink_packet_route::AddressFamily::Inet;
     rule.header.action = netlink_packet_route::rule::RuleAction::ToTable;
@@ -452,13 +491,15 @@ fn only_empty_hardware_metadata_and_explicit_no_xdp_are_bookkeeping() {
         L::DevlinkPort(vec![DevlinkPort::PortIndex(1)]),
         L::DpllPin(vec![DpllPin::PinId(1)]),
         L::Xdp(vec![LinkXdp::Attached(XdpAttached::Driver)]),
-        L::Controller(2),
     ] {
         let mut x = m.clone();
         x.attributes
             .retain(|a| !matches!(a, L::DevlinkPort(_) | L::DpllPin(_) | L::Xdp(_)));
         x.attributes.push(extra);
-        assert_eq!(crate::project::link(x), Err(Error::Unsupported));
+        assert!(matches!(
+            crate::project::link(x),
+            Err(Error::UnsupportedLinkAttribute(_))
+        ));
     }
 }
 
@@ -573,4 +614,153 @@ fn independent_pinned_daemon_raw_rules_preserve_all_functional_metadata() {
         }
         assert!(matches!(p.audit(Some(&s), 4, 1000.0), Audit::Rejected(_)));
     }
+}
+
+#[test]
+fn host_metadata_is_observed_but_protected_link_authority_stays_exact() {
+    use netlink_packet_route::link::{LinkAttribute as L, LinkMessage, Prop};
+    let mut m = LinkMessage::default();
+    m.header.index = 44;
+    m.attributes = vec![
+        L::IfName("ens2".into()),
+        L::Mtu(1500),
+        L::Controller(3),
+        L::Promiscuity(1),
+        L::AllMulticast(1),
+        L::PropList(vec![Prop::AltIfName("enp0s2".into())]),
+        L::PermAddress(vec![1, 2, 3, 4, 5, 6]),
+        L::ParentDevName("virtio0".into()),
+        L::ParentDevBusName("virtio".into()),
+    ];
+    let observed = crate::project::link(m.clone()).unwrap();
+    assert_eq!(observed.controller, 3);
+    assert_eq!(observed.promiscuity, 1);
+    assert_eq!(observed.all_multicast, 1);
+    assert_eq!(observed.alternate_names, ["enp0s2"]);
+    for extra in [
+        L::ParentDevName(String::new()),
+        L::ParentDevBusName("x".repeat(256)),
+        L::PermAddress(vec![0; 33]),
+    ] {
+        let mut bad = m.clone();
+        bad.attributes.retain(|a| {
+            !matches!(
+                a,
+                L::ParentDevName(_) | L::ParentDevBusName(_) | L::PermAddress(_)
+            )
+        });
+        bad.attributes.push(extra);
+        assert!(crate::project::link(bad).is_err());
+    }
+    let p = plan();
+    for field in 0..5 {
+        let mut protected = snapshot(&p);
+        let link = &mut protected.links[1];
+        match field {
+            0 => link.controller = 3,
+            1 => link.port_kind = "bridge".into(),
+            2 => link.promiscuity = 1,
+            3 => link.all_multicast = 1,
+            4 => link.alternate_names.push("foreign".into()),
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            p.audit(Some(&protected), 4, 1000.0),
+            Audit::Rejected(Error::Drifted)
+        );
+    }
+}
+
+#[test]
+fn raw_host_bridge_data_is_bounded_and_veth_peer_grammar_still_rejected() {
+    use netlink_packet_core::NetlinkMessage;
+    use netlink_packet_route::{
+        RouteNetlinkMessage,
+        link::{InfoData, InfoKind, InfoVeth, LinkAttribute as L, LinkInfo, LinkMessage},
+    };
+    fn bytes(kind: InfoKind, data: InfoData) -> Vec<u8> {
+        let mut m = LinkMessage::default();
+        m.header.index = 3;
+        m.attributes = vec![
+            L::IfName("docker0".into()),
+            L::Mtu(1500),
+            L::LinkInfo(vec![LinkInfo::Kind(kind), LinkInfo::Data(data)]),
+        ];
+        let mut n = NetlinkMessage::from(RouteNetlinkMessage::NewLink(m));
+        n.finalize();
+        let mut b = vec![0; n.buffer_len()];
+        n.serialize(&mut b);
+        b
+    }
+    let bridge = bytes(InfoKind::Bridge, InfoData::Bridge(vec![]));
+    let netlink_packet_route::RouteNetlinkMessage::NewLink(m) =
+        crate::project::route_message(&bridge).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(crate::project::link(m).unwrap().kind, "bridge");
+    let peer = bytes(
+        InfoKind::Veth,
+        InfoData::Veth(InfoVeth::Peer(LinkMessage::default())),
+    );
+    assert!(crate::project::route_message(&peer).is_err());
+}
+
+#[test]
+fn dynamic_host_address_flags_are_retained_and_protected_dynamic_flags_rejected() {
+    use netlink_packet_route::{
+        AddressFamily,
+        address::{AddressAttribute as A, AddressFlags, AddressMessage},
+    };
+    let mut m = AddressMessage::default();
+    m.header.index = 2;
+    m.header.family = AddressFamily::Inet6;
+    m.header.prefix_len = 64;
+    m.attributes = vec![
+        A::Address("fe80::1".parse().unwrap()),
+        A::Flags(AddressFlags::from_bits_retain(0x300)),
+    ];
+    let observed = crate::project::address(m.clone()).unwrap();
+    assert_eq!(observed.flags, 0x300);
+    m.header.flags = netlink_packet_route::address::AddressHeaderFlags::from_bits_retain(0x80);
+    assert!(matches!(crate::project::address(m), Err(Error::Malformed)));
+    let p = plan();
+    let mut protected = snapshot(&p);
+    protected.addresses[1].flags = 0x300;
+    assert_eq!(
+        p.audit(Some(&protected), 4, 1000.0),
+        Audit::Rejected(Error::Drifted)
+    );
+}
+
+#[test]
+fn complete_local_host_rtm_oracle_projects_without_discarding_forwarding_fields() {
+    use netlink_packet_route::RouteNetlinkMessage as N;
+    let messages: Vec<String> =
+        serde_json::from_str(include_str!("../tests/fixtures/task8a-local-host-rtm.json")).unwrap();
+    let mut broadcast = false;
+    let mut priority = false;
+    let mut indirect = false;
+    let mut flags = false;
+    for hex in messages {
+        let bytes: Vec<u8> = hex
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|b| u8::from_str_radix(std::str::from_utf8(b).unwrap(), 16).unwrap())
+            .collect();
+        match crate::project::route_message(&bytes).unwrap() {
+            N::NewAddress(m) => {
+                let a = crate::project::address(m).unwrap();
+                broadcast |= a.broadcast.is_some();
+                priority |= a.route_priority.is_some();
+                flags |= a.flags & !0x80 != 0;
+            }
+            N::NewRoute(m) => {
+                let r = crate::project::route(m).unwrap();
+                indirect |= r.nexthop_id.is_some();
+            }
+            _ => panic!("unexpected oracle message"),
+        }
+    }
+    assert!(broadcast && priority && indirect && flags);
 }

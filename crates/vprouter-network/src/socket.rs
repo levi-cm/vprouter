@@ -297,7 +297,12 @@ impl Replies {
                         return Err(Error::SequenceMismatch);
                     }
                     if m[16..20] != [0; 4] {
-                        return Err(Error::KernelRejected);
+                        let errno =
+                            i32::from_ne_bytes(m[16..20].try_into().map_err(|_| Error::Malformed)?);
+                        if errno < -4095 {
+                            return Err(Error::Malformed);
+                        }
+                        return Err(Error::KernelErrno(-errno));
                     }
                     if self.ack || matches!(self.completion, Completion::Dump) {
                         return Err(Error::Malformed);

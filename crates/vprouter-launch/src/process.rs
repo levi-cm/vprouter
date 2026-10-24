@@ -419,6 +419,9 @@ impl PinnedProcess {
         }
         self.revalidate(spec, stage)
     }
+    pub(super) fn cgroup_parent(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.cgroup.as_fd()
+    }
     pub(super) fn launch_fds(&self) -> super::kernel::ContainerFds<'_> {
         super::kernel::ContainerFds {
             mount: self.namespaces[0].as_fd(),

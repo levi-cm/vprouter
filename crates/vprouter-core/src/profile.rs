@@ -22,6 +22,8 @@ pub struct Profile {
     public_key: [u8; 32],
     address: Ipv4Addr,
     endpoint: SocketAddrV4,
+    dns: Vec<IpAddr>,
+    resolvers: Vec<Ipv4Addr>,
     expected_server: String,
     server_hint_verified: bool,
 }
@@ -50,6 +52,8 @@ impl Profile {
         let mut public_key = None;
         let mut address = None;
         let mut endpoint = None;
+        let mut dns_metadata = Vec::new();
+        let mut resolvers = Vec::new();
         let mut default_v4 = false;
         let mut hint = false;
         if let Some(stem) = source_path
@@ -122,8 +126,17 @@ impl Profile {
                     }
                 }
                 ("[Interface]", "dns") => {
-                    for dns in value.split(',') {
-                        dns.trim().parse::<IpAddr>().map_err(|_| invalid())?;
+                    for dns in value.split(',').map(str::trim) {
+                        let ip = dns.parse::<IpAddr>().map_err(|_| invalid())?;
+                        if dns_metadata.contains(&ip) || dns_metadata.len() >= 8 {
+                            return Err(invalid());
+                        }
+                        dns_metadata.push(ip);
+                        if let IpAddr::V4(ip) = ip
+                            && ip.is_private()
+                        {
+                            resolvers.push(ip);
+                        }
                     }
                 }
                 ("[Interface]", "mtu") => {
@@ -185,6 +198,8 @@ impl Profile {
             public_key,
             address: address.ok_or_else(invalid)?,
             endpoint: endpoint.ok_or_else(invalid)?,
+            dns: dns_metadata,
+            resolvers,
             expected_server: expected_server.to_owned(),
             server_hint_verified: hint,
         })
@@ -200,6 +215,15 @@ impl Profile {
     }
     pub fn endpoint(&self) -> SocketAddrV4 {
         self.endpoint
+    }
+    /// Validated original metadata, including IPv6; never resolver authority.
+    pub fn dns_metadata(&self) -> &[IpAddr] {
+        &self.dns
+    }
+    /// Only explicit private IPv4 DNS from this protected profile; empty means
+    /// unavailable, never permission to use a host or environment resolver.
+    pub fn resolvers(&self) -> &[Ipv4Addr] {
+        &self.resolvers
     }
     pub fn peer_public_key(&self) -> &[u8; 32] {
         &self.public_key

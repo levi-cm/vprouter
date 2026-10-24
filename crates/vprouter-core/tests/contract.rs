@@ -390,3 +390,51 @@ fn profile_known_options_are_ascii_case_insensitive_and_duplicates_still_fail() 
         assert!(Profile::parse(invalid.as_bytes(), "de-fra-wg-404", None).is_err());
     }
 }
+
+#[test]
+fn profile_dns_retains_metadata_and_derives_only_explicit_private_ipv4_authority() {
+    let source = profile(KEY).replace(
+        "DNS = 10.64.0.1",
+        "DNS = 10.64.0.1, fd00::53, 9.9.9.9, 192.168.2.53",
+    );
+    let p = Profile::parse(source.as_bytes(), "de-fra-wg-404", None).unwrap();
+    assert_eq!(p.dns_metadata().len(), 4);
+    assert_eq!(
+        p.resolvers(),
+        &[
+            "10.64.0.1".parse::<std::net::Ipv4Addr>().unwrap(),
+            "192.168.2.53".parse().unwrap()
+        ]
+    );
+    for list in [
+        "10.64.0.1,10.64.0.1",
+        "fd00::53, fd00:0:0::53",
+        "10.64.0.1,",
+        "not-an-ip",
+        "10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4,10.0.0.5,10.0.0.6,10.0.0.7,10.0.0.8,10.0.0.9",
+    ] {
+        let bad = profile(KEY).replace("DNS = 10.64.0.1", &format!("DNS = {list}"));
+        let e = Profile::parse(bad.as_bytes(), "de-fra-wg-404", None)
+            .err()
+            .unwrap();
+        assert_eq!(e.reason(), Reason::InvalidProfile);
+        assert!(!format!("{e:?} {e}").contains(KEY));
+        assert!(!format!("{e:?} {e}").contains(list));
+    }
+    let no_authority = profile(KEY).replace("DNS = 10.64.0.1", "DNS = fd00::53, 9.9.9.9");
+    assert!(
+        Profile::parse(no_authority.as_bytes(), "de-fra-wg-404", None)
+            .unwrap()
+            .resolvers()
+            .is_empty()
+    );
+    // Missing DNS metadata preserves existing profile parsing, but yields no
+    // authority; guard startup must refuse it before any network mutation.
+    let missing = profile(KEY).replace("DNS = 10.64.0.1\n", "");
+    assert!(
+        Profile::parse(missing.as_bytes(), "de-fra-wg-404", None)
+            .unwrap()
+            .resolvers()
+            .is_empty()
+    );
+}

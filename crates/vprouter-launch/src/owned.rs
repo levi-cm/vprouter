@@ -44,6 +44,8 @@ impl Identity {
 enum Phase {
     Creating,
     Offline,
+    Activating,
+    Bootstrap,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -54,6 +56,24 @@ struct Entry {
     phase: Phase,
     data: Option<Identity>,
     transport: Option<Identity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    links: Option<LinkOwnership>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    producer: Option<ProducerOwnership>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProducerOwnership {
+    parent: Identity,
+    group: Identity,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LinkOwnership {
+    host_namespace: Identity,
+    host_index: u32,
+    transport_index: u32,
+    wireguard_index: u32,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -110,7 +130,31 @@ impl Record {
             {
                 return Err(Error::OwnershipMismatch);
             }
-            if e.phase == Phase::Offline && (e.data.is_none() || e.transport.is_none()) {
+            if e.phase != Phase::Creating && (e.data.is_none() || e.transport.is_none()) {
+                return Err(Error::OwnershipMismatch);
+            }
+            if let Some(p) = &e.producer {
+                if !matches!(e.phase, Phase::Activating | Phase::Bootstrap)
+                    || p.parent.dev != p.group.dev
+                    || p.parent == p.group
+                    || p.parent.ino == 0
+                    || p.group.ino == 0
+                {
+                    return Err(Error::OwnershipMismatch);
+                }
+            } else if e.phase == Phase::Bootstrap {
+                return Err(Error::OwnershipMismatch);
+            }
+            if let Some(l) = &e.links {
+                if !matches!(e.phase, Phase::Activating | Phase::Bootstrap)
+                    || l.host_namespace.ino == 0
+                    || l.host_namespace == e.data.unwrap_or(l.host_namespace)
+                    || l.host_namespace == e.transport.unwrap_or(l.host_namespace)
+                    || [l.host_index, l.transport_index, l.wireguard_index].contains(&0)
+                {
+                    return Err(Error::OwnershipMismatch);
+                }
+            } else if e.phase == Phase::Bootstrap {
                 return Err(Error::OwnershipMismatch);
             }
             for id in [e.data, e.transport].into_iter().flatten() {
@@ -326,6 +370,8 @@ impl<'a> Transaction<'a> {
             phase: Phase::Creating,
             data: None,
             transport: None,
+            links: None,
+            producer: None,
         });
         self.persist()?;
         let data = self.create(
@@ -352,6 +398,154 @@ impl<'a> Transaction<'a> {
             .bind(s, &self.record.primary_exit_id, self.record.base_network)?;
         self.persist()?;
         OwnedNamespaces::new(s, data, transport)
+    }
+    /// Persist activation intent before any link creation/UP operation. A crash
+    /// in this phase is never silently adopted by acquire().
+    pub fn begin_transport(&mut self, s: &LaunchSpec, ns: &OwnedNamespaces) -> Result<()> {
+        self.revalidate(s)?;
+        ns.bind(s)?;
+        let e = self
+            .record
+            .entries
+            .iter_mut()
+            .find(|e| e.exit_id == s.exit.exit_id)
+            .ok_or(Error::OwnershipMismatch)?;
+        if e.phase != Phase::Offline || e.links.is_some() {
+            return Err(Error::Interrupted);
+        }
+        e.phase = Phase::Activating;
+        self.persist()
+    }
+    pub fn bind_producer(
+        &mut self,
+        s: &LaunchSpec,
+        parent: Identity,
+        group: Identity,
+    ) -> Result<()> {
+        self.revalidate(s)?;
+        let e = self
+            .record
+            .entries
+            .iter_mut()
+            .find(|e| e.exit_id == s.exit.exit_id)
+            .ok_or(Error::OwnershipMismatch)?;
+        if e.phase != Phase::Activating
+            || e.producer.is_some()
+            || parent.dev != group.dev
+            || parent == group
+            || parent.ino == 0
+            || group.ino == 0
+        {
+            return Err(Error::OwnershipMismatch);
+        }
+        e.producer = Some(ProducerOwnership { parent, group });
+        self.persist()
+    }
+    pub fn verify_producer(&self, s: &LaunchSpec, parent: Identity, group: Identity) -> Result<()> {
+        self.revalidate(s)?;
+        let e = self
+            .record
+            .entries
+            .iter()
+            .find(|e| e.exit_id == s.exit.exit_id)
+            .ok_or(Error::OwnershipMismatch)?;
+        let p = e.producer.as_ref().ok_or(Error::OwnershipMismatch)?;
+        if p.parent != parent || p.group != group {
+            return Err(Error::OwnershipMismatch);
+        }
+        Ok(())
+    }
+    pub fn bind_links(
+        &mut self,
+        s: &LaunchSpec,
+        ns: &OwnedNamespaces,
+        host: Identity,
+        indices: (u32, u32, u32),
+    ) -> Result<()> {
+        self.revalidate(s)?;
+        ns.bind(s)?;
+        let e = self
+            .record
+            .entries
+            .iter_mut()
+            .find(|e| e.exit_id == s.exit.exit_id)
+            .ok_or(Error::OwnershipMismatch)?;
+        if e.phase != Phase::Activating
+            || e.links.is_some()
+            || [indices.0, indices.1, indices.2].contains(&0)
+            || host.ino == 0
+            || Some(host) == e.data
+            || Some(host) == e.transport
+        {
+            return Err(Error::OwnershipMismatch);
+        }
+        e.links = Some(LinkOwnership {
+            host_namespace: host,
+            host_index: indices.0,
+            transport_index: indices.1,
+            wireguard_index: indices.2,
+        });
+        self.persist()
+    }
+    pub fn bootstrap(
+        &mut self,
+        s: &LaunchSpec,
+        ns: &OwnedNamespaces,
+        host: Identity,
+        indices: (u32, u32, u32),
+    ) -> Result<()> {
+        self.verify_links(s, ns, host, indices)?;
+        let e = self
+            .record
+            .entries
+            .iter_mut()
+            .find(|e| e.exit_id == s.exit.exit_id)
+            .ok_or(Error::OwnershipMismatch)?;
+        if e.phase != Phase::Activating {
+            return Err(Error::Interrupted);
+        }
+        e.phase = Phase::Bootstrap;
+        self.persist()
+    }
+    pub fn verify_links(
+        &self,
+        s: &LaunchSpec,
+        ns: &OwnedNamespaces,
+        host: Identity,
+        indices: (u32, u32, u32),
+    ) -> Result<()> {
+        self.revalidate(s)?;
+        ns.bind(s)?;
+        let e = self
+            .record
+            .entries
+            .iter()
+            .find(|e| e.exit_id == s.exit.exit_id)
+            .ok_or(Error::OwnershipMismatch)?;
+        let l = e.links.as_ref().ok_or(Error::OwnershipMismatch)?;
+        if !matches!(e.phase, Phase::Activating | Phase::Bootstrap)
+            || l.host_namespace != host
+            || (l.host_index, l.transport_index, l.wireguard_index) != indices
+        {
+            return Err(Error::OwnershipMismatch);
+        }
+        Ok(())
+    }
+    pub fn transport_cleaned(&mut self, s: &LaunchSpec) -> Result<()> {
+        self.revalidate(s)?;
+        let e = self
+            .record
+            .entries
+            .iter_mut()
+            .find(|e| e.exit_id == s.exit.exit_id)
+            .ok_or(Error::OwnershipMismatch)?;
+        if !matches!(e.phase, Phase::Activating | Phase::Bootstrap) {
+            return Err(Error::Interrupted);
+        }
+        e.phase = Phase::Offline;
+        e.links = None;
+        e.producer = None;
+        self.persist()
     }
     fn create(&self, name: &str, source: Option<std::os::fd::BorrowedFd<'_>>) -> Result<OwnedFd> {
         let placeholder = fs::openat(
@@ -416,6 +610,42 @@ impl<'a> Transaction<'a> {
 mod tests {
     use super::*;
     #[test]
+    fn durable_activation_and_bootstrap_require_exact_live_authorities() {
+        let (s, _) = super::super::tests::fixture();
+        let base = Identity { dev: 4, ino: 10 };
+        let mut r = Record::new(&s, "one", base).unwrap();
+        r.entries.push(Entry {
+            exit_id: "one".into(),
+            data_name: s.exit.data_namespace.clone(),
+            transport_name: s.exit.transport_namespace.clone(),
+            phase: Phase::Activating,
+            data: Some(base),
+            transport: Some(Identity { dev: 4, ino: 11 }),
+            producer: None,
+            links: None,
+        });
+        // Partial intent remains readable, but acquire refuses this phase.
+        assert!(r.bind(&s, "one", base).is_ok());
+        r.entries[0].phase = Phase::Bootstrap;
+        assert!(r.bind(&s, "one", base).is_err());
+        r.entries[0].producer = Some(ProducerOwnership {
+            parent: Identity { dev: 5, ino: 20 },
+            group: Identity { dev: 5, ino: 21 },
+        });
+        r.entries[0].links = Some(LinkOwnership {
+            host_namespace: Identity { dev: 4, ino: 12 },
+            host_index: 2,
+            transport_index: 3,
+            wireguard_index: 4,
+        });
+        assert!(r.bind(&s, "one", base).is_ok());
+        r.entries[0].links.as_mut().unwrap().host_namespace = base;
+        assert!(r.bind(&s, "one", base).is_err());
+        r.entries[0].links.as_mut().unwrap().host_namespace = Identity { dev: 4, ino: 12 };
+        r.entries[0].producer.as_mut().unwrap().group.dev = 6;
+        assert!(r.bind(&s, "one", base).is_err());
+    }
+    #[test]
     fn exact_members_generation_primary_and_interruption_are_bound() {
         let (mut s, _) = super::super::tests::fixture();
         let base = Identity { dev: 4, ino: 10 };
@@ -433,6 +663,8 @@ mod tests {
             phase: Phase::Creating,
             data: None,
             transport: None,
+            links: None,
+            producer: None,
         });
         assert!(r.bind(&s, "one", base).is_ok());
         r.entries[0].phase = Phase::Offline;

@@ -17,9 +17,15 @@ mod owned;
 #[cfg(test)]
 pub mod probe;
 mod process;
+#[allow(dead_code)]
+mod producer;
 mod spec;
 #[cfg(test)]
 mod tests;
+#[allow(dead_code)]
+mod transport;
+#[cfg(test)]
+pub mod transport_lab;
 
 use serde::Serialize;
 pub use spec::{LaunchSpec, StagingEvidence};
@@ -30,6 +36,9 @@ use vprouter_linux::docker::DockerClient;
 #[serde(rename_all = "snake_case")]
 pub enum Error {
     InvalidSpec,
+    ResolverUnavailable,
+    NetworkPolicy,
+    NetworkOperation,
     AllocationMismatch,
     UnsafeInput,
     UnsupportedPlatform,

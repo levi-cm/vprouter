@@ -31,7 +31,7 @@ use std::{
 use vprouter_core::profile::Profile;
 use zeroize::Zeroize;
 
-type NamespaceIdentity = (u64, u64);
+pub(crate) type NamespaceIdentity = (u64, u64);
 fn current_namespace() -> Result<NamespaceIdentity> {
     let m = fs::metadata("/proc/thread-self/ns/net").map_err(|_| Error::NamespaceUnverified)?;
     Ok((m.dev(), m.ino()))
@@ -68,8 +68,8 @@ impl NamespaceTarget {
 /// Non-forgeable record of the observed DOWN resource. This is not a kernel
 /// lease or alias CAS: privileged concurrent writers must be excluded externally.
 pub struct DownLink {
-    link: Link,
-    namespace: NamespaceIdentity,
+    pub(crate) link: Link,
+    pub(crate) namespace: NamespaceIdentity,
 }
 impl DownLink {
     pub fn index(&self) -> u32 {
@@ -89,8 +89,8 @@ impl DownLink {
 /// }
 /// ```
 pub struct VethPair {
-    host: DownLink,
-    transport: DownLink,
+    pub(crate) host: DownLink,
+    pub(crate) transport: DownLink,
 }
 impl VethPair {
     pub fn host(&self) -> &DownLink {
@@ -104,11 +104,11 @@ impl VethPair {
 /// These two native sockets stay bound to their construction namespace even
 /// when returned from a dedicated synchronous helper thread. No setns here.
 pub struct NativeNetwork {
-    plan: Plan,
-    route: Socket,
+    pub(crate) plan: Plan,
+    pub(crate) route: Socket,
     generic: Socket,
     family: Option<u16>,
-    namespace: NamespaceIdentity,
+    pub(crate) namespace: NamespaceIdentity,
 }
 impl NativeNetwork {
     /// Caller establishes trusted transport/data/host context before opening.
@@ -186,7 +186,7 @@ impl NativeNetwork {
         self.family = Some(ids[0]);
         Ok(ids[0])
     }
-    fn links(&mut self, end: Instant) -> Result<Vec<Link>> {
+    pub(crate) fn links(&mut self, end: Instant) -> Result<Vec<Link>> {
         let mut out = Vec::new();
         for b in self.route.request(
             N::GetLink(LinkMessage::default()),
@@ -202,7 +202,7 @@ impl NativeNetwork {
         }
         Ok(out)
     }
-    fn addresses(&mut self, end: Instant) -> Result<Vec<Address>> {
+    pub(crate) fn addresses(&mut self, end: Instant) -> Result<Vec<Address>> {
         let mut out = Vec::new();
         for family in [AddressFamily::Inet, AddressFamily::Inet6] {
             let mut m = AddressMessage::default();
@@ -219,7 +219,7 @@ impl NativeNetwork {
         }
         Ok(out)
     }
-    fn routes(&mut self, end: Instant) -> Result<Vec<Route>> {
+    pub(crate) fn routes(&mut self, end: Instant) -> Result<Vec<Route>> {
         let mut out = Vec::new();
         for family in [AddressFamily::Inet, AddressFamily::Inet6] {
             let mut m = RouteMessage::default();
@@ -236,7 +236,7 @@ impl NativeNetwork {
         }
         Ok(out)
     }
-    fn rules(&mut self, end: Instant) -> Result<Vec<Rule>> {
+    pub(crate) fn rules(&mut self, end: Instant) -> Result<Vec<Rule>> {
         let mut out = Vec::new();
         for family in [AddressFamily::Inet, AddressFamily::Inet6] {
             let mut m = RuleMessage::default();
@@ -295,14 +295,14 @@ impl NativeNetwork {
             wireguard,
         })
     }
-    fn absent(&mut self, name: &str, end: Instant) -> Result<()> {
+    pub(crate) fn absent(&mut self, name: &str, end: Instant) -> Result<()> {
         if self.links(end)?.iter().any(|l| l.name == name) {
             Err(Error::Foreign)
         } else {
             Ok(())
         }
     }
-    fn owned_down(&mut self, token: &DownLink, end: Instant) -> Result<Link> {
+    pub(crate) fn owned_down(&mut self, token: &DownLink, end: Instant) -> Result<Link> {
         if self.namespace != token.namespace {
             return Err(Error::NamespaceUnverified);
         }
@@ -314,6 +314,11 @@ impl NativeNetwork {
         if l != token.link
             || l.alias != self.plan.alias
             || l.up
+            || l.controller != 0
+            || !l.port_kind.is_empty()
+            || l.promiscuity != 0
+            || l.all_multicast != 0
+            || !l.alternate_names.is_empty()
             || ![
                 self.plan.wireguard_name(),
                 self.plan.host_name(),
@@ -336,7 +341,16 @@ impl NativeNetwork {
             .into_iter()
             .find(|l| l.name == name)
             .ok_or(Error::Absent)?;
-        if link.kind != kind || link.alias != self.plan.alias || link.up || link.mtu != 1420 {
+        if link.kind != kind
+            || link.alias != self.plan.alias
+            || link.up
+            || link.mtu != 1420
+            || link.controller != 0
+            || !link.port_kind.is_empty()
+            || link.promiscuity != 0
+            || link.all_multicast != 0
+            || !link.alternate_names.is_empty()
+        {
             #[cfg(test)]
             eprintln!(
                 "LAB_NEW_TOKEN_MISMATCH index={} kind_matches={} alias_matches={} up={} mtu={}",
@@ -370,6 +384,11 @@ impl NativeNetwork {
             || link.up
             || link.mtu != 1420
             || link.hardware_type != hardware
+            || link.controller != 0
+            || !link.port_kind.is_empty()
+            || link.promiscuity != 0
+            || link.all_multicast != 0
+            || !link.alternate_names.is_empty()
             || (!link.alias.is_empty() && link.alias != self.plan.alias)
         {
             return Err(Error::Foreign);
@@ -390,7 +409,7 @@ impl NativeNetwork {
         m.attributes.push(L::IfAlias(self.plan.alias.clone()));
         self.link_mutation(N::SetLink(m), end)
     }
-    fn link_mutation(&mut self, m: N, end: Instant) -> Result<()> {
+    pub(crate) fn link_mutation(&mut self, m: N, end: Instant) -> Result<()> {
         self.route
             .request(m, 0, 16, Completion::Ack, end)
             .map(|_| ())
@@ -463,7 +482,7 @@ impl NativeNetwork {
         self.owned_down(&token, end)?;
         complete(end, token)
     }
-    fn configuration(&mut self, index: u32, end: Instant) -> Result<()> {
+    pub(crate) fn configuration(&mut self, index: u32, end: Instant) -> Result<()> {
         let w = self.wireguard(index, end)?;
         if w.name != self.plan.wireguard_name()
             || w.public_key != self.plan.public_key
@@ -648,6 +667,11 @@ mod tests {
                 mtu: 1420,
                 alias: plan.alias.clone(),
                 hardware_type: 1,
+                controller: 0,
+                port_kind: String::new(),
+                promiscuity: 0,
+                all_multicast: 0,
+                alternate_names: Vec::new(),
             },
             namespace,
         };

@@ -6,6 +6,14 @@ use vprouter_core::{
     profile::public_ipv4,
 };
 
+/// Exact enforced packet policy. Readiness is represented for oracle comparison;
+/// this slice grants no readiness authority to the guard transport.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Stage {
+    Offline,
+    Bootstrap,
+    Ready,
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Scope {
     Data,
@@ -42,6 +50,7 @@ pub struct Policy {
     pub(crate) wan: String,
     pub(crate) transport_ip: Ipv4Addr,
     pub(crate) subnet: Ipv4Addr,
+    pub(crate) producer: Option<std::sync::Arc<crate::SocketProducer>>,
 }
 impl Policy {
     /// Caller must independently observe link ownership/kind and namespace identity.
@@ -95,7 +104,17 @@ impl Policy {
             wan: wan.into(),
             transport_ip,
             subnet,
+            producer: None,
         })
+    }
+    pub fn with_producer(
+        mut self,
+        producer: std::sync::Arc<crate::SocketProducer>,
+    ) -> Result<Self> {
+        producer.verify()?;
+        // Namespace identity is checked again against the actual nft socket open.
+        self.producer = Some(producer);
+        Ok(self)
     }
     pub fn scope(&self) -> Scope {
         self.scope
@@ -230,6 +249,87 @@ impl Policy {
         }
         t
     }
+    /// Same owned quarantine table identity, atomically replaced as a whole.
+    /// Bootstrap admits namespace-local WireGuard control/health and encrypted
+    /// endpoint UDP only. Its data FORWARD chain has no ACCEPT rule.
+    pub(crate) fn emergency_table(&self) -> Table {
+        let mut t = self.table(true);
+        t.name.push_str("_e");
+        t
+    }
+    pub(crate) fn bootstrap_table(&self) -> Table {
+        let mut t = self.table(true);
+        for c in &mut t.chains {
+            match self.scope {
+                Scope::Data if c.name == "input" || c.name == "output" => {
+                    let wg = self
+                        .allocation
+                        .wireguard_interface
+                        .as_deref()
+                        .expect("mullvad");
+                    let mut rule = vec![
+                        meta_eq(15, &[2]),
+                        meta_name(if c.name == "output" { 7 } else { 6 }, wg),
+                        meta_name(if c.name == "output" { 27 } else { 26 }, "wireguard"),
+                    ];
+                    if c.name == "input" {
+                        rule.push(established());
+                    }
+                    if let Some(owner) = &self.producer {
+                        // INPUT too: an established legacy application stream
+                        // must not keep receiving during bootstrap.
+                        rule.push(socket_owner(owner.id(), owner.level()));
+                    } else {
+                        continue;
+                    } // no caller/synthetic fallback authority
+                    rule.push(verdict(1));
+                    c.rule(rule);
+                }
+                Scope::Transport => self.transport_rules(c),
+                Scope::Host if c.name == "forward" => {
+                    // Must precede quarantine's veth/subnet drop rules.
+                    c.rules.insert(0, flatten(self.flow(true, true)));
+                    c.rules.insert(0, flatten(self.flow(false, true)));
+                }
+                _ => {}
+            }
+        }
+        t
+    }
+    /// Each independent filter remains restricted if its sibling is removed.
+    /// Only the later readiness owner can choose the Ready representation.
+    pub(crate) fn permit_stage_table(&self, stage: Stage) -> Table {
+        if stage == Stage::Ready {
+            return self.table(false);
+        }
+        let mut table = self.stage_table(stage);
+        table.name = self.name(false);
+        for chain in &mut table.chains {
+            chain.priority = -150;
+        }
+        if stage == Stage::Bootstrap {
+            table.chains.extend(
+                self.table(false)
+                    .chains
+                    .into_iter()
+                    .filter(|c| c.kind == "nat"),
+            );
+        }
+        table
+    }
+    pub(crate) fn stage_table(&self, stage: Stage) -> Table {
+        match stage {
+            Stage::Offline => self.table(true),
+            Stage::Bootstrap => self.bootstrap_table(),
+            Stage::Ready => self.table(false),
+        }
+    }
+    pub(crate) fn binding(&self) -> String {
+        format!(
+            "vprouter-v2:{}:{}:{}",
+            self.deployment, self.generation, self.allocation.exit_id
+        )
+    }
     fn data_rules(&self, c: &mut Chain) {
         let wg = self
             .allocation
@@ -292,7 +392,7 @@ impl Policy {
             c.rules.last_mut().expect("rule").push(verdict(1));
         }
     }
-    fn flow(&self, reverse: bool, host: bool) -> Vec<Attr> {
+    pub(crate) fn flow(&self, reverse: bool, host: bool) -> Vec<Attr> {
         let mut a = vec![meta_eq(15, &[2]), meta_eq(16, &[17])];
         if host {
             a.push(meta_name(if reverse { 6 } else { 7 }, &self.wan));
@@ -357,7 +457,7 @@ impl Chain {
         self.rules.push(flatten(parts));
     }
 }
-fn flatten(parts: Vec<Attr>) -> Vec<Attr> {
+pub(crate) fn flatten(parts: Vec<Attr>) -> Vec<Attr> {
     parts
         .into_iter()
         .flat_map(|a| {
@@ -432,6 +532,12 @@ fn network(source: bool, addr: Ipv4Addr, prefix: u8) -> Attr {
         payload(1, if source { 12 } else { 16 }, 4),
         bitwise(&(u32::MAX << (32 - prefix)).to_be_bytes()),
         compare(&addr.octets(), false),
+    ])
+}
+pub(crate) fn socket_owner(id: u64, level: u32) -> Attr {
+    bundle(vec![
+        expr("socket", vec![u32a(1, 3), u32a(2, 1), u32a(3, level)]),
+        compare(&id.to_ne_bytes(), false),
     ])
 }
 fn established() -> Attr {
@@ -514,6 +620,7 @@ mod tests {
         sport: u16,
         dport: u16,
         state: u32,
+        owner: Option<u64>,
     }
     fn base() -> Packet<'static> {
         Packet {
@@ -528,6 +635,7 @@ mod tests {
             sport: 12345,
             dport: 443,
             state: 0,
+            owner: None,
         }
     }
     // Independent small evaluator for this supported UAPI subset. Policy assertions
@@ -557,6 +665,15 @@ mod tests {
                             16 => vec![p.proto],
                             _ => panic!("unsupported meta"),
                         }
+                    }
+                    "socket" => {
+                        assert_eq!(be32(get(&data, 1).unwrap()).unwrap(), 3);
+                        assert_eq!(be32(get(&data, 3).unwrap()).unwrap(), 3);
+                        let Some(id) = p.owner else {
+                            matches = false;
+                            break;
+                        };
+                        reg = id.to_ne_bytes().to_vec();
                     }
                     "ct" => reg = p.state.to_ne_bytes().to_vec(),
                     "payload" => {
@@ -765,6 +882,42 @@ mod tests {
                 p.iif = "unrelated";
                 assert_eq!(eval(&t.chains[0], &p), 1);
             }
+        }
+    }
+    #[test]
+    fn bootstrap_binds_both_directions_to_socket_producer_and_never_forwards_apps() {
+        let mut policy = fixture(Scope::Data);
+        policy.producer = Some(crate::producer::fixture(77));
+        for t in [
+            policy.stage_table(Stage::Bootstrap),
+            policy.permit_stage_table(Stage::Bootstrap),
+        ] {
+            let mut p = base();
+            p.oif = policy.allocation.wireguard_interface.as_deref().unwrap();
+            p.owner = Some(77);
+            assert_eq!(eval(&chain(&t, "output"), &p), 1);
+            assert_eq!(eval(&chain(&t, "forward"), &p), 0);
+            for owner in [None, Some(78)] {
+                p.owner = owner;
+                assert_eq!(eval(&chain(&t, "output"), &p), 0);
+            }
+            p.iif = p.oif;
+            p.ikind = "wireguard";
+            p.state = 2;
+            // An already established legacy flow still cannot deliver INPUT.
+            for owner in [None, Some(78)] {
+                p.owner = owner;
+                assert_eq!(eval(&chain(&t, "input"), &p), 0);
+            }
+            p.owner = Some(77);
+            assert_eq!(eval(&chain(&t, "input"), &p), 1);
+            p.family = 10;
+            assert_eq!(eval(&chain(&t, "input"), &p), 0);
+            assert_eq!(eval(&chain(&t, "output"), &p), 0);
+            let closed = fixture(Scope::Data).bootstrap_table();
+            p.family = 2;
+            assert_eq!(eval(&chain(&closed, "input"), &p), 0);
+            assert_eq!(eval(&chain(&closed, "output"), &p), 0);
         }
     }
     #[test]

@@ -1,7 +1,7 @@
 use crate::{
     Error, Result,
     codec::*,
-    policy::{Policy, Table},
+    policy::{Policy, Stage, Table},
     socket::Socket,
 };
 use serde::Serialize;
@@ -24,8 +24,13 @@ pub enum Reconciliation {
 /// Operates only within the socket's namespace. Namespace admission and lifecycle
 /// belong to the future guard, not this component. No CLI/runtime is activated.
 pub struct Actuator {
-    socket: Socket,
+    pub(crate) socket: Socket,
     policy: Policy,
+    quarantine_stage: Stage,
+    permit_stage: Stage,
+    namespace: (u64, u64),
+    emergency: Socket,
+    cooperation: Option<crate::cooperation::Cooperation>,
 }
 struct Snapshot {
     generation: u32,
@@ -34,10 +39,52 @@ struct Snapshot {
 }
 impl Actuator {
     pub fn open(policy: Policy) -> Result<Self> {
+        use std::os::unix::fs::MetadataExt;
+        let before =
+            std::fs::metadata("/proc/thread-self/ns/net").map_err(|_| Error::InvalidInput)?;
+        let socket = Socket::open()?;
+        let emergency = Socket::open()?;
+        let after =
+            std::fs::metadata("/proc/thread-self/ns/net").map_err(|_| Error::InvalidInput)?;
+        if (before.dev(), before.ino()) != (after.dev(), after.ino()) {
+            return Err(Error::InvalidInput);
+        }
+        if let Some(producer) = &policy.producer {
+            if policy.scope() != crate::Scope::Data
+                || !producer.matches(&policy.binding(), (before.dev(), before.ino()))
+            {
+                return Err(Error::InvalidAllocation);
+            }
+            producer.verify()?;
+        }
         Ok(Self {
-            socket: Socket::open()?,
+            socket,
             policy,
+            quarantine_stage: Stage::Offline,
+            permit_stage: Stage::Ready,
+            namespace: (before.dev(), before.ino()),
+            emergency,
+            cooperation: None,
         })
+    }
+    /// Kernel feature probe: create+validate+delete one exclusively owned table
+    /// in ONE atomic transaction. No table/rule becomes externally installed.
+    /// Fails before retained policy/link/cgroup installation, no fallback.
+    pub fn preflight_socket_cgroup(policy: &Policy) -> Result<()> {
+        let mut socket = Socket::open()?;
+        let end = Self::deadline();
+        let generation = socket.generation(end)?;
+        let mut table = policy.table(true);
+        table.name.push_str("_probe");
+        table.chains.truncate(1);
+        table.chains[0]
+            .rules
+            .push(crate::policy::flatten(vec![crate::policy::socket_owner(
+                0, 3,
+            )]));
+        let mut ops = table.operations();
+        ops.push(delete(&table));
+        socket.batch(&ops, generation, end)
     }
     fn deadline() -> Instant {
         Instant::now() + Duration::from_secs(5)
@@ -50,18 +97,119 @@ impl Actuator {
         }
     }
     pub fn install_quarantine(&mut self) -> Result<()> {
-        self.quarantine(Self::deadline())
+        // A failed exchange must not disable independent quarantine restoration.
+        // Both descriptors were opened in this exact namespace before activation.
+        if self.socket.poisoned() && !self.emergency.poisoned() {
+            std::mem::swap(&mut self.socket, &mut self.emergency);
+        }
+        let end = Self::deadline();
+        // A distinct preallocated policy identity restores full containment even
+        // if the main quarantine table has been removed, changed, or its last
+        // atomic ACK was lost. Never overwrite the changed resource itself.
+        let generation = self.socket.generation(end)?;
+        let emergency = self.policy.emergency_table();
+        match self.inspect_table(&emergency, end)? {
+            Reconciliation::Matching => {}
+            Reconciliation::Absent => {
+                self.socket
+                    .batch(&emergency.operations(), generation, end)?
+            }
+            Reconciliation::Foreign => return Err(Error::Foreign),
+            _ => return Err(Error::Drifted),
+        }
+        require(
+            self.inspect_table(&emergency, end)?,
+            Reconciliation::Matching,
+        )?;
+        self.quarantine(end)
+    }
+    pub(crate) fn install_cooperation(&mut self) -> Result<()> {
+        if self.policy.scope() != crate::Scope::Host {
+            return Err(Error::InvalidInput);
+        }
+        if self.quarantine_stage != Stage::Offline || self.reconcile().0 != Reconciliation::Matching
+        {
+            return Err(Error::QuarantineRequired);
+        }
+        if self.cooperation.is_some() {
+            return self.verify_cooperation();
+        }
+        self.cooperation = Some(crate::cooperation::Cooperation::install(
+            &mut self.socket,
+            &self.policy,
+            Self::deadline(),
+        )?);
+        Ok(())
+    }
+    pub(crate) fn verify_cooperation(&mut self) -> Result<()> {
+        self.cooperation
+            .as_ref()
+            .ok_or(Error::Drifted)?
+            .verify(&mut self.socket, Self::deadline())
+    }
+    pub(crate) fn cleanup_cooperation(&mut self) -> Result<()> {
+        if let Some(c) = &self.cooperation {
+            c.cleanup(&mut self.socket, Self::deadline())?;
+        }
+        self.cooperation = None;
+        Ok(())
+    }
+    pub(crate) fn namespace(&self) -> (u64, u64) {
+        self.namespace
+    }
+    pub(crate) fn policy(&self) -> &Policy {
+        &self.policy
+    }
+    pub(crate) fn stage(&self) -> Stage {
+        self.quarantine_stage
+    }
+    pub(crate) fn verify_emergency(&mut self) -> Result<()> {
+        require(
+            self.inspect_table(&self.policy.emergency_table(), Self::deadline())?,
+            Reconciliation::Matching,
+        )
+    }
+    pub(crate) fn verify_producer(&self) -> Result<()> {
+        if let Some(p) = &self.policy.producer {
+            p.verify()?;
+        }
+        Ok(())
+    }
+    pub(crate) fn install_bootstrap(&mut self) -> Result<()> {
+        let end = Self::deadline();
+        if self.quarantine_stage != Stage::Offline || self.permit_stage != Stage::Bootstrap {
+            return Err(Error::QuarantineRequired);
+        }
+        let s = self.snapshot(end)?;
+        require(s.quarantine, Reconciliation::Matching)?;
+        require(s.permit, Reconciliation::Matching)?;
+        require(
+            self.inspect_table(&self.policy.emergency_table(), end)?,
+            Reconciliation::Matching,
+        )?;
+        let mut ops = vec![
+            delete(&self.policy.table(true)),
+            delete(&self.policy.emergency_table()),
+        ];
+        ops.extend(self.policy.bootstrap_table().operations());
+        self.socket.batch(&ops, s.generation, end)?;
+        self.quarantine_stage = Stage::Bootstrap;
+        let s = self.snapshot(end)?;
+        require(s.quarantine, Reconciliation::Matching)?;
+        require(s.permit, Reconciliation::Matching)
     }
     fn quarantine(&mut self, deadline: Instant) -> Result<()> {
         let s = self.snapshot(deadline)?;
         match s.quarantine {
-            Reconciliation::Matching => Ok(()),
-            Reconciliation::Absent => {
-                self.socket.batch(
-                    &self.policy.table(true).operations(),
-                    s.generation,
-                    deadline,
-                )?;
+            Reconciliation::Matching if self.quarantine_stage == Stage::Offline => Ok(()),
+            Reconciliation::Matching | Reconciliation::Absent => {
+                let mut ops = Vec::new();
+                if s.quarantine == Reconciliation::Matching {
+                    ops.push(delete(&self.policy.stage_table(self.quarantine_stage)));
+                }
+                ops.extend(self.policy.table(true).operations());
+                self.socket.batch(&ops, s.generation, deadline)?;
+                self.quarantine_stage = Stage::Offline;
                 require(
                     self.snapshot(deadline)?.quarantine,
                     Reconciliation::Matching,
@@ -74,6 +222,12 @@ impl Actuator {
     /// Quarantine is installed first and remains on any create/replace/verify error.
     /// Replacing drifted or foreign state is refused; it needs operator investigation.
     pub fn install_permit(&mut self) -> Result<()> {
+        self.install_permit_stage(Stage::Ready)
+    }
+    pub(crate) fn install_bootstrap_permit(&mut self) -> Result<()> {
+        self.install_permit_stage(Stage::Bootstrap)
+    }
+    fn install_permit_stage(&mut self, stage: Stage) -> Result<()> {
         let deadline = Self::deadline();
         self.quarantine(deadline)?;
         let s = self.snapshot(deadline)?;
@@ -81,12 +235,15 @@ impl Actuator {
         let mut ops = Vec::new();
         match s.permit {
             Reconciliation::Absent => {}
-            Reconciliation::Matching => ops.push(delete(&self.policy.table(false))),
+            Reconciliation::Matching => {
+                ops.push(delete(&self.policy.permit_stage_table(self.permit_stage)))
+            }
             Reconciliation::Foreign => return Err(Error::Foreign),
             _ => return Err(Error::Drifted),
         }
-        ops.extend(self.policy.table(false).operations());
+        ops.extend(self.policy.permit_stage_table(stage).operations());
         self.socket.batch(&ops, s.generation, deadline)?;
+        self.permit_stage = stage;
         let s = self.snapshot(deadline)?;
         require(s.quarantine, Reconciliation::Matching)?;
         require(s.permit, Reconciliation::Matching)
@@ -94,7 +251,7 @@ impl Actuator {
     /// Change public endpoint/WAN under the same allocation. The old policy must
     /// match the kernel exactly; the caller cannot authorize replacement by name.
     pub fn replace_permit(&mut self, next: Policy) -> Result<()> {
-        if !self.policy.compatible(&next) {
+        if self.permit_stage != Stage::Ready || !self.policy.compatible(&next) {
             return Err(Error::InvalidAllocation);
         }
         let deadline = Self::deadline();
@@ -121,8 +278,18 @@ impl Actuator {
         if s.quarantine != Reconciliation::Matching {
             return Err(Error::QuarantineRequired);
         }
-        self.socket
-            .batch(&[delete(&self.policy.table(true))], s.generation, deadline)
+        if self.quarantine_stage != Stage::Offline {
+            return Err(Error::QuarantineRequired);
+        }
+        self.verify_emergency()?;
+        self.socket.batch(
+            &[
+                delete(&self.policy.table(true)),
+                delete(&self.policy.emergency_table()),
+            ],
+            s.generation,
+            deadline,
+        )
     }
     /// Ordinary shutdown removes only the verified permit table, leaving quarantine.
     /// Final quarantine cleanup intentionally has no API until namespace/link
@@ -145,7 +312,7 @@ impl Actuator {
     #[cfg(test)]
     pub(crate) fn diagnose(&mut self) {
         let deadline = Self::deadline();
-        let t = self.policy.table(false);
+        let t = self.policy.permit_stage_table(self.permit_stage);
         let result = (|| -> Result<()> {
             let all = self.socket.dump(1, &[], deadline)?;
             for m in &all {
@@ -205,50 +372,63 @@ impl Actuator {
             eprintln!("LAB_DIAG diagnostic_error={e:?}");
         }
     }
+    fn inspect_table(&mut self, expected: &Table, deadline: Instant) -> Result<Reconciliation> {
+        let tables = self.socket.dump(1, &[], deadline)?;
+        self.inspect_table_from(expected, &tables, deadline)
+    }
+    fn inspect_table_from(
+        &mut self,
+        expected: &Table,
+        tables: &[Message],
+        deadline: Instant,
+    ) -> Result<Reconciliation> {
+        let mut found = None;
+        for m in tables {
+            let a = nfattrs(m)?;
+            if text(get(&a, 1)?)? == expected.name {
+                if found.is_some() {
+                    return Err(Error::Foreign);
+                }
+                found = Some(a);
+            }
+        }
+        let Some(a) = found else {
+            return Ok(Reconciliation::Absent);
+        };
+        if get(&a, 6).ok() != Some(expected.marker.as_slice()) {
+            return Ok(Reconciliation::Foreign);
+        }
+        let chains = self.socket.scoped_dump(4, &expected.name, deadline)?;
+        let rules = self.socket.scoped_dump(7, &expected.name, deadline)?;
+        let mut extras = false;
+        for op in [10, 19, 23] {
+            if !self
+                .socket
+                .scoped_dump(op, &expected.name, deadline)?
+                .is_empty()
+            {
+                extras = true;
+            }
+        }
+        Ok(
+            if !extras && verify(expected, &a, &chains, &rules).is_ok() {
+                Reconciliation::Matching
+            } else {
+                Reconciliation::Drifted
+            },
+        )
+    }
     fn snapshot(&mut self, deadline: Instant) -> Result<Snapshot> {
         let generation = self.socket.generation(deadline)?;
         let tables = self.socket.dump(1, &[], deadline)?;
         let mut states = Vec::new();
         for quarantine in [true, false] {
-            let expected = self.policy.table(quarantine);
-            let mut found = None;
-            for m in &tables {
-                let a = nfattrs(m)?;
-                if text(get(&a, 1)?)? == expected.name {
-                    if found.is_some() {
-                        return Err(Error::Foreign);
-                    }
-                    found = Some(a);
-                }
-            }
-            let state = match found {
-                None => Reconciliation::Absent,
-                Some(a) => {
-                    if get(&a, 6).ok() != Some(expected.marker.as_slice()) {
-                        Reconciliation::Foreign
-                    } else {
-                        let chains = self.socket.scoped_dump(4, &expected.name, deadline)?;
-                        let rules = self.socket.scoped_dump(7, &expected.name, deadline)?;
-                        // Owned tables never contain sets, stateful objects or flowtables.
-                        // Their presence is functional drift even when no current rule uses them.
-                        let mut extras = false;
-                        for op in [10, 19, 23] {
-                            if !self
-                                .socket
-                                .scoped_dump(op, &expected.name, deadline)?
-                                .is_empty()
-                            {
-                                extras = true;
-                            }
-                        }
-                        if !extras && verify(&expected, &a, &chains, &rules).is_ok() {
-                            Reconciliation::Matching
-                        } else {
-                            Reconciliation::Drifted
-                        }
-                    }
-                }
+            let expected = if quarantine {
+                self.policy.stage_table(self.quarantine_stage)
+            } else {
+                self.policy.permit_stage_table(self.permit_stage)
             };
+            let state = self.inspect_table_from(&expected, &tables, deadline)?;
             states.push(state);
         }
         if self.socket.generation(deadline)? != generation {
@@ -357,7 +537,7 @@ fn verify(expected: &Table, table: &[Attr], chains: &[Message], rules: &[Message
 }
 // Attribute order is not semantic; expression and rule order are. Recursion is
 // limited to the known expression grammar (depth <=5), never attacker-controlled.
-fn canonical_exprs(exprs: &[Attr]) -> Result<Vec<Vec<u8>>> {
+pub(crate) fn canonical_exprs(exprs: &[Attr]) -> Result<Vec<Vec<u8>>> {
     if exprs.len() > 256 {
         return Err(Error::Oversized);
     }
@@ -373,6 +553,7 @@ fn canonical_exprs(exprs: &[Attr]) -> Result<Vec<Vec<u8>>> {
         let schema: &[(u16, u8)] = match name {
             "meta" => &[(1, 0), (2, 0)],
             "ct" => &[(1, 0), (2, 0)],
+            "socket" => &[(1, 0), (2, 0), (3, 0)],
             "payload" => &[(1, 0), (2, 0), (3, 0), (4, 0)],
             "cmp" => &[(1, 0), (2, 0), (3, 1)],
             "bitwise" => &[(1, 0), (2, 0), (3, 0), (4, 1), (5, 1), (6, 0)],

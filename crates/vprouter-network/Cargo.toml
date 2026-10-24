@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+vprouter-netfilter = { path = "../vprouter-netfilter" }
 vprouter-core = { path = "../vprouter-core" }
 rustix.workspace = true
 netlink-packet-core.workspace = true

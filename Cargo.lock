@@ -1356,6 +1356,9 @@ dependencies = [
  "tokio",
  "vprouter-core",
  "vprouter-linux",
+ "vprouter-netfilter",
+ "vprouter-network",
+ "x25519-dalek",
 ]
 
 [[package]]
@@ -1395,6 +1398,7 @@ dependencies = [
  "rustix",
  "serde_json",
  "vprouter-core",
+ "vprouter-netfilter",
  "x25519-dalek",
  "zeroize",
 ]

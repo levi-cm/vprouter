@@ -42,7 +42,7 @@ fn allocation(dir: &Path) -> Result<AllocationRecord> {
         .map_err(|_| Error::InvalidSpec)?;
     AllocationRecord::from_configuration(&cfg, 1).map_err(|_| Error::AllocationMismatch)
 }
-fn inspect(
+pub(super) fn inspect(
     id: &str,
     allocation: &AllocationRecord,
     exit: usize,

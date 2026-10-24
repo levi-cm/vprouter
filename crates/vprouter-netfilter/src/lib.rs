@@ -2,11 +2,16 @@
 #![forbid(unsafe_code)]
 mod actuator;
 mod codec;
+mod cooperation;
+mod enforcement;
 mod policy;
+mod producer;
 mod socket;
 
 pub use actuator::{Actuator, Reconciliation};
-pub use policy::{Endpoint, Policy, Scope};
+pub use enforcement::Enforcement;
+pub use policy::{Endpoint, Policy, Scope, Stage};
+pub use producer::SocketProducer;
 use serde::Serialize;
 
 /// Authored reason codes only: no kernel error text or offending packet escapes.

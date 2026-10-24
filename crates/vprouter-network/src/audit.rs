@@ -31,19 +31,43 @@ impl Plan {
         if !s.links.iter().any(|l| l.name == self.wireguard_name()) {
             return Audit::Absent;
         }
-        match self.check(s, expected_index, now_unix) {
+        match self.check(s, expected_index, now_unix, true) {
             Ok(()) => Audit::StructurallyValid,
             Err(e) => Audit::Rejected(e),
         }
     }
-    fn check(&self, s: &Snapshot, expected_index: u32, now: f64) -> Result<(), Error> {
+    pub(crate) fn bootstrap_structure(
+        &self,
+        s: &Snapshot,
+        expected_index: u32,
+    ) -> Result<(), Error> {
+        if s.links.iter().any(|l| l.name == "tailscale0") {
+            return Err(Error::Drifted);
+        }
+        self.check(s, expected_index, 1.0, false)
+    }
+    fn check(
+        &self,
+        s: &Snapshot,
+        expected_index: u32,
+        now: f64,
+        handshake: bool,
+    ) -> Result<(), Error> {
         if expected_index == 0 || !now.is_finite() || now <= 0.0 {
             return Err(Error::InvalidInput);
         }
         let mut indices = HashSet::new();
         let mut names = HashSet::new();
         for l in &s.links {
-            if !indices.insert(l.index) || !names.insert(&l.name) || l.index == 0 {
+            if !indices.insert(l.index)
+                || !names.insert(&l.name)
+                || l.index == 0
+                || l.controller != 0
+                || !l.port_kind.is_empty()
+                || l.promiscuity != 0
+                || l.all_multicast != 0
+                || !l.alternate_names.is_empty()
+            {
                 return Err(Error::Drifted);
             }
             let valid = if l.name == self.wireguard_name() {
@@ -73,7 +97,11 @@ impl Plan {
         let ts = s.links.iter().find(|l| l.name == "tailscale0");
         let mut addrs = HashSet::new();
         for a in &s.addresses {
-            if !addrs.insert((a.index, a.address, a.prefix, a.scope)) {
+            if a.broadcast.is_some()
+                || a.route_priority.is_some()
+                || a.flags & !0x80 != 0
+                || !addrs.insert((a.index, a.address, a.prefix, a.scope))
+            {
                 return Err(Error::Drifted);
             }
             let valid = if a.index == expected_index {
@@ -130,6 +158,9 @@ impl Plan {
         {
             return Err(Error::Drifted);
         }
+        if !handshake {
+            return Ok(());
+        }
         let time = p.handshake_unix.ok_or(Error::Drifted)?;
         let age = now - time;
         if !time.is_finite() || time <= 0.0 || !age.is_finite() || !(0.0..180.0).contains(&age) {
@@ -138,7 +169,7 @@ impl Plan {
         Ok(())
     }
 }
-fn same<T: PartialEq>(a: &[T], b: &[T]) -> bool {
+pub(crate) fn same<T: PartialEq>(a: &[T], b: &[T]) -> bool {
     a.len() == b.len()
         && a.iter()
             .all(|x| a.iter().filter(|y| *y == x).count() == b.iter().filter(|y| *y == x).count())
@@ -182,6 +213,8 @@ pub(crate) fn expected_routes(plan: &Plan, addresses: &[Address], lo: u32, wg: u
     let mut add =
         |destination: IpAddr, prefix, table, output, source, kind, scope, protocol, metric| {
             routes.push(Route {
+                nexthop_id: None,
+                preference: 0,
                 destination,
                 prefix,
                 table,

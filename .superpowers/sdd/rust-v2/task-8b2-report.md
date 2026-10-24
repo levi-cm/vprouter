@@ -237,3 +237,29 @@ regressions; launch/worker all-target clippy and fmt pass with the final code. S
 architectures are rebuilt and source-bound before root execution. Successful
 actual observer/LocalAPI, strict token-bound kernel shape and lifecycle remain
 pending; production launch/Placed/readiness stay refused.
+
+
+## Candidate11 fixed LocalAPI diagnostic alphabet
+
+Root frozen10 attempts15/16 remain FAILchild_failed, retained without weakening
+acceptance. Attempt15's getsockopt-only collector validates56 metadata traces and
+witnesses actual observer39000 receiving host credentials pid0/uid0/gid0; host
+38835 independently sees observer39000/uid65534/gid65534. Thus pinned raw-credential
+handling has fresh actual namespace evidence. Raw16 identifies observer39244
+finishing authenticated bootstrap, native metadata, a LocalAPI connection and TWO
+HTTP exchanges before exit1. No new post-bootstrap EPERM explains this refusal.
+Neither LocalAPI body nor daemon state was decoded by the controller collector.
+
+Candidate11 leaves all parsers and unenrolled predicates unchanged. Its fixed
+observation-only executable emits only a closed diagnostic alphabet on FD2:
+status4/Self-node4/prefs11 field type codes (missing0/null1/bool2/number3/string4/
+array5/object6), status4/prefs10 boolean predicates, or predefined JSON/parse
+refusal codes. Exact hardcoded relevant field lists exclude unknown keys and
+never emit values, lengths, IDs, paths, URLs, arbitrary errors or API bodies.
+The diagnostic type regression proves value/length/foreign-key changes cannot
+change type output; duplicate JSON and nonobject bodies remain rejected.
+No preference write, enrollment, advertisement, network-shape permission or
+readiness is added. Focused regression, full worker42 tests, fmt and all-target
+launch/worker clippy pass; botharchitecture fixed observers/init/payload/contexts
+are rebuilt before root uses a new exact source freeze. Runtime acceptance and
+strict live-bound kernel/lifecycle work remain pending.

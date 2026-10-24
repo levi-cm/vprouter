@@ -7,8 +7,8 @@
     {
       "role": "worker_observer",
       "path": "/usr/local/bin/vprouter-worker-observe",
-      "sha256": "a53a59714a943fe893a3fa20eae7244b5500bf0d4251dd6399620f3c03f74669",
-      "bytes": 2814528,
+      "sha256": "0c1a241ebb9a0ceb40e3947c30384ba9fd613d5a3c6924e8fe193189451238bb",
+      "bytes": 2832960,
       "policy": "observation-only-zero-caps-private-root-v2"
     },
     {
@@ -21,7 +21,7 @@
     {
       "role": "gateway_init",
       "path": "/usr/local/bin/vprouter-worker",
-      "sha256": "c3f5c363b7aeac6a71a5c73171bbf3b920bb7ef8b17faa195500c77916dd6380",
+      "sha256": "40812d2512da23ff7148678811b6b956f69b740a04d5ad82a87dbc95a8e92e94",
       "bytes": 575312,
       "policy": "inert-image-pid1-caps0-v1"
     }

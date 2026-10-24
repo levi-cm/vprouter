@@ -600,11 +600,7 @@ pub fn observe() -> Result<()> {
                     65536,
                 )
                 .await?;
-            if !crate::localapi::parse_status(&status.body)?.unenrolled()
-                || !crate::localapi::parse_prefs(&prefs.body)?.unenrolled()
-            {
-                return Err(Error::Identity);
-            }
+            crate::localapi::require_unenrolled(&status.body, &prefs.body)?;
             admitted.check()
         })
         .await

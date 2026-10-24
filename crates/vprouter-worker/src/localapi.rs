@@ -70,6 +70,110 @@ pub(crate) fn parse_status(bytes: &[u8]) -> Result<DaemonStatus> {
 pub(crate) fn parse_prefs(bytes: &[u8]) -> Result<Prefs> {
     json::decode(bytes)
 }
+// Fixed observation-only diagnostic alphabet. No field value, string, length,
+// identifier, URL, state or arbitrary key is emitted. This cannot grant access.
+fn diagnostic_type(value: Option<&serde_json::Value>) -> u8 {
+    match value {
+        None => 0,
+        Some(serde_json::Value::Null) => 1,
+        Some(serde_json::Value::Bool(_)) => 2,
+        Some(serde_json::Value::Number(_)) => 3,
+        Some(serde_json::Value::String(_)) => 4,
+        Some(serde_json::Value::Array(_)) => 5,
+        Some(serde_json::Value::Object(_)) => 6,
+    }
+}
+fn observation_types(bytes: &[u8], fields: &[&str]) -> Result<Vec<u8>> {
+    let value: serde_json::Value = json::decode(bytes)?;
+    let object = value.as_object().ok_or(Error::Malformed)?;
+    Ok(fields
+        .iter()
+        .map(|field| diagnostic_type(object.get(*field)))
+        .collect())
+}
+pub(crate) fn require_unenrolled(status: &[u8], prefs: &[u8]) -> Result<()> {
+    // These exact public field-name lists are deliberately closed. The decimal
+    // type/predicate alphabet is safe even if a daemon returns sensitive data.
+    let status_types =
+        observation_types(status, &["Version", "BackendState", "Self", "TailscaleIPs"])
+            .inspect_err(|_| eprintln!("observation_status_json_refused"))?;
+    eprintln!("observation_status_types={status_types:?}");
+    let status_json: serde_json::Value = json::decode(status)?;
+    let node = status_json
+        .get("Self")
+        .and_then(serde_json::Value::as_object);
+    let node_types: Vec<_> = ["ID", "Online", "ExitNodeOption", "TailscaleIPs"]
+        .iter()
+        .map(|field| diagnostic_type(node.and_then(|v| v.get(*field))))
+        .collect();
+    eprintln!("observation_status_node_types={node_types:?}");
+    let prefs_types = observation_types(
+        prefs,
+        &[
+            "WantRunning",
+            "LoggedOut",
+            "RouteAll",
+            "CorpDNS",
+            "AdvertiseRoutes",
+            "NetfilterMode",
+            "ExitNodeID",
+            "ExitNodeIP",
+            "NoStatefulFiltering",
+            "RunSSH",
+            "NoSNAT",
+        ],
+    )
+    .inspect_err(|_| eprintln!("observation_prefs_json_refused"))?;
+    eprintln!("observation_prefs_types={prefs_types:?}");
+    let status =
+        parse_status(status).inspect_err(|_| eprintln!("observation_status_parse_refused"))?;
+    let status_predicates = [
+        status.version_pinned(),
+        matches!(
+            status.backend_state.as_str(),
+            "NeedsLogin" | "Stopped" | "NoState"
+        ),
+        status.self_node.is_none(),
+        status.ips.is_empty(),
+    ];
+    eprintln!("observation_status_predicates={status_predicates:?}");
+    let prefs = parse_prefs(prefs).inspect_err(|_| eprintln!("observation_prefs_parse_refused"))?;
+    let prefs_predicates = [
+        !prefs.want_running,
+        !prefs.route_all,
+        !prefs.corp_dns,
+        prefs.netfilter_mode == 0,
+        !prefs.run_ssh,
+        prefs.no_snat,
+        prefs.exit_node_id.is_empty(),
+        prefs.exit_node_ip.is_empty(),
+        prefs.no_stateful_filtering,
+        prefs.advertise_routes.is_empty(),
+    ];
+    eprintln!("observation_prefs_predicates={prefs_predicates:?}");
+    if !status.unenrolled() || !prefs.unenrolled() {
+        return Err(Error::Identity);
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod diagnostic_tests {
+    #[test]
+    fn fixed_diagnostic_alphabet_retains_types_without_values_or_foreign_keys() {
+        use super::*;
+        let fields = ["Version", "BackendState", "Self", "TailscaleIPs"];
+        let a = br#"{"Version":"secret-a","BackendState":"state-a","Self":{"ID":"identity-a"},"TailscaleIPs":[],"foreign":"secret"}"#;
+        let b = br#"{"Version":"different-length-secret","BackendState":"state-b","Self":{"ID":"identity-b","other":false},"TailscaleIPs":["100.64.0.1"]}"#;
+        assert_eq!(observation_types(a, &fields).unwrap(), [4, 4, 6, 5]);
+        assert_eq!(observation_types(a, &fields), observation_types(b, &fields));
+        assert_eq!(
+            observation_types(br#"{"Self":null}"#, &fields).unwrap(),
+            [0, 0, 1, 0]
+        );
+        assert!(observation_types(br#"{"Self":null,"Self":{}}"#, &fields).is_err());
+        assert!(observation_types(b"[]", &fields).is_err());
+    }
+}
 #[derive(Clone)]
 pub(crate) struct Identity {
     pub node_id: String,

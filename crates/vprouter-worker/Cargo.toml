@@ -11,7 +11,7 @@ vprouter-network = { path = "../vprouter-network" }
 serde.workspace = true
 serde_json.workspace = true
 rustix.workspace = true
-tokio = { workspace = true, features = ["sync", "test-util"] }
+tokio = { workspace = true, features = ["sync"] }
 hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
@@ -22,6 +22,7 @@ webpki-roots.workspace = true
 hickory-proto.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "crypto"] }
 
 [[test]]

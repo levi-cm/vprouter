@@ -5,6 +5,8 @@
 mod actual;
 #[cfg(test)]
 pub mod actual_lab;
+#[allow(dead_code)]
+mod daemon;
 mod evidence;
 #[allow(dead_code)]
 mod execution;

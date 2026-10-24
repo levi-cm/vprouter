@@ -272,6 +272,12 @@ impl Child {
     pub fn pid(&self) -> u32 {
         self.pid
     }
+    pub fn require_live(&self) -> Result<()> {
+        if self.reaped || wait_ready(&self.pidfd, Duration::ZERO)? {
+            return Err(Error::PlacementFailed);
+        }
+        Ok(())
+    }
     /// Placement can move only this still-unreleased, live, unreaped child.
     /// The retained pidfd pins identity; no PID-only or caller proof is accepted.
     pub fn require_placement_gate(&self) -> Result<()> {
@@ -511,6 +517,23 @@ fn spawn_inner(
     actual: Option<Actual<'_>>,
 ) -> Result<Child> {
     process::single_threaded()?;
+    // These two fixed sources belong to the host guard's mount namespace.
+    // Clone them before setns(container.mount); open_tree cannot clone a source
+    // mount that is outside the current mount namespace. Detached trees may be
+    // transferred into the new private root without exposing their parents.
+    let placement_tree = actual
+        .and_then(|a| a.placement)
+        .map(clone_tree)
+        .transpose()?;
+    let localapi_tree = actual
+        .and_then(|a| a.localapi)
+        .map(clone_tree)
+        .transpose()?;
+    let actual = actual.map(|a| Actual {
+        placement: placement_tree.as_ref().map(AsFd::as_fd),
+        localapi: localapi_tree.as_ref().map(AsFd::as_fd),
+        ..a
+    });
     let state_tree = rustix::mount::open_tree(
         state,
         "",
@@ -519,6 +542,10 @@ fn spawn_inner(
             | rustix::mount::OpenTreeFlags::AT_EMPTY_PATH,
     )
     .map_err(|_| Error::MountStateClone)?;
+    let mut tree_fds = vec![state_tree.as_fd()];
+    tree_fds.extend(placement_tree.iter().map(AsFd::as_fd));
+    tree_fds.extend(localapi_tree.iter().map(AsFd::as_fd));
+    let _trees_inventory = super::inventory::Registration::owned(&tree_fds)?;
     let (release_r, release_w) = pipe()?;
     let (health_r, health_w) = pipe()?;
     let parent = std::process::id() as i32;
@@ -2384,6 +2411,9 @@ pub(super) fn gateway_init() -> Result<()> {
 
 // ---- Fixed actual Rust / Go private root and execution policy ----
 const DAEMON_CONFIG: &[u8] = br#"{"version":"alpha0","locked":true,"enabled":false,"acceptDNS":false,"acceptRoutes":false,"advertiseRoutes":[],"advertiseExitNode":false,"disableSNAT":true,"netfilterMode":"off","noStatefulFiltering":true,"runSSHServer":false,"runWebClient":false,"remoteConfig":false,"autoUpdate":{"Check":false,"Apply":false}}"#;
+pub(super) fn daemon_configuration() -> &'static [u8] {
+    DAEMON_CONFIG
+}
 struct ActualTrees {
     ca: OwnedFd,
     placement: Option<OwnedFd>,
@@ -2408,8 +2438,16 @@ impl ActualTrees {
         approved_null(null.as_fd())?;
         Ok(Self {
             ca: clone_tree(a.ca)?,
-            placement: a.placement.map(clone_tree).transpose()?,
-            localapi: a.localapi.map(clone_tree).transpose()?,
+            // Host sources were cloned before namespace entry. Retain only a
+            // CLOEXEC duplicate of each exact detached mount for move_mount.
+            placement: a
+                .placement
+                .map(|fd| fd.try_clone_to_owned().map_err(|_| Error::MountIsolation))
+                .transpose()?,
+            localapi: a
+                .localapi
+                .map(|fd| fd.try_clone_to_owned().map_err(|_| Error::MountIsolation))
+                .transpose()?,
             tun: a.tun.map(clone_tree).transpose()?,
             null: clone_tree(null)?,
         })

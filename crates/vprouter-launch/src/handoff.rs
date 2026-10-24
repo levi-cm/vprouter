@@ -243,6 +243,35 @@ impl<'g, 'a> Handoff<'g, 'a> {
             None,
         )
     }
+    pub fn pin_daemon(
+        &self,
+        bundle: &ReviewedBundle,
+        child: &super::kernel::Child,
+        pid: u32,
+    ) -> Result<super::daemon::LiveDaemon<'g, 'a>> {
+        self.verify()?;
+        super::daemon::LiveDaemon::pin(
+            self.admission,
+            self.transaction,
+            self.namespaces,
+            self.producer,
+            bundle,
+            child,
+            pid,
+            &self.config_digest,
+        )
+    }
+    pub fn verify_daemon(
+        &self,
+        bundle: &ReviewedBundle,
+        daemon: &mut super::daemon::LiveDaemon<'_, '_>,
+    ) -> Result<()> {
+        if let Err(error) = self.verify() {
+            daemon.revoke();
+            return Err(error);
+        }
+        daemon.verify(bundle, &self.config_digest)
+    }
     pub fn launch_observer(&self, bundle: &ReviewedBundle) -> Result<super::kernel::Child> {
         self.verify()?;
         super::actual::launch(

@@ -172,3 +172,31 @@ are rejected by focused offline regression; launch28tests and clippy pass.
 The inherited-FD pre-exec0..4 closure remains unchanged. Metadata from11 is
 transitional (TUN down then UP across dumps), so it is not adopted as a stable
 kernel baseline or readiness. Live-daemon token/structural admission remains work.
+
+
+## Candidate09 host mount provenance and retained daemon authority
+
+Root unchanged08 attempt12 passed actual Go UID/NET_ADMIN-only/LSM/seccomp/
+private-root/state/descriptor checks, then failed observer mount preparation.
+All52 raw metadata trace files identify observer helper37614 open_tree(fd5,
+AT_EMPTY_PATH|CLONE|CLOEXEC) EINVAL after successful executable and CA clones.
+The fixed host-owned placement directory was being cloned after entering the
+container mount namespace. Candidate09 clones only host placement/socket sources
+before namespace entry, registers their detached-tree descriptors, and duplicates
+those exact trees for private move_mount after entry. CA/TUN/null retain their
+container-view cloning. Neither parent path nor another state view is exposed.
+All controls and detached mounts still close before fixed exec.
+
+A new private LiveDaemon object is minted only after actual Go is live. It
+retains fixed executable/configuration descriptors, five namespace objects,
+pidfds/proc/starttimes for the exact three-parent chain ending in the launcher's
+retained unreaped Child, owned producer membership, initial UID/GID maps,
+post-exec65534 credentials, NET_ADMIN-only allfive capability sets, NNP/seccomp/LSM,
+manifest digest, protected bootstrap digest and generation-bound transaction.
+Revalidation checks these objects before/after metadata and observer execution;
+any error permanently revokes. Setup acknowledgements mint no such object.
+Ignored lifecycle now requires repeated refusal after actual daemon TERM/reap.
+No kernel-shape permission or readiness is added by this object. Pure parsing and
+credential fault regressions pass; launch30tests/clippy pass. Botharchitecture
+static artifacts/contexts are rebuilt after final source changes. Root runtime
+and all remaining structural/lifecycle acceptance remain pending.

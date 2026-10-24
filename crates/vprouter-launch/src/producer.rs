@@ -169,7 +169,7 @@ impl ProducerGroup {
             spec.container_id, self.name
         )
     }
-    fn membership(&self, pid: u32, proc: impl AsFd, spec: &LaunchSpec) -> Result<()> {
+    pub(super) fn membership(&self, pid: u32, proc: impl AsFd, spec: &LaunchSpec) -> Result<()> {
         if read(proc, "cgroup", 4096)? != self.path(spec)
             || read(&self.group, "cgroup.procs", 65536)?
                 .lines()

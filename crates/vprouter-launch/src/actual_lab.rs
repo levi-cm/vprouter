@@ -387,7 +387,13 @@ pub(super) fn run(
         std::thread::sleep(Duration::from_millis(10));
     };
     lab::stage("actual_daemon_live_socket_program_identified");
+    let mut daemon_authority = handoff.pin_daemon(&bundle, &daemon, daemon_pid)?;
+    if daemon_authority.pid() != daemon_pid {
+        return Err(Error::PlacementFailed);
+    }
+    lab::stage("actual_daemon_identity_pinned");
     super::transport_lab::actual_metadata(data_name, dir)?;
+    handoff.verify_daemon(&bundle, &mut daemon_authority)?;
     inspect(a, daemon_pid, true, dir)?;
     lab::case("actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds");
     lab::stage("actual_observer_authenticated_launch");
@@ -411,12 +417,18 @@ pub(super) fn run(
     lab::case(
         "actual_rust_protected_readonly_configuration_authenticated_one_use_peer_metadata_localapi",
     );
+    handoff.verify_daemon(&bundle, &mut daemon_authority)?;
     handoff.cleanup()?;
     if daemon.try_wait_success()? {
         return Err(Error::ChildFailed);
     }
     daemon.signal(libc::SIGTERM)?;
     wait_exit(&mut daemon)?;
+    if daemon_authority.revalidate(&bundle).is_ok() || daemon_authority.revalidate(&bundle).is_ok()
+    {
+        return Err(Error::PlacementFailed);
+    }
+    drop(daemon_authority);
     drop(daemon);
     drop(observer);
     if !pids(a)?.is_empty() {

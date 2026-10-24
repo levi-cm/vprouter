@@ -1,0 +1,150 @@
+{
+  "schema": 1,
+  "scope": "task8b2_actual_program_identity_free_local_vm_component",
+  "release_ready": false,
+  "production_changes": false,
+  "approved_identity_accessed": false,
+  "local_testing_only": true,
+  "source_commit_first_candidate": "61201d816e0a6bce97f598f9a9a2ed7d9cf3590c",
+  "context_scope": "six whitelisted public files and fixed directories; no profiles, identity state, Python, shell or lab SSH files",
+  "attempts": [
+    {
+      "attempt": 1,
+      "source_binding": {
+        "source_commit": "61201d816e0a6bce97f598f9a9a2ed7d9cf3590c",
+        "source_archive_sha256": "2b8f566240839723bf45ddf218648b465431cd6962ebf2c652d326b05e3f6cb3",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "8e5e6801bb6edbab4a2fb68901ba823d7ab2c4b1c207878c4c898fe2a8b31a2d"
+      },
+      "artifact_sha256": "e70445f18839ae8435a1d510815ba15e45c360cee57afa78bbb320ff5a6218a3",
+      "context_sha256": "10b801885fd9dd0385c779c78c2d272cf66d31ca70d0f3525704ce2b3c1c32ca",
+      "manifest_sha256": "de7e6eb5a0d23044c32d0ce824665b3384ab2b01c70a9d819a398cf07b90282c",
+      "image_id": "sha256:ca415d3fffced58cd79bd53ef760097f4b9eee4e439d9ebcf8b763b745645a23",
+      "image_layers": [
+        "sha256:f37c1d355aa81745433840d721e51b16357bae8e06022f877c3e8dfdfde7035c"
+      ],
+      "runner_sha256": "a2b7408f5e3f5a3ad68149df31dfa55df5cd5067b8c69aad8ada98f69f5d95f2",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 5.468,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "actual_lab: child_failed"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": false,
+      "actual_daemon_exec": "NOT_REACHED",
+      "actual_observer_exec": "NOT_REACHED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-1.json",
+      "private_run_record_sha256": "ac57b05d808c15126b5e464d4c78f5ed511091dec11e02360eb22665595131d2",
+      "private_inventory": "target/lab-state/actual-program-inspect-1.json",
+      "private_inventory_sha256": "ee9339cb3c736db590da49a010f647b366de6aa63f79f81f24add0f4463db4e6",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      }
+    },
+    {
+      "attempt": 2,
+      "source_binding": {
+        "source_commit": "61201d816e0a6bce97f598f9a9a2ed7d9cf3590c",
+        "source_archive_sha256": "2b8f566240839723bf45ddf218648b465431cd6962ebf2c652d326b05e3f6cb3",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "8e5e6801bb6edbab4a2fb68901ba823d7ab2c4b1c207878c4c898fe2a8b31a2d"
+      },
+      "artifact_sha256": "e70445f18839ae8435a1d510815ba15e45c360cee57afa78bbb320ff5a6218a3",
+      "context_sha256": "10b801885fd9dd0385c779c78c2d272cf66d31ca70d0f3525704ce2b3c1c32ca",
+      "manifest_sha256": "de7e6eb5a0d23044c32d0ce824665b3384ab2b01c70a9d819a398cf07b90282c",
+      "image_id": "sha256:ca415d3fffced58cd79bd53ef760097f4b9eee4e439d9ebcf8b763b745645a23",
+      "image_layers": [
+        "sha256:f37c1d355aa81745433840d721e51b16357bae8e06022f877c3e8dfdfde7035c"
+      ],
+      "runner_sha256": "fb2ffba4fd8ad252f0fed72131dadec00ca78d3fc871cb0a8a8aac0ec9b50aee",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 4.322,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "actual_lab: child_failed"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": true,
+      "actual_daemon_exec": "NOT_REACHED",
+      "actual_observer_exec": "NOT_REACHED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-2.json",
+      "private_run_record_sha256": "217d7f690f125bac4eedf1dbed6d8f047cd06c94d687be67a1abb162c2aad2f0",
+      "private_inventory": "target/lab-state/actual-program-inspect-2.json",
+      "private_inventory_sha256": "975c65aff89e79df4a3ba586c3856928ec1607b6de1fcf8734bc145e32598b3c",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      }
+    }
+  ],
+  "diagnosis": {
+    "status": "EVIDENCE_FOR_ORDERING_FIX_PENDING",
+    "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
+    "raw_trace_files": 34,
+    "quoted_decoded_strings_present": false,
+    "failing_child_trace": "syscall.33895",
+    "failing_child_sha256": "a7754e7d727fe0510177745045ae215c509b9af2b87174f917314aeaa82aa7e0",
+    "observation": "EROFS on open immediately after final private TUN file bind/remount; no execveat reached. Source actual_root attempts IPv6 sysctl writes through inherited readonly container proc after mount entry.",
+    "private_summary": "target/lab-state/actual-program-trace-2-summary.json",
+    "private_summary_sha256": "fbdc30501f13d035d1cd9f94b0ed5919fac9c6516f2c4dec36271014e04392dd"
+  },
+  "postfailure_attempt1": {
+    "verified_live_base_namespace": {
+      "dev": 4,
+      "ino": 4026536019
+    },
+    "data_interfaces": [
+      "lo",
+      "wg2eda3b61fe8a"
+    ],
+    "data_policy_tables": [
+      "vr_ce892eda3b61fe8a_dp",
+      "vr_ce892eda3b61fe8a_dq"
+    ],
+    "producer_group_empty": true,
+    "synthetic_wan_absent": true,
+    "namespace_pin_mount_persistence_outside_runner": "NOT_VERIFIED",
+    "ownership_records": "RETAINED",
+    "private_live_inventory": "target/lab-state/actual-program-live-data-1.json"
+  },
+  "remaining_gates": [
+    "actual_go_and_observer_execution",
+    "actual_daemon_metadata_admission",
+    "three_scope_capture_controls",
+    "signal_reaping_and_container_death",
+    "independent_spec_quality_review",
+    "autonomous_guard_protocol_and_readiness",
+    "real_tailscale_client_failure_matrix",
+    "all_platforms_migration_performance_release_gates"
+  ]
+}

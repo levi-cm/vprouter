@@ -90,7 +90,7 @@ def context_check(context, source):
                 assert 1 in kinds and not {2, 3}.intersection(kinds)
             inventory.append({'path': item.name, 'sha256': sha(data), 'bytes': len(data)})
     assert seen == expected | directories
-    return manifest_digest, inventory
+    return manifest_digest, inventory, entries['gateway_init']
 
 
 GUEST = r'''
@@ -119,6 +119,23 @@ for kind,mode in [('payload',0o555),('context.tar',0o600)]:
  if source.exists():source.unlink()
 net=pathlib.Path('/proc/self/ns/net').stat();init=pathlib.Path('/proc/1/ns/net').stat()
 assert (net.st_dev,net.st_ino)==(init.st_dev,init.st_ino)
+# Admission compares a separate protected host artifact with the container's
+# exact PID1 bytes. Preserve each content-addressed artifact; the first frozen
+# candidate alone also uses an exclusive legacy fixed path. Never replace it.
+with __import__('tarfile').open(root/('task8b2-'+config['context.tar']+'.context.tar')) as archive:
+ member=archive.getmember('rootfs/usr/local/bin/vprouter-worker')
+ assert member.isfile() and member.size==config['init_bytes']
+ data=archive.extractfile(member).read()
+ assert hashlib.sha256(data).hexdigest()==config['init_sha256']
+init_paths=[root/('task8b2-'+config['init_sha256']+'.gateway-init')]
+if config['legacy_fixed_init']:init_paths.append(root/'task8b2-gateway-init')
+for path in init_paths:
+ if path.exists():
+  regular(path,0o555);assert hashlib.sha256(path.read_bytes()).hexdigest()==config['init_sha256']
+ else:
+  fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o555)
+  with os.fdopen(fd,'wb') as out:out.write(data);out.flush();os.fsync(out.fileno())
+  regular(path,0o555)
 def run(args):
  r=subprocess.run(args,capture_output=True,text=True,timeout=8)
  assert r.returncode==0,(args,r.returncode,r.stderr[:4096])
@@ -155,7 +172,13 @@ try:
   with os.fdopen(fd,'w') as out:json.dump(content,out);out.flush();os.fsync(out.fileno())
   made.append((path,content))
  print(json.dumps({'preflight':'PASS','host_namespace':{'dev':net.st_dev,'ino':net.st_ino},'image_id':image_id,'image_layers':image['RootFS']['Layers'],'docker_forward_before':chain,'routes_before':routes,'addresses_before':addresses}),flush=True)
- result=subprocess.run(['timeout','--kill-after=3s','60s',str(root/('task8b2-'+config['payload']+'.payload')),'--ignored'],timeout=66)
+ argv=['timeout','--kill-after=3s','60s',str(root/('task8b2-'+config['payload']+'.payload')),'--ignored']
+ if config['raw_syscall_metadata']:
+  trace=root/('task8b2-trace-'+config['payload']+'-'+str(os.getpid()))
+  trace.mkdir(mode=0o700)
+  print(json.dumps({'trace_directory':str(trace),'trace_kind':'raw_syscall_arguments_no_decoded_buffers_or_environments'}),flush=True)
+  argv=['strace','-ff','-qq','-e','raw=all','-o',str(trace/'syscall'),'--',*argv]
+ result=subprocess.run(argv,timeout=66)
  print(json.dumps({'harness_exit_code':result.returncode,'docker_forward_after':json.loads(run(['nft','-j','list','chain','ip','filter','FORWARD']))}),flush=True)
 finally:
  for path,content in reversed(made):
@@ -165,8 +188,12 @@ raise SystemExit(result.returncode)
 
 
 def main():
-    assert len(sys.argv) == 8, 'usage: artifact sha256 source.tar sha256 context.tar sha256 full_source_commit'
-    artifact, digest, source, source_digest, context, context_digest, commit = sys.argv[1:]
+    assert 8 <= len(sys.argv) <= 10, 'usage: artifact sha256 source.tar sha256 context.tar sha256 full_source_commit [--legacy-fixed-init] [--raw-syscall-metadata]'
+    artifact, digest, source, source_digest, context, context_digest, commit = sys.argv[1:8]
+    options = set(sys.argv[8:])
+    assert len(options) == len(sys.argv[8:]) and options <= {'--legacy-fixed-init', '--raw-syscall-metadata'}
+    legacy_fixed_init = '--legacy-fixed-init' in options
+    raw_syscall_metadata = '--raw-syscall-metadata' in options
     assert re.fullmatch('[a-f0-9]{40}', commit)
     for path, expected in ((artifact, digest), (source, source_digest), (context, context_digest)):
         assert re.fullmatch('[a-f0-9]{64}', expected)
@@ -174,7 +201,7 @@ def main():
     binding = json.loads(subprocess.check_output([
         sys.executable, 'tools/verify-frozen-build-inputs.py', source, commit
     ]))
-    manifest_digest, inventory = context_check(context, source)
+    manifest_digest, inventory, init = context_check(context, source)
     base = pathlib.Path('target/lab-state')
     for path, expected, suffix in ((artifact, digest, 'payload'), (source, source_digest, 'source.tar'),
                                    (context, context_digest, 'context.tar')):
@@ -196,7 +223,9 @@ def main():
                             'vprouterlab@127.0.0.1:/home/vprouterlab/task8b2-' + expected],
                            check=True, timeout=30, capture_output=True, text=True)
         guest = GUEST.replace('CONFIGURATION', repr({
-            'payload': digest, 'context.tar': context_digest, 'manifest': manifest_digest
+            'payload': digest, 'context.tar': context_digest, 'manifest': manifest_digest,
+            'init_sha256': init['sha256'], 'init_bytes': init['bytes'],
+            'legacy_fixed_init': legacy_fixed_init, 'raw_syscall_metadata': raw_syscall_metadata,
         }))
         result = subprocess.run([*ssh, 'sudo unshare --mount --propagation private python3 -'],
                                 input=guest, capture_output=True, text=True, timeout=158)
@@ -216,6 +245,7 @@ def main():
         'stdout': stdout, 'stderr': stderr,
         'result': 'PASS_PARTIAL_ACTUAL_PROGRAMS' if code == 0 else 'FAIL',
         'real_client_acceptance': 'NOT_RUN', 'production_changes': False,
+        'raw_syscall_metadata': raw_syscall_metadata,
     }
     attempt = 1
     while (base / f'actual-program-run-{attempt}.json').exists():
@@ -225,7 +255,17 @@ def main():
         json.dump(evidence, out, indent=2)
         out.write('\n')
     path.chmod(0o600)
-    print(json.dumps(evidence, indent=2))
+    summary = {key: value for key, value in evidence.items() if key != 'stdout'}
+    summary['record'] = str(path)
+    summary['runtime_events'] = []
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if 'case' in event or 'trace_directory' in event:
+            summary['runtime_events'].append(event)
+    print(json.dumps(summary, indent=2))
     return 0 if code == 0 else 1
 
 

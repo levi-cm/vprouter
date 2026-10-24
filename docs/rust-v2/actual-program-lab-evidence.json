@@ -1381,10 +1381,198 @@
         ]
       },
       "observation": "Pinned fresh disabled daemon emits Self object and null top-level/Self TailscaleIPs. Required Vec parser rejects null. Fixed type vectors only; no API values, bodies, IDs or parser error text emitted. Strict unenrolled semantics still required; no admission relaxation."
+    },
+    {
+      "attempt": 18,
+      "source_binding": {
+        "source_commit": "263e8a7f2daf035c59dfa77dca89d27c063f445e",
+        "source_archive_sha256": "1d3a74dc7443631c80e4d918b46fb0dfbe38c2f7e08d51e09f3d72e6e717dca2",
+        "tracked_build_inputs_verified": 102,
+        "source_aggregate_sha256": "5c05d851c17bdbaf62f6df587534f4217d44ee5e0ec42b05b4376d7975de49c1"
+      },
+      "artifact_sha256": "839950a3b045d42c432b0eb85b63c3883c8903e2598e2189a00241d103eefbe0",
+      "context_sha256": "15746fb14d6eb67d3b69e9f32a405c064ed76ac7234a00ee8685b8db7e79a55a",
+      "manifest_sha256": "6ebaba352af9b24c50505e8a0cad389cfac5ce5256c177b81dd4ac424e7c93ac",
+      "image_id": "sha256:f519c18bccf9b0de5212446b2f79e52c5fbb3342dd5d39306747482a076b059b",
+      "image_layers": [
+        "sha256:1b9a69860f7bdf9f556d5ca5e13a9b04bbe870ee0d0bd5f2ad0fa7cb9e691356"
+      ],
+      "runner_sha256": "65dc3e0055bb61094a3e447d37f3a26b7fda5a81c8423513da14ca5fff215513",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 7.529,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+          "result": "pass"
+        },
+        {
+          "case": "actual_rust_protected_readonly_configuration_authenticated_one_use_peer_metadata_localapi",
+          "result": "pass"
+        },
+        {
+          "case": "actual_go_signal_forwarding_bounded_reaping_empty_group_parent_accounting_unchanged",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "LAB_STAGE actual_daemon_identity_pinned",
+        "LAB_STAGE actual_observer_authenticated_launch",
+        "actual_lab: network_operation"
+      ],
+      "result": "FAIL",
+      "stderr_diagnostic": true,
+      "actual_daemon_exec": "LIVE_CONFINEMENT_AND_SIGNAL_REAP_PASS",
+      "actual_observer_exec": "AUTHENTICATION_CONFINEMENT_READONLY_LOCALAPI_OBSERVATION_PASS",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-18.json",
+      "private_run_record_sha256": "dc826865147b706e6d7a88d96bb35f6eb721420c9037e221fba1da5ec8fd062d",
+      "private_inventory": "target/lab-state/actual-program-inspect-18.json",
+      "private_inventory_sha256": "c0ed2c3f147b0a282bc47eeb0ef7a769644332ea224903956c38a8dcf4611f84",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-stderr-trace-18-summary.json",
+      "trace_summary_sha256": "846ad9b6cfe95dc126d692df0a83256a6045f94d2907fe57c8d80e0d99afe5e9",
+      "trace_files": 54,
+      "closed_codebook_witness": {
+        "file": "syscall.40217",
+        "sha256": "3faaa931d809133cfb02b58c96316bbc3d5f69d761c9a600f9c296dcbd3455f0",
+        "bytes": 4089,
+        "lines": 92,
+        "classifications": [],
+        "public_observations": [
+          {
+            "code": "status_types",
+            "values": [
+              4,
+              4,
+              6,
+              1
+            ]
+          },
+          {
+            "code": "status_node_types",
+            "values": [
+              4,
+              2,
+              2,
+              1
+            ]
+          },
+          {
+            "code": "prefs_types",
+            "values": [
+              2,
+              2,
+              2,
+              2,
+              5,
+              3,
+              4,
+              4,
+              2,
+              2,
+              2
+            ]
+          },
+          {
+            "code": "status_node_predicates",
+            "values": [
+              true,
+              true,
+              true,
+              true
+            ]
+          },
+          {
+            "code": "status_predicates",
+            "values": [
+              true,
+              true,
+              true,
+              true
+            ]
+          },
+          {
+            "code": "prefs_predicates",
+            "values": [
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true
+            ]
+          }
+        ]
+      },
+      "private_live_inventory": "target/lab-state/actual-program-live-data-18.json",
+      "private_live_inventory_sha256": "5dce94e9a675c2a2fcab5ab9a8eb12b538e3bfdcd4c452f6bf6439fe70af116d",
+      "postdaemon_live_namespace": {
+        "dev": 4,
+        "ino": 4026537088
+      },
+      "postdaemon_links": [
+        "lo",
+        "wg6a4893d3b8f2"
+      ],
+      "postdaemon_rules4": [
+        {
+          "priority": 0,
+          "src": "all",
+          "table": "local"
+        },
+        {
+          "priority": 32766,
+          "src": "all",
+          "table": "main"
+        },
+        {
+          "priority": 32767,
+          "src": "all",
+          "table": "default"
+        }
+      ],
+      "postdaemon_rules6": [
+        {
+          "priority": 0,
+          "src": "all",
+          "table": "local"
+        },
+        {
+          "priority": 32766,
+          "src": "all",
+          "table": "main"
+        }
+      ],
+      "postdaemon_routes6": [],
+      "live_inventory_atomic_snapshot": false,
+      "observation": "Five cases pass including exact empty disabled Self, readonly observation, TERM forwarding/reaping/empty producer and unchanged parent controls. Guard post-daemon audit fails network_operation. Post-TERM data metadata has no TUN/residual daemon rules and no IPv6 routes; pre-activation baseline captured before later IPv6 suppression needs ordering repair, not learned-state adoption.",
+      "daemon_process_proof_sha256": "ff25c68c1cefcc4e11d12ff7e25024d96a15ef6a3744b989a6c6f0f2d17d373a",
+      "observer_process_proof_sha256": "67038cc1d1b11eb21516736511798554e98babefc79a1111969a5818a3e0ab41"
     }
   ],
   "diagnosis": {
-    "status": "ACTUAL_CONFINEMENT_AUTHENTICATION_PASS_UNENROLLED_NULL_IP_PARSER_MISMATCH",
+    "status": "ACTUAL_OBSERVATION_AND_SIGNAL_REAP_PASS_POSTDAEMON_NETWORK_AUDIT_PENDING",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

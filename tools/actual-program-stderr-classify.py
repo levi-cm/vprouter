@@ -25,10 +25,10 @@ directory=pathlib.Path(DIRECTORY);s=directory.lstat()
 assert directory.parent==root and stat.S_ISDIR(s.st_mode) and s.st_uid==s.st_gid==0 and stat.S_IMODE(s.st_mode)==0o700
 tokens=['fatal','error','failed','engine','tun','tuntap','iptables','nftables','route','bind','socket','permission denied','operation not permitted','read-only file system','no such file or directory','invalid argument','not supported','logpolicy','config','state','syspolicy','user','network','listen','wgengine','tpm','mkdir','ioctl','pipe','inotify','offload']
 def public_observations(text):
- shapes={'status_types':(4,int),'status_node_types':(4,int),'prefs_types':(11,int),'status_predicates':(4,bool),'prefs_predicates':(10,bool)}
+ shapes={'status_types':(4,int),'status_node_types':(4,int),'prefs_types':(11,int),'status_node_predicates':(4,bool),'status_predicates':(4,bool),'prefs_predicates':(10,bool)}
  rows=[]
  for line in text.splitlines():
-  match=re.fullmatch(r'observation_(status_types|status_node_types|prefs_types|status_predicates|prefs_predicates)=(\[[0-6truefals, ]+\])',line)
+  match=re.fullmatch(r'observation_(status_types|status_node_types|prefs_types|status_node_predicates|status_predicates|prefs_predicates)=(\[[0-6truefals, ]+\])',line)
   if match:
    key,encoded=match.groups()
    try:values=json.loads(encoded)

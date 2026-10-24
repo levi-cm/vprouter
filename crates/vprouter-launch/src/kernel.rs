@@ -210,30 +210,38 @@ impl Child {
         write_byte(&f, 1)
     }
     pub fn ready(&mut self) -> Result<()> {
-        if !wait_ready(&self.health, Duration::from_secs(5))? {
-            return Err(Error::Deadline);
+        let end = Instant::now() + Duration::from_secs(5);
+        let mut worker = false;
+        let mut init = false;
+        while !worker || !init {
+            let remaining = end.saturating_duration_since(Instant::now());
+            if remaining.is_zero() || !wait_ready(&self.health, remaining)? {
+                return Err(Error::Deadline);
+            }
+            match read_byte(&self.health)? {
+                1 => worker = true,
+                2 => init = true,
+                201 => return Err(Error::NamespaceOperation),
+                202 => return Err(Error::MountIsolation),
+                203 => return Err(Error::DescriptorPolicy),
+                204 => return Err(Error::CapabilityPolicy),
+                205 => return Err(Error::ConfinementPolicy),
+                210 => return Err(Error::MountContainerRoot),
+                211 => return Err(Error::MountPrivate),
+                212 => return Err(Error::MountTmp),
+                213 => return Err(Error::MountExecutable),
+                214 => return Err(Error::MountState),
+                215 => return Err(Error::MountPivot),
+                216 => return Err(Error::MountProc),
+                217 => return Err(Error::MountReadonly),
+                218 => return Err(Error::MountExecutableBind),
+                219 => return Err(Error::MountExecutableReadonly),
+                220 => return Err(Error::MountExecutableClone),
+                221 => return Err(Error::MountStateClone),
+                _ => return Err(Error::ChildFailed),
+            }
         }
-        match read_byte(&self.health)? {
-            1 => Ok(()),
-            201 => Err(Error::NamespaceOperation),
-            202 => Err(Error::MountIsolation),
-            210 => Err(Error::MountContainerRoot),
-            211 => Err(Error::MountPrivate),
-            212 => Err(Error::MountTmp),
-            213 => Err(Error::MountExecutable),
-            220 => Err(Error::MountExecutableClone),
-            221 => Err(Error::MountStateClone),
-            218 => Err(Error::MountExecutableBind),
-            219 => Err(Error::MountExecutableReadonly),
-            214 => Err(Error::MountState),
-            215 => Err(Error::MountPivot),
-            216 => Err(Error::MountProc),
-            217 => Err(Error::MountReadonly),
-            203 => Err(Error::DescriptorPolicy),
-            204 => Err(Error::CapabilityPolicy),
-            205 => Err(Error::ConfinementPolicy),
-            _ => Err(Error::ChildFailed),
-        }
+        Ok(())
     }
     pub fn signal(&self, sig: i32) -> Result<()> {
         send(&self.pidfd, sig)
@@ -282,14 +290,6 @@ pub(super) fn spawn(
     state: BorrowedFd<'_>,
 ) -> Result<Child> {
     process::single_threaded()?;
-    let executable_tree = rustix::mount::open_tree(
-        container.executable,
-        "",
-        rustix::mount::OpenTreeFlags::OPEN_TREE_CLONE
-            | rustix::mount::OpenTreeFlags::OPEN_TREE_CLOEXEC
-            | rustix::mount::OpenTreeFlags::AT_EMPTY_PATH,
-    )
-    .map_err(|_| Error::MountExecutableClone)?;
     let state_tree = rustix::mount::open_tree(
         state,
         "",
@@ -318,13 +318,7 @@ pub(super) fn spawn(
             if !wait_ready(&release_r, Duration::from_secs(5))? || read_byte(&release_r)? != 1 {
                 return Err(Error::PlacementFailed);
             }
-            container_stage(
-                container,
-                data,
-                executable_tree.as_fd(),
-                state_tree.as_fd(),
-                health_w.as_fd(),
-            )
+            container_stage(container, data, state_tree.as_fd(), health_w.as_fd())
         })();
         die(if result.is_ok() { 0 } else { 121 });
     }
@@ -407,7 +401,6 @@ fn attach_tree(tree: BorrowedFd<'_>, target: &str) -> Result<()> {
 fn container_stage(
     container: ContainerFds<'_>,
     data: BorrowedFd<'_>,
-    executable_tree: BorrowedFd<'_>,
     state: BorrowedFd<'_>,
     health: BorrowedFd<'_>,
 ) -> Result<()> {
@@ -422,7 +415,7 @@ fn container_stage(
     if inner == 0 {
         let r = (|| {
             parent_death(0)?;
-            setup(container, data, executable_tree, state, health)
+            setup(container, data, state, health)
         })();
         if let Err(e) = r {
             report_failure(health, e);
@@ -436,7 +429,6 @@ fn container_stage(
 fn setup(
     container: ContainerFds<'_>,
     data: BorrowedFd<'_>,
-    executable_tree: BorrowedFd<'_>,
     state: BorrowedFd<'_>,
     health: BorrowedFd<'_>,
 ) -> Result<()> {
@@ -449,6 +441,14 @@ fn setup(
     ] {
         enter(fd, kind)?;
     }
+    let executable_tree = rustix::mount::open_tree(
+        container.executable,
+        "",
+        rustix::mount::OpenTreeFlags::OPEN_TREE_CLONE
+            | rustix::mount::OpenTreeFlags::OPEN_TREE_CLOEXEC
+            | rustix::mount::OpenTreeFlags::AT_EMPTY_PATH,
+    )
+    .map_err(|_| Error::MountExecutableClone)?;
     // Bind root provenance after entering admitted container mount namespace.
     // SAFETY: pinned admitted root fd is a directory. chroot/fchdir affect this child only.
     cv(
@@ -489,7 +489,7 @@ fn setup(
         std::fs::create_dir(format!("/tmp/root/{d}")).map_err(|_| Error::MountPivot)?;
     }
     std::fs::File::create("/tmp/root/bin/vprouter-worker").map_err(|_| Error::MountPivot)?;
-    attach_tree(executable_tree, "/tmp/root/bin/vprouter-worker")
+    attach_tree(executable_tree.as_fd(), "/tmp/root/bin/vprouter-worker")
         .map_err(|_| Error::MountExecutableBind)?;
     mount(
         None,
@@ -647,8 +647,23 @@ fn supervise(health: BorrowedFd<'_>, set: &libc::sigset_t, parent: BorrowedFd<'_
     if wait_ready(parent, Duration::ZERO)? {
         return Err(Error::ChildFailed);
     }
-    close_except(&[])?;
-    seccomp()?;
+    close_except(&[health.as_raw_fd()])?;
+    if let Err(e) = seccomp() {
+        report_failure(health, e);
+        die(115);
+    }
+    if write_byte(health, 2).is_err() {
+        die(114);
+    }
+    // SAFETY: supervisor consumes its health descriptor and never unwinds these
+    // inherited FD owners. The signal/reap loop exits via _exit only.
+    unsafe {
+        libc::close(health.as_raw_fd());
+    }
+    let result = supervisor_loop(set, worker);
+    die(if result.is_ok() { 0 } else { 113 });
+}
+fn supervisor_loop(set: &libc::sigset_t, worker: i32) -> Result<()> {
     let mut deadline = None;
     let mut main_exited = false;
     loop {
@@ -1079,44 +1094,51 @@ fn worker_exec(executable: BorrowedFd<'_>, health: BorrowedFd<'_>) -> Result<()>
     let he = unsafe { BorrowedFd::borrow_raw(he) };
     dup_fixed(he, 3, false)?;
     dup_fixed(ex, 4, true)?;
-    close_except(&[3, 4])?;
-    lsm_exec()?;
-    reduce_privileges()?;
-    if unsafe { libc::getppid() } != 1 {
-        return Err(Error::ChildFailed);
+    let result = (|| -> Result<()> {
+        close_except(&[3, 4])?;
+        lsm_exec()?;
+        reduce_privileges()?;
+        if unsafe { libc::getppid() } != 1 {
+            return Err(Error::ChildFailed);
+        }
+        seccomp()?;
+        // Final inventory exact0..4; executable4 is CLOEXEC, health3 explicitly not.
+        final_fds(true)?;
+        // SAFETY: empty initialized set unblocks inherited blocked signals only in
+        // the worker, not PID1. Fixed argv/env are null-terminated pointer arrays.
+        let mut empty = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::sigemptyset(&mut empty);
+        }
+        cv(
+            unsafe { libc::sigprocmask(libc::SIG_SETMASK, &empty, std::ptr::null_mut()) },
+            Error::ChildFailed,
+        )?;
+        let args = [
+            c"vprouter-worker".as_ptr(),
+            c"--isolated-probe".as_ptr(),
+            std::ptr::null(),
+        ];
+        let env = [c"LANG=C".as_ptr(), c"PATH=/bin".as_ptr(), std::ptr::null()];
+        // SAFETY: FD4 is retained manifest-verified executable, CLOEXEC intentionally
+        // consumed by execveat AT_EMPTY_PATH. No pathname/argv/env comes from caller.
+        unsafe {
+            libc::syscall(
+                libc::SYS_execveat,
+                4,
+                c"".as_ptr(),
+                args.as_ptr(),
+                env.as_ptr(),
+                libc::AT_EMPTY_PATH,
+            );
+        }
+        Err(Error::ChildFailed)
+    })();
+    if let Err(e) = result {
+        let health = unsafe { BorrowedFd::borrow_raw(3) };
+        report_failure(health, e);
     }
-    seccomp()?;
-    // Final inventory exact0..4; executable4 is CLOEXEC, health3 explicitly not.
-    final_fds(true)?;
-    // SAFETY: empty initialized set unblocks inherited blocked signals only in
-    // the worker, not PID1. Fixed argv/env are null-terminated pointer arrays.
-    let mut empty = unsafe { std::mem::zeroed() };
-    unsafe {
-        libc::sigemptyset(&mut empty);
-    }
-    cv(
-        unsafe { libc::sigprocmask(libc::SIG_SETMASK, &empty, std::ptr::null_mut()) },
-        Error::ChildFailed,
-    )?;
-    let args = [
-        c"vprouter-worker".as_ptr(),
-        c"--isolated-probe".as_ptr(),
-        std::ptr::null(),
-    ];
-    let env = [c"LANG=C".as_ptr(), c"PATH=/bin".as_ptr(), std::ptr::null()];
-    // SAFETY: FD4 is retained manifest-verified executable, CLOEXEC intentionally
-    // consumed by execveat AT_EMPTY_PATH. No pathname/argv/env comes from caller.
-    unsafe {
-        libc::syscall(
-            libc::SYS_execveat,
-            4,
-            c"".as_ptr(),
-            args.as_ptr(),
-            env.as_ptr(),
-            libc::AT_EMPTY_PATH,
-        );
-    }
-    Err(Error::ChildFailed)
+    die(119)
 }
 fn final_fds(before_exec: bool) -> Result<()> {
     let expected = if before_exec { 5 } else { 4 };
@@ -1315,6 +1337,7 @@ pub(super) fn lab_parent_loss(
         match result {
             Ok(_running) => {
                 let _ = write_byte(&w, 1);
+                let _ = write_byte(&w, 2);
                 loop {
                     std::thread::sleep(Duration::from_secs(1));
                 }
@@ -1436,4 +1459,10 @@ mod policy_tests {
             0x00050001
         );
     }
+}
+#[cfg(test)]
+pub(super) fn probe_failure(error: Error) {
+    // SAFETY: post-exec probe owns fixed health FD3; only fixed enum byte emitted.
+    let fd = unsafe { BorrowedFd::borrow_raw(3) };
+    report_failure(fd, error);
 }

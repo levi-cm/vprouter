@@ -14,7 +14,8 @@ pub fn main() {
     let result = super::kernel::probe_verify()
         .and_then(|()| super::kernel::probe_descendant())
         .and_then(|()| super::kernel::probe_ready());
-    if result.is_err() {
+    if let Err(e) = result {
+        super::kernel::probe_failure(e);
         std::process::exit(117);
     }
     loop {

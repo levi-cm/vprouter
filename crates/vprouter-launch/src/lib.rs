@@ -1,8 +1,18 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 //! Descriptor-backed admission only. No namespace entry, mutation or execution.
 mod evidence;
+#[allow(dead_code)]
+mod execution;
+#[cfg(test)]
+pub mod execution_lab;
+#[allow(unsafe_code, dead_code)]
+mod kernel;
 #[cfg(test)]
 pub mod lab;
+#[allow(dead_code)]
+mod owned;
+#[cfg(test)]
+pub mod probe;
 mod process;
 mod spec;
 #[cfg(test)]
@@ -35,6 +45,17 @@ pub enum Error {
     NotSingleThreaded,
     LabRequired,
     LaunchUnavailable,
+    OwnershipMismatch,
+    LockBusy,
+    Interrupted,
+    NamespaceOperation,
+    PlacementFailed,
+    MountIsolation,
+    DescriptorPolicy,
+    CapabilityPolicy,
+    ConfinementPolicy,
+    ChildFailed,
+    Deadline,
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

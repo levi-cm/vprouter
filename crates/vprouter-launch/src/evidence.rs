@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 use super::{
     Error, Result,
     spec::{LaunchSpec, StagingEvidence, WORKER},

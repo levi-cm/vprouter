@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 use super::{
     Error, Result,
     spec::{LIMIT, LaunchSpec, StagingEvidence, WORKER, safe_absolute},
@@ -102,9 +103,15 @@ fn protected_path(path: &Path) -> Result<OwnedFd> {
 pub(super) fn single_threaded() -> Result<()> {
     let proc = open("/proc", DIR, Mode::empty()).map_err(|_| Error::UnsupportedPlatform)?;
     fs_type(&proc, PROC)?;
-    // Numeric PID avoids following /proc/self and any caller-supplied component.
-    let own = openat(&proc, std::process::id().to_string(), DIR, Mode::empty())
-        .map_err(|_| Error::ProcessUnavailable)?;
+    // Deliberate kernel procfs self link remains valid across PID namespaces;
+    // procfs was validated, and no caller path component is accepted.
+    let own = openat(
+        &proc,
+        "self",
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| Error::ProcessUnavailable)?;
     let task = openat(&own, "task", DIR, Mode::empty()).map_err(|_| Error::ProcessUnavailable)?;
     let mut entries = fs::Dir::read_from(&task).map_err(|_| Error::ProcessUnavailable)?;
     let mut count = 0;
@@ -398,6 +405,45 @@ impl PinnedProcess {
             return Err(Error::CgroupMismatch);
         }
         self.revalidate(spec, stage)
+    }
+    pub(super) fn launch_fds(&self) -> super::kernel::ContainerFds<'_> {
+        super::kernel::ContainerFds {
+            mount: self.namespaces[0].as_fd(),
+            pid: self.namespaces[2].as_fd(),
+            network: self.namespaces[1].as_fd(),
+            ipc: self.namespaces[5].as_fd(),
+            uts: self.namespaces[4].as_fd(),
+            cgroup_ns: self.namespaces[6].as_fd(),
+            root: self.root.as_fd(),
+            executable: self.executable.as_fd(),
+        }
+    }
+    #[allow(dead_code)]
+    pub(super) fn base_network(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.namespaces[1].as_fd()
+    }
+
+    pub(super) fn place(&self, pid: u32, spec: &LaunchSpec) -> Result<()> {
+        use std::io::Write;
+        let fd = openat(
+            &self.cgroup,
+            "cgroup.procs",
+            OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::PlacementFailed)?;
+        std::fs::File::from(fd)
+            .write_all(pid.to_string().as_bytes())
+            .map_err(|_| Error::PlacementFailed)?;
+        self.verify_placement(pid, spec)
+    }
+    pub(super) fn verify_placement(&self, pid: u32, spec: &LaunchSpec) -> Result<()> {
+        membership(&self.cgroup, pid).map_err(|_| Error::PlacementFailed)?;
+        let dir =
+            open(format!("/proc/{pid}"), DIR, Mode::empty()).map_err(|_| Error::PlacementFailed)?;
+        cgroup_path(&read_at(&dir, "cgroup", 4096)?, &spec.container_id)
+            .map_err(|_| Error::PlacementFailed)?;
+        alive(&self.pidfd)
     }
     pub(super) fn bind_container(&self, c: &LaunchContainer) -> Result<()> {
         if c.state.pid != self.pid || c.state.started_at != self.started_at {

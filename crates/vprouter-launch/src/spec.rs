@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 use super::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

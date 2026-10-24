@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 //! Custom test main: libtest's runner would add an extra OS task and defeat the
 //! exact-one-task admission invariant. Ordinary `cargo test` skips this lab.
 // The harness compiles private admission modules directly so synthetic staging

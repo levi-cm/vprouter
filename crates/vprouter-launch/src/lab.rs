@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! Test-only owned-guest harness. Not linked into the production library/helper.
 use super::{Admission, Error, LaunchSpec, Result, StagingEvidence, process, tests};
 use rustix::fs::{FileType, Mode, OFlags, fstat, open, openat};
@@ -9,10 +10,10 @@ use std::{
     process::Command,
 };
 use vprouter_linux::docker::DockerClient;
-const IMAGE: &str =
+pub(super) const IMAGE: &str =
     "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065";
 const PROBE: &str = "/var/lib/vprouter-v2-lab/launch-probe";
-fn admit_lab() -> Result<()> {
+pub(super) fn admit_lab() -> Result<()> {
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(Error::LabRequired);
     }
@@ -63,7 +64,7 @@ fn admit_lab() -> Result<()> {
     process::single_threaded()?;
     Ok(())
 }
-fn docker(args: &[&str]) -> Result<Vec<u8>> {
+pub(super) fn docker(args: &[&str]) -> Result<Vec<u8>> {
     // Fixed test-only native argv, never a shell. Output is never printed.
     let output = Command::new("docker")
         .args(args)
@@ -89,7 +90,7 @@ impl Drop for Disposable {
         let _ = fs::remove_dir_all(&self.dir);
     }
 }
-fn write(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(super) fn write(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut f = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -100,10 +101,10 @@ fn write(path: &Path, bytes: &[u8]) -> Result<()> {
         .and_then(|()| f.sync_all())
         .map_err(|_| Error::UnsafeInput)
 }
-fn case(s: &str) {
+pub(super) fn case(s: &str) {
     println!("{{\"case\":\"{s}\",\"result\":\"pass\"}}");
 }
-fn stage(s: &str) {
+pub(super) fn stage(s: &str) {
     eprintln!("LAB_STAGE {s}");
 }
 pub fn run() -> Result<()> {

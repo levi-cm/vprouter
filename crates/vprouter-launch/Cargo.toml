@@ -13,6 +13,7 @@ serde_json.workspace = true
 rustix.workspace = true
 sha2.workspace = true
 tokio.workspace = true
+libc = "=0.2.189"
 
 [[bin]]
 name = "vprouter-launch-admit"
@@ -21,4 +22,14 @@ path = "src/main.rs"
 [[test]]
 name = "admission_lab"
 path = "src/lab_main.rs"
+harness = false
+
+[[test]]
+name = "execution_probe"
+path = "src/execution_probe_main.rs"
+harness = false
+
+[[test]]
+name = "execution_lab"
+path = "src/execution_lab_main.rs"
 harness = false

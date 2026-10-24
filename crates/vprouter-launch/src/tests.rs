@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 use super::*;
 use serde_json::{Value, json};
 use vprouter_core::{allocation::AllocationRecord, config::Configuration};

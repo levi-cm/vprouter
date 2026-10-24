@@ -79,3 +79,14 @@ passed. The initial mutation exposed the missing explicit assertion and was not
 misreported as covered. Exact evidence is retained in controller-local
 /tmp/task8b2-clone3-{mutation,restored}-test.txt. Focused26tests and launch clippy
 pass. Fresh03 runtime, kernel-shape admission and container-death remain pending.
+
+## Candidate04 exact demonstrated Go thread clone
+
+Root attempt4 resolved PID1 sequencing and demonstrated pinned Go
+`clone(0xd0f00, stack, 0, 0, tls)` denied EPERM, followed by exit2. Candidate04
+admits only that additional canonical thread flag set (VM/FS/FILES/SIGHAND/THREAD/
+SYSVSEM/SETTLS), alongside prior exact sets; fork, signal-bearing or namespace
+variants and every upper-word bit remain denied and are regression checked.
+No general clone, clone3, exec, privilege, socket-family or mount allowance was
+added. Focused26tests and clippy pass; both static payload/image-input builds
+and post-payload init manifest verification pass. Further actual runtime pending.

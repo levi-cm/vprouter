@@ -2650,7 +2650,7 @@ fn runtime_filter(role: ActualRole) -> Vec<libc::sock_filter> {
         libc::sock_filter {
             code: 0x15,
             jt: 0,
-            jf: 7,
+            jf: 8,
             k: libc::SYS_clone as u32,
         },
         libc::sock_filter {
@@ -2662,7 +2662,7 @@ fn runtime_filter(role: ActualRole) -> Vec<libc::sock_filter> {
         libc::sock_filter {
             code: 0x15,
             jt: 0,
-            jf: 4,
+            jf: 5,
             k: 0,
         },
         libc::sock_filter {
@@ -2673,15 +2673,21 @@ fn runtime_filter(role: ActualRole) -> Vec<libc::sock_filter> {
         },
         libc::sock_filter {
             code: 0x15,
-            jt: 1,
+            jt: 2,
             jf: 0,
             k: 0x50f00,
         },
         libc::sock_filter {
             code: 0x15,
+            jt: 1,
+            jf: 0,
+            k: 0x3d0f00,
+        },
+        libc::sock_filter {
+            code: 0x15,
             jt: 0,
             jf: 1,
-            k: 0x3d0f00,
+            k: 0xd0f00,
         },
         libc::sock_filter {
             code: 0x06,
@@ -3394,15 +3400,33 @@ mod policy_tests {
                     0x00050001
                 );
             }
-            assert_eq!(
-                verdict_args(
-                    &policy,
-                    arch,
-                    libc::SYS_clone as u32,
-                    [0x50f00, 0, 0, 0, 0, 0]
-                ),
-                0x7fff0000
-            );
+            for flags in [0x50f00, 0x3d0f00, 0xd0f00] {
+                assert_eq!(
+                    verdict_args(
+                        &policy,
+                        arch,
+                        libc::SYS_clone as u32,
+                        [flags, 0, 0, 0, 0, 0]
+                    ),
+                    0x7fff0000
+                );
+                for extra in [
+                    1u64 << 32,
+                    libc::CLONE_NEWNET as u64,
+                    libc::CLONE_NEWUSER as u64,
+                    libc::SIGCHLD as u64,
+                ] {
+                    assert_eq!(
+                        verdict_args(
+                            &policy,
+                            arch,
+                            libc::SYS_clone as u32,
+                            [flags | extra, 0, 0, 0, 0, 0]
+                        ),
+                        0x00050001
+                    );
+                }
+            }
             assert_eq!(
                 verdict_args(
                     &policy,

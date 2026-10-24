@@ -14,6 +14,7 @@ use std::{
 };
 use vprouter_netfilter::SocketProducer;
 pub(super) struct ProducerGroup {
+    _inventory: super::inventory::Registration,
     parent: OwnedFd,
     group: OwnedFd,
     parent_id: Identity,
@@ -53,7 +54,9 @@ impl ProducerGroup {
             ns.data.as_fd(),
         )
         .map_err(|_| Error::CgroupMismatch)?;
+        let inventory = super::inventory::Registration::producer(parent.as_fd(), group.as_fd())?;
         let result = Self {
+            _inventory: inventory,
             parent,
             group,
             parent_id,
@@ -111,5 +114,235 @@ impl ProducerGroup {
     #[cfg(test)]
     pub fn socket_scope<T>(&self, f: impl FnOnce() -> Result<T>) -> Result<T> {
         super::kernel::producer_socket_scope(&self.group, f)
+    }
+}
+
+/// Retained host process identity for a single accepted observation peer. Not a
+/// readiness/producer constructor and never exposed outside the launch crate.
+pub(super) struct Sender {
+    proc: OwnedFd,
+    pidfd: OwnedFd,
+    pid: u32,
+    start: u64,
+}
+fn read(fd: impl AsFd, name: &str, limit: u64) -> Result<String> {
+    let f = fs::openat(
+        fd,
+        name,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| Error::PlacementFailed)?;
+    let mut s = String::new();
+    File::from(f)
+        .take(limit + 1)
+        .read_to_string(&mut s)
+        .map_err(|_| Error::PlacementFailed)?;
+    if s.len() as u64 > limit {
+        return Err(Error::PlacementFailed);
+    }
+    Ok(s)
+}
+fn alive(fd: impl AsFd) -> Result<()> {
+    let mut p = [rustix::event::PollFd::new(
+        &fd,
+        rustix::event::PollFlags::IN,
+    )];
+    if rustix::event::poll(
+        &mut p,
+        Some(&rustix::event::Timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        }),
+    )
+    .map_err(|_| Error::PlacementFailed)?
+        != 0
+    {
+        return Err(Error::PlacementFailed);
+    }
+    Ok(())
+}
+impl ProducerGroup {
+    fn path(&self, spec: &LaunchSpec) -> String {
+        format!(
+            "0::/system.slice/docker-{}.scope/{}\n",
+            spec.container_id, self.name
+        )
+    }
+    fn membership(&self, pid: u32, proc: impl AsFd, spec: &LaunchSpec) -> Result<()> {
+        if read(proc, "cgroup", 4096)? != self.path(spec)
+            || read(&self.group, "cgroup.procs", 65536)?
+                .lines()
+                .filter(|line| line.parse::<u32>().ok() == Some(pid))
+                .count()
+                != 1
+        {
+            return Err(Error::PlacementFailed);
+        }
+        Ok(())
+    }
+    pub fn verify_child(&self, pid: u32, tx: &Transaction<'_>, spec: &LaunchSpec) -> Result<()> {
+        self.verify(tx, spec)?;
+        let proc = fs::open(
+            format!("/proc/{pid}"),
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::PlacementFailed)?;
+        self.membership(pid, proc, spec)
+    }
+    /// Host-side placement gate: child stays blocked at its inherited release
+    /// pipe until all cgroup/parent/allocation/namespace checks have succeeded.
+    /// No PID-number-only release API and no caller-supplied proof boolean.
+    pub fn release_child(
+        &self,
+        child: &mut super::kernel::Child,
+        admission: &Admission,
+        tx: &Transaction<'_>,
+        ns: &OwnedNamespaces,
+    ) -> Result<()> {
+        child.require_placement_gate()?;
+        super::process::single_threaded()?;
+        self.verify(tx, &admission.spec)?;
+        ns.bind(&admission.spec)?;
+        admission
+            .process
+            .revalidate(&admission.spec, &admission.staging)?;
+        let pid = child.pid();
+        let dir = fs::open(
+            format!("/proc/{pid}"),
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::PlacementFailed)?;
+        if fs::fstatfs(&dir)
+            .map_err(|_| Error::PlacementFailed)?
+            .f_type as u64
+            != 0x9fa0
+        {
+            return Err(Error::PlacementFailed);
+        }
+        let start = super::process::stat_start(&read(&dir, "stat", 65536)?, pid)?;
+        let f = fs::openat(
+            &self.group,
+            "cgroup.procs",
+            OFlags::WRONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::PlacementFailed)?;
+        use std::io::Write;
+        File::from(f)
+            .write_all(pid.to_string().as_bytes())
+            .map_err(|_| Error::PlacementFailed)?;
+        self.verify(tx, &admission.spec)?;
+        self.membership(pid, &dir, &admission.spec)?;
+        admission
+            .process
+            .revalidate(&admission.spec, &admission.staging)?;
+        if start != super::process::stat_start(&read(&dir, "stat", 65536)?, pid)? {
+            return Err(Error::PlacementFailed);
+        }
+        // Child owns a retained pidfd and has not been reaped, preventing PID
+        // reuse between this verification and release. Errors do not release.
+        child.release()
+    }
+    pub fn pin_sender(
+        &self,
+        pid: u32,
+        tx: &Transaction<'_>,
+        spec: &LaunchSpec,
+        ns: &OwnedNamespaces,
+        bundle: &super::programs::ReviewedBundle,
+    ) -> Result<Sender> {
+        self.verify(tx, spec)?;
+        ns.bind(spec)?;
+        let pidfd = rustix::process::pidfd_open(
+            rustix::process::Pid::from_raw(pid as i32).ok_or(Error::PlacementFailed)?,
+            rustix::process::PidfdFlags::NONBLOCK,
+        )
+        .map_err(|_| Error::PlacementFailed)?;
+        alive(&pidfd)?;
+        let proc = fs::open(
+            format!("/proc/{pid}"),
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::PlacementFailed)?;
+        if fs::fstatfs(&proc)
+            .map_err(|_| Error::PlacementFailed)?
+            .f_type as u64
+            != 0x9fa0
+        {
+            return Err(Error::PlacementFailed);
+        }
+        let start = super::process::stat_start(&read(&proc, "stat", 65536)?, pid)?;
+        let sender = Sender {
+            proc,
+            pidfd,
+            pid,
+            start,
+        };
+        sender.verify(self, tx, spec, ns, bundle)?;
+        Ok(sender)
+    }
+}
+impl Sender {
+    pub fn verify(
+        &self,
+        group: &ProducerGroup,
+        tx: &Transaction<'_>,
+        spec: &LaunchSpec,
+        ns: &OwnedNamespaces,
+        bundle: &super::programs::ReviewedBundle,
+    ) -> Result<()> {
+        alive(&self.pidfd)?;
+        group.verify(tx, spec)?;
+        ns.bind(spec)?;
+        if self.start != super::process::stat_start(&read(&self.proc, "stat", 65536)?, self.pid)?
+            || !super::process::initial_map(&read(&self.proc, "uid_map", 4096)?)
+            || !super::process::initial_map(&read(&self.proc, "gid_map", 4096)?)
+        {
+            return Err(Error::PlacementFailed);
+        }
+        group.membership(self.pid, &self.proc, spec)?;
+        let net = fs::openat(
+            &self.proc,
+            "ns/net",
+            OFlags::RDONLY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::NamespaceMismatch)?;
+        if Identity::network(net)? != Identity::network(&ns.data)? {
+            return Err(Error::NamespaceMismatch);
+        }
+        let exe = fs::openat(
+            &self.proc,
+            "exe",
+            OFlags::RDONLY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| Error::ExecutableMismatch)?;
+        bundle.verify(exe, super::programs::Role::WorkerObserver)?;
+        group.membership(self.pid, &self.proc, spec)?;
+        if self.start != super::process::stat_start(&read(&self.proc, "stat", 65536)?, self.pid)? {
+            return Err(Error::PlacementFailed);
+        }
+        alive(&self.pidfd)
+    }
+}
+#[cfg(test)]
+mod placement_tests {
+    #[test]
+    fn exact_host_producer_path_is_not_namespace_relative_membership() {
+        let id = "a".repeat(64);
+        let name = "vpr-test";
+        let exact = format!("0::/system.slice/docker-{id}.scope/{name}\n");
+        for other in [
+            "0::/\n".to_string(),
+            format!("0::/system.slice/docker-{id}.scope\n"),
+            format!("0::/system.slice/docker-{id}.scope/{name}-foreign\n"),
+        ] {
+            assert_ne!(exact, other);
+        }
     }
 }

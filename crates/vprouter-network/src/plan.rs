@@ -1,4 +1,5 @@
 use crate::{Error, Result};
+use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use vprouter_core::{
     allocation::{AllocationRecord, ExitAllocation},
@@ -93,5 +94,91 @@ impl Plan {
                 == p.with_private_key(|key| {
                     x25519_dalek::x25519(*key, x25519_dalek::X25519_BASEPOINT_BYTES)
                 })
+    }
+}
+
+/// Public monitoring facts only: never a WG private key or activation authority.
+/// Restoring this projection cannot certify the current kernel structure.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MonitoringPlan {
+    endpoint: SocketAddrV4,
+    address: Ipv4Addr,
+    peer: [u8; 32],
+    public_key: [u8; 32],
+}
+impl Plan {
+    pub fn monitoring(&self) -> MonitoringPlan {
+        MonitoringPlan {
+            endpoint: self.endpoint,
+            address: self.address,
+            peer: self.peer,
+            public_key: self.public_key,
+        }
+    }
+    /// Reconstitute an observational plan from protected public monitoring data.
+    /// This grants neither confinement, namespace placement nor guarded activation.
+    pub fn from_monitoring(
+        record: &AllocationRecord,
+        exit: &ExitAllocation,
+        monitoring: MonitoringPlan,
+    ) -> Result<Self> {
+        record
+            .validate(&record.deployment_id, &[])
+            .map_err(|_| Error::InvalidInput)?;
+        if !record.exits.contains(exit) || exit.mode != ExitMode::Mullvad {
+            return Err(Error::Foreign);
+        }
+        if !vprouter_core::profile::public_ipv4(*monitoring.endpoint.ip())
+            || monitoring.endpoint.port() == 0
+            || !monitoring.address.is_private()
+            || monitoring.peer == [0; 32]
+            || monitoring.public_key == [0; 32]
+        {
+            return Err(Error::InvalidInput);
+        }
+        Ok(Self {
+            allocation: exit.clone(),
+            alias: format!(
+                "vprouter-v2:{}:{}:{}",
+                record.deployment_id, record.generation, exit.exit_id
+            ),
+            endpoint: monitoring.endpoint,
+            address: monitoring.address,
+            peer: monitoring.peer,
+            public_key: monitoring.public_key,
+        })
+    }
+}
+
+#[cfg(test)]
+mod monitoring_tests {
+    use super::*;
+    #[test]
+    fn public_monitoring_roundtrip_preserves_exact_plan_without_private_profile() {
+        let (record, profile) = crate::tests::fixture();
+        let plan = Plan::new(&record, "networklab", &record.exits[0], &profile).unwrap();
+        let bytes = serde_json::to_vec(&plan.monitoring()).unwrap();
+        assert!(!std::str::from_utf8(&bytes).unwrap().contains("private"));
+        let restored = Plan::from_monitoring(
+            &record,
+            &record.exits[0],
+            serde_json::from_slice(&bytes).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(restored, plan);
+        let mut projection: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        projection["endpoint"] = "127.0.0.1:51820".into();
+        assert!(
+            Plan::from_monitoring(
+                &record,
+                &record.exits[0],
+                serde_json::from_value(projection).unwrap()
+            )
+            .is_err()
+        );
+        let mut foreign = record.exits[0].clone();
+        foreign.exit_id = "foreign".into();
+        assert!(Plan::from_monitoring(&record, &foreign, plan.monitoring()).is_err());
     }
 }

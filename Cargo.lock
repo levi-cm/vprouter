@@ -1358,6 +1358,7 @@ dependencies = [
  "vprouter-linux",
  "vprouter-netfilter",
  "vprouter-network",
+ "vprouter-worker",
  "x25519-dalek",
 ]
 
@@ -1396,6 +1397,7 @@ dependencies = [
  "netlink-packet-route",
  "netlink-packet-wireguard",
  "rustix",
+ "serde",
  "serde_json",
  "vprouter-core",
  "vprouter-netfilter",
@@ -1417,6 +1419,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-rustls",
  "vprouter-core",

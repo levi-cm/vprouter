@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "architecture": "arm64",
+  "base_index": "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065",
+  "base_platform": "sha256:472c549d2ef8cebc000de2c8a94061bbdc864d2454177b2ada713262475449ef",
+  "programs": [
+    {
+      "role": "worker_observer",
+      "path": "/usr/local/bin/vprouter-worker-observe",
+      "sha256": "f6b923d25ab310bbaefbc3cd9738d37d69c8d52a2765ae6e47b70931388d77d5",
+      "bytes": 2390984,
+      "policy": "observation-only-zero-caps-v1;confinement-unverified"
+    },
+    {
+      "role": "tailscaled",
+      "path": "/usr/local/bin/tailscaled",
+      "sha256": "3cf2640069ded59322dc2113be5fa90540937410be22bb40873a614773ab27cc",
+      "bytes": 40133663,
+      "policy": "tailscale-1.102.5;execution-unavailable-until-8b2"
+    }
+  ]
+}

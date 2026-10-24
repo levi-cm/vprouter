@@ -1,5 +1,6 @@
 //! Allocation-bound native observations, DOWN provisioning and quarantined activation.
-//! No activation, namespace entry, readiness, or quarantine removal API exists.
+//! Guarded activation requires retained netfilter quarantine authority.
+//! Namespace entry, readiness and quarantine removal are not provided here.
 #![forbid(unsafe_code)]
 
 mod audit;
@@ -11,8 +12,8 @@ mod socket;
 
 pub use audit::{Audit, Snapshot};
 pub use guarded::ActiveLinks;
-pub use native::{DownLink, NamespaceTarget, NativeNetwork, VethPair};
-pub use plan::Plan;
+pub use native::{DownLink, MetadataSnapshot, NamespaceTarget, NativeNetwork, VethPair};
+pub use plan::{MonitoringPlan, Plan};
 pub use project::{Address, Link, Peer, Route, Rule, Wireguard};
 
 /// Fixed errors intentionally carry no external errors, payloads, or keys.

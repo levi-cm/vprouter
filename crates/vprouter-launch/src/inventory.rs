@@ -61,6 +61,33 @@ impl Registration {
             Ok(Self { fds })
         })
     }
+    /// Producer owns one extra parent FD and exactly two matching subgroup FDs
+    /// (local + private netfilter authority). Existing admitted descriptors are
+    /// already registered. No raw authority FD getter or caller numeric list.
+    pub fn producer(parent: BorrowedFd<'_>, group: BorrowedFd<'_>) -> Result<Self> {
+        let parent = fs::fstat(parent).map_err(|_| Error::DescriptorPolicy)?;
+        let group = fs::fstat(group).map_err(|_| Error::DescriptorPolicy)?;
+        let registered = OWNED.with(|o| o.borrow().clone());
+        let mut parents = Vec::new();
+        let mut groups = Vec::new();
+        for fd in numbers()? {
+            if fd <= 2 || registered.contains_key(&fd) {
+                continue;
+            }
+            let id = observed(fd)?;
+            if (id.dev, id.ino) == (parent.st_dev, parent.st_ino) {
+                parents.push(fd);
+            }
+            if (id.dev, id.ino) == (group.st_dev, group.st_ino) {
+                groups.push(fd);
+            }
+        }
+        if parents.len() != 1 || groups.len() != 2 {
+            return Err(Error::DescriptorPolicy);
+        }
+        parents.extend(groups);
+        Self::numbers(parents)
+    }
     /// AllocationStore deliberately exposes no FD. After verify_directory, two
     /// exact directory handles (store + transaction) and one lock handle must
     /// exist. This observation is one-task bounded and checked by count/identity;

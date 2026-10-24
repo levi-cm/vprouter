@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+vprouter-worker = { path = "../vprouter-worker" }
 vprouter-network = { path = "../vprouter-network" }
 vprouter-netfilter = { path = "../vprouter-netfilter" }
 vprouter-core = { path = "../vprouter-core" }
@@ -43,3 +44,8 @@ harness = false
 
 [dev-dependencies]
 x25519-dalek.workspace = true
+
+[[test]]
+name = "producer_lab"
+path = "src/producer_lab_main.rs"
+harness = false

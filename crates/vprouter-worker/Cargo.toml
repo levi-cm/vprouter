@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 vprouter-core = { path = "../vprouter-core" }
 vprouter-network = { path = "../vprouter-network" }
+sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rustix.workspace = true
@@ -29,3 +30,7 @@ rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "c
 name = "localapi_lab"
 path = "src/lab_main.rs"
 harness = false
+
+[[bin]]
+name = "vprouter-worker-observe"
+path = "src/observe_main.rs"

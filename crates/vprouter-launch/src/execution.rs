@@ -117,6 +117,7 @@ pub(super) fn launch(
         tx,
         ns,
         program,
+        None,
         #[cfg(test)]
         None,
     )
@@ -132,7 +133,29 @@ pub(super) fn lab_failed_placement(
         tx,
         ns,
         VerifiedProgram::probe(a)?,
+        None,
         Some(kernel::Child::kill_gated),
+    )
+}
+#[cfg(test)]
+pub(super) fn lab_producer(
+    a: &Admission,
+    tx: &owned::Transaction<'_>,
+    ns: &owned::OwnedNamespaces,
+    producer: &super::producer::ProducerGroup,
+    killed: bool,
+) -> Result<Running> {
+    launch_inner(
+        a,
+        tx,
+        ns,
+        VerifiedProgram::probe(a)?,
+        Some(producer),
+        if killed {
+            Some(kernel::Child::kill_gated)
+        } else {
+            None
+        },
     )
 }
 fn launch_inner(
@@ -140,6 +163,7 @@ fn launch_inner(
     tx: &owned::Transaction<'_>,
     ns: &owned::OwnedNamespaces,
     program: VerifiedProgram,
+    producer: Option<&super::producer::ProducerGroup>,
     #[cfg(test)] before_place: Option<fn(&mut kernel::Child) -> Result<()>>,
 ) -> Result<Running> {
     process::single_threaded()?;
@@ -163,23 +187,30 @@ fn launch_inner(
     if let Some(fault) = before_place {
         fault(&mut child)?;
     }
-    if a.process
-        .place(child.pid(), &a.spec)
-        .and_then(|()| revalidate(a))
-        .and_then(|()| tx.revalidate(&a.spec))
-        .and_then(|()| a.process.verify_placement(child.pid(), &a.spec))
-        .is_err()
-    {
+    let placed = if let Some(producer) = producer {
+        producer.release_child(&mut child, a, tx, ns)
+    } else {
+        a.process
+            .place(child.pid(), &a.spec)
+            .and_then(|()| revalidate(a))
+            .and_then(|()| tx.revalidate(&a.spec))
+            .and_then(|()| a.process.verify_placement(child.pid(), &a.spec))
+            .and_then(|()| child.release())
+    };
+    if placed.is_err() {
         child.terminate()?;
         return Err(Error::PlacementFailed);
     }
-    child.release()?;
     // PID1 readiness requires successful post-exec probe verification, not merely
     // child creation or Docker status. An error kills/reaps boundedly in Drop.
     #[cfg(test)]
     eprintln!("LAB_EXEC_STAGE post_exec_readiness");
     child.ready()?;
-    a.process.verify_placement(child.pid(), &a.spec)?;
+    if let Some(producer) = producer {
+        producer.verify_child(child.pid(), tx, &a.spec)?;
+    } else {
+        a.process.verify_placement(child.pid(), &a.spec)?;
+    }
     Ok(Running { child })
 }
 fn revalidate(a: &Admission) -> Result<()> {

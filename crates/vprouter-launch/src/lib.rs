@@ -7,6 +7,8 @@ mod execution;
 #[cfg(test)]
 pub mod execution_lab;
 #[allow(dead_code)]
+mod handoff;
+#[allow(dead_code)]
 mod inventory;
 #[allow(unsafe_code, dead_code)]
 mod kernel;
@@ -19,6 +21,8 @@ pub mod probe;
 mod process;
 #[allow(dead_code)]
 mod producer;
+#[allow(dead_code)]
+mod programs;
 mod spec;
 #[cfg(test)]
 mod tests;

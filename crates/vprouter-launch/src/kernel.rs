@@ -256,6 +256,14 @@ impl Child {
     pub fn pid(&self) -> u32 {
         self.pid
     }
+    /// Placement can move only this still-unreleased, live, unreaped child.
+    /// The retained pidfd pins identity; no PID-only or caller proof is accepted.
+    pub fn require_placement_gate(&self) -> Result<()> {
+        if self.release.is_none() || self.reaped || wait_ready(&self.pidfd, Duration::ZERO)? {
+            return Err(Error::PlacementFailed);
+        }
+        Ok(())
+    }
     pub fn release(&mut self) -> Result<()> {
         let f = self.release.take().ok_or(Error::ChildFailed)?;
         drop(self.release_inventory.take());

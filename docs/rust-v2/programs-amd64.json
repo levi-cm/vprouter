@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "architecture": "amd64",
+  "base_index": "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065",
+  "base_platform": "sha256:08a1bc6c82fee62d1a135788fb67fefa9d22deea3830e8a45ebe1a3cb116e325",
+  "programs": [
+    {
+      "role": "worker_observer",
+      "path": "/usr/local/bin/vprouter-worker-observe",
+      "sha256": "6ccb35685cbf9f62997d74ca341cf518d2d996a61d2dfcbf829cf1d80d448dd2",
+      "bytes": 2078120,
+      "policy": "observation-only-zero-caps-v1;confinement-unverified"
+    },
+    {
+      "role": "tailscaled",
+      "path": "/usr/local/bin/tailscaled",
+      "sha256": "b2ec98126c6ee19d7b3603b0cfee97c5dd646874065aed7016653d30ff92a9cd",
+      "bytes": 42902060,
+      "policy": "tailscale-1.102.5;execution-unavailable-until-8b2"
+    }
+  ]
+}

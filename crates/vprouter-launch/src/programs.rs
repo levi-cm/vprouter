@@ -1,0 +1,231 @@
+#![forbid(unsafe_code)]
+//! Fixed reviewed program bytes. This binding does not certify Go confinement,
+//! an init/rootfs, release staging, or production launch authority.
+use super::{Error, Result};
+use rustix::fs::{self, FileType, Mode, OFlags};
+use serde::Deserialize;
+use std::{
+    os::fd::{AsFd, OwnedFd},
+    path::Path,
+};
+use vprouter_worker::bootstrap::{MAX_PROGRAM, digest};
+
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Role {
+    WorkerObserver,
+    Tailscaled,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Entry {
+    role: Role,
+    path: String,
+    sha256: String,
+    bytes: u64,
+    policy: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Bundle {
+    schema: u32,
+    architecture: String,
+    base_index: String,
+    base_platform: String,
+    programs: Vec<Entry>,
+}
+pub(super) struct ReviewedBundle {
+    bundle: Bundle,
+    digest: String,
+}
+pub(super) struct Program {
+    fd: OwnedFd,
+    role: Role,
+    sha256: String,
+    bytes: u64,
+}
+impl ReviewedBundle {
+    pub fn current() -> Result<Self> {
+        let bytes = if cfg!(target_arch = "x86_64") {
+            include_bytes!("../../../docs/rust-v2/programs-amd64.json").as_slice()
+        } else if cfg!(target_arch = "aarch64") {
+            include_bytes!("../../../docs/rust-v2/programs-arm64.json").as_slice()
+        } else {
+            return Err(Error::UnsupportedPlatform);
+        };
+        Self::decode(bytes)
+    }
+    fn decode(bytes: &[u8]) -> Result<Self> {
+        let b: Bundle = serde_json::from_slice(bytes).map_err(|_| Error::ExecutableMismatch)?;
+        let arch = if cfg!(target_arch = "x86_64") {
+            "amd64"
+        } else {
+            "arm64"
+        };
+        if b.schema != 1
+            || b.architecture != arch
+            || b.base_index
+                != "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065"
+            || b.base_platform
+                != if arch == "amd64" {
+                    "sha256:08a1bc6c82fee62d1a135788fb67fefa9d22deea3830e8a45ebe1a3cb116e325"
+                } else {
+                    "sha256:472c549d2ef8cebc000de2c8a94061bbdc864d2454177b2ada713262475449ef"
+                }
+            || b.programs.len() != 2
+        {
+            return Err(Error::ExecutableMismatch);
+        }
+        for role in [Role::WorkerObserver, Role::Tailscaled] {
+            let entries: Vec<_> = b.programs.iter().filter(|p| p.role == role).collect();
+            if entries.len() != 1 {
+                return Err(Error::ExecutableMismatch);
+            }
+            let p = entries[0];
+            let (path, policy) = match role {
+                Role::WorkerObserver => (
+                    "/usr/local/bin/vprouter-worker-observe",
+                    "observation-only-zero-caps-v1;confinement-unverified",
+                ),
+                Role::Tailscaled => (
+                    "/usr/local/bin/tailscaled",
+                    "tailscale-1.102.5;execution-unavailable-until-8b2",
+                ),
+            };
+            if p.path != path
+                || p.policy != policy
+                || !super::spec::digest(&p.sha256)
+                || p.bytes < 64
+                || p.bytes > MAX_PROGRAM
+            {
+                return Err(Error::ExecutableMismatch);
+            }
+        }
+        Ok(Self {
+            bundle: b,
+            digest: digest(bytes),
+        })
+    }
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+    fn entry(&self, role: Role) -> Result<&Entry> {
+        self.bundle
+            .programs
+            .iter()
+            .find(|p| p.role == role)
+            .ok_or(Error::ExecutableMismatch)
+    }
+    /// Fixed admitted root only. No arbitrary path, argv, role policy or bytes.
+    pub fn open(&self, root: impl AsFd, role: Role) -> Result<Program> {
+        let p = self.entry(role)?;
+        let fd = fs::openat2(
+            root,
+            Path::new(&p.path[1..]),
+            OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+            Mode::empty(),
+            fs::ResolveFlags::BENEATH | fs::ResolveFlags::NO_SYMLINKS,
+        )
+        .map_err(|_| Error::ExecutableMismatch)?;
+        self.verify(&fd, role)?;
+        Ok(Program {
+            fd,
+            role,
+            sha256: p.sha256.clone(),
+            bytes: p.bytes,
+        })
+    }
+    pub fn verify(&self, fd: impl AsFd, role: Role) -> Result<()> {
+        let p = self.entry(role)?;
+        verify(fd, p, &self.bundle.architecture)
+    }
+    pub fn worker_digest(&self) -> Result<&str> {
+        Ok(&self.entry(Role::WorkerObserver)?.sha256)
+    }
+}
+fn verify(fd: impl AsFd, p: &Entry, architecture: &str) -> Result<()> {
+    let before = fs::fstat(&fd).map_err(|_| Error::ExecutableMismatch)?;
+    if before.st_uid != 0
+        || before.st_gid != 0
+        || before.st_mode & 0o7222 != 0
+        || before.st_mode & 0o111 == 0
+        || FileType::from_raw_mode(before.st_mode) != FileType::RegularFile
+        || before.st_size as u64 != p.bytes
+    {
+        return Err(Error::ExecutableMismatch);
+    }
+    let mut bytes = vec![0; p.bytes as usize];
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let n = rustix::io::pread(&fd, &mut bytes[offset..], offset as u64)
+            .map_err(|_| Error::ExecutableMismatch)?;
+        if n == 0 {
+            return Err(Error::ExecutableMismatch);
+        }
+        offset += n;
+    }
+    super::process::elf(&bytes, architecture)?;
+    if digest(&bytes) != p.sha256 {
+        return Err(Error::ExecutableMismatch);
+    }
+    let after = fs::fstat(fd).map_err(|_| Error::ExecutableMismatch)?;
+    if (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mode,
+        before.st_mtime,
+        before.st_mtime_nsec,
+        before.st_ctime,
+        before.st_ctime_nsec,
+    ) != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mode,
+        after.st_mtime,
+        after.st_mtime_nsec,
+        after.st_ctime,
+        after.st_ctime_nsec,
+    ) {
+        return Err(Error::ExecutableMismatch);
+    }
+    Ok(())
+}
+impl Program {
+    pub fn revalidate(&self, bundle: &ReviewedBundle) -> Result<()> {
+        if self.sha256 != bundle.entry(self.role)?.sha256
+            || self.bytes != bundle.entry(self.role)?.bytes
+        {
+            return Err(Error::ExecutableMismatch);
+        }
+        bundle.verify(&self.fd, self.role)
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn fixed_bundle_rejects_program_policy_platform_and_duplicate_substitution() {
+        let original = include_bytes!("../../../docs/rust-v2/programs-amd64.json");
+        if !cfg!(target_arch = "x86_64") {
+            return;
+        }
+        assert!(ReviewedBundle::current().is_ok());
+        let mut v: serde_json::Value = serde_json::from_slice(original).unwrap();
+        for key in ["path", "policy"] {
+            let saved = v["programs"][0][key].clone();
+            v["programs"][0][key] = "substitute".into();
+            assert!(ReviewedBundle::decode(&serde_json::to_vec(&v).unwrap()).is_err());
+            v["programs"][0][key] = saved;
+        }
+        v["programs"][0]["argv"] = serde_json::json!(["/bin/sh"]);
+        assert!(ReviewedBundle::decode(&serde_json::to_vec(&v).unwrap()).is_err());
+        v["programs"][0].as_object_mut().unwrap().remove("argv");
+        v["programs"][1]["role"] = "worker_observer".into();
+        assert!(ReviewedBundle::decode(&serde_json::to_vec(&v).unwrap()).is_err());
+        let mut v: serde_json::Value = serde_json::from_slice(original).unwrap();
+        v["base_platform"] = format!("sha256:{}", "a".repeat(64)).into();
+        assert!(ReviewedBundle::decode(&serde_json::to_vec(&v).unwrap()).is_err());
+    }
+}

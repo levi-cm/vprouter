@@ -37,6 +37,15 @@ fn current_namespace() -> Result<NamespaceIdentity> {
     Ok((m.dev(), m.ino()))
 }
 
+/// Unprivileged metadata only, intentionally not accepted by Plan::audit.
+/// No WG peer/key/handshake observation or structural-validity claim.
+pub struct MetadataSnapshot {
+    pub links: Vec<Link>,
+    pub addresses: Vec<Address>,
+    pub routes: Vec<Route>,
+    pub rules: Vec<Rule>,
+}
+
 /// A pinned caller-supplied network namespace FD. This checks nsfs/type and
 /// identity, NOT container/PID/cgroup/allocation authorization. A later trusted
 /// launch helper MUST establish that provenance before constructing this value.
@@ -271,6 +280,21 @@ impl NativeNetwork {
             return Err(Error::Drifted);
         }
         Ok(w)
+    }
+    /// All link/address/route/rule metadata, without the privileged WG query.
+    /// This is never a full Snapshot and cannot satisfy structural readiness.
+    pub fn observe_metadata(&mut self) -> Result<MetadataSnapshot> {
+        let end = deadline();
+        let result = MetadataSnapshot {
+            links: self.links(end)?,
+            addresses: self.addresses(end)?,
+            routes: self.routes(end)?,
+            rules: self.rules(end)?,
+        };
+        if Instant::now() >= end {
+            return Err(Error::Deadline);
+        }
+        Ok(result)
     }
     /// ALL tables and both address families are dumped, with all policy rules.
     /// An error gives no partial/verified snapshot. No raw replies leave here.

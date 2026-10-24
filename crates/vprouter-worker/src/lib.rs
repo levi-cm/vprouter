@@ -3,6 +3,7 @@
 // The engine is compiled in production, but cannot be constructed until the
 // reviewed placement and independent guard bridge exists. No feature bypass.
 #![allow(dead_code)]
+pub mod bootstrap;
 mod client;
 mod dns;
 mod engine;
@@ -17,6 +18,7 @@ use serde::Serialize;
 #[serde(rename_all = "snake_case")]
 pub enum Error {
     StructuralGap,
+    Bootstrap,
     NamespaceChanged,
     DirectUnsupported,
     InvalidConfiguration,

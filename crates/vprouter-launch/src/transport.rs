@@ -194,6 +194,28 @@ impl<'a> GuardTransport<'a> {
             plan,
         })
     }
+    /// Observation handoff is available only while exact bootstrap enforcement
+    /// and retained producer/allocation/namespace authority freshly verify.
+    pub fn prepare_observation<'g>(
+        &'g mut self,
+        admission: &'g Admission,
+        bundle: &super::programs::ReviewedBundle,
+    ) -> Result<super::handoff::Handoff<'g, 'a>> {
+        self.audit()?;
+        if !std::ptr::eq(self.spec, &admission.spec) {
+            return Err(Error::AllocationMismatch);
+        }
+        let resolver = *self.resolvers.first().ok_or(Error::ResolverUnavailable)?;
+        super::handoff::Handoff::prepare(
+            admission,
+            &self.producer,
+            &self.transaction,
+            &self.namespaces,
+            &self.plan,
+            resolver,
+            bundle,
+        )
+    }
     pub fn audit(&mut self) -> Result<()> {
         let result = (|| {
             let active = self.active.as_ref().ok_or(Error::Interrupted)?;

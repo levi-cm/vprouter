@@ -42,7 +42,9 @@ before peer routes, without ONLINK bypass. IPv6 autoconfiguration is disabled be
 
 Independent permit AND main quarantine tables both carry bootstrap restrictions.
 Data INPUT/OUTPUT require exact root-owned health/control socket producer, IPv4
-source/address and WG path; established input cannot bypass producer identity.
+family and WG path; established INPUT additionally requires its established
+predicate and cannot bypass producer identity. Structural IPv4 addresses are
+separately audited; this bootstrap statement does not claim an address predicate.
 Application FORWARD remains dropped. Missing producer closes bootstrap. Host and
 transport restrict allocated source/path and exact public UDP endpoint plus bounded
 NAT. Separate retained emergency policy and preopened second nft descriptor restore

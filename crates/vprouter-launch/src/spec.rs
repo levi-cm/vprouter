@@ -33,6 +33,8 @@ pub struct StagingEvidence {
     pub(super) artifact_sha256: String,
     pub(super) artifact_size: u64,
     pub(super) worker_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) execution_policy_sha256: Option<String>,
 }
 pub(super) fn digest(s: &str) -> bool {
     s.len() == 64
@@ -150,6 +152,9 @@ impl StagingEvidence {
             || !digest(&v.artifact_sha256)
             || v.artifact_size < 64
             || v.artifact_size > LIMIT as u64
+            || v.execution_policy_sha256
+                .as_ref()
+                .is_some_and(|s| !digest(s))
             || v.worker_path != WORKER
         {
             return Err(Error::InvalidSpec);

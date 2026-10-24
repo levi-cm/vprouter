@@ -4,7 +4,8 @@ pub fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args == ["--test-probe-container"] {
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(60));
+            super::kernel::probe_container_reap();
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
     if args != ["--isolated-probe"] {

@@ -402,7 +402,8 @@ fn setup(
         Error::MountContainerRoot,
     )?;
     unshare(libc::CLONE_NEWNS | libc::CLONE_NEWPID)?;
-    mount(None, c"/", None, libc::MS_REC | libc::MS_PRIVATE, None)?;
+    mount(None, c"/", None, libc::MS_REC | libc::MS_PRIVATE, None)
+        .map_err(|_| Error::MountPrivate)?;
     // Original readonly container root remains provenance source only; new root
     // contains fixed executable + selected state + fixed private resolver/proc.
     mount(
@@ -430,7 +431,8 @@ fn setup(
         &fdpath(container.executable)?,
         "/tmp/root/bin/vprouter-worker",
         true,
-    )?;
+    )
+    .map_err(|_| Error::MountExecutable)?;
     bind(&fdpath(state)?, "/tmp/root/state", false).map_err(|_| Error::MountState)?;
     std::fs::write(
         "/tmp/root/etc/resolv.conf",
@@ -458,7 +460,11 @@ fn setup(
             init_root()?;
             supervise(health, &signals, init_parent.as_fd())
         })();
-        die(if result.is_ok() { 0 } else { 120 });
+        if let Err(e) = result {
+            report_failure(health, e);
+            die(120);
+        }
+        die(0);
     }
     let initfd = pidfd(init)?;
     // The intermediate has no purpose beyond preserving parent-death linkage;
@@ -907,6 +913,16 @@ fn filter() -> Vec<libc::sock_filter> {
     }); // EPERM default
     out
 }
+pub(super) fn policy_digest() -> String {
+    let mut bytes = super::execution::POLICY.as_bytes().to_vec();
+    for instruction in filter() {
+        bytes.extend_from_slice(&instruction.code.to_le_bytes());
+        bytes.push(instruction.jt);
+        bytes.push(instruction.jf);
+        bytes.extend_from_slice(&instruction.k.to_le_bytes());
+    }
+    vprouter_linux::sha256(&bytes)
+}
 fn seccomp() -> Result<()> {
     let f = filter();
     let p = libc::sock_fprog {
@@ -1147,4 +1163,59 @@ pub(super) fn lab_unpin(dir: BorrowedFd<'_>, name: &str, id: super::owned::Ident
         Error::OwnershipMismatch,
     )?;
     fs::unlinkat(dir, name, fs::AtFlags::empty()).map_err(|_| Error::OwnershipMismatch)
+}
+#[cfg(test)]
+pub(super) fn lab_parent_loss(
+    a: &super::Admission,
+    tx: &super::owned::Transaction<'_>,
+    ns: &super::owned::OwnedNamespaces,
+) -> Result<Child> {
+    process::single_threaded()?;
+    let (r, w) = pipe()?;
+    // SAFETY: test-only fixed launch, one task and no runtime; child never returns
+    // or runs destructors for borrowed parent admission/ownership descriptors.
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        return Err(Error::ChildFailed);
+    }
+    if pid == 0 {
+        unsafe {
+            libc::close(r.as_raw_fd());
+        }
+        let result = super::execution::VerifiedProgram::probe(a)
+            .and_then(|p| super::execution::launch(a, tx, ns, p));
+        match result {
+            Ok(_running) => {
+                let _ = write_byte(&w, 1);
+                loop {
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+            }
+            Err(e) => {
+                report_failure(&w, e);
+                die(116);
+            }
+        }
+    }
+    drop(w);
+    let pinned = pidfd(pid)?;
+    let mut child = Child {
+        pid: pid as u32,
+        pidfd: pinned,
+        release: None,
+        health: r,
+        reaped: false,
+    };
+    child.ready()?;
+    Ok(child)
+}
+#[cfg(test)]
+pub(super) fn probe_container_reap() {
+    loop {
+        // SAFETY: test container PID1 reaps only direct/adopted children, never host tasks.
+        let p = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
+        if p <= 0 {
+            break;
+        }
+    }
 }

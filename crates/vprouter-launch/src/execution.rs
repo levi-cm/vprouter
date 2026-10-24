@@ -6,7 +6,7 @@ use std::{
     os::fd::{AsFd, OwnedFd},
     path::Path,
 };
-const POLICY: &str = "vprouter-static-probe-v1;uid=65534;gid=65534;caps=0;lsm=docker-default;seccomp=probe-v1;resolver=192.0.2.53;env=LANG=C,PATH=/bin;argv=vprouter-worker,--isolated-probe";
+pub(super) const POLICY: &str = "vprouter-static-probe-v1;uid=65534;gid=65534;caps=0;lsm=docker-default;seccomp=probe-v1;resolver=192.0.2.53;env=LANG=C,PATH=/bin;argv=vprouter-worker,--isolated-probe";
 pub(super) struct VerifiedProgram {
     digest: String,
     policy_digest: String,
@@ -14,17 +14,25 @@ pub(super) struct VerifiedProgram {
 impl VerifiedProgram {
     #[cfg(test)]
     pub fn probe(a: &Admission) -> Result<Self> {
-        if a.staging.artifact_kind != "synthetic_static_probe_v1" {
+        Self::probe_stage(&a.staging)
+    }
+    #[cfg(test)]
+    fn probe_stage(stage: &super::StagingEvidence) -> Result<Self> {
+        if stage.artifact_kind != "synthetic_static_probe_v1" {
             return Err(Error::ExecutableMismatch);
         }
+        if stage.execution_policy_sha256.as_deref() != Some(&kernel::policy_digest()) {
+            return Err(Error::ConfinementPolicy);
+        }
         Ok(Self {
-            digest: a.staging.artifact_sha256.clone(),
-            policy_digest: vprouter_linux::sha256(POLICY.as_bytes()),
+            digest: stage.artifact_sha256.clone(),
+            policy_digest: kernel::policy_digest(),
         })
     }
     fn bind(&self, a: &Admission) -> Result<()> {
         if self.digest != a.staging.artifact_sha256
-            || self.policy_digest != vprouter_linux::sha256(POLICY.as_bytes())
+            || self.policy_digest != kernel::policy_digest()
+            || a.staging.execution_policy_sha256.as_deref() != Some(&self.policy_digest)
         {
             return Err(Error::ConfinementPolicy);
         }
@@ -180,10 +188,22 @@ mod tests {
     use super::*;
     #[test]
     fn manifest_policy_is_bound_to_fixed_probe_identity() {
-        let (s, st) = super::super::tests::fixture();
-        assert_eq!(s.worker_sha256, st.artifact_sha256);
-        let digest = vprouter_linux::sha256(POLICY.as_bytes());
-        assert_eq!(digest.len(), 64);
-        assert!(POLICY.contains("caps=0"));
+        let (_, mut stage) = super::super::tests::fixture();
+        assert!(matches!(
+            VerifiedProgram::probe_stage(&stage),
+            Err(Error::ConfinementPolicy)
+        ));
+        stage.execution_policy_sha256 = Some(kernel::policy_digest());
+        assert!(VerifiedProgram::probe_stage(&stage).is_ok());
+        stage.execution_policy_sha256 = Some("f".repeat(64));
+        assert!(matches!(
+            VerifiedProgram::probe_stage(&stage),
+            Err(Error::ConfinementPolicy)
+        ));
+        stage.artifact_kind = "vprouter_worker_v1".into();
+        assert!(matches!(
+            VerifiedProgram::probe_stage(&stage),
+            Err(Error::ExecutableMismatch)
+        ));
     }
 }

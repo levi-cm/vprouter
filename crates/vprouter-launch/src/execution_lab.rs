@@ -84,6 +84,7 @@ fn inspect(
         stage.artifact_path = PROBE.into();
         stage.artifact_sha256 = digest.into();
         stage.artifact_size = size;
+        stage.execution_policy_sha256 = Some(kernel::policy_digest());
         // Exact same protected staging decoder as admission; synthetic kind is
         // unavailable outside cfg(test), no production feature or bypass flag.
         let probe_file = allocation.exits[exit].state_dir.join("staging.json");
@@ -327,6 +328,20 @@ pub fn run() -> Result<()> {
             .collect::<Vec<_>>(),
     )?;
     lab::case("signal_forwarding_pid1_reaping_frozen_descendants");
+    lab::stage("parent_loss_kills_actual_launch_tree");
+    let lost = kernel::lab_parent_loss(&one, &tx, &first)?;
+    let tree = container_pids(&id)?;
+    lost.terminate()?;
+    wait_absent(
+        &tree
+            .into_iter()
+            .filter(|p| !after.contains(p))
+            .collect::<Vec<_>>(),
+    )?;
+    if container_pids(&id)?.len() != 1 {
+        return Err(Error::ChildFailed);
+    }
+    lab::case("launcher_parent_death_kills_and_reaps_namespace_descendants");
     lab::stage("container_death_kills_actual_launch_tree");
     let final_run = execution::launch(&one, &tx, &first, execution::VerifiedProgram::probe(&one)?)?;
     let all = container_pids(&id)?;

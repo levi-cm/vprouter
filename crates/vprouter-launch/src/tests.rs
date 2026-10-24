@@ -39,6 +39,7 @@ pub(super) fn fixture() -> (LaunchSpec, StagingEvidence) {
         artifact_sha256: spec.worker_sha256.clone(),
         artifact_size: 128,
         worker_path: spec::WORKER.into(),
+        execution_policy_sha256: None,
     };
     (spec, stage)
 }

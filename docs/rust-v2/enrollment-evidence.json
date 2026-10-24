@@ -26,5 +26,14 @@
   "backend_state": "Running",
   "node_id": "nnhXNghWF621CNTRL",
   "tailscale_ipv4": "100.120.226.13",
-  "online": true
+  "online": true,
+  "last_rechecked_at_utc": "2026-10-24T13:00:53.359873+00:00",
+  "last_recheck": {
+    "backend": "Running",
+    "node_id": "nnhXNghWF621CNTRL",
+    "tailscale_ipv4": "100.120.226.13",
+    "online": true,
+    "exit_advertised": false,
+    "identity_preserved": true
+  }
 }

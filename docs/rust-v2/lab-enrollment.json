@@ -30,5 +30,13 @@
     "No Rust runtime or client-fallback policy is active.",
     "The previously approved disposable client identity is unchanged.",
     "Login URLs are presented only to the operator and omitted from evidence."
-  ]
+  ],
+  "last_rechecked_at_utc": "2026-10-24T13:00:53.359994+00:00",
+  "last_recheck": {
+    "backend": "NeedsLogin",
+    "node_id": null,
+    "tailscale_ips": [],
+    "approval": "PENDING",
+    "new_login_link_presented": true
+  }
 }

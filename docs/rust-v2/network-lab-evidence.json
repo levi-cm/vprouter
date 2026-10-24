@@ -1,0 +1,246 @@
+{
+  "observed_at_utc": "2026-10-24T12:48:38.682283+00:00",
+  "environment": {
+    "host": "owned disposable Debian 13 KVM guest",
+    "kernel": "6.12.113+deb13-cloud-amd64",
+    "execution": "root unshare --net with checked lab marker",
+    "production_namespace_touched": false
+  },
+  "attempts": [
+    {
+      "implementation_commit": "uncommitted task5 candidate based on48293d5",
+      "binary_sha256": "badf4508fa2920e70a6ef172d610d25a6e4f445661a1532e15ea88a46899ccff",
+      "test": "lab::native_acceptance",
+      "result": "FAIL",
+      "exit_code": 101,
+      "duration_seconds": 0.01,
+      "completed_cases": [],
+      "failure": "NamespaceUnverified before first case; direct proc-netns FD type/provenance check rejected harness ip-netns bind-mount FD. Correcting test FD acquisition without relaxing production checks.",
+      "resources_after_exit": "outer disposable network namespace destroyed; owned named test namespaces handled by harness Drop",
+      "traffic_generated": false
+    },
+    {
+      "implementation_commit": "uncommitted task5 candidate with direct proc-netns test FDs, fixed stage diagnostics and explicit inactive XDP handling",
+      "binary_sha256": "a577f624e0467212d3f52124061ad9c3226489e182785ad0fcf9aa3d2cbd112b",
+      "test": "lab::native_acceptance",
+      "result": "FAIL",
+      "exit_code": 101,
+      "duration_seconds": 0.02,
+      "completed_cases": [],
+      "last_stage": "create_foreign_control_and_refuse_native_creation",
+      "failure": "Drifted after LAB_UNSUPPORTED_LINK_ATTRIBUTE kind=32830; namespace descriptor checks passed. Numeric kernel attribute requires diagnosis.",
+      "resources_after_exit": "outer disposable network namespace destroyed; owned named test namespaces handled by harness Drop",
+      "traffic_generated": false
+    },
+    {
+      "implementation_commit": "uncommitted task5 candidate accepting only empty devlink hardware metadata",
+      "binary_sha256": "b07da239e7a8e025f5329c06fc79af0a7c779165687f1e341948c4f4620c2968",
+      "test": "lab::native_acceptance",
+      "result": "FAIL",
+      "exit_code": 101,
+      "duration_seconds": 0.01,
+      "completed_cases": [],
+      "last_stage": "create_foreign_control_and_refuse_native_creation",
+      "failure": "Drifted after LAB_UNSUPPORTED_LINK_ATTRIBUTE kind=32833; identifying inactive DPLL metadata representation.",
+      "resources_after_exit": "outer disposable network namespace destroyed; owned named test namespaces handled by harness Drop",
+      "traffic_generated": false
+    },
+    {
+      "implementation_commit": "uncommitted task5 candidate with bounded public diagnostics",
+      "binary_sha256": "463ff4addc658b0c5dfc5b370b925468009199bb534d1956eb12ad576fa76f94",
+      "test": "lab::native_acceptance",
+      "result": "FAIL",
+      "exit_code": 101,
+      "duration_seconds": 0.03,
+      "completed_cases": [
+        "foreign_name_refused_without_replacement"
+      ],
+      "last_stage": "create_native_veth_pair_down",
+      "failure": "Drifted during native DOWN veth pair creation; metadata parsing and foreign-name refusal passed.",
+      "resources_after_exit": "outer disposable network namespace destroyed; owned named test namespaces handled by harness Drop",
+      "traffic_generated": false
+    },
+    {
+      "implementation_commit": "uncommitted task5 candidate with bounded public diagnostics",
+      "binary_sha256": "26e9d7b0dd0c5f25049662b4852469bba30a2039c27260fc8cac8886c0abcb56",
+      "test": "lab::native_acceptance",
+      "result": "FAIL",
+      "exit_code": 101,
+      "duration_seconds": 0.03,
+      "completed_cases": [
+        "foreign_name_refused_without_replacement"
+      ],
+      "last_stage": "create_native_veth_pair_down",
+      "failure": "DOWN veth index3 kind matched, UP=false, MTU1420, alias did not match; peer-create alias not applied by kernel.",
+      "resources_after_exit": "outer disposable network namespace destroyed; owned named test namespaces handled by harness Drop",
+      "traffic_generated": false
+    },
+    {
+      "implementation_commit": "uncommitted task5 candidate with exclusive-new DOWN peer alias initialization",
+      "binary_sha256": "13ff8c2b415948b7506acb582c26e4790cdb2608de9445e2eb699d64e3299eb7",
+      "test": "lab::native_acceptance",
+      "result": "FAIL",
+      "exit_code": 101,
+      "duration_seconds": 0.07,
+      "completed_cases": [
+        "foreign_name_refused_without_replacement",
+        "native_veth_both_ends_down_owned_and_duplicate_refused"
+      ],
+      "last_stage": "observe_post_move_namespaces",
+      "failure": "Unsupported after native WireGuard create/configure/move DOWN; requires identifying exact projected attribute.",
+      "resources_after_exit": "outer disposable network namespace destroyed; owned named test namespaces handled by harness Drop",
+      "traffic_generated": false
+    },
+    {
+      "implementation_commit": "uncommitted task5 diagnostic candidate",
+      "binary_sha256": "867821582b936453cccc7f3d50f42938deb32762d4f27f7eb8cb89c64fd56512",
+      "test": "lab::native_acceptance",
+      "result": "FAIL",
+      "exit_code": 101,
+      "duration_seconds": 0.06,
+      "completed_cases": [
+        "foreign_name_refused_without_replacement",
+        "native_veth_both_ends_down_owned_and_duplicate_refused"
+      ],
+      "last_stage": "observe_post_move_namespaces",
+      "failure": "Rule attribute14 length4 was FRA_SUPPRESS_PREFIXLEN=4294967295, the disabled sentinel; native parser did not yet accept it.",
+      "resources_after_exit": "root read-only inventory confirmed zero residual vr-network-lab-* namespaces after this attempt",
+      "traffic_generated": false
+    },
+    {
+      "implementation_commit": "a01d28d4f3d88d691088614e0a610e33fef22f13",
+      "binary_sha256": "d2d739d6bd7e8bfb2ecca88c66d86b70de99c717efb618c83f949d78233cc308",
+      "test": "lab::native_acceptance",
+      "result": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 0.22,
+      "completed_cases": [
+        "foreign_name_refused_without_replacement",
+        "native_veth_both_ends_down_owned_and_duplicate_refused",
+        "native_wireguard_moved_down_peer_endpoint_allowedips_verified",
+        "address_projection_and_address_drift_cleanup_refusal",
+        "owned_only_native_cleanup_sentinel_preserved"
+      ],
+      "resources_after_exit": "native scoped link cleanup succeeded and sentinel survived; root independently confirmed zero residual vr-network-lab-* named namespaces; outer disposable namespace destroyed",
+      "traffic_generated": false
+    }
+  ],
+  "component_acceptance": "PASS_ISOLATED_DOWN_LINK_KERNEL_ONLY",
+  "guard_runtime": false,
+  "activation": false,
+  "real_client_leakage_acceptance": "NOT_RUN",
+  "release_acceptance": "NOT_RUN",
+  "independent_route_oracle": {
+    "result": "PASS_SYNTHETIC_KERNEL_OBSERVATION",
+    "setup": "new guest unshare --net; ip link set lo up; ip link add wgfixture type wireguard; ip address add 10.64.1.2/32 dev wgfixture; WireGuard remains DOWN",
+    "keys_configured": false,
+    "traffic_generated": false,
+    "ipv4_routes": [
+      {
+        "table": "local",
+        "type": "local",
+        "dst": "10.64.1.2/32",
+        "dev": "wgfixture",
+        "scope": "host",
+        "prefsrc": "10.64.1.2",
+        "protocol": "kernel"
+      },
+      {
+        "table": "local",
+        "type": "local",
+        "dst": "127.0.0.0/8",
+        "dev": "lo",
+        "scope": "host",
+        "prefsrc": "127.0.0.1",
+        "protocol": "kernel"
+      },
+      {
+        "table": "local",
+        "type": "local",
+        "dst": "127.0.0.1/32",
+        "dev": "lo",
+        "scope": "host",
+        "prefsrc": "127.0.0.1",
+        "protocol": "kernel"
+      },
+      {
+        "table": "local",
+        "type": "broadcast",
+        "dst": "127.255.255.255/32",
+        "dev": "lo",
+        "scope": "link",
+        "prefsrc": "127.0.0.1",
+        "protocol": "kernel"
+      }
+    ],
+    "ipv4_main_connected_route_present": false,
+    "ipv6_routes": [
+      {
+        "table": "local",
+        "type": "local",
+        "dst": "::1/128",
+        "dev": "lo",
+        "protocol": "kernel",
+        "metric": 0,
+        "pref": "medium"
+      }
+    ],
+    "ipv4_rules": [
+      {
+        "priority": 0,
+        "table": "local"
+      },
+      {
+        "priority": 32766,
+        "table": "main"
+      },
+      {
+        "priority": 32767,
+        "table": "default"
+      }
+    ],
+    "ipv6_rules": [
+      {
+        "priority": 0,
+        "table": "local"
+      },
+      {
+        "priority": 32766,
+        "table": "main"
+      }
+    ],
+    "limits": "Independent external ip oracle for synthetic /32 kernel route shape only; no Tailscale or production native activation."
+  },
+  "independent_attached_tun_oracle": {
+    "result": "PASS_SYNTHETIC_KERNEL_OBSERVATION",
+    "setup": "fresh guest unshare netns; loUP; WG10.64.1.2/32 UP without keys/peers; attached TUNFD100.100.1.2/32+fd7a:115c:a1e0::2/128 nodad and MTU1280; no WAN interface",
+    "ipv4_routes": "local WG/32, TUN/32, 127.0.0.0/8,127.0.0.1/32 and broadcast127.255.255.255/32 only",
+    "ipv6_routes": "main fd7a node/128 and fe80::/64 kernel metric256; local ::1, fd7a node and generated fe80 node metric0; local multicast ff00::/8 on WG and TUN metric256",
+    "traffic_generated": false,
+    "real_tailscale_used": false,
+    "limitations": "No policy table52 rules/routes because this is synthetic TUN without tailscaled; no protected traffic acceptance."
+  },
+  "legacy_read_only_compatibility_oracle": {
+    "mutations": false,
+    "credentials_read": false,
+    "purpose": "route/rule shapes and address prefix lengths only; peer/node address bits omitted",
+    "tailscale_address_prefixes": [
+      "IPv4 global /32",
+      "IPv6 global /128",
+      "IPv6 link-local /64"
+    ],
+    "rules_both_families": [
+      "0 lookup local",
+      "5210 fwmark0x80000/0xff0000 lookup main",
+      "5230 fwmark0x80000/0xff0000 lookup default",
+      "5250 fwmark0x80000/0xff0000 unreachable",
+      "5270 lookup52",
+      "32766 lookup main"
+    ],
+    "ipv4_additional_rule": "32767 lookup default",
+    "ipv6_main_routes": "tailscale global node/128 and fe80::/64 kernel metric256",
+    "ipv6_table52_routes": "tailscale node/128 and fd7a:115c:a1e0::/48 unicast metric1024",
+    "ipv6_local_routes": "lo::1, tailscale global node, FE80 node local; FE80 anycast; ff00::/8 multicast on WG and tailscale0",
+    "limitation": "Observational legacy diagnostic only; no native audit parity or protected traffic claim."
+  }
+}

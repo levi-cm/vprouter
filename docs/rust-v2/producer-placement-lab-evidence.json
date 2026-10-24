@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "component": "producer_placement_gate",
+  "scope": "local Debian VM; fixed6b probe, no actual observer/Go/transport/traffic",
+  "attempts": [
+    {
+      "attempt": 1,
+      "source_commit": "7c08bd63d63e9d62ea7b2ecb71f7d93d5ba3b76d",
+      "source_binding": {
+        "source_commit": "7c08bd63d63e9d62ea7b2ecb71f7d93d5ba3b76d",
+        "source_archive_sha256": "73109a5707e5eadd9730b01d5014a3603cfe7e278112d6e27a3f4f5bc1728517",
+        "tracked_build_inputs_verified": 97,
+        "source_aggregate_sha256": "544cadb6b01ceaf1505262db70c8f4c3c5a5fc7b871d93fa14e08cba0e4bc335",
+        "artifacts": [
+          {
+            "artifact_sha256": "fad89759c5687e7279ea9257313eb7f7e77aa0fc9000b5a6c2256ff0cfd73964",
+            "bytes": 2493200,
+            "elf_machine": 62,
+            "no_interp_or_dynamic": true
+          },
+          {
+            "artifact_sha256": "26369b835cfba148581e37c06cdd22ef13f4280093a581c724718f64f50420be",
+            "bytes": 2975816,
+            "elf_machine": 183,
+            "no_interp_or_dynamic": true
+          }
+        ]
+      },
+      "observed_at_utc": "2026-10-24T16:37:21.562658+00:00",
+      "artifact_sha256": "fad89759c5687e7279ea9257313eb7f7e77aa0fc9000b5a6c2256ff0cfd73964",
+      "source_archive_sha256": "73109a5707e5eadd9730b01d5014a3603cfe7e278112d6e27a3f4f5bc1728517",
+      "runner_sha256": "321b75faaea873e40ab16ab217d77dae27f7f51ff4aacdb84714de591b5f2fc1",
+      "exit_code": 1,
+      "wall_seconds": 1.697,
+      "result": "FAIL",
+      "stdout": "{\"preflight\": \"PASS\", \"network_namespace\": {\"dev\": 4, \"ino\": 4026535957}, \"probe_sha256\": \"808789d0d5d59b673c7f6fd55b306c3ecfc05ef0bbdd65731cff2ae7695bd828\"}\n{\"harness_exit_code\": 1}\n",
+      "stderr": "LAB_STAGE producer_exact_hash_owned_guest_admitted\nproducer_lab: placement_failed\n",
+      "ownership_after": "exact disposable container and parent cgroup absent; Activating ownership records retained; temporary approval marker removed",
+      "completed_cases": []
+    },
+    {
+      "attempt": 2,
+      "source_commit": "c18f55fa20523afa0150dd193162333886786e4a",
+      "source_binding": {
+        "source_commit": "c18f55fa20523afa0150dd193162333886786e4a",
+        "source_archive_sha256": "a4244176924bfe682019b5931e73e973ee2c2cb1f377e6eed2fc539c8ef6ed6c",
+        "tracked_build_inputs_verified": 97,
+        "source_aggregate_sha256": "01b982aec53fbb19c503f807add360c5610ee4236a5984e6967c11efae749338"
+      },
+      "observed_at_utc": "2026-10-24T16:39:10.570363+00:00",
+      "artifact_sha256": "bde41de5ad7111c16dea1c473c4b77ecb21db4de2a448c8bad153f4e90fb3b6e",
+      "source_archive_sha256": "a4244176924bfe682019b5931e73e973ee2c2cb1f377e6eed2fc539c8ef6ed6c",
+      "runner_sha256": "321b75faaea873e40ab16ab217d77dae27f7f51ff4aacdb84714de591b5f2fc1",
+      "exit_code": 1,
+      "wall_seconds": 1.408,
+      "result": "FAIL",
+      "stdout": "{\"preflight\": \"PASS\", \"network_namespace\": {\"dev\": 4, \"ino\": 4026535957}, \"probe_sha256\": \"808789d0d5d59b673c7f6fd55b306c3ecfc05ef0bbdd65731cff2ae7695bd828\"}\n{\"harness_exit_code\": 1}\n",
+      "stderr": "LAB_STAGE producer_exact_hash_owned_guest_admitted\nLAB_EXEC_STAGE fixed_program_binding\nLAB_EXEC_STAGE allocation_revalidation\nLAB_EXEC_STAGE namespace_binding\nLAB_EXEC_STAGE container_revalidation\nLAB_PRODUCER_UNEXPECTED killed_gated=Some(CgroupMismatch)\nproducer_lab: placement_failed\n",
+      "ownership_after": "exact disposable container and parent cgroup absent; Activating ownership records retained; temporary approval marker removed",
+      "completed_cases": []
+    }
+  ],
+  "actual_observer_execution": "NOT_RUN",
+  "go_execution": "NOT_RUN",
+  "real_client_acceptance": "NOT_RUN",
+  "release_ready": false,
+  "production_changes": false
+}

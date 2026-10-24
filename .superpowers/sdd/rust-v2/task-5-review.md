@@ -21,3 +21,7 @@ and provider acceptance remain later gates, already documented as NOT_RUN.
 
 Original implementer resumed for fix round1; both findings sent verbatim with
 focused covering tests. No source mutation/tests performed by reviewer.
+
+## Fix1 independent re-review
+
+Reviewer /root/review_network scoped0631fb0..d63050e: both findings ADDRESSED, spec PASS, quality Approved for bounded component; no new Critical/Important/Minor. Native.rs92-100 private endpoints/borrowed getters,581-587 namespace-pair+Plan admission before I/O;85-89 compilefail,660-684 collision ordering regression. Socket.rs319-322 rejects Single multipart,399-433 ACK-order/normal/dump regressions. No source mutations/outside checks/test reruns. Runtime/traffic/namespace authorization limits unchanged.

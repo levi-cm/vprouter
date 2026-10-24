@@ -123,6 +123,24 @@
       ],
       "resources_after_exit": "native scoped link cleanup succeeded and sentinel survived; root independently confirmed zero residual vr-network-lab-* named namespaces; outer disposable namespace destroyed",
       "traffic_generated": false
+    },
+    {
+      "implementation_commit": "8a1c97c",
+      "binary_sha256": "584577685bd0b61a45dc610c0e708ef04f0171e823060681d1f8d6a6b7a2f284",
+      "test": "lab::native_acceptance",
+      "result": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 0.23,
+      "completed_cases": [
+        "foreign_name_refused_without_replacement",
+        "native_veth_both_ends_down_owned_and_duplicate_refused",
+        "native_wireguard_moved_down_peer_endpoint_allowedips_verified",
+        "address_projection_and_address_drift_cleanup_refusal",
+        "owned_only_native_cleanup_sentinel_preserved"
+      ],
+      "resources_after_exit": "native scoped cleanup passed, sentinel preserved; root separately confirmed zero residual named namespaces",
+      "traffic_generated": false,
+      "change": "fix1 private inseparable VethPair, original namespace admission before I/O; strict Single completion rejects multipart"
     }
   ],
   "component_acceptance": "PASS_ISOLATED_DOWN_LINK_KERNEL_ONLY",

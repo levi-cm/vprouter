@@ -52,7 +52,7 @@ for scope,name in [('host',None),('transport',allocation['transport_namespace'])
  prefix=['nsenter','--net='+str(pin)] if pin else []
  observations.append({'scope':scope,'pin':str(pin) if pin else None,'links':call([*prefix,'ip','-details','-j','link','show']),'addresses':call([*prefix,'ip','-j','address','show']),'routes4':call([*prefix,'ip','-j','-4','route','show','table','all']),'routes6':call([*prefix,'ip','-j','-6','route','show','table','all']),'rules4':call([*prefix,'ip','-j','-4','rule','show']),'rules6':call([*prefix,'ip','-j','-6','rule','show']),'nft':call([*prefix,'nft','-j','list','ruleset'])})
 files={}
-for name in ['daemon-process.json','observer-process.json','actual-daemon-kernel.json','actual-packet-accounting.json','result.json']:
+for name in ['daemon-process.json','observer-process.json','daemon-descriptors.json','observer-descriptors.json','actual-daemon-kernel.json','actual-packet-accounting.json','result.json']:
  path=directory/name
  if path.exists():
   raw=read(path,4*1024*1024)

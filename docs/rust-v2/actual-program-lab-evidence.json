@@ -674,10 +674,218 @@
       "trace_summary_sha256": "1b35b9a10c56b836b67324068dd6a3548726b56e3af8c5470d8fb37c986c2f2a",
       "trace_files": 43,
       "observation": "Candidate06 private mount isolation plus daemon-only exact CLOEXEC pipe enables setup acknowledgement and live daemon socket/program identity. Harness descriptor_policy refuses runtime descriptor before writing proof. Pipe descriptor hypothesis not independently confirmed yet."
+    },
+    {
+      "attempt": 11,
+      "source_binding": {
+        "source_commit": "d4725b14fce91d619e9474bbcc82e592c66e0fd8",
+        "source_archive_sha256": "997215c71b8ade5d56780926dd413f69bec9e0e41a22a2faf6ed0a9ea98d71a7",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "6e9e72ee53f392bb5adb53f0fff14e46680df33e3ffd21cf6e854f378830dd1b"
+      },
+      "artifact_sha256": "f5116fa07f702619e1620bd9c834f57719c1c544915bffb03d72976ce33d1774",
+      "context_sha256": "8d81b3ef91e94a15b4d8939662a3b3692263207b9df08c3ba69a1f3b502414a1",
+      "manifest_sha256": "773f8757938bde28e0ee393685bb2c54df1612826a9a464f8fa9d8c11def6c74",
+      "image_id": "sha256:75305d096f9cb2c4f741e94a5ca899370df24c86a979f64182d23d2a13f636b1",
+      "image_layers": [
+        "sha256:67b608f3fd126d081b7a1d09bd8e8abbfeccd727a7690d3ebde68954cbb4b404"
+      ],
+      "runner_sha256": "6d869dd87520efab0bd3d72ff6bb9d1dbc32b8fbb3c4125652049e464477c3a4",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 5.049,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "actual_lab: descriptor_policy"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": true,
+      "actual_daemon_exec": "LIVE_SOCKET_AND_PROGRAM_IDENTITY_REACHED_INSPECTION_FAILED",
+      "actual_observer_exec": "NOT_REACHED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-11.json",
+      "private_run_record_sha256": "d9ae934011ad67601fe51bf9c1badca7043ca011e347bf1aa32c1b96fbd32692",
+      "private_inventory": "target/lab-state/actual-program-inspect-11.json",
+      "private_inventory_sha256": "8eebb8548221cfa85cbc2162ec042005d1010e6b5ee524daf793b96cd0d8b29b",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-trace-11-summary.json",
+      "trace_summary_sha256": "f27a80009b32cc9d7c47da9a597a57982d32ab3dbade12ba969faabef43cb6b5",
+      "trace_files": 50,
+      "diagnostic_descriptor_snapshot": {
+        "sha256": "b0f373f2e78654c563c82b0040ffd73c7e7adfa49bed61fb171dd36ae8e4dfa8",
+        "data": [
+          {
+            "dev": 1048699,
+            "flags": 32770,
+            "ino": 5,
+            "mode": 8630,
+            "number": 0,
+            "target": "/null"
+          },
+          {
+            "dev": 1048699,
+            "flags": 32770,
+            "ino": 5,
+            "mode": 8630,
+            "number": 1,
+            "target": "/null"
+          },
+          {
+            "dev": 1048699,
+            "flags": 32770,
+            "ino": 5,
+            "mode": 8630,
+            "number": 2,
+            "target": "/null"
+          },
+          {
+            "dev": 9,
+            "flags": 526338,
+            "ino": 233687,
+            "mode": 49663,
+            "number": 3,
+            "target": "socket:[233687]"
+          },
+          {
+            "dev": 16,
+            "flags": 524290,
+            "ino": 1151,
+            "mode": 384,
+            "number": 4,
+            "target": "anon_inode:[eventpoll]"
+          },
+          {
+            "dev": 16,
+            "flags": 526338,
+            "ino": 1151,
+            "mode": 384,
+            "number": 5,
+            "target": "anon_inode:[eventfd]"
+          },
+          {
+            "dev": 9,
+            "flags": 526338,
+            "ino": 233692,
+            "mode": 49663,
+            "number": 6,
+            "target": "socket:[233692]"
+          },
+          {
+            "dev": 1048699,
+            "flags": 559106,
+            "ino": 12,
+            "mode": 8630,
+            "number": 7,
+            "target": "/dev/net/tun"
+          },
+          {
+            "dev": 9,
+            "flags": 526338,
+            "ino": 232761,
+            "mode": 49663,
+            "number": 8,
+            "target": "socket:[232761]"
+          },
+          {
+            "dev": 15,
+            "flags": 524288,
+            "ino": 232762,
+            "mode": 4480,
+            "number": 9,
+            "target": "pipe:[232762]"
+          },
+          {
+            "dev": 15,
+            "flags": 526337,
+            "ino": 232762,
+            "mode": 4480,
+            "number": 10,
+            "target": "pipe:[232762]"
+          },
+          {
+            "dev": 9,
+            "flags": 526338,
+            "ino": 232770,
+            "mode": 49663,
+            "number": 11,
+            "target": "socket:[232770]"
+          },
+          {
+            "dev": 9,
+            "flags": 526338,
+            "ino": 232771,
+            "mode": 49663,
+            "number": 12,
+            "target": "socket:[232771]"
+          }
+        ]
+      },
+      "diagnostic_kernel_snapshot_sha256": "6fb58a2cdfa5c3549beeb5ee930b51c8906fe4310c5094b13b2f9c01214914f6",
+      "diagnostic_rules4": [
+        {
+          "priority": 0,
+          "src": "all",
+          "table": "local"
+        },
+        {
+          "fwmark": "0x80000",
+          "fwmask": "0xff0000",
+          "priority": 5210,
+          "src": "all",
+          "table": "main"
+        },
+        {
+          "fwmark": "0x80000",
+          "fwmask": "0xff0000",
+          "priority": 5230,
+          "src": "all",
+          "table": "default"
+        },
+        {
+          "action": "unreachable",
+          "fwmark": "0x80000",
+          "fwmask": "0xff0000",
+          "priority": 5250,
+          "src": "all"
+        },
+        {
+          "priority": 5270,
+          "src": "all",
+          "table": "52"
+        },
+        {
+          "priority": 32766,
+          "src": "all",
+          "table": "main"
+        },
+        {
+          "priority": 32767,
+          "src": "all",
+          "table": "default"
+        }
+      ],
+      "observation": "Diagnostic07 confirms first rejected descriptors are private null stdio alias /null; one paired daemon FIFO is also present with read CLOEXEC/write NONBLOCK CLOEXEC. Snapshot is evidence, not adopted baseline or authority. Actual TUN/rules require pinned-live-daemon binding and exact shape validation."
     }
   ],
   "diagnosis": {
-    "status": "PRIVATE_PROC_AND_PIPE_FIX_REACHES_LIVE_DAEMON_DESCRIPTOR_CHECK_PENDING",
+    "status": "EXACT_NULL_ALIAS_PIPE_PAIR_AND_KERNEL_SHAPES_CAPTURED_VALIDATION_PENDING",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

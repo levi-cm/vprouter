@@ -53,6 +53,10 @@ impl Running {
     pub fn signal(&self, signal: i32) -> Result<()> {
         self.child.signal(signal)
     }
+    #[cfg(test)]
+    pub fn try_wait_success(&mut self) -> Result<bool> {
+        self.child.try_wait_success()
+    }
 }
 /// Reject unexpected inherited descriptors before forking. All observed sockets
 /// (including dormant async reactors) are forbidden. Child final inventory is

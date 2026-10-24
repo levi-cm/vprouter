@@ -1,5 +1,6 @@
 #![deny(unsafe_code)]
-//! Descriptor-backed admission only. No namespace entry, mutation or execution.
+//! Public descriptor-backed admission refuses activation. The private staged
+//! executor supports only the synthetic, manifest-bound test probe.
 mod evidence;
 #[allow(dead_code)]
 mod execution;

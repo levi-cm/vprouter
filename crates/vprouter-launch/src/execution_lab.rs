@@ -375,6 +375,119 @@ fn wait_absent(pids: &[u32]) -> Result<()> {
         std::thread::sleep(Duration::from_millis(30));
     }
 }
+fn prove_frozen_descendants(id: &str, workers: &[u32]) -> Result<()> {
+    let end = Instant::now() + Duration::from_secs(1);
+    loop {
+        let mut stopped_parents = std::collections::BTreeSet::new();
+        for pid in container_pids(id)? {
+            let status = fs::read_to_string(format!("/proc/{pid}/status"))
+                .map_err(|_| Error::ProcessUnavailable)?;
+            let parent = status
+                .lines()
+                .find_map(|line| line.strip_prefix("PPid:"))
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .ok_or(Error::ProcessUnavailable)?;
+            if !workers.contains(&parent) {
+                continue;
+            }
+            let ids = status
+                .lines()
+                .find_map(|line| line.strip_prefix("NSpid:"))
+                .ok_or(Error::NamespaceMismatch)?
+                .split_whitespace()
+                .collect::<Vec<_>>();
+            if ids.len() != 3 || ids[2] != "3" {
+                return Err(Error::NamespaceMismatch);
+            }
+            if status
+                .lines()
+                .find_map(|line| line.strip_prefix("State:"))
+                .and_then(|state| state.split_whitespace().next())
+                == Some("T")
+                && !stopped_parents.insert(parent)
+            {
+                return Err(Error::ChildFailed);
+            }
+        }
+        if stopped_parents.len() == workers.len() {
+            return Ok(());
+        }
+        if Instant::now() >= end {
+            return Err(Error::Deadline);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+fn state_witness(path: &Path, expected: &[u8]) -> Result<bool> {
+    match fs::read(path) {
+        Ok(bytes) if bytes == expected => Ok(true),
+        // Creation and the one small write are separate syscalls. An empty
+        // transient file is not evidence and remains subject to the same bound.
+        Ok(bytes) if bytes.is_empty() => Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        _ => Err(Error::ChildFailed),
+    }
+}
+fn signal_and_wait_naturally(
+    one: &mut execution::Running,
+    two: &mut execution::Running,
+    record: &AllocationRecord,
+) -> Result<()> {
+    let start = Instant::now();
+    let mut done = [false; 2];
+    let mut forwarded = false;
+    let mut iteration = 0;
+    loop {
+        // Every signal goes through the actual outer/intermediate/PID1 chain.
+        // Keep delivering faster than every grace period until natural exit.
+        let signal = if !forwarded {
+            libc::SIGTERM
+        } else {
+            [libc::SIGTERM, libc::SIGINT, libc::SIGHUP][iteration % 3]
+        };
+        for (index, child) in [&mut *one, &mut *two].into_iter().enumerate() {
+            if !done[index] {
+                done[index] = child.try_wait_success()?;
+                if !done[index]
+                    && let Err(error) = child.signal(signal)
+                {
+                    if child.try_wait_success()? {
+                        done[index] = true;
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        forwarded = record
+            .exits
+            .iter()
+            .map(|exit| state_witness(&exit.state_dir.join("worker/forwarded-signal"), b"TERM"))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .all(|seen| seen);
+        if start.elapsed() >= Duration::from_secs(2) {
+            return Err(Error::Deadline);
+        }
+        if done == [true, true] {
+            if !forwarded {
+                return Err(Error::ChildFailed);
+            }
+            for exit in &record.exits {
+                if !state_witness(&exit.state_dir.join("worker/reaped-descendant"), b"reaped")? {
+                    return Err(Error::ChildFailed);
+                }
+            }
+            eprintln!(
+                "LAB_SIGNAL_PROOF stopped_forwarded_reaped_natural repeated_signals elapsed_ms={}",
+                start.elapsed().as_millis()
+            );
+            return Ok(());
+        }
+        iteration += 1;
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
 pub fn run() -> Result<()> {
     lab::admit_lab()?;
     lab::stage("execution_lab_admitted_owned_guest");
@@ -506,10 +619,10 @@ pub fn run() -> Result<()> {
     }
     lab::case("killed_placement_gated_child_never_released_or_executed");
     lab::stage("launch_first_private_probe");
-    let running_one =
+    let mut running_one =
         execution::launch(&one, &tx, &first, execution::VerifiedProgram::probe(&one)?)?;
     lab::stage("launch_second_private_probe");
-    let running_two =
+    let mut running_two =
         execution::launch(&two, &tx, &second, execution::VerifiedProgram::probe(&two)?)?;
     let pids = workers(&id)?;
     if pids.len() != 2 {
@@ -548,11 +661,10 @@ pub fn run() -> Result<()> {
     verify_launch_tree(&id)?;
     lab::case("all_surviving_wrappers_empty_ro_roots_cwd_exact_pidfd_null_caps_lsm_seccomp");
     let old = container_pids(&id)?;
-    running_one.signal(libc::SIGTERM)?;
-    running_two.signal(libc::SIGTERM)?;
-    std::thread::sleep(Duration::from_millis(1000));
-    running_one.terminate()?;
-    running_two.terminate()?;
+    prove_frozen_descendants(&id, &pids)?;
+    // On failure Child::drop remains emergency cleanup. No terminate/SIGKILL
+    // from the harness is permitted before successful natural completion proof.
+    signal_and_wait_naturally(&mut running_one, &mut running_two, &record)?;
     let after = container_pids(&id)?;
     if after.len() != 1 {
         return Err(Error::ChildFailed);

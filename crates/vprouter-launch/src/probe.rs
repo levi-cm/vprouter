@@ -18,7 +18,8 @@ pub fn main() {
         super::kernel::probe_failure(e);
         std::process::exit(117);
     }
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(60));
+    if let Err(error) = super::kernel::probe_signal_loop() {
+        super::kernel::probe_failure(error);
+        std::process::exit(117);
     }
 }

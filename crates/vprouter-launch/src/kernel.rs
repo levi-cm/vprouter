@@ -14,6 +14,7 @@ use std::{
     os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd},
     time::{Duration, Instant},
 };
+// ---- Fixed diagnostics and checked syscall primitives ----
 fn cv(r: i32, e: Error) -> Result<()> {
     if r < 0 { Err(e) } else { Ok(()) }
 }
@@ -89,6 +90,7 @@ fn enter(fd: BorrowedFd<'_>, kind: i32) -> Result<()> {
     };
     rustix::thread::move_into_link_name_space(fd, Some(t)).map_err(|_| Error::NamespaceOperation)
 }
+// ---- Owned network namespace entry and exclusive pinning ----
 fn unshare(flags: i32) -> Result<()> {
     process::single_threaded()?; // SAFETY: dedicated one-task helper, no async runtime or shared descriptor owners in another thread.
     cv(unsafe { libc::unshare(flags) }, Error::NamespaceOperation)
@@ -156,6 +158,7 @@ pub(super) struct ContainerFds<'a> {
     pub root: BorrowedFd<'a>,
     pub executable: BorrowedFd<'a>,
 }
+// ---- Gated child ownership, readiness and parent-death lifecycle ----
 fn pipe() -> Result<(OwnedFd, OwnedFd)> {
     let mut fds = [-1; 2]; // SAFETY: two initialized integers, ownership transferred once on successful pipe2.
     cv(
@@ -196,6 +199,9 @@ fn wait_ready(fd: impl AsFd, timeout: Duration) -> Result<bool> {
     }; // SAFETY: one initialized pollfd, bounded timeout.
     let r = unsafe { libc::poll(&mut p, 1, timeout.as_millis().min(i32::MAX as u128) as i32) };
     if r < 0 {
+        return Err(Error::ChildFailed);
+    }
+    if p.revents & (libc::POLLERR | libc::POLLNVAL) != 0 {
         return Err(Error::ChildFailed);
     }
     Ok(r > 0)
@@ -363,6 +369,26 @@ impl Child {
         send(&self.pidfd, sig)
     }
     #[cfg(test)]
+    pub fn try_wait_success(&mut self) -> Result<bool> {
+        if self.reaped {
+            return Ok(true);
+        }
+        if !wait_ready(&self.pidfd, Duration::ZERO)? {
+            return Ok(false);
+        }
+        let mut status = 0;
+        // SAFETY: exact unreaped direct child, with identity retained by pidfd.
+        if unsafe { libc::waitpid(self.pid as i32, &mut status, 0) } != self.pid as i32 {
+            return Err(Error::ChildFailed);
+        }
+        self.reaped = true;
+        if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0 {
+            Ok(true)
+        } else {
+            Err(Error::ChildFailed)
+        }
+    }
+    #[cfg(test)]
     pub fn kill_gated(&mut self) -> Result<()> {
         send(&self.pidfd, libc::SIGKILL)?;
         // Leave the dead child unreaped until normal failed-placement cleanup;
@@ -476,6 +502,7 @@ pub(super) fn spawn(
         reaped: false,
     })
 }
+// ---- Container namespace entry and isolated mount-root construction ----
 fn mount(
     source: Option<&CStr>,
     target: &CStr,
@@ -712,6 +739,7 @@ fn init_root() -> Result<()> {
     )
     .map_err(|_| Error::MountReadonly)
 }
+// ---- Synchronous signal forwarding, bounded escalation and PID1 reaping ----
 fn blocked_signals() -> Result<libc::sigset_t> {
     // SAFETY: zero is initialized storage subsequently initialized by sigemptyset; libc consumes exact sigset size.
     let mut set = unsafe { std::mem::zeroed() };
@@ -727,23 +755,55 @@ fn blocked_signals() -> Result<libc::sigset_t> {
     )?;
     Ok(set)
 }
-fn pending(set: &libc::sigset_t) -> i32 {
+fn pending(set: &libc::sigset_t) -> Result<Option<i32>> {
     let t = libc::timespec {
         tv_sec: 0,
         tv_nsec: 50_000_000,
     }; // SAFETY: initialized fixed sigset and bounded timespec, no handlers.
-    unsafe { libc::sigtimedwait(set, std::ptr::null_mut(), &t) }
+    let signal = unsafe { libc::sigtimedwait(set, std::ptr::null_mut(), &t) };
+    if signal >= 0 {
+        return Ok(Some(signal));
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(libc::EAGAIN | libc::EINTR) => Ok(None),
+        _ => Err(Error::ChildFailed),
+    }
 }
-fn forward_and_wait(pid: i32, fd: BorrowedFd<'_>, set: &libc::sigset_t) -> Result<()> {
-    let mut deadline = None;
-    loop {
-        let sig = pending(set);
-        if matches!(sig, libc::SIGTERM | libc::SIGINT | libc::SIGHUP) {
-            let _ = send(fd, sig);
-            deadline = Some(Instant::now() + Duration::from_millis(700));
+fn earliest_deadline(deadline: &mut Option<Instant>, candidate: Instant) {
+    *deadline = Some(deadline.map_or(candidate, |old| old.min(candidate)));
+}
+fn send_or_exited(fd: BorrowedFd<'_>, signal: i32) -> Result<()> {
+    match send(fd, signal) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            // A pinned child may exit between wait and signal. No numeric PID
+            // fallback; only actual pidfd readiness makes that race harmless.
+            if std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+                && wait_ready(fd, Duration::ZERO)?
+            {
+                Ok(())
+            } else {
+                Err(error)
+            }
         }
-        if deadline.is_some_and(|d| Instant::now() >= d) {
-            let _ = send(fd, libc::SIGKILL);
+    }
+}
+fn forward_and_wait(
+    pid: i32,
+    fd: BorrowedFd<'_>,
+    set: &libc::sigset_t,
+    grace: Duration,
+) -> Result<()> {
+    let mut deadline = None;
+    let mut escalation = None;
+    loop {
+        if let Some(sig @ (libc::SIGTERM | libc::SIGINT | libc::SIGHUP)) = pending(set)? {
+            send_or_exited(fd, sig)?;
+            earliest_deadline(&mut deadline, Instant::now() + grace);
+        }
+        if escalation.is_none() && deadline.is_some_and(|d| Instant::now() >= d) {
+            send_or_exited(fd, libc::SIGKILL)?;
+            escalation = Some(Instant::now() + Duration::from_secs(1));
         }
         if wait_ready(fd, Duration::ZERO)? {
             let mut status = 0; // SAFETY: our unreaped direct child, pinned by fd.
@@ -755,6 +815,9 @@ fn forward_and_wait(pid: i32, fd: BorrowedFd<'_>, set: &libc::sigset_t) -> Resul
             } else {
                 Err(Error::ChildFailed)
             };
+        }
+        if escalation.is_some_and(|d| Instant::now() >= d) {
+            return Err(Error::Deadline);
         }
     }
 }
@@ -860,7 +923,10 @@ fn wait_role(
         unsafe {
             libc::close(4);
         }
-        let result = forward_and_wait(pid, child, set);
+        // PID1 gets 500ms; its immediate wrapper gets 1000ms, the outer 1500ms.
+        // These fixed bounds permit inner escalation and actual reaping first.
+        let grace = Duration::from_millis(if ready == 8 { 1000 } else { 1500 });
+        let result = forward_and_wait(pid, child, set, grace);
         die(if result.is_ok() { 0 } else { 112 });
     })();
     if let Err(e) = result {
@@ -942,8 +1008,13 @@ fn supervise(
     if wait_ready(parent, Duration::ZERO)? {
         return Err(Error::ChildFailed);
     }
-    close_except(&[health.as_raw_fd()])?;
-    if let Err(e) = seccomp() {
+    let confined: Result<()> = (|| {
+        close_except(&[health.as_raw_fd()])?;
+        supervisor_fds(health, null_identity)?;
+        seccomp()?;
+        supervisor_fds(health, null_identity)
+    })();
+    if let Err(e) = confined {
         report_failure(health, e);
         die(115);
     }
@@ -952,49 +1023,64 @@ fn supervise(
     }
     // SAFETY: supervisor consumes its health descriptor and never unwinds these
     // inherited FD owners. The signal/reap loop exits via _exit only.
-    unsafe {
-        libc::close(health.as_raw_fd());
+    if checked_close(health.as_raw_fd()).is_err() {
+        die(114);
     }
     let result = supervisor_loop(set, worker);
     die(if result.is_ok() { 0 } else { 113 });
 }
 fn supervisor_loop(set: &libc::sigset_t, worker: i32) -> Result<()> {
     let mut deadline = None;
+    let mut escalation = None;
     let mut main_exited = false;
     loop {
-        let sig = pending(set);
-        if matches!(sig, libc::SIGTERM | libc::SIGINT | libc::SIGHUP) {
-            // SAFETY: PID1 private namespace; -1 can only address its own descendants.
-            unsafe {
-                libc::kill(-1, sig);
-            }
-            deadline = Some(Instant::now() + Duration::from_millis(500));
+        if let Some(sig @ (libc::SIGTERM | libc::SIGINT | libc::SIGHUP)) = pending(set)? {
+            signal_descendants(sig)?;
+            earliest_deadline(&mut deadline, Instant::now() + Duration::from_millis(500));
         }
-        if deadline.is_some_and(|d| Instant::now() >= d) {
-            unsafe {
-                libc::kill(-1, libc::SIGKILL);
-            }
+        if escalation.is_none() && deadline.is_some_and(|d| Instant::now() >= d) {
+            signal_descendants(libc::SIGKILL)?;
+            escalation = Some(Instant::now() + Duration::from_millis(400));
         }
         loop {
             let mut status = 0; // SAFETY: wait only any direct/adopted children in this private PID namespace.
             let p = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
             if p == worker {
                 main_exited = true;
-                deadline = Some(Instant::now());
+                earliest_deadline(&mut deadline, Instant::now());
+            } else if p > 0 {
+                #[cfg(test)]
+                write_test_state("/state/reaped-descendant", b"reaped")?;
             }
             if p == 0 {
                 break;
             }
             if p < 0 {
-                return if main_exited {
-                    Ok(())
-                } else {
-                    Err(Error::ChildFailed)
-                };
+                match std::io::Error::last_os_error().raw_os_error() {
+                    Some(libc::EINTR) => continue,
+                    Some(libc::ECHILD) if main_exited => return Ok(()),
+                    _ => return Err(Error::ChildFailed),
+                }
             }
+        }
+        if escalation.is_some_and(|d| Instant::now() >= d) {
+            return Err(Error::Deadline);
         }
     }
 }
+fn signal_descendants(signal: i32) -> Result<()> {
+    // SAFETY: private PID1; -1 addresses only descendants of this namespace.
+    if unsafe { libc::kill(-1, signal) } == 0 {
+        return Ok(());
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        // No remaining signal targets is benign; waitpid must still establish
+        // ECHILD before successful supervision completion.
+        Some(libc::ESRCH) => Ok(()),
+        _ => Err(Error::ChildFailed),
+    }
+}
+// ---- Descriptor closure and independently verified final inventories ----
 fn dup_fixed(fd: impl AsFd, to: i32, cloexec: bool) -> Result<()> {
     // SAFETY: fixed child-only targets, duplicate first to avoid source/target collisions.
     let saved = unsafe { libc::fcntl(fd.as_fd().as_raw_fd(), libc::F_DUPFD_CLOEXEC, 100) };
@@ -1014,20 +1100,100 @@ fn close_except(keep: &[i32]) -> Result<()> {
     // CLOEXEC is not enough: remove host dirs, sockets, roots and namespace FDs
     // before untrusted code. Enumeration closes only numeric descriptors; owners
     // remain inert until this child execs/_exits, never Rust unwinding.
-    let fds: Vec<_> = std::fs::read_dir("/proc/self/fd")
-        .map_err(|_| Error::DescriptorClose)?
-        .filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok())
-        .collect();
+    close_numbers(descriptor_inventory()?, keep, checked_close)
+}
+fn close_numbers(
+    fds: std::collections::BTreeSet<i32>,
+    keep: &[i32],
+    mut close: impl FnMut(i32) -> Result<()>,
+) -> Result<()> {
     for fd in fds {
         if fd > 2 && !keep.contains(&fd) {
-            // SAFETY: child owns its descriptor table exclusively and will never drop inherited owners.
-            unsafe {
-                libc::close(fd);
-            }
+            close(fd)?;
         }
     }
     Ok(())
 }
+fn checked_close(fd: i32) -> Result<()> {
+    // SAFETY: caller exclusively owns this child's descriptor table; inherited
+    // Rust owners never run after closure. On Linux close consumes the FD even
+    // on EINTR; report failure without a potentially dangerous retry.
+    cv(unsafe { libc::close(fd) }, Error::DescriptorClose)
+}
+fn descriptor_numbers(
+    entries: impl IntoIterator<Item = Result<Vec<u8>>>,
+    scan_fd: i32,
+) -> Result<std::collections::BTreeSet<i32>> {
+    let mut numbers = std::collections::BTreeSet::new();
+    for entry in entries {
+        let name = entry?;
+        if name == b"." || name == b".." {
+            continue;
+        }
+        if name.is_empty() || !name.iter().all(u8::is_ascii_digit) {
+            return Err(Error::DescriptorInventory);
+        }
+        let fd = std::str::from_utf8(&name)
+            .ok()
+            .and_then(|name| name.parse::<i32>().ok())
+            .ok_or(Error::DescriptorInventory)?;
+        if !numbers.insert(fd) {
+            return Err(Error::DescriptorInventory);
+        }
+    }
+    if !numbers.remove(&scan_fd) {
+        return Err(Error::DescriptorInventory);
+    }
+    Ok(numbers)
+}
+fn descriptor_inventory() -> Result<std::collections::BTreeSet<i32>> {
+    let directory = fs::openat(
+        fs::CWD,
+        "/proc/self/fd",
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| Error::DescriptorScanOpen)?;
+    let mut scan = fs::Dir::new(directory).map_err(|_| Error::DescriptorInventory)?;
+    let scan_fd = scan
+        .fd()
+        .map_err(|_| Error::DescriptorInventory)?
+        .as_raw_fd();
+    descriptor_numbers(
+        (&mut scan).map(|entry| {
+            entry
+                .map(|entry| entry.file_name().to_bytes().to_vec())
+                .map_err(|_| Error::DescriptorInventory)
+        }),
+        scan_fd,
+    )
+}
+fn supervisor_fds(health: BorrowedFd<'_>, expected_null: StdioIdentity) -> Result<()> {
+    let health_fd = health.as_raw_fd();
+    supervisor_inventory(descriptor_inventory()?, health_fd)?;
+    for fd in 0..3 {
+        // SAFETY: exact final child stdio is borrowed only for identity checks.
+        if approved_null(unsafe { BorrowedFd::borrow_raw(fd) })? != expected_null
+            || unsafe { libc::fcntl(fd, libc::F_GETFD) } != 0
+        {
+            return Err(Error::DescriptorStdio);
+        }
+    }
+    let stat = fs::fstat(health).map_err(|_| Error::DescriptorHealth)?;
+    if fs::FileType::from_raw_mode(stat.st_mode) != fs::FileType::Fifo
+        || unsafe { libc::fcntl(health_fd, libc::F_GETFD) } != libc::FD_CLOEXEC
+    {
+        return Err(Error::DescriptorHealth);
+    }
+    Ok(())
+}
+fn supervisor_inventory(fds: std::collections::BTreeSet<i32>, health_fd: i32) -> Result<()> {
+    if health_fd <= 2 || fds != [0, 1, 2, health_fd].into() {
+        return Err(Error::DescriptorInventory);
+    }
+    Ok(())
+}
+// ---- Capability, identity and LSM confinement ----
 fn reduce_privileges(role: u8, health: BorrowedFd<'_>) -> Result<()> {
     drop_privileges()?;
     verify_credentials(role, health)
@@ -1160,17 +1326,17 @@ fn read_fixed(path: &str, limit: usize) -> std::io::Result<Vec<u8>> {
     Ok(bytes)
 }
 #[cfg(test)]
-fn write_probe_state() -> Result<()> {
+fn write_test_state(path: &'static str, value: &[u8]) -> Result<()> {
     use std::io::Write;
     let fd = fs::openat(
         fs::CWD,
-        "/state/probe",
+        path,
         OFlags::WRONLY | OFlags::CREATE | OFlags::TRUNC | OFlags::CLOEXEC | OFlags::NOFOLLOW,
         Mode::RUSR | Mode::WUSR,
     )
     .map_err(|_| Error::ProbeStateWrite)?;
     std::fs::File::from(fd)
-        .write_all(b"selected-exit-only")
+        .write_all(value)
         .map_err(|_| Error::ProbeStateWrite)
 }
 fn verify_credentials_text(s: &str, role: u8, health: BorrowedFd<'_>) -> Result<()> {
@@ -1237,6 +1403,7 @@ fn lsm_supervisor() -> Result<()> {
         .map_err(|_| Error::ConfinementPolicy)?;
     lsm_current()
 }
+// ---- Manifest-bound probe and reduced wait-role seccomp programs ----
 fn filter() -> Vec<libc::sock_filter> {
     let mut out = vec![
         libc::sock_filter {
@@ -1543,6 +1710,7 @@ fn apply_filter(f: &[libc::sock_filter]) -> Result<()> {
     }
     Ok(())
 }
+// ---- Fixed worker exec and post-exec descriptor checks ----
 fn worker_exec(
     executable: BorrowedFd<'_>,
     health: BorrowedFd<'_>,
@@ -1701,6 +1869,7 @@ fn final_fds(before_exec: bool, expected_null: Option<StdioIdentity>) -> Result<
     }
     Ok(())
 }
+// ---- Test-only post-exec adversarial probe and isolated guest helpers ----
 #[cfg(test)]
 pub(super) fn probe_verify() -> Result<()> {
     verify_credentials(64, unsafe { BorrowedFd::borrow_raw(3) })?;
@@ -1743,7 +1912,7 @@ pub(super) fn probe_verify() -> Result<()> {
             return Err(Error::ProbeForbiddenRoot);
         }
     }
-    write_probe_state()?;
+    write_test_state("/state/probe", b"selected-exit-only")?;
     if fs::openat(
         fs::CWD,
         "/etc/forbidden",
@@ -1791,6 +1960,9 @@ pub(super) fn probe_verify() -> Result<()> {
 }
 #[cfg(test)]
 pub(super) fn probe_descendant() -> Result<()> {
+    // Install synchronous handling before clone/readiness. The frozen descendant
+    // inherits blocked shutdown signals and can only be removed by escalation.
+    blocked_signals()?;
     // SAFETY: one-task post-exec test probe; SIGCHLD alone copies address space
     // and current stack, never CLONE_VM. x86_64/ARM64 order the ancillary tid/tls
     // arguments differently, but every such argument is the same null value.
@@ -1815,6 +1987,26 @@ pub(super) fn probe_descendant() -> Result<()> {
         die(0);
     }
     Ok(())
+}
+#[cfg(test)]
+pub(super) fn probe_signal_loop() -> Result<()> {
+    let set = blocked_signals()?;
+    let mut witnessed = false;
+    loop {
+        if let Some(signal @ (libc::SIGTERM | libc::SIGINT | libc::SIGHUP)) = pending(&set)?
+            && !witnessed
+        {
+            let value: &[u8] = match signal {
+                libc::SIGTERM => b"TERM",
+                libc::SIGINT => b"INT",
+                _ => b"HUP",
+            };
+            write_test_state("/state/forwarded-signal", value)?;
+            witnessed = true;
+            // Remain alive so repeated signals cannot hide a moved PID1 deadline
+            // behind ordinary worker exit. Actual SIGKILL must reap both roles.
+        }
+    }
 }
 #[cfg(test)]
 pub(super) fn probe_ready() -> Result<()> {
@@ -1979,9 +2171,90 @@ pub(super) fn probe_failure(error: Error) {
     let fd = unsafe { BorrowedFd::borrow_raw(3) };
     report_failure(fd, error);
 }
+// ---- Offline policy, descriptor-fault and monotonic-deadline regressions ----
 #[cfg(test)]
 mod policy_tests {
     use super::*;
+    #[test]
+    fn descriptor_scan_errors_and_malformed_names_are_fatal() {
+        assert_eq!(
+            descriptor_numbers(
+                [
+                    Ok(b"0".to_vec()),
+                    Err(Error::DescriptorInventory),
+                    Ok(b"9".to_vec())
+                ],
+                9
+            ),
+            Err(Error::DescriptorInventory)
+        );
+        for invalid in [b"x".as_slice(), b"-1", b"", b"2147483648", b"\xff"] {
+            assert_eq!(
+                descriptor_numbers([Ok(b"9".to_vec()), Ok(invalid.to_vec())], 9),
+                Err(Error::DescriptorInventory)
+            );
+        }
+        // Scan FD must itself be present exactly once, never an arbitrary entry
+        // silently ignored because it disappeared or failed to parse.
+        assert_eq!(
+            descriptor_numbers([Ok(b"0".to_vec())], 9),
+            Err(Error::DescriptorInventory)
+        );
+        assert_eq!(
+            descriptor_numbers([Ok(b"9".to_vec()), Ok(b"9".to_vec())], 9),
+            Err(Error::DescriptorInventory)
+        );
+        assert_eq!(
+            descriptor_numbers(
+                [
+                    Ok(b".".to_vec()),
+                    Ok(b"..".to_vec()),
+                    Ok(b"0".to_vec()),
+                    Ok(b"9".to_vec())
+                ],
+                9
+            ),
+            Ok([0].into())
+        );
+    }
+    #[test]
+    fn descriptor_close_failure_cannot_reach_success_and_final_inventory_is_exact() {
+        let mut visited = Vec::new();
+        assert_eq!(
+            close_numbers([0, 1, 2, 3, 40, 41].into(), &[3], |fd| {
+                visited.push(fd);
+                Err(Error::DescriptorClose)
+            }),
+            Err(Error::DescriptorClose)
+        );
+        assert_eq!(visited, [40]);
+        assert_eq!(checked_close(-1), Err(Error::DescriptorClose));
+        assert_eq!(supervisor_inventory([0, 1, 2, 3].into(), 3), Ok(()));
+        for fds in [vec![0, 1, 2, 3, 40], vec![0, 1, 3], vec![0, 1, 2]] {
+            assert_eq!(
+                supervisor_inventory(fds.into_iter().collect(), 3),
+                Err(Error::DescriptorInventory)
+            );
+        }
+        assert_eq!(
+            supervisor_inventory([0, 1, 2].into(), 2),
+            Err(Error::DescriptorInventory)
+        );
+    }
+    #[test]
+    fn repeated_signals_never_extend_shutdown_or_worker_exit_deadline() {
+        let now = Instant::now();
+        let first = now + Duration::from_millis(500);
+        let mut deadline = None;
+        earliest_deadline(&mut deadline, first);
+        for later in 1..100 {
+            earliest_deadline(&mut deadline, first + Duration::from_millis(later * 50));
+            assert_eq!(deadline, Some(first));
+        }
+        earliest_deadline(&mut deadline, now);
+        earliest_deadline(&mut deadline, first);
+        assert_eq!(deadline, Some(now));
+    }
     fn verdict(arch: u32, nr: u32, arg: u64) -> u32 {
         verdict_program(&filter(), arch, nr, arg)
     }

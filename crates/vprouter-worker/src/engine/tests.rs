@@ -10,6 +10,8 @@ struct Faults {
     age: f64,
     withdraw_fail: bool,
     delay: Duration,
+    guard_seen: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    stop_after_withdraw: Option<watch::Sender<bool>>,
 }
 struct Script {
     origin: Instant,
@@ -69,6 +71,15 @@ impl Inputs for Script {
     async fn withdraw(&mut self) -> Result<()> {
         self.event("withdraw");
         let mut f = self.faults.borrow_mut();
+        if let Some(seen) = &f.guard_seen {
+            assert!(
+                seen.load(std::sync::atomic::Ordering::SeqCst),
+                "withdrawal preceded guard notification"
+            );
+        }
+        if let Some(stop) = f.stop_after_withdraw.take() {
+            stop.send(true).unwrap();
+        }
         f.advertised = false;
         if f.withdraw_fail {
             Err(Error::Transport)
@@ -356,6 +367,7 @@ impl Inputs for TlsInputs {
         self.script.structure().await
     }
     async fn provider(&mut self) -> Result<Confirmation> {
+        self.script.event("provider");
         self.provider.confirm().await
     }
     async fn local(&mut self) -> Result<Observation> {
@@ -369,6 +381,217 @@ impl Inputs for TlsInputs {
     }
     fn cancel(&mut self) {
         self.provider.cancel();
+    }
+}
+
+#[tokio::test]
+async fn real_transport_eof_and_reset_retry_only_after_fresh_checks() {
+    use crate::tests::{TlsMock, TransportFault};
+    use std::sync::atomic::Ordering;
+    for fault in [
+        TransportFault::HandshakeEof,
+        TransportFault::HandshakeReset,
+        TransportFault::HttpEof,
+        TransportFault::HttpReset,
+        TransportFault::BodyEof,
+        TransportFault::BodyReset,
+    ] {
+        for drift in [false, true] {
+            let server = TlsMock::fault_then_success(fault).await;
+            let fixture = engine();
+            if drift {
+                fixture.inputs.faults.borrow_mut().structure_at = Some(3);
+            }
+            let mut e = Engine::new(
+                TlsInputs {
+                    script: fixture.inputs,
+                    provider: server.provider(),
+                },
+                ExitMode::Mullvad,
+                "de-fra-wg-404",
+                "n123",
+                fixture.origin,
+            )
+            .unwrap();
+            let start = Instant::now();
+            assert_eq!(
+                e.sample().await,
+                if drift {
+                    Err(Error::Structural)
+                } else {
+                    Ok(())
+                },
+                "{fault:?}, drift={drift}"
+            );
+            assert!(start.elapsed() >= Duration::from_secs(1));
+            assert_eq!(
+                server.connections.load(Ordering::Relaxed),
+                if drift { 1 } else { 2 },
+                "{fault:?}"
+            );
+            let handshake = matches!(
+                fault,
+                TransportFault::HandshakeEof | TransportFault::HandshakeReset
+            );
+            assert_eq!(
+                server.requests.load(Ordering::Relaxed),
+                usize::from(!handshake) + usize::from(!drift)
+            );
+            let events = e.inputs.script.events.borrow();
+            assert_eq!(
+                events.iter().filter(|(s, _)| *s == "structure").count(),
+                if drift { 3 } else { 5 }
+            );
+            let providers: Vec<_> = events
+                .iter()
+                .enumerate()
+                .filter(|(_, (s, _))| *s == "provider")
+                .collect();
+            assert_eq!(providers.len(), if drift { 1 } else { 2 });
+            if !drift {
+                let (second, (_, at)) = providers[1];
+                assert_eq!(events[second - 1].0, "structure");
+                assert!(at.saturating_sub(providers[0].1.1) >= Duration::from_secs(1));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn real_certificate_refusal_is_not_retried_by_engine() {
+    use crate::tests::{PROVIDER, TlsMock, response};
+    use std::sync::atomic::Ordering;
+    for name in ["wrong.invalid", "am.i.mullvad.net"] {
+        let server = TlsMock::new(name, vec![response(200, PROVIDER)], 1).await;
+        let fixture = engine();
+        let mut provider = server.provider();
+        if name == "am.i.mullvad.net" {
+            provider = Provider::synthetic(
+                Rc::new(Placed::synthetic()),
+                rustls::RootCertStore::empty(),
+                server.address(),
+            );
+        }
+        let mut e = Engine::new(
+            TlsInputs {
+                script: fixture.inputs,
+                provider,
+            },
+            ExitMode::Mullvad,
+            "de-fra-wg-404",
+            "n123",
+            fixture.origin,
+        )
+        .unwrap();
+        assert_eq!(e.sample().await, Err(Error::Tls));
+        assert_eq!(server.connections.load(Ordering::Relaxed), 1);
+        assert_eq!(server.requests.load(Ordering::Relaxed), 0);
+        assert_eq!(e.inputs.script.faults.borrow().structures, 1);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn recovering_expiry_before_sample_or_offer_resets_three_success_gate() {
+    for (gap, delay) in [(45, 0), (46, 0), (44, 2)] {
+        let mut e = engine();
+        for n in 0..3 {
+            if n > 0 {
+                time::advance(CADENCE).await;
+            }
+            e.sample().await.unwrap();
+        }
+        assert_eq!(e.machine.state(), HealthState::Recovering);
+        time::advance(Duration::from_secs(gap)).await;
+        e.inputs.faults.borrow_mut().delay = Duration::from_secs(delay);
+        assert_eq!(e.sample().await, Err(Error::Structural));
+        e.inputs.faults.borrow_mut().delay = Duration::ZERO;
+        assert_eq!(count(&e, "advertise"), 0);
+        assert_eq!(e.machine.state(), HealthState::Blocked);
+        for _ in 0..3 {
+            e.sample().await.unwrap();
+            assert_eq!(count(&e, "advertise"), 0);
+            time::advance(CADENCE).await;
+        }
+        assert_eq!(e.machine.state(), HealthState::Recovering);
+        e.sample().await.unwrap();
+        assert_eq!(count(&e, "advertise"), 1);
+    }
+}
+
+#[tokio::test]
+async fn expired_ready_runner_notifies_guard_before_withdrawing_without_success_heartbeat() {
+    use crate::tests::{json_response, read_request};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use tokio::{io::AsyncWriteExt, net::UnixListener};
+    for gap in [45, 46] {
+        time::pause();
+        let mut engine = engine();
+        engine.inputs.faults.borrow_mut().approved = true;
+        for n in 0..4 {
+            if n > 0 {
+                time::advance(CADENCE).await;
+            }
+            engine.sample().await.unwrap();
+        }
+        assert_eq!(engine.machine.state(), HealthState::Ready);
+        assert_eq!(count(&engine, "advertise"), 1);
+        let providers_before = count(&engine, "provider");
+        time::advance(Duration::from_secs(gap)).await;
+        time::resume();
+        let (publisher, path) = publisher();
+        let guard = path.join("guard.sock");
+        let listener = UnixListener::bind(&guard).unwrap();
+        let seen = Arc::new(AtomicBool::new(false));
+        let guard_seen = seen.clone();
+        let server = tokio::spawn(async move {
+            for (sequence, reason) in [(1, "structural"), (2, "cancelled")] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = read_request(&mut socket).await;
+                assert_eq!((&*request.0, &*request.1), ("POST", "/v1/worker/block"));
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(&request.2).unwrap(),
+                    serde_json::json!({"version":1,"sequence":sequence,"reason":reason})
+                );
+                guard_seen.store(true, Ordering::SeqCst);
+                socket
+                    .write_all(&json_response(
+                        serde_json::json!({"version":1,"sequence":sequence,"recorded":true}),
+                    ))
+                    .await
+                    .unwrap();
+                socket.shutdown().await.unwrap();
+            }
+        });
+        let (stop, rx) = watch::channel(false);
+        engine.inputs.faults.borrow_mut().guard_seen = Some(seen);
+        engine.inputs.faults.borrow_mut().stop_after_withdraw = Some(stop);
+        let mut runner = Runner {
+            engine,
+            publisher,
+            control: Control {
+                placed: Rc::new(Placed::synthetic()),
+                guard,
+                init: path.join("unused"),
+                sequence: 0,
+            },
+        };
+        time::timeout(
+            Duration::from_secs(4),
+            runner.run(rx, "deployment", "exit", 1),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        server.await.unwrap();
+        assert_eq!(count(&runner.engine, "provider"), providers_before);
+        assert_eq!(count(&runner.engine, "advertise"), 1);
+        assert_eq!(count(&runner.engine, "withdraw"), 2); // expiry, then shutdown
+        assert!(!runner.engine.inputs.faults.borrow().advertised);
+        assert_eq!(runner.control.sequence, 2); // both blocks, no success heartbeat
+        std::fs::remove_dir_all(path).unwrap();
     }
 }
 #[tokio::test]

@@ -119,11 +119,56 @@ impl Http {
 fn http_error(e: hyper::Error) -> Error {
     if e.is_parse() || e.is_user() {
         Error::Malformed
-    } else if e.is_incomplete_message() || e.is_closed() || e.is_canceled() {
-        Error::Transport
     } else {
-        Error::Malformed
+        match transient_io(&e) {
+            Some(true) => Error::Transport,
+            Some(false) => Error::Malformed,
+            None if e.is_incomplete_message() || e.is_closed() || e.is_canceled() => {
+                Error::Transport
+            }
+            None => Error::Malformed,
+        }
     }
+}
+/// Inspect at most eight typed causes, never error strings. A rustls protocol/
+/// certificate error or non-allowlisted I/O kind overrides transient wrappers.
+/// Unknown/overlong chains do not authorize a retry.
+pub(crate) fn transient_io(error: &(dyn std::error::Error + 'static)) -> Option<bool> {
+    use std::io::ErrorKind;
+    let mut cause = Some(error);
+    let mut io = None;
+    for _ in 0..8 {
+        let Some(error) = cause else {
+            return io;
+        };
+        if error.is::<rustls::Error>() {
+            return Some(false);
+        }
+        cause = if let Some(error) = error.downcast_ref::<std::io::Error>() {
+            let eligible = matches!(
+                error.kind(),
+                ErrorKind::ConnectionReset
+                    | ErrorKind::ConnectionAborted
+                    | ErrorKind::ConnectionRefused
+                    | ErrorKind::NotConnected
+                    | ErrorKind::BrokenPipe
+                    | ErrorKind::UnexpectedEof
+                    | ErrorKind::TimedOut
+                    | ErrorKind::Interrupted
+                    | ErrorKind::WouldBlock
+                    | ErrorKind::HostUnreachable
+                    | ErrorKind::NetworkUnreachable
+                    | ErrorKind::NetworkDown
+            );
+            io = Some(io.unwrap_or(true) && eligible);
+            error
+                .get_ref()
+                .map(|e| e as &(dyn std::error::Error + 'static))
+        } else {
+            error.source()
+        };
+    }
+    if cause.is_some() { Some(false) } else { io }
 }
 pub(crate) async fn unix_request(
     socket: &Path,

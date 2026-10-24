@@ -108,13 +108,7 @@ impl HealthMachine {
         }
         // Status is observational. Revoke expired cached success here before a
         // new healthy sample can extend an old streak or preserve READY.
-        let expired = self
-            .evidence
-            .as_ref()
-            .and_then(|previous| self.check(now, previous, false).err());
-        if let Some(error) = expired {
-            self.block(error.reason());
-        }
+        self.expire(now);
         if let Err(error) = self.check(now, &evidence, true) {
             self.block(error.reason());
             return Err(error);
@@ -141,6 +135,20 @@ impl HealthMachine {
         };
         self.evidence = Some(evidence);
         Ok(self.state)
+    }
+    /// Revoke expired cached evidence before external lifecycle decisions.
+    /// Returns true only when evidence was present and has just been revoked;
+    /// callers must enforce withdrawal even if a new sample could be healthy.
+    pub fn expire(&mut self, now: f64) -> bool {
+        let expired = self
+            .evidence
+            .as_ref()
+            .and_then(|previous| self.check(now, previous, false).err());
+        if let Some(error) = expired {
+            self.block(error.reason());
+            return true;
+        }
+        false
     }
     fn check(&self, now: f64, e: &Evidence, fresh_sample: bool) -> Result<()> {
         if !valid_time(now)

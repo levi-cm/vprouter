@@ -150,6 +150,16 @@ pub(crate) struct TlsMock {
     roots: rustls::RootCertStore,
     task: JoinHandle<()>,
     pub(crate) connections: Arc<AtomicUsize>,
+    pub(crate) requests: Arc<AtomicUsize>,
+}
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TransportFault {
+    HandshakeEof,
+    HandshakeReset,
+    HttpEof,
+    HttpReset,
+    BodyEof,
+    BodyReset,
 }
 impl Drop for TlsMock {
     fn drop(&mut self) {
@@ -157,6 +167,9 @@ impl Drop for TlsMock {
     }
 }
 impl TlsMock {
+    pub(crate) fn address(&self) -> SocketAddr {
+        self.address
+    }
     pub(crate) async fn new(name: &str, replies: Vec<Vec<u8>>, connections: usize) -> Self {
         let (roots, config) = certificates(name);
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
@@ -166,6 +179,8 @@ impl TlsMock {
         let accept = tokio_rustls::TlsAcceptor::from(Arc::new(config));
         let counter = Arc::new(AtomicUsize::new(0));
         let c = counter.clone();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let rcount = requests.clone();
         let task = tokio::spawn(async move {
             let per_connection = replies.len() / connections;
             let mut replies = replies.into_iter();
@@ -177,6 +192,7 @@ impl TlsMock {
                 };
                 for _ in 0..per_connection {
                     let r = read_request(&mut stream).await;
+                    rcount.fetch_add(1, Ordering::Relaxed);
                     assert_eq!((&*r.0, &*r.1, r.2.is_empty()), ("GET", "/json", true));
                     stream.write_all(&replies.next().unwrap()).await.unwrap();
                     stream.flush().await.unwrap();
@@ -190,6 +206,74 @@ impl TlsMock {
             roots,
             task,
             connections: counter,
+            requests,
+        }
+    }
+    pub(crate) async fn fault_then_success(fault: TransportFault) -> Self {
+        let (roots, config) = certificates("am.i.mullvad.net");
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let accept = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        let connections = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(AtomicUsize::new(0));
+        let c = connections.clone();
+        let r = requests.clone();
+        let task = tokio::spawn(async move {
+            for attempt in 0..2 {
+                let (mut tcp, _) = listener.accept().await.unwrap();
+                c.fetch_add(1, Ordering::Relaxed);
+                if attempt == 0
+                    && matches!(
+                        fault,
+                        TransportFault::HandshakeEof | TransportFault::HandshakeReset
+                    )
+                {
+                    // Consume ClientHello before FIN so EOF is not accidentally RST.
+                    assert!(tcp.read(&mut [0; 4096]).await.unwrap() > 0);
+                    if matches!(fault, TransportFault::HandshakeReset) {
+                        rustix::net::sockopt::set_socket_linger(&tcp, Some(Duration::ZERO))
+                            .unwrap();
+                    } else {
+                        tcp.shutdown().await.unwrap();
+                    }
+                    drop(tcp);
+                    continue;
+                }
+                let mut tls = accept.accept(tcp).await.unwrap();
+                let request = read_request(&mut tls).await;
+                assert_eq!((&*request.0, &*request.1), ("GET", "/json"));
+                r.fetch_add(1, Ordering::Relaxed);
+                if attempt == 0 {
+                    if matches!(fault, TransportFault::BodyEof | TransportFault::BodyReset) {
+                        tls.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 200\r\n\r\n{")
+                            .await
+                            .unwrap();
+                        tls.flush().await.unwrap();
+                    }
+                    if matches!(fault, TransportFault::HttpReset | TransportFault::BodyReset) {
+                        rustix::net::sockopt::set_socket_linger(
+                            tls.get_ref().0,
+                            Some(Duration::ZERO),
+                        )
+                        .unwrap();
+                    }
+                    // Deliberately omit close_notify: exercise actual truncated TLS I/O.
+                    drop(tls);
+                } else {
+                    tls.write_all(&response(200, PROVIDER)).await.unwrap();
+                    tls.flush().await.unwrap();
+                    let _ = tls.shutdown().await;
+                }
+            }
+        });
+        Self {
+            address,
+            roots,
+            task,
+            connections,
+            requests,
         }
     }
     pub(crate) fn provider(&self) -> provider::Provider {
@@ -203,6 +287,34 @@ impl TlsMock {
 #[test]
 fn production_has_no_authority_bypass() {
     assert_eq!(crate::start(), Err(Error::StructuralGap));
+}
+#[test]
+fn transport_cause_inspection_is_bounded_and_protocol_errors_override_io() {
+    use std::io::{Error as Io, ErrorKind};
+    for kind in [
+        ErrorKind::ConnectionReset,
+        ErrorKind::UnexpectedEof,
+        ErrorKind::TimedOut,
+    ] {
+        assert_eq!(client::transient_io(&Io::from(kind)), Some(true));
+    }
+    for kind in [
+        ErrorKind::InvalidData,
+        ErrorKind::PermissionDenied,
+        ErrorKind::InvalidInput,
+    ] {
+        assert_eq!(client::transient_io(&Io::from(kind)), Some(false));
+    }
+    let wrapped_protocol = Io::new(
+        ErrorKind::ConnectionReset,
+        rustls::Error::InvalidMessage(rustls::InvalidMessage::InvalidContentType),
+    );
+    assert_eq!(client::transient_io(&wrapped_protocol), Some(false));
+    let mut nested = Io::from(ErrorKind::ConnectionReset);
+    for _ in 0..8 {
+        nested = Io::new(ErrorKind::ConnectionReset, nested);
+    }
+    assert_eq!(client::transient_io(&nested), Some(false));
 }
 #[test]
 fn provider_strict_shape_negative_server_duplicate_types_and_ip() {

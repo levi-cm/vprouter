@@ -139,6 +139,7 @@ impl<I: Inputs> Engine<I> {
         result
     }
     async fn sample_inner(&mut self) -> Result<()> {
+        self.cached_fresh()?;
         if !self.initialized {
             self.inputs.initialize().await?;
             self.initialized = true;
@@ -159,6 +160,7 @@ impl<I: Inputs> Engine<I> {
         let provider_at = self.origin.elapsed().as_secs_f64();
         let structural = self.inputs.structure().await?;
         let mut local = self.inputs.local().await?;
+        self.cached_fresh()?;
         // This private engine has no production constructor. Task8 must bind
         // retained health-only bootstrap enforcement before this recovery write.
         // It is possible only after three independent prior provider+structure samples
@@ -177,7 +179,10 @@ impl<I: Inputs> Engine<I> {
         if now - structural.at >= 45.0 {
             return Err(Error::Structural);
         }
-        self.machine
+        self.cached_fresh()?;
+        let previous = self.machine.state();
+        let state = self
+            .machine
             .observe(
                 now,
                 Evidence {
@@ -198,7 +203,17 @@ impl<I: Inputs> Engine<I> {
                 },
             )
             .map_err(|_| Error::Structural)?;
+        if previous == HealthState::Ready && state != HealthState::Ready {
+            return Err(Error::Structural);
+        }
         Ok(())
+    }
+    fn cached_fresh(&mut self) -> Result<()> {
+        if self.machine.expire(self.origin.elapsed().as_secs_f64()) {
+            Err(Error::Structural)
+        } else {
+            Ok(())
+        }
     }
 }
 fn eligible(e: Error) -> bool {

@@ -126,11 +126,13 @@ impl Provider {
                 .map_err(|_| Error::Transport)?;
             let name =
                 rustls::pki_types::ServerName::try_from(dns::PROVIDER).map_err(|_| Error::Tls)?;
-            let tls = self
-                .connector
-                .connect(name, tcp)
-                .await
-                .map_err(|_| Error::Tls)?;
+            let tls = self.connector.connect(name, tcp).await.map_err(|e| {
+                if crate::client::transient_io(&e) == Some(true) {
+                    Error::Transport
+                } else {
+                    Error::Tls
+                }
+            })?;
             self.http = Some(Http::connect(tls).await?);
         }
         let reply = self

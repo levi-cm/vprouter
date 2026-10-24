@@ -24,6 +24,48 @@ fn machine() -> HealthMachine {
     HealthMachine::new(ExitMode::Mullvad, Some("de-fra-wg-404"), "node123").unwrap()
 }
 #[test]
+fn explicit_expiry_preserves_empty_startup_and_checks_cached_boundaries() {
+    let mut empty = machine();
+    assert!(!empty.expire(0.0));
+    assert!(!empty.expire(100.0));
+    assert_eq!(empty.state(), HealthState::Starting);
+    for count in 1..=4 {
+        for gap in [45.0, 46.0] {
+            let mut m = machine();
+            for n in 0..count {
+                let at = 100.0 + n as f64 * 5.0;
+                m.observe(at, healthy(at)).unwrap();
+            }
+            let at = 100.0 + (count - 1) as f64 * 5.0;
+            assert!(!m.expire(at + 44.999));
+            assert!(m.expire(at + gap));
+            assert_eq!(m.state(), HealthState::Blocked);
+            assert!(!m.expire(at + gap)); // already revoked
+            for n in 0..2 {
+                let now = at + gap + n as f64 * 5.0;
+                assert_eq!(m.observe(now, healthy(now)).unwrap(), HealthState::Blocked);
+            }
+            let now = at + gap + 10.0;
+            assert_eq!(
+                m.observe(now, healthy(now)).unwrap(),
+                HealthState::Recovering
+            );
+        }
+    }
+    for now in [99.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut m = machine();
+        m.observe(100.0, healthy(100.0)).unwrap();
+        assert!(m.expire(now));
+        assert_eq!(m.state(), HealthState::Blocked);
+    }
+    let mut m = machine();
+    let mut e = healthy(100.0);
+    e.handshake_age_seconds = Some(179.0);
+    m.observe(100.0, e).unwrap();
+    assert!(!m.expire(100.999));
+    assert!(m.expire(101.0));
+}
+#[test]
 fn startup_requires_three_fresh_checks_then_online_approval() {
     let mut m = machine();
     assert_eq!(

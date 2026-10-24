@@ -84,6 +84,12 @@ any drift fail closed. Sample timeout34s leaves margin for the existing native
 is below39s, strictly below45s. Native dump blocking can delay cancellation by up
 to5s; this is not a hard realtime scheduler guarantee.
 
+TLS negotiation and established HTTP I/O retain a bounded typed error-cause
+classification: explicit reset/EOF/timeout and other allowlisted transient I/O
+kinds may receive that single retry. Certificate/hostname/protocol failures,
+non-allowlisted I/O and overlong cause chains remain permanent. No error-string
+matching or external error logging is used.
+
 Reviewed HealthMachine requires three independent fresh successes before
 RECOVERING and actual advertised, online, approved stable identity before READY.
 `ExitNodeOption` means offered AND approved in pinned Tailscale. False while
@@ -101,6 +107,10 @@ is used; one exit has zero offset and no extra exit timers. Overruns skip missed
 cadence starts rather than create overlapping samples or retry bursts. Freshness
 is strict45s; handshake ages must be nonfuture/known and strictly below180s.
 The independent90s guard watchdog remains a task8 implementation requirement.
+Cached evidence is explicitly expired before sampling, before any recovery
+advertisement and before accepting replacement evidence. Expiry resets every
+partial/recovery streak and returns through guard-first withdrawal, including
+expired READY; a healthy replacement cannot hide that enforcement event.
 
 ## Failure, cancellation and protected status
 

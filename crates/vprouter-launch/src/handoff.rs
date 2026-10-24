@@ -288,6 +288,21 @@ impl<'g, 'a> Handoff<'g, 'a> {
     /// Exact current accept peer is checked through host proc/pidfd and retained
     /// producer membership. Translation of worker-side PID0/cgroup'/' is irrelevant.
     pub fn serve_once(&mut self, bundle: &ReviewedBundle) -> Result<u32> {
+        self.serve_once_inner(bundle, |_| Ok(()))
+    }
+    #[cfg(test)]
+    pub fn serve_once_inspected(
+        &mut self,
+        bundle: &ReviewedBundle,
+        inspect: impl FnOnce(u32) -> Result<()>,
+    ) -> Result<u32> {
+        self.serve_once_inner(bundle, inspect)
+    }
+    fn serve_once_inner(
+        &mut self,
+        bundle: &ReviewedBundle,
+        inspect: impl FnOnce(u32) -> Result<()>,
+    ) -> Result<u32> {
         // Consume BEFORE accepting: malformed/unauthorized attempts never enable
         // another try with the same nonce/config. Failure stays quarantined.
         self.attempt.begin()?;
@@ -340,6 +355,10 @@ impl<'g, 'a> Handoff<'g, 'a> {
         let request: Request = bootstrap::read_message_before(&mut stream, end)
             .map_err(|_| Error::DescriptorPolicy)?;
         request_binding(&request, &self.config_digest, &self.config.nonce)?;
+        // The ignored oracle inspects this authenticated process while it is
+        // blocked awaiting the response. This avoids racing transient bootstrap
+        // descriptors or post-response observer exit; no permission exists yet.
+        inspect(pid)?;
         self.verify()?;
         sender.verify(
             self.producer,

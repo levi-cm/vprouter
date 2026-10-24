@@ -398,11 +398,7 @@ pub(super) fn run(
     lab::case("actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds");
     lab::stage("actual_observer_authenticated_launch");
     let mut observer = handoff.launch_observer(&bundle)?;
-    let observer_pid = identify(a, &bundle, Role::WorkerObserver)?;
-    inspect(a, observer_pid, false, dir)?;
-    if handoff.serve_once(&bundle)? != observer_pid {
-        return Err(Error::DescriptorPolicy);
-    }
+    handoff.serve_once_inspected(&bundle, |pid| inspect(a, pid, false, dir))?;
     if handoff.serve_once(&bundle).err() != Some(Error::DescriptorPolicy) {
         return Err(Error::DescriptorPolicy);
     }

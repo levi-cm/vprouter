@@ -359,7 +359,7 @@ fn write_message_before<T: Serialize>(
     }
     let mut framed = (bytes.len() as u32).to_be_bytes().to_vec();
     framed.extend(bytes);
-    stream.set_nonblocking(true).map_err(|_| Error::Bootstrap)?;
+    nonblocking(stream)?;
     let mut offset = 0;
     while offset < framed.len() {
         if std::time::Instant::now() >= end {
@@ -376,6 +376,12 @@ fn write_message_before<T: Serialize>(
         }
     }
     Ok(())
+}
+fn nonblocking(stream: &UnixStream) -> Result<()> {
+    // Use the already admitted fcntl operations rather than std's Linux
+    // FIONBIO ioctl. Preserve every existing status flag on framing streams.
+    let flags = fs::fcntl_getfl(stream).map_err(|_| Error::Bootstrap)?;
+    fs::fcntl_setfl(stream, flags | OFlags::NONBLOCK).map_err(|_| Error::Bootstrap)
 }
 fn wait(
     stream: &UnixStream,
@@ -405,7 +411,7 @@ fn wait(
     Ok(())
 }
 fn read_before(stream: &mut UnixStream, bytes: &mut [u8], end: std::time::Instant) -> Result<()> {
-    stream.set_nonblocking(true).map_err(|_| Error::Bootstrap)?;
+    nonblocking(stream)?;
     let mut offset = 0;
     while offset < bytes.len() {
         if std::time::Instant::now() >= end {
@@ -498,6 +504,12 @@ fn response_binding(response: &Response, hash: &str, nonce: &str) -> Result<()> 
     }
     Ok(())
 }
+fn root_peer(peer: &nix::sys::socket::UnixCredentials) -> Result<()> {
+    if peer.uid() != 0 || peer.gid() != 0 {
+        return Err(Error::Bootstrap);
+    }
+    Ok(())
+}
 fn admit() -> Result<Observation> {
     let (config, hash) = protected_configuration()?;
     credentials()?;
@@ -514,13 +526,15 @@ fn admit() -> Result<Observation> {
     // starttime/pidfd/cgroup/netns/executable before returning ObserveOnce.
     let end = std::time::Instant::now() + Duration::from_secs(2);
     let mut stream = connect_before(std::path::Path::new(SOCKET), end)?;
-    let peer = rustix::net::sockopt::socket_peercred(&stream).map_err(|_| Error::Bootstrap)?;
+    // A host-side guard can legitimately translate to PID0 here. rustix1.1.4's
+    // UCred uses NonZeroI32 for pid, so that representation is invalid across
+    // this private PID boundary. Pinned nix keeps libc's raw integer layout.
+    let peer = nix::sys::socket::getsockopt(&stream, nix::sys::socket::sockopt::PeerCredentials)
+        .map_err(|_| Error::Bootstrap)?;
     // PID may translate to zero in a private PID namespace. UID/GID root are
     // necessary here, not sufficient: the fixed protected socket+nonce+digest
     // and the independently checked current client bind the one-shot exchange.
-    if peer.uid.as_raw() != 0 || peer.gid.as_raw() != 0 {
-        return Err(Error::Bootstrap);
-    }
+    root_peer(&peer)?;
     write_message_before(
         &mut stream,
         &Request {
@@ -616,6 +630,30 @@ pub fn observe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn translated_pid_zero_retains_raw_layout_and_requires_both_root_credentials() {
+        for (pid, uid, gid, allowed) in [
+            (0, 0, 0, true),
+            (1, 0, 0, true),
+            (0, 65534, 0, false),
+            (0, 0, 65534, false),
+            (0, 65534, 65534, false),
+        ] {
+            let peer = nix::sys::socket::UnixCredentials::from(nix::libc::ucred { pid, uid, gid });
+            assert_eq!(peer.pid(), pid);
+            assert_eq!(root_peer(&peer).is_ok(), allowed);
+        }
+    }
+    #[test]
+    fn framing_nonblocking_preserves_existing_status_flags() {
+        let (a, _b) = UnixStream::pair().unwrap();
+        let before = fs::fcntl_getfl(&a).unwrap();
+        assert!(!before.contains(OFlags::NONBLOCK));
+        nonblocking(&a).unwrap();
+        assert_eq!(fs::fcntl_getfl(&a).unwrap(), before | OFlags::NONBLOCK);
+        nonblocking(&a).unwrap();
+        assert_eq!(fs::fcntl_getfl(&a).unwrap(), before | OFlags::NONBLOCK);
+    }
     #[test]
     fn stalled_listener_and_refusal_share_the_absolute_connection_exchange_deadline() {
         let path =

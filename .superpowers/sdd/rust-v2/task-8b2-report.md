@@ -200,3 +200,40 @@ No kernel-shape permission or readiness is added by this object. Pure parsing an
 credential fault regressions pass; launch30tests/clippy pass. Botharchitecture
 static artifacts/contexts are rebuilt after final source changes. Root runtime
 and all remaining structural/lifecycle acceptance remain pending.
+
+
+## Candidate10 bounded authenticated observer handoff
+
+Root unchanged09 attempts13/14 remain FAIL and are retained. Attempt13 reached
+actual_daemon_identity_pinned and passed actual Go confinement, then both Go and
+Rust observer exec succeeded. Observer refused bootstrap after successful
+SO_PEERCRED; the existing inspection raced transient bootstrap descriptors/exit.
+The metadata-only attempt14 collector validated53 files but saw no SO_PEERCRED
+calls, so no actual PID0 credential witness is claimed from either attempt.
+
+Pinned rustix1.1.4 UCred represents pid with NonZeroI32, although a host listener
+outside the observer's private PID namespace may legitimately translate to pid0.
+Worker now uses exact nix0.30.1 safe PeerCredentials with raw libc pid_t layout;
+root UID AND GID remain mandatory, followed by the same protected socket, nonce,
+digest and independently pinned sender checks. The public nix crate's SHA256
+74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6 matches the lock.
+Only nix0.30.1, cfg_aliases0.2.2 and memoffset0.9.1 are new lock packages; no prior
+locked version changed. Direct pid0/root positive and either-nonroot negative
+regressions pass. Weakening OR to AND fails that regression(exit101); restored
+policy passes(exit0), retained in /tmp/task8b2-root-peer-{mutation,restored}-test.txt.
+
+The ignored test inspector now runs only after a request's digest/nonce and
+actual sender have been checked, while the observer awaits its response. The
+one-use attempt is consumed before accept; sender, authority and absolute
+exchange deadline are checked again after inspection and before ObserveOnce.
+Production uses the same path with an empty inspection callback. This changes
+no permission and avoids racing observer exit/bootstrap descriptor closure.
+
+Framing uses safe fcntl_getfl/setfl preserving all existing flags plus NONBLOCK,
+instead of std's Linux FIONBIO ioctl; no syscall permission is added. Status-flag
+preservation and bounded backlog/stalled/trickling exchange regressions pass.
+Final launch30 and worker41 tests pass, including all10 focused bootstrap
+regressions; launch/worker all-target clippy and fmt pass with the final code. Static observers, init, payloads and contexts for both
+architectures are rebuilt and source-bound before root execution. Successful
+actual observer/LocalAPI, strict token-bound kernel shape and lifecycle remain
+pending; production launch/Placed/readiness stay refused.

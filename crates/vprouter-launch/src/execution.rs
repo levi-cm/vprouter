@@ -167,11 +167,19 @@ fn launch_inner(
     #[cfg(test)] before_place: Option<fn(&mut kernel::Child) -> Result<()>>,
 ) -> Result<Running> {
     process::single_threaded()?;
+    #[cfg(test)]
+    eprintln!("LAB_EXEC_STAGE fixed_program_binding");
     program.bind(a)?;
+    #[cfg(test)]
+    eprintln!("LAB_EXEC_STAGE allocation_revalidation");
     tx.revalidate(&a.spec)?;
+    #[cfg(test)]
+    eprintln!("LAB_EXEC_STAGE namespace_binding");
     ns.bind(&a.spec)?;
     // All Docker revalidation runtimes are created and dropped in this function;
     // none exists across fork or namespace entry. No caller-controlled runtime.
+    #[cfg(test)]
+    eprintln!("LAB_EXEC_STAGE container_revalidation");
     revalidate(a)?;
     #[cfg(test)]
     eprintln!("LAB_EXEC_STAGE selected_state_admission");

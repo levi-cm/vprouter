@@ -838,8 +838,9 @@ pub fn run_producer() -> Result<()> {
                 .map_err(|_| Error::CgroupMismatch)
         })
         .collect::<Result<_>>()?;
-    if execution::lab_producer(&a, &tx, &ns, &producer, true).err() != Some(Error::PlacementFailed)
-    {
+    let killed = execution::lab_producer(&a, &tx, &ns, &producer, true).err();
+    if killed != Some(Error::PlacementFailed) {
+        eprintln!("LAB_PRODUCER_UNEXPECTED killed_gated={killed:?}");
         return Err(Error::PlacementFailed);
     }
     if fs::metadata(a.spec.exit.state_dir.join("worker/probe")).is_ok() {

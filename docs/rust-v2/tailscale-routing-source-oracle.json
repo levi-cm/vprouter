@@ -1,0 +1,98 @@
+{
+  "observed_at_utc": "2026-10-24T13:48:05.680577+00:00",
+  "kind": "independent public upstream source oracle only",
+  "version": "1.102.5",
+  "annotated_tag_object": "8908149cab706b043db0a3ffb967fbf0bfa9f9eb",
+  "peeled_commit": "5fb2a81b065b0a0bbbfc67ab20a0d9c6a1108115",
+  "actual_lab_version": "1.102.5-1-t5fb2a81b0",
+  "sources": [
+    {
+      "path": "wgengine/router/osrouter/router_linux.go",
+      "immutable_url": "https://raw.githubusercontent.com/tailscale/tailscale/5fb2a81b065b0a0bbbfc67ab20a0d9c6a1108115/wgengine/router/osrouter/router_linux.go",
+      "sha256": "ffd537768a56081d2572e270aa8d99852f1460e6642f86cde0281f3855618a34"
+    },
+    {
+      "path": "tsconst/linuxfw.go",
+      "immutable_url": "https://raw.githubusercontent.com/tailscale/tailscale/5fb2a81b065b0a0bbbfc67ab20a0d9c6a1108115/tsconst/linuxfw.go",
+      "sha256": "8c128cc006a0ec182d272e3b3b5802277d73e3fd552df1fbb2f4f125d06ceb6e"
+    }
+  ],
+  "facts": {
+    "linux_default_ip_policy_pref_base": {
+      "value": 5200,
+      "source_lines": "router_linux.go:141"
+    },
+    "tailscale_route_table": {
+      "value": 52,
+      "source_lines": "router_linux.go:1575"
+    },
+    "bypass_mark": {
+      "value": "0x80000",
+      "source_lines": "linuxfw.go:41-42"
+    },
+    "mark_mask": {
+      "value": "0xff0000",
+      "source_lines": "linuxfw.go:31-32"
+    },
+    "default_rule_intent": {
+      "source_lines": "router_linux.go:1594-1626,1666-1678",
+      "rules": [
+        {
+          "priority": 5210,
+          "mark": "0x80000",
+          "mask": "0xff0000",
+          "table": 254
+        },
+        {
+          "priority": 5230,
+          "mark": "0x80000",
+          "mask": "0xff0000",
+          "table": 253
+        },
+        {
+          "priority": 5250,
+          "mark": "0x80000",
+          "mask": "0xff0000",
+          "action": "unreachable"
+        },
+        {
+          "priority": 5270,
+          "table": 52
+        }
+      ],
+      "per_rule_values": {
+        "Goto": -1,
+        "SuppressIfgroup": -1,
+        "SuppressPrefixlen": -1,
+        "Flow": -1
+      },
+      "families": "each family returned by actual addrFamilies; installed kernel shape not proved"
+    },
+    "route_constructor": {
+      "source_lines": "router_linux.go:1190-1205,1375-1380",
+      "specified_fields": [
+        "LinkIndex=tun interface",
+        "Dst=masked approved prefix",
+        "Table=52 when policy rules available"
+      ],
+      "limitation": "Default protocol/scope/type/metric emitted by Go netlink/kernel still require independent exact kernel oracle; source constructor alone is insufficient."
+    },
+    "address_constructor": {
+      "source_lines": "router_linux.go:994-1012",
+      "behavior": "AddrReplace from approved local prefix; no authority to permit arbitrary observed addresses"
+    }
+  },
+  "failed_lookup": {
+    "path": "wgengine/router/router_linux.go",
+    "result": "404; followed observed directory listing to osrouter; no code assumption retained"
+  },
+  "kernel_acceptance": "NOT_RUN",
+  "native_audit_parity": "NOT_RUN",
+  "production_changes": false,
+  "limitations": [
+    "No daemon routes/rules were changed or advertised.",
+    "Normal Linux rules differ from optional UBNT/Synology policy variants; unsupported variants must fail closed.",
+    "Do not accept arbitrary table52 routes or marks based on this source oracle.",
+    "Native projected fields and exact installed kernel attributes require separate tests before worker readiness."
+  ]
+}

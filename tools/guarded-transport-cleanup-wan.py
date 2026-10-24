@@ -23,7 +23,7 @@ expected=EXPECTED
 root=pathlib.Path('/var/lib/vprouter-v2-lab');m=(root/'isolated-acceptance').lstat()
 assert os.geteuid()==0 and stat.S_ISREG(m.st_mode) and m.st_uid==0 and m.st_gid==0 and m.st_nlink==1 and stat.S_IMODE(m.st_mode)==0o600
 directory=pathlib.Path(expected['directory'])
-assert directory.parent==root and directory.name.startswith('task8a-')
+assert directory.parent==root and __import__('re').fullmatch(r'(?:task8a|task8b2)-[1-9][0-9]*',directory.name)
 record=directory/'resources.json';s=record.lstat()
 assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_gid==0 and s.st_nlink==1 and not s.st_mode&0o077
 r=json.loads(record.read_text());assert r==expected['resources']

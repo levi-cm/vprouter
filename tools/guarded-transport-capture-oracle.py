@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 assert len(sys.argv) == 2 and re.fullmatch(
-    r"/var/lib/vprouter-v2-lab/task8a-[1-9][0-9]*", sys.argv[1]
+    r"/var/lib/vprouter-v2-lab/(?:task8a|task8b2)-[1-9][0-9]*", sys.argv[1]
 ), "usage: exact_owned_test_directory"
 script = r'''
 import datetime, hashlib, json, os, pathlib, pwd, re, stat, struct
@@ -41,10 +41,11 @@ def read(p, maximum, capture=False):
   return b
 
 record = json.loads(read(directory/'resources.json', 65536))
-assert record['records'] == str(directory/'records') and record['deployment'] == 'transportlab'+directory.name.removeprefix('task8a-')
+assert record['records'] == str(directory/'records') and record['deployment'] == 'transportlab'+directory.name.rsplit('-',1)[1]
 rows = []
-for phase in ['positive', 'negative']:
- for scope in ['data', 'transport', 'host']:
+phases = ['actual-positive', 'actual-negative'] if directory.name.startswith('task8b2-') else ['positive', 'negative']
+for phase in phases:
+ for scope in (['data'] if directory.name.startswith('task8b2-') else ['data', 'transport', 'host']):
   p = directory/(phase+'-'+scope+'.pcap')
   if not p.exists():
    rows.append({'file':p.name, 'status':'NOT_PRESENT'})
@@ -63,7 +64,8 @@ for phase in ['positive', 'negative']:
    packets.append(b[offset:offset+included]); offset += included
   stderr = read(p.with_suffix('.stderr'),65536).decode('utf-8')
   counters = {label:int(m.group(1)) for label,pattern in [('captured',r'(\d+) packets? captured'),('received_by_filter',r'(\d+) packets? received by filter'),('dropped_by_kernel',r'(\d+) packets? dropped by kernel')] if (m:=re.search(pattern,stderr))}
-  markers = {label:sum(packet.count(marker) for packet in packets) for label,marker in [('positive_data_health',b'VR8A_POSITIVE_DATA_HEALTH'),('positive_plaintext_control',b'VR8A_POSITIVE_PLAINTEXT_CAPTURE'),('forbidden_prefix',b'VR8A_FORBIDDEN_')]}
+  needles = [('positive_producer',b'VR8B2_POSITIVE_PRODUCER'),('forbidden_prefix',b'VR8B2_FORBIDDEN_')] if directory.name.startswith('task8b2-') else [('positive_data_health',b'VR8A_POSITIVE_DATA_HEALTH'),('positive_plaintext_control',b'VR8A_POSITIVE_PLAINTEXT_CAPTURE'),('forbidden_prefix',b'VR8A_FORBIDDEN_')]
+  markers = {label:sum(packet.count(marker) for packet in packets) for label,marker in needles}
   rows.append({'file':p.name,'status':'FRAMING_VERIFIED','bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),'linktype':linktype,'records':len(packets),'capture_counters':counters,'marker_occurrences':markers})
 continuous = {'status':'NOT_PRESENT'}
 if (directory/'continuous-sender.json').exists():

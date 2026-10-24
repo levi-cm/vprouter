@@ -1100,10 +1100,184 @@
         "sha256:7d4a53f2b2146a7c10ac2e54ea018ce5c7cc8af653563b781d69ea2b66945b8f"
       ],
       "observation": "Metadata-only run captured no SO_PEERCRED call in53verified trace files. Parent descriptor inventory rejection can kill observer before authentication; this is inconclusive about kernel credential integers."
+    },
+    {
+      "attempt": 15,
+      "source_binding": {
+        "source_commit": "2396bda67ca8d45a7c7535bb07afe92abaf0e8cc",
+        "source_archive_sha256": "df33088732ee75f01b2a424bec505910e91f93860dbfc1aa030b120aa31d25ce",
+        "tracked_build_inputs_verified": 102,
+        "source_aggregate_sha256": "bdac5d519b1bc7de02f6afc2e3766ff0e5d89b7435349b966d4b96776e374689"
+      },
+      "artifact_sha256": "a79a78a1392f73ac836ca2014be36b18d158f2650681a471d65f38c17af40c05",
+      "context_sha256": "e9d78fafe61d98d262c0a8d0501582c6a2c5337a253d9e4c982985bfaeeb48fe",
+      "manifest_sha256": "9d27e0cd4d4176b8294c7120a6d9d27ebb030e6d1541f27856fc03f502d1809c",
+      "image_id": "sha256:2be14da5b7850ab2ad628e593683f67632bd5d0ca0d3fba80ef6c0895af6f43c",
+      "image_layers": [
+        "sha256:c97d56a2e8036e90907bf8122d073afaf6d6ac60dc403174bba3f7ab8e24d539"
+      ],
+      "runner_sha256": "65dc3e0055bb61094a3e447d37f3a26b7fda5a81c8423513da14ca5fff215513",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 7.042,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "LAB_STAGE actual_daemon_identity_pinned",
+        "LAB_STAGE actual_observer_authenticated_launch",
+        "actual_lab: child_failed"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": false,
+      "peer_credential_metadata": true,
+      "actual_daemon_exec": "LIVE_DAEMON_CONFINEMENT_INSPECTION_PASS",
+      "actual_observer_exec": "AUTHENTICATED_REQUEST_INSPECTION_PASS_POST_REPLY_EXIT_FAILED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-15.json",
+      "private_run_record_sha256": "bf65546ed14fecc85ebdac997c4ae1cd2e3b8b956929340f16edf63bbe25a8d7",
+      "private_inventory": "target/lab-state/actual-program-inspect-15.json",
+      "private_inventory_sha256": "d8d37496a07b1e188ad1bfd749ba97925f3b5da7075d105f4541061c840c9446",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-peer-trace-15-summary.json",
+      "trace_summary_sha256": "c0ffaea556eddc37da036875a7b1299e3135b2712780a7b29fea457638e0054d",
+      "trace_files": 56,
+      "daemon_process_proof_sha256": "eedca9845d94f20f571a0db601261b7efd06b94b20252aeb916da445e90ab818",
+      "observer_process_proof_sha256": "3df09632552c396a9cff24f94775886a91301add4afd13f34b8645d1c64a44b6",
+      "peer_credential_witnesses": [
+        {
+          "file": "syscall.38835",
+          "sha256": "018e07c7104f6fec10de424a30b3c4e7794783c9cf6f28f7724181c8301cebbb",
+          "bytes": 8233,
+          "lines": 105,
+          "peer_credentials": [
+            {
+              "pid": 39000,
+              "uid": 65534,
+              "gid": 65534,
+              "line": 102
+            }
+          ]
+        },
+        {
+          "file": "syscall.38989",
+          "sha256": "3e517b6cab58bd99632dc1c5ba311278b0df8638c54f6c49f402313da8f76810",
+          "bytes": 107,
+          "lines": 2,
+          "peer_credentials": [
+            {
+              "pid": 0,
+              "uid": 65534,
+              "gid": 65534,
+              "line": 0
+            }
+          ]
+        },
+        {
+          "file": "syscall.39000",
+          "sha256": "c7d2f7655667a2d8043c8887daf57a3afd45032b28c35b30a90fdecbed44332b",
+          "bytes": 122,
+          "lines": 2,
+          "peer_credentials": [
+            {
+              "pid": 0,
+              "uid": 0,
+              "gid": 0,
+              "line": 0
+            }
+          ]
+        }
+      ],
+      "observation": "Actual observer39000 receives SO_PEERCRED pid0 uid0 gid0; host38835 authenticates observer39000 uid/gid65534. Both actual confinement inspections pass; post-reply worker exits before completed observation."
+    },
+    {
+      "attempt": 16,
+      "source_binding": {
+        "source_commit": "2396bda67ca8d45a7c7535bb07afe92abaf0e8cc",
+        "source_archive_sha256": "df33088732ee75f01b2a424bec505910e91f93860dbfc1aa030b120aa31d25ce",
+        "tracked_build_inputs_verified": 102,
+        "source_aggregate_sha256": "bdac5d519b1bc7de02f6afc2e3766ff0e5d89b7435349b966d4b96776e374689"
+      },
+      "artifact_sha256": "a79a78a1392f73ac836ca2014be36b18d158f2650681a471d65f38c17af40c05",
+      "context_sha256": "e9d78fafe61d98d262c0a8d0501582c6a2c5337a253d9e4c982985bfaeeb48fe",
+      "manifest_sha256": "9d27e0cd4d4176b8294c7120a6d9d27ebb030e6d1541f27856fc03f502d1809c",
+      "image_id": "sha256:2be14da5b7850ab2ad628e593683f67632bd5d0ca0d3fba80ef6c0895af6f43c",
+      "image_layers": [
+        "sha256:c97d56a2e8036e90907bf8122d073afaf6d6ac60dc403174bba3f7ab8e24d539"
+      ],
+      "runner_sha256": "65dc3e0055bb61094a3e447d37f3a26b7fda5a81c8423513da14ca5fff215513",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 5.238,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "LAB_STAGE actual_daemon_identity_pinned",
+        "LAB_STAGE actual_observer_authenticated_launch",
+        "actual_lab: child_failed"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": true,
+      "peer_credential_metadata": false,
+      "actual_daemon_exec": "LIVE_DAEMON_CONFINEMENT_INSPECTION_PASS",
+      "actual_observer_exec": "AUTHENTICATED_REQUEST_INSPECTION_PASS_POST_REPLY_EXIT_FAILED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-16.json",
+      "private_run_record_sha256": "a6e56ebdb958e42dc023a191563f2b5dde907887da090dac58739740793cf547",
+      "private_inventory": "target/lab-state/actual-program-inspect-16.json",
+      "private_inventory_sha256": "53fa93c9499ae8ea02cd6e387c588c203816d848de8c77a5979cf079c0b5b5cf",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-trace-16-summary.json",
+      "trace_summary_sha256": "bcff510dd24f874a081e8f5cf59504028e633a2c7955840f68527f9240a1bc61",
+      "trace_files": 55,
+      "daemon_process_proof_sha256": "775edd545a7522070ae63ec5c99d2d1a7b449d72a2c4683b5c120679199a451f",
+      "observer_process_proof_sha256": "3e1c0e93cd394c30d18417cb298e5f8d2fd766d2df71b31c8ffae56f739b194c",
+      "expanded_raw_summary": "target/lab-state/actual-program-trace-16-expanded-summary.json",
+      "expanded_raw_summary_sha256": "81fde6964cded5b66bdc82e9499120bb6f02bd8d890f384165d5866ee287caae",
+      "observation": "Observer39244 completes authentication and native metadata, then two LocalAPI HTTP exchanges without new denied syscalls (allocator fallback earlier). Refuses before observation record; typed parsing/unenrolled predicate diagnosis pending. No decoded LocalAPI body captured."
     }
   ],
   "diagnosis": {
-    "status": "ACTUAL_GO_CONFINEMENT_PASS_OBSERVER_PEERCRED_REPRESENTATION_AND_INSPECTION_RACE_PENDING",
+    "status": "ACTUAL_GO_AND_OBSERVER_CONFINEMENT_AUTHENTICATION_PASS_LOCALAPI_OBSERVATION_PENDING",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

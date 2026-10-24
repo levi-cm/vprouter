@@ -30,10 +30,25 @@ fn untrusted_config_path_errors_never_echo_secrets_and_create_no_paths() {
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stderr.is_empty());
     let text = String::from_utf8(output.stdout).unwrap();
-    assert!(serde_json::from_str::<serde_json::Value>(&text).is_ok());
+    let value = serde_json::from_str::<serde_json::Value>(&text).unwrap();
+    assert_eq!(value["reason"], "unsafe_path");
     assert!(!text.contains("DO_NOT_PRINT_SECRET"));
     assert!(!path.with_extension("lock").exists());
     std::fs::remove_file(path).unwrap();
+}
+#[test]
+fn malformed_config_content_uses_production_error_mapping_and_redacts_secrets() {
+    let input = br#"{"PrivateKey":"DO_NOT_PRINT_SECRET" INVALID"#;
+    let error = match vprouter_linux::parse_configuration(input) {
+        Err(error) => error,
+        Ok(_) => panic!("malformed configuration unexpectedly parsed"),
+    };
+    assert_eq!(error, vprouter_linux::Error::InvalidConfiguration);
+    let output = vprouter_linux::failure(error);
+    assert_eq!(output["reason"], "invalid_configuration");
+    let text = serde_json::to_string(&output).unwrap();
+    assert!(!text.contains("DO_NOT_PRINT_SECRET"));
+    assert!(!text.contains("PrivateKey"));
 }
 #[test]
 fn help_lists_only_implemented_operations() {

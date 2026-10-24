@@ -74,7 +74,7 @@ pub(crate) fn platform_checks(
     arch: &str,
     os: &str,
     manager: &str,
-    glibc: bool,
+    observed_host_glibc: Option<bool>,
 ) -> Vec<Check> {
     let mut parts = kernel.trim().split('.');
     let version = parts
@@ -84,10 +84,10 @@ pub(crate) fn platform_checks(
     let platform = match os_value(os, "ID") {
         Some("debian") => os_value(os, "VERSION_ID") == Some("13") && manager == "systemd",
         Some("arch" | "cachyos") => manager == "systemd",
-        Some("void") => manager == "runit" && glibc,
+        Some("void") => manager == "runit",
         _ => false,
     };
-    vec![
+    let mut checks = vec![
         Check::tested(
             "linux_6_1",
             version.is_some_and(|v| v >= (6, 1)),
@@ -99,7 +99,14 @@ pub(crate) fn platform_checks(
             Error::InvalidPlatform,
         ),
         Check::tested("distribution_and_manager", platform, Error::InvalidPlatform),
-    ]
+    ];
+    if os_value(os, "ID") == Some("void") {
+        checks.push(match observed_host_glibc {
+            Some(glibc) => Check::tested("void_host_glibc", glibc, Error::InvalidPlatform),
+            None => Check::unknown("void_host_glibc"),
+        });
+    }
+    checks
 }
 pub async fn preflight(cfg: &ValidatedConfiguration) -> Preflight {
     let kernel = small_read("/proc/sys/kernel/osrelease").unwrap_or_default();
@@ -110,7 +117,10 @@ pub async fn preflight(cfg: &ValidatedConfiguration) -> Preflight {
         std::env::consts::ARCH,
         &os,
         manager.trim(),
-        cfg!(target_env = "gnu"),
+        // The binary's target libc is not evidence of the host's libc. No
+        // reliable native host-libc probe is implemented here; Void remains
+        // explicitly unverified, including when this binary is statically linked.
+        None,
     );
     let cgroup2 = File::open("/sys/fs/cgroup")
         .ok()
@@ -196,7 +206,7 @@ mod tests {
             ("ID=void", "runit", true),
         ] {
             assert!(
-                platform_checks("6.1.0", "aarch64", os, manager, glibc)
+                platform_checks("6.1.0", "aarch64", os, manager, Some(glibc))
                     .iter()
                     .all(|c| c.state == CheckState::Pass)
             );
@@ -216,9 +226,50 @@ mod tests {
             ("6.1.0", "x86_64", "ID=arch", "runit", true),
             ("6.1.0", "x86_64", "ID=arch\nID=arch", "systemd", true),
         ] {
-            let checks = platform_checks(kernel, arch, os, manager, glibc);
+            let checks = platform_checks(kernel, arch, os, manager, Some(glibc));
             assert!(checks.iter().any(|c| c.state == CheckState::Fail));
             assert!(!serde_json::to_string(&checks).unwrap().contains("SECRET"));
+        }
+    }
+    #[test]
+    fn void_host_libc_is_unknown_without_observation_regardless_of_build_target() {
+        // Binary target labels deliberately never enter platform_checks: neither
+        // static artifact establishes what libc is installed on its host.
+        for binary_target in [
+            "x86_64-unknown-linux-gnu-static",
+            "x86_64-unknown-linux-musl",
+        ] {
+            for (observed_host_glibc, expected) in [
+                (Some(true), CheckState::Pass),
+                (Some(false), CheckState::Fail),
+                (None, CheckState::NotTested),
+            ] {
+                let checks =
+                    platform_checks("6.1.0", "x86_64", "ID=void", "runit", observed_host_glibc);
+                assert_eq!(
+                    checks
+                        .iter()
+                        .find(|check| check.id == "distribution_and_manager")
+                        .unwrap()
+                        .state,
+                    CheckState::Pass,
+                    "{binary_target}"
+                );
+                assert_eq!(
+                    checks
+                        .iter()
+                        .find(|check| check.id == "void_host_glibc")
+                        .unwrap()
+                        .state,
+                    expected,
+                    "{binary_target}"
+                );
+                assert_eq!(
+                    checks.iter().all(|check| check.state == CheckState::Pass),
+                    observed_host_glibc == Some(true),
+                    "{binary_target}"
+                );
+            }
         }
     }
 }

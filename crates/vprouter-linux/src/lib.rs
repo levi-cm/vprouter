@@ -50,7 +50,12 @@ pub fn capabilities() -> Value {
 }
 pub fn load_configuration(path: &Path) -> Result<ValidatedConfiguration> {
     let bytes = storage::read(path, storage::Kind::PublicFile, 1024 * 1024)?;
-    Configuration::parse(&bytes)
+    parse_configuration(&bytes)
+}
+/// Parse configuration content with the same redacted error mapping used by
+/// the protected file loader. Referenced profiles still require secure reads.
+pub fn parse_configuration(bytes: &[u8]) -> Result<ValidatedConfiguration> {
+    Configuration::parse(bytes)
         .map_err(|_| Error::InvalidConfiguration)?
         .validate_with(load_profile)
         .map_err(|_| Error::InvalidConfiguration)

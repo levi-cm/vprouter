@@ -62,7 +62,11 @@ are no deployment, apply or rollback instructions for this implementation.
 Native preflight checks Linux 6.1 or newer; x86_64 or aarch64; Debian 13 with
 systemd, Arch/CachyOS with systemd, or Void glibc with runit; a cgroup-v2 mount;
 and a root-owned TUN character device with Linux device number 10:200. PID 1
-identifies the manager. A module directory or module list is not sufficient to
+identifies the manager. The binary's GNU/musl compiler target is never used as host
+evidence. This package has no reliable native host-libc probe, so Void adds an
+explicit `void_host_glibc:NOT_TESTED` check and remains unverified. No glibc host
+is rejected merely because the binary was built for musl. A module directory
+or module list is not sufficient to
 prove usable nftables or WireGuard. Those active kernel probes are always
 `NOT_TESTED` here. Unknown checks prevent `host_supported:true` and activation.
 The real `/opt/vprouter/current` release directory is checked for ownership

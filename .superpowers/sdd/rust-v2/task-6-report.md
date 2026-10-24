@@ -1,5 +1,10 @@
 # Task6 launch admission implementer report
 
+Latest review-fix implementation: `338dcba280dbe0699640def7c63f9ed7f17e16c3`.
+Round1 sole Important finding (daemon security-profile admission) is fixed;
+controller exact-payload attempt5 passed. Original implementation/evidence below
+is preserved historically; the appended round1 section binds current code/tests.
+
 Status: DONE_WITH_CONCERNS. Admission ONLY; namespace entry/creation, placement,
 execution, independent host guard, production runtime and migration remain
 unavailable. `guard_runtime:false`, `activation_ready:false` throughout.
@@ -221,3 +226,93 @@ sleeps; it does not execute children or inspect state.
   contents/secrets/production Docker/runtime/API/profile data were read. That
   search should have been scoped to ancestors/assigned worktree; subsequent work
   stayed in assigned Rust worktree. No production mutation occurred.
+
+
+## Independent review fix round1: exact inherited daemon security profile
+
+Review verdict before fix: specification FAIL / quality Needs fixes; sole
+Important finding: original daemon admission only denied known rootless/userns
+markers, so empty/unknown SecurityOptions or a custom inherited seccomp default
+could pass with container SecurityOpt=[no-new-privileges]. No Critical/Minor
+finding was assigned in this round. This section records the implemented fix,
+not an independent re-review acceptance claim.
+
+Exact fix code commit: `338dcba280dbe0699640def7c63f9ed7f17e16c3`
+(`fix: bind launch admission to exact daemon security profiles`), parent
+`a28e309` (controller's intervening evidence/next-boundary preparation).
+Owned source changes only: evidence.rs, lib.rs, tests.rs, launch-helper.md.
+Controller ledger/evidence/task6b brief changes remain untouched.
+
+The rootful/systemd/cgroup2/Linux gate now produces private enumerated profile
+evidence only for these exact unordered SecurityOptions sets:
+
+- `name=seccomp,profile=builtin` + `name=cgroupns`.
+- Those two plus exactly one `name=apparmor`.
+
+Missing mandatory markers, empty arrays, duplicates, unknown markers, SELinux,
+rootless/userns, custom/unconfined/extra seccomp options fail closed with fixed
+unsupported_configuration. The profile without AppArmor requires an empty
+container AppArmorProfile; the AppArmor profile requires exactly docker-default.
+Admission stores the private enum, refreshes native daemon evidence on every
+revalidation, rejects profile drift, then checks the matching container profile.
+No public evidence assertion, new activation/exec path or synthetic production
+flag was introduced. Production staging still returns launch_unavailable.
+
+Controller selected-field read-only guest evidence before fix was exactly:
+SecurityOptions=["name=apparmor","name=seccomp,profile=builtin","name=cgroupns"].
+A new disposable synthetic container's AppArmorProfile was exactly docker-default;
+controller removed its exact newly created ID after diagnosis. No raw daemon/
+container/env payloads were emitted. This binds the kernel-exercised supported
+profile. The no-AppArmor profile has positive/negative offline fixtures but
+**kernel verification remains NOT_RUN**; it is not a verified release platform.
+
+Focused verification commands/results for exact fix source:
+
+```
+cargo fmt --all
+cargo test -p vprouter-launch -p vprouter-linux
+cargo clippy -p vprouter-launch -p vprouter-linux --all-targets -- -D warnings
+cargo fmt --all -- --check
+cargo check -p vprouter-launch -p vprouter-linux --all-targets
+cargo rustc -p vprouter-launch --release --target x86_64-unknown-linux-musl --test admission_lab -- -C relocation-model=static
+cargo rustc -p vprouter-launch --release --target x86_64-unknown-linux-musl --bin vprouter-launch-admit -- -C relocation-model=static
+git diff --check
+```
+
+All pass: launch9+Linux17 = **26 tests passed**, 0 failures; custom lab skipped
+without explicit ignored argument. Focused profile fixtures cover serialization
+order, both exact positive sets, missing/malformed native list, duplicate markers,
+unknown and conflicting profiles, custom/unconfined seccomp, missing mandatory
+seccomp/cgroupns, explicit rootless/userns and AppArmor/container mismatch.
+Error output remains fixed/redacted even for a synthetic secret-shaped custom
+seccomp path. Original workspace101-test evidence above is historical; no claim
+of a new full workspace or ARM64 artifact rebuild in this focused review fix.
+
+Final static lab (same path as original) SHA256:
+`312d59da7caa0e3ea97bfecc1e97be234c69a32608283517efcfcc6b26790144`.
+Final standalone fail-closed helper SHA256:
+`5e96e8ad423613456b5143042e7ed1c204bd4ef447d9533b2bcdba761b01cb18`.
+Probe unchanged SHA256:
+`2c1068174b100fd21339c6a633a76f5318c0fa0ff02bd71dafcec0a6d22cc362`.
+
+Controller alone installed exact protected payload and ran unchanged admitted
+owned-guest command:
+
+```
+sudo unshare --net /var/lib/vprouter-v2-lab/launch-admission-lab --ignored
+```
+
+**Attempt5 PASS**, exit0/1.362s SSHwall, exact code338dcba/payload312d59.
+All six prior admission/kernel cases pass and final guard_runtime:false,
+activation:false. The new gate is exercised against the actual observed
+AppArmor+builtin-seccomp+cgroupns daemon and docker-default container profile.
+No subsequent implementation source changes. Controller records attempt5 and
+cleanup in its independent evidence; implementer does not edit that evidence.
+
+FD/unsafe/subprocess inventory is unchanged (15 private production descriptors,
+zero unsafe or production subprocesses, zero namespace entry/mutation/exec).
+Revalidation adds a bounded native GET-only daemon query and retains a private
+profile enum, no extra persistent descriptors. All original task6b/runtime,
+trusted-root concurrency, no-AppArmor kernel, unsupported layouts and release
+acceptance limitations remain. Independent scoped re-review is controller-owned
+and not claimed completed by this report.

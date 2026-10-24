@@ -6,7 +6,7 @@ use rustix::fs;
 use std::{
     cell::RefCell,
     collections::BTreeMap,
-    os::fd::{AsRawFd, BorrowedFd},
+    os::fd::{AsRawFd, BorrowedFd, OwnedFd},
 };
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Identity {
@@ -116,6 +116,9 @@ fn numbers() -> Result<Vec<i32>> {
         fs::Mode::empty(),
     )
     .map_err(|_| Error::DescriptorPolicy)?;
+    scan_numbers(fd)
+}
+fn scan_numbers(fd: OwnedFd) -> Result<Vec<i32>> {
     let scan_fd = fd.as_raw_fd();
     let mut numbers = Vec::new();
     for entry in fs::Dir::new(fd).map_err(|_| Error::DescriptorPolicy)? {
@@ -165,6 +168,32 @@ pub(super) fn verify() -> Result<()> {
 mod tests {
     use super::*;
     use std::os::fd::AsFd;
+    #[test]
+    fn exact_scan_fd_is_excluded_but_disappeared_real_fd_is_an_error() {
+        let real = fs::openat(
+            fs::CWD,
+            "/",
+            fs::OFlags::RDONLY | fs::OFlags::DIRECTORY | fs::OFlags::CLOEXEC,
+            fs::Mode::empty(),
+        )
+        .unwrap();
+        // A deliberately high FD avoids reuse by other ordinary libtest tasks.
+        let real = rustix::io::fcntl_dupfd_cloexec(real, 10000).unwrap();
+        let real_number = real.as_raw_fd();
+        let scan = fs::openat(
+            fs::CWD,
+            "/proc/self/fd",
+            fs::OFlags::RDONLY | fs::OFlags::DIRECTORY | fs::OFlags::CLOEXEC,
+            fs::Mode::empty(),
+        )
+        .unwrap();
+        let scan_number = scan.as_raw_fd();
+        let numbers = scan_numbers(scan).unwrap();
+        assert!(numbers.contains(&real_number));
+        assert!(!numbers.contains(&scan_number));
+        drop(real);
+        assert_eq!(observed(real_number).err(), Some(Error::DescriptorPolicy));
+    }
     #[test]
     fn unregistered_directory_and_namespace_are_not_owned() {
         let directory = fs::open(

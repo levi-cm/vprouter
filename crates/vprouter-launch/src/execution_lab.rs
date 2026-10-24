@@ -141,6 +141,25 @@ fn verify_worker(a: &Admission, pid: u32, data: &owned::OwnedNamespaces) -> Resu
     if (actual_state.dev(), actual_state.ino()) != (selected_state.dev(), selected_state.ino()) {
         return Err(Error::MountIsolation);
     }
+    let mountinfo =
+        fs::read_to_string(format!("/proc/{pid}/mountinfo")).map_err(|_| Error::MountIsolation)?;
+    for (path, readonly) in [
+        ("/", true),
+        ("/bin/vprouter-worker", true),
+        ("/state", false),
+    ] {
+        let fields = mountinfo
+            .lines()
+            .map(|line| line.split_whitespace().collect::<Vec<_>>())
+            .find(|fields| fields.get(4) == Some(&path))
+            .ok_or(Error::MountIsolation)?;
+        let flags = fields.get(5).ok_or(Error::MountIsolation)?;
+        if flags.split(',').any(|flag| flag == "ro") != readonly
+            || flags.split(',').any(|flag| flag == "rw") == readonly
+        {
+            return Err(Error::MountIsolation);
+        }
+    }
     let net = fs::metadata(format!("/proc/{pid}/ns/net")).map_err(|_| Error::NamespaceMismatch)?;
     if (owned::Identity {
         dev: net.dev(),

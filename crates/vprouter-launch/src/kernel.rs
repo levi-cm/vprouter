@@ -305,6 +305,8 @@ impl Child {
                             10 => "securebits_query",
                             11 => "status_read",
                             12 => "status_utf8",
+                            13 => "status_denied",
+                            14 => "status_missing",
                             _ => "invalid",
                         }
                     );
@@ -1124,9 +1126,52 @@ fn credential_failure(health: BorrowedFd<'_>, role: u8, field: u8) -> Error {
     Error::CapabilityPolicy
 }
 fn verify_credentials(role: u8, health: BorrowedFd<'_>) -> Result<()> {
-    let s = std::fs::read_to_string("/proc/self/status")
-        .map_err(|_| credential_failure(health, role, 11))?;
-    verify_credentials_text(&s, role, health)
+    let s = read_fixed("/proc/self/status", 16384).map_err(|error| {
+        credential_failure(
+            health,
+            role,
+            match error.kind() {
+                std::io::ErrorKind::PermissionDenied => 13,
+                std::io::ErrorKind::NotFound => 14,
+                _ => 11,
+            },
+        )
+    })?;
+    let s = std::str::from_utf8(&s).map_err(|_| credential_failure(health, role, 12))?;
+    verify_credentials_text(s, role, health)
+}
+fn read_fixed(path: &str, limit: usize) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    // Explicit openat is part of the fixed profile on both architectures;
+    // std File::open would call denied musl SYS_open on x86_64.
+    let fd = fs::openat(
+        fs::CWD,
+        path,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )?;
+    let mut bytes = Vec::new();
+    std::fs::File::from(fd)
+        .take(limit as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(std::io::ErrorKind::InvalidData.into());
+    }
+    Ok(bytes)
+}
+#[cfg(test)]
+fn write_probe_state() -> Result<()> {
+    use std::io::Write;
+    let fd = fs::openat(
+        fs::CWD,
+        "/state/probe",
+        OFlags::WRONLY | OFlags::CREATE | OFlags::TRUNC | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::RUSR | Mode::WUSR,
+    )
+    .map_err(|_| Error::ProbeStateWrite)?;
+    std::fs::File::from(fd)
+        .write_all(b"selected-exit-only")
+        .map_err(|_| Error::ProbeStateWrite)
 }
 fn verify_credentials_text(s: &str, role: u8, health: BorrowedFd<'_>) -> Result<()> {
     for (field, (key, expected)) in [
@@ -1171,9 +1216,12 @@ fn verify_credentials_text(s: &str, role: u8, health: BorrowedFd<'_>) -> Result<
     Ok(())
 }
 fn lsm_current() -> Result<()> {
-    let s =
-        std::fs::read_to_string("/proc/self/attr/current").map_err(|_| Error::ConfinementPolicy)?;
-    if s.trim() != "docker-default (enforce)" {
+    let s = read_fixed("/proc/self/attr/current", 128).map_err(|_| Error::ConfinementPolicy)?;
+    if std::str::from_utf8(&s)
+        .map_err(|_| Error::ConfinementPolicy)?
+        .trim()
+        != "docker-default (enforce)"
+    {
         return Err(Error::ConfinementPolicy);
     }
     Ok(())
@@ -1658,7 +1706,8 @@ pub(super) fn probe_verify() -> Result<()> {
     verify_credentials(64, unsafe { BorrowedFd::borrow_raw(3) })?;
     lsm_current()?;
     final_fds(false, None)?;
-    let s = std::fs::read_to_string("/proc/self/status").map_err(|_| Error::ConfinementPolicy)?;
+    let bytes = read_fixed("/proc/self/status", 16384).map_err(|_| Error::ConfinementPolicy)?;
+    let s = std::str::from_utf8(&bytes).map_err(|_| Error::ConfinementPolicy)?;
     if !s.lines().any(|l| l == "Seccomp:\t2") {
         return Err(Error::ConfinementPolicy);
     }
@@ -1679,8 +1728,8 @@ pub(super) fn probe_verify() -> Result<()> {
     {
         return Err(Error::ConfinementPolicy);
     }
-    if std::fs::read_to_string("/etc/resolv.conf").map_err(|_| Error::ProbeResolver)?
-        != "nameserver 192.0.2.53\noptions attempts:1 timeout:1\n"
+    if read_fixed("/etc/resolv.conf", 128).map_err(|_| Error::ProbeResolver)?
+        != b"nameserver 192.0.2.53\noptions attempts:1 timeout:1\n"
     {
         return Err(Error::ProbeResolver);
     }
@@ -1694,8 +1743,15 @@ pub(super) fn probe_verify() -> Result<()> {
             return Err(Error::ProbeForbiddenRoot);
         }
     }
-    std::fs::write("/state/probe", b"selected-exit-only").map_err(|_| Error::ProbeStateWrite)?;
-    if std::fs::write("/etc/forbidden", b"x").is_ok() {
+    write_probe_state()?;
+    if fs::openat(
+        fs::CWD,
+        "/etc/forbidden",
+        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::RUSR | Mode::WUSR,
+    )
+    .is_ok()
+    {
         return Err(Error::ProbeReadonly);
     }
     // Before creating any descendant the private procfs must expose exactly

@@ -45,7 +45,7 @@ assert record['records'] == str(directory/'records') and record['deployment'] ==
 rows = []
 phases = ['actual-positive', 'actual-negative'] if directory.name.startswith('task8b2-') else ['positive', 'negative']
 for phase in phases:
- for scope in (['data'] if directory.name.startswith('task8b2-') else ['data', 'transport', 'host']):
+ for scope in ['data', 'transport', 'host']:
   p = directory/(phase+'-'+scope+'.pcap')
   if not p.exists():
    rows.append({'file':p.name, 'status':'NOT_PRESENT'})
@@ -64,7 +64,7 @@ for phase in phases:
    packets.append(b[offset:offset+included]); offset += included
   stderr = read(p.with_suffix('.stderr'),65536).decode('utf-8')
   counters = {label:int(m.group(1)) for label,pattern in [('captured',r'(\d+) packets? captured'),('received_by_filter',r'(\d+) packets? received by filter'),('dropped_by_kernel',r'(\d+) packets? dropped by kernel')] if (m:=re.search(pattern,stderr))}
-  needles = [('positive_producer',b'VR8B2_POSITIVE_PRODUCER'),('forbidden_prefix',b'VR8B2_FORBIDDEN_')] if directory.name.startswith('task8b2-') else [('positive_data_health',b'VR8A_POSITIVE_DATA_HEALTH'),('positive_plaintext_control',b'VR8A_POSITIVE_PLAINTEXT_CAPTURE'),('forbidden_prefix',b'VR8A_FORBIDDEN_')]
+  needles = [('positive_producer',b'VR8B2_POSITIVE_PRODUCER'),('positive_plaintext_control',b'VR8B2_POSITIVE_PLAINTEXT_CAPTURE'),('authorized_during_denial',b'VR8B2_AUTHORIZED_DURING_DENIAL'),('forbidden_prefix',b'VR8B2_FORBIDDEN_')] if directory.name.startswith('task8b2-') else [('positive_data_health',b'VR8A_POSITIVE_DATA_HEALTH'),('positive_plaintext_control',b'VR8A_POSITIVE_PLAINTEXT_CAPTURE'),('forbidden_prefix',b'VR8A_FORBIDDEN_')]
   markers = {label:sum(packet.count(marker) for packet in packets) for label,marker in needles}
   rows.append({'file':p.name,'status':'FRAMING_VERIFIED','bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),'linktype':linktype,'records':len(packets),'capture_counters':counters,'marker_occurrences':markers})
 continuous = {'status':'NOT_PRESENT'}

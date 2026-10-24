@@ -105,10 +105,142 @@
         "task8b2-image": false,
         "task8b2-host-acceptance": false
       }
+    },
+    {
+      "attempt": 3,
+      "source_binding": {
+        "source_commit": "9e39b5471a23aab040a016b9c2db7c38f40a5924",
+        "source_archive_sha256": "869e7e64a9da4078882a6550e4dd3447655e3da801fbfa2b669c0480e433cb62",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "dc040a0d12ca92ef67eaec2d9e2c12d5b6e3536e13478837f9beb4cee6cc0f2c"
+      },
+      "artifact_sha256": "52c9721bec2e0dbbcfab885ca76e0a49365145e95b5c09bd5412b1392b0a7218",
+      "context_sha256": "f996b59a44df4ebf55a0b5d79522854c4b5c008324550fce99508b0465a08dc9",
+      "manifest_sha256": "87af1515620676215e03a2e46f55489ff457fe210ac10c04607a974a80a6b99c",
+      "image_id": "sha256:a8c913e9eb562ceb396803111f024c513f970da5225916e4029de362d9cce933",
+      "image_layers": [
+        "sha256:78748ddbfb3760ef5289249362a9206ce7a1b103f0f3569725b4c6d614c798c8"
+      ],
+      "runner_sha256": "fb2ffba4fd8ad252f0fed72131dadec00ca78d3fc871cb0a8a8aac0ec9b50aee",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 6.875,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "actual_lab: descriptor_scan_open"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": true,
+      "actual_daemon_exec": "REACHED_NOT_HEALTHY",
+      "actual_observer_exec": "NOT_REACHED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-3.json",
+      "private_run_record_sha256": "6c675338457f9469173b9d826ae76997f24a7b16a05bea0b4aa4769eb2a05a12",
+      "private_inventory": "target/lab-state/actual-program-inspect-3.json",
+      "private_inventory_sha256": "70cdc3e4c88511122bb775a4f9ff6520ba2b5fdaedbf4aff8c36be51de2930e4",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-trace-3-summary.json",
+      "trace_summary_sha256": "157d754da17228476caf642fb1b4268f5b03a596b415b6f7bc204c6dc58185a3",
+      "trace_files_no_decoded_strings": 36,
+      "failure_witness": {
+        "file": "syscall.34321",
+        "bytes": 12184,
+        "sha256": "af28bcbb8f72cd63762d85db7aff7b209bd4ad41a8c1f386bd37927ad2a336f3",
+        "lines": 262,
+        "last_errors": [
+          {
+            "line": 142,
+            "syscall": "prctl(0x17, 0x29, 0, 0, 0)              = -1 EINVAL (Invalid argument)"
+          },
+          {
+            "line": 259,
+            "syscall": "openat(0xffffff9c, 0x7ffe8c883778, 0x98000, 0) = -1 EPERM (Operation not permitted)"
+          }
+        ],
+        "tail": [
+          "fcntl(0, 0x1, 0)                        = 0",
+          "fstat(0x1, 0x7ffe8c8838d0)              = 0",
+          "fcntl(0x1, 0x1, 0)                      = 0",
+          "fstat(0x2, 0x7ffe8c8838d0)              = 0",
+          "fcntl(0x2, 0x1, 0x3)                    = 0",
+          "fstat(0x30, 0x7ffe8c8838d0)             = 0",
+          "fcntl(0x30, 0x1, 0x3)                   = 0x1",
+          "mmap(0, 0x1000, 0x3, 0x22, 0xffffffffffffffff, 0) = 0x7f3579b42000",
+          "munmap(0x7f3579b42000, 0x1000)          = 0",
+          "mmap(0, 0x1000, 0x3, 0x22, 0xffffffffffffffff, 0) = 0x7f3579b42000",
+          "munmap(0x7f3579b42000, 0x1000)          = 0",
+          "mmap(0, 0x1000, 0x3, 0x22, 0xffffffffffffffff, 0) = 0x7f3579b42000",
+          "prctl(0x16, 0x2, 0x7ffe8c883a00, 0, 0)  = 0",
+          "prctl(0x15, 0, 0, 0, 0)                 = 0x2",
+          "munmap(0x7f3579b42000, 0x1000)          = 0",
+          "openat(0xffffff9c, 0x7ffe8c883778, 0x98000, 0) = -1 EPERM (Operation not permitted)",
+          "write(0x30, 0x7ffe8c883a6f, 0x1)        = 0x1",
+          "exit_group(0x73)                        = ?"
+        ],
+        "execveat_calls": []
+      },
+      "go_exec_witness": {
+        "file": "syscall.34322",
+        "bytes": 12386,
+        "sha256": "bce858ad364420e8620949ada3b34449215ca860336a0f8effd3ea51fb68f531",
+        "lines": 259,
+        "last_errors": [
+          {
+            "line": 164,
+            "syscall": "prctl(0x17, 0x29, 0, 0, 0)              = -1 EINVAL (Invalid argument)"
+          },
+          {
+            "line": 226,
+            "syscall": "openat(0xffffff9c, 0x1fdd820, 0, 0)     = -1 ENOENT (No such file or directory)"
+          },
+          {
+            "line": 229,
+            "syscall": "prctl(0x53564d41, 0, 0x7f4f2200f000, 0x40000, 0x7ffd34488ed8) = -1 EINVAL (Invalid argument)"
+          }
+        ],
+        "tail": [
+          "mmap(0x7f4f21fef000, 0x20000, 0x3, 0x32, 0xffffffff, 0) = 0x7f4f21fef000",
+          "mmap(0x7f4f21f8a000, 0x1000, 0x3, 0x32, 0xffffffff, 0) = 0x7f4f21f8a000",
+          "mmap(0x7f4f21ada000, 0x1000, 0x3, 0x32, 0xffffffff, 0) = 0x7f4f21ada000",
+          "mmap(0x7f4f1fcd5000, 0x1000, 0x3, 0x32, 0xffffffff, 0) = 0x7f4f1fcd5000",
+          "mmap(0x7f4f10cae000, 0x1000, 0x3, 0x32, 0xffffffff, 0) = 0x7f4f10cae000",
+          "mmap(0x7f4ef0cae000, 0x1000, 0x3, 0x32, 0xffffffff, 0) = 0x7f4ef0cae000",
+          "mmap(0, 0x100000, 0x3, 0x22, 0xffffffff, 0) = 0x7f4edb500000",
+          "madvise(0x7f4edb500000, 0x100000, 0xf)  = 0",
+          "mmap(0, 0x10000, 0x3, 0x22, 0xffffffff, 0) = 0x7f4f21ecd000",
+          "mmap(0, 0x10000, 0x3, 0x22, 0xffffffff, 0) = 0x7f4f21ebd000",
+          "rt_sigprocmask(0x2, 0, 0x2074f18, 0x8)  = 0",
+          "fcntl(0, 0x1, 0)                        = 0",
+          "fcntl(0x1, 0x1, 0)                      = 0",
+          "fcntl(0x2, 0x1, 0)                      = 0",
+          "openat(0xffffffffffffff9c, 0x7ffd34488fe6, 0x80000, 0) = 0x3",
+          "read(0x3, 0x20ac9e0, 0x10000)           = 0x5",
+          "read(0x3, 0x20ac9e0, 0x10000)           = 0",
+          "+++ killed by SIGKILL +++"
+        ],
+        "execveat_calls": [
+          "execveat(0x4, 0x6a2408, 0x7ffe8c883890, 0x7ffe8c883960, 0x1000) = 0"
+        ]
+      }
     }
   ],
   "diagnosis": {
-    "status": "EVIDENCE_FOR_ORDERING_FIX_PENDING",
+    "status": "ORDERING_FIX_REACHED_GO_EXEC_LATER_INIT_FILTER_FIX_PENDING",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

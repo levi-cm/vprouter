@@ -3,16 +3,16 @@
 Status: DONE_WITH_CONCERNS. Bounded native route/WireGuard component implemented;
 activation and real router acceptance remain explicitly unimplemented/unperformed.
 
-Code commit: `a01d28d4f3d88d691088614e0a610e33fef22f13`
+Initial component code commit: `a01d28d4f3d88d691088614e0a610e33fef22f13`
 (`feat(network): add bounded native audit and DOWN-only provisioning`).
 Parent: `48293d5` (controller's intervening review/enrollment ledger commit;
 initial dispatched reviewed code base was `37034ea`). Worktree/branch:
 `/DATA/AppData/vprouter-rust-v2`, `rust/v2`.
 
-Final static test executable:
+Initial guest-tested static test executable:
 `target/x86_64-unknown-linux-musl/release/deps/vprouter_network-f26312060b05102f`.
 SHA256: `d2d739d6bd7e8bfb2ecca88c66d86b70de99c717efb618c83f949d78233cc308`.
-No implementation source changed after building that final guest-tested payload.
+No implementation source changed between building that payload and its guest run.
 The subsequent code commit includes documentation finalized after that build.
 
 ## Implemented
@@ -168,3 +168,63 @@ handshake/connectivity, Tailscale/client traffic, packet capture/leak/fault gate
 independent UDP birth namespace proof, ARM64 kernel run, deployment, reboot,
 migration, performance/soak and all mandatory full release acceptance. Independent
 component review is the controller's next step, not completed by this report.
+
+## Fix round 1: inseparable veth ownership and single-response framing
+
+Code commit: `8a1c97cdcddadb371bf25c7a09c24d39573201f9`
+(`fix(network): bind veth cleanup to original namespace pair`). Immediate parent
+`d931629` contains controller review/brief/ledger documentation. Prior reviewed
+component/report head was `0631fb0`; intervening root documentation is preserved.
+
+Both review findings were verified against the implementation and addressed:
+
+- Important: `VethPair` endpoints are private, with only borrowed `host()` and
+  `transport()` inspection getters. The original namespace identities remain in
+  the inseparable pair's private tokens. Before any netlink request, cleanup
+  binds both supplied socket handles to those identities, requires distinct
+  namespaces and equal Plans. Existing exact ownership/DOWN/address/route/peer
+  checks still precede deletion. A compile-fail public-API example prevents
+  owned token recombination. The focused offline collision regression models
+  two same-Plan pairs in H1/T1 and H2/T2 with identical names/aliases and local
+  indices 2/2. Cleanup using H1/T2 refuses both intact pairs with
+  `NamespaceUnverified`. Test-only sockets reject every request before I/O with
+  `SequenceMismatch`, proving the namespace refusal precedes observation and
+  deletion. This is an offline ordering regression, not a fresh kernel result.
+- Minor: `Completion::Single` rejects `NLM_F_MULTI` data immediately, regardless
+  of ACK order. The focused regression first failed against the old framing
+  (`Ok(())` instead of `Malformed`), then passed after the fix. It also accepts
+  a normal single data message plus ACK in either order and verifies that dump
+  multipart data remains incomplete until successful DONE.
+
+Commands/results for this fix, all without host network mutation or credentials:
+
+1. `cargo test --locked --offline -p vprouter-network colliding_veth_indices_in_other_namespace_pairs_refuse_before_io`:
+   PASS, 1 focused test. `cargo test --locked --offline --doc -p vprouter-network`:
+   PASS, 1 compile-fail recombination doctest.
+2. `cargo test --locked --offline -p vprouter-network single_rejects_multipart_data_in_either_ack_order`:
+   expected initial FAIL demonstrating the old bug; final PASS, 1 focused test.
+3. `cargo fmt --all`, then `cargo test --locked --offline -p vprouter-network`:
+   PASS, 15 unit tests, 0 failed, 1 ignored guest harness; 1 compile-fail doctest
+   passed. The two new unit tests contain the collision/framing fault cases.
+4. `cargo fmt --all -- --check`: PASS.
+5. `cargo clippy --locked --offline --all-targets -- -D warnings`: PASS.
+6. `cargo check --locked --offline --target aarch64-unknown-linux-musl -p vprouter-network --lib`:
+   PASS, compile only; ARM64 kernel execution remains NOT_RUN.
+7. `cargo test --locked --offline --release --target x86_64-unknown-linux-musl -p vprouter-network --lib --no-run`:
+   PASS. Updated static executable:
+   `target/x86_64-unknown-linux-musl/release/deps/vprouter_network-f26312060b05102f`.
+   SHA256: `584577685bd0b61a45dc610c0e708ef04f0171e823060681d1f8d6a6b7a2f284`.
+8. `git diff --check` and `git diff --cached --check`: PASS.
+
+Because cleanup's public preflight changed, the updated payload is supplied for
+controller rerun of the existing ignored guest harness. The earlier attempt8 PASS
+above applies only to the previous payload, not this fix. This implementer has
+not run the updated payload in a guest. No new ignored lab execution or runtime
+acceptance is claimed; controller evidence remains separately owned.
+
+Only `crates/vprouter-network/src/{native,socket}.rs`,
+`docs/rust-v2/network.md`, and this report were changed/staged by this implementer.
+Root progress/review/evidence/brief files remain untouched. No subagents were
+spawned; no production unsafe, FFI, subprocess, activation or namespace-entry API
+was added. Existing non-atomic snapshot/alias-ifindex TOCTOU and namespace trust
+boundaries remain; all earlier unperformed runtime/release gates still apply.

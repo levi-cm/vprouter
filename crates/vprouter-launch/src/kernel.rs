@@ -422,6 +422,7 @@ fn container_stage(
 ) -> Result<()> {
     let signals = blocked_signals()?;
     enter(container.pid, libc::CLONE_NEWPID)?;
+    process::single_threaded()?;
     // SAFETY: single-task child, no runtime; setns PID-for-children becomes the
     // active container PID namespace only in this next intermediate child.
     let inner = unsafe { libc::fork() };
@@ -523,11 +524,13 @@ fn setup(
     .map_err(|_| Error::MountPivot)?;
     let null = fs::open("/dev/null", OFlags::RDWR | OFlags::CLOEXEC, Mode::empty())
         .map_err(|_| Error::DescriptorNull)?;
+    let null_identity = approved_null(null.as_fd())?;
     for fd in 0..3 {
         dup_fixed(&null, fd, false)?;
     }
     let signals = blocked_signals()?;
     let init_parent = pidfd(std::process::id() as i32)?;
+    process::single_threaded()?;
     // SAFETY: one task, no signal handler/thread; fixed PID1 child always _exits.
     let init = unsafe { libc::fork() };
     if init < 0 {
@@ -540,7 +543,7 @@ fn setup(
         let result = (|| {
             parent_death(0)?;
             init_root()?;
-            supervise(health, &signals, init_parent.as_fd())
+            supervise(health, &signals, init_parent.as_fd(), null_identity)
         })();
         if let Err(e) = result {
             report_failure(health, e);
@@ -635,7 +638,12 @@ fn forward_and_wait(pid: i32, fd: &OwnedFd, set: &libc::sigset_t) -> Result<()> 
         }
     }
 }
-fn supervise(health: BorrowedFd<'_>, set: &libc::sigset_t, parent: BorrowedFd<'_>) -> Result<()> {
+fn supervise(
+    health: BorrowedFd<'_>,
+    set: &libc::sigset_t,
+    parent: BorrowedFd<'_>,
+    null_identity: StdioIdentity,
+) -> Result<()> {
     cv(
         unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) },
         Error::CapabilityPolicy,
@@ -646,13 +654,14 @@ fn supervise(health: BorrowedFd<'_>, set: &libc::sigset_t, parent: BorrowedFd<'_
         Mode::empty(),
     )
     .map_err(|_| Error::ExecutableMismatch)?;
+    process::single_threaded()?;
     // SAFETY: PID1 is single-task, fixed child exec path or _exit only.
     let worker = unsafe { libc::fork() };
     if worker < 0 {
         return Err(Error::ChildFailed);
     }
     if worker == 0 {
-        let result = worker_exec(executable.as_fd(), health);
+        let result = worker_exec(executable.as_fd(), health, null_identity);
         let _ = result;
         die(119);
     }
@@ -1096,7 +1105,12 @@ fn seccomp() -> Result<()> {
     }
     Ok(())
 }
-fn worker_exec(executable: BorrowedFd<'_>, health: BorrowedFd<'_>) -> Result<()> {
+fn worker_exec(
+    executable: BorrowedFd<'_>,
+    health: BorrowedFd<'_>,
+    null_identity: StdioIdentity,
+) -> Result<()> {
+    process::single_threaded()?;
     parent_death(1)?;
     // Duplicate both sources above fixed targets before replacing either one.
     // SAFETY: creates new child-owned CLOEXEC descriptors; never transferred to Rust owners after final closure.
@@ -1119,7 +1133,7 @@ fn worker_exec(executable: BorrowedFd<'_>, health: BorrowedFd<'_>) -> Result<()>
         }
         seccomp()?;
         // Final inventory exact0..4; executable4 is CLOEXEC, health3 explicitly not.
-        final_fds(true)?;
+        final_fds(true, Some(null_identity))?;
         // SAFETY: empty initialized set unblocks inherited blocked signals only in
         // the worker, not PID1. Fixed argv/env are null-terminated pointer arrays.
         let mut empty = unsafe { std::mem::zeroed() };
@@ -1156,7 +1170,32 @@ fn worker_exec(executable: BorrowedFd<'_>, health: BorrowedFd<'_>) -> Result<()>
     }
     die(119)
 }
-fn final_fds(before_exec: bool) -> Result<()> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct StdioIdentity {
+    dev: u64,
+    ino: u64,
+    rdev: u64,
+}
+fn approved_null(fd: BorrowedFd<'_>) -> Result<StdioIdentity> {
+    let stat = fs::fstat(fd).map_err(|_| Error::DescriptorStdio)?;
+    if fs::FileType::from_raw_mode(stat.st_mode) != fs::FileType::CharacterDevice
+        || fs::major(stat.st_rdev) != 1
+        || fs::minor(stat.st_rdev) != 3
+    {
+        return Err(Error::DescriptorStdio);
+    }
+    Ok(StdioIdentity {
+        dev: stat.st_dev,
+        ino: stat.st_ino,
+        rdev: stat.st_rdev,
+    })
+}
+fn final_fds(before_exec: bool, expected_null: Option<StdioIdentity>) -> Result<()> {
+    // SAFETY: FD0 belongs to current isolated child and is only borrowed here.
+    let null = approved_null(unsafe { BorrowedFd::borrow_raw(0) })?;
+    if expected_null.is_some_and(|expected| expected != null) {
+        return Err(Error::DescriptorStdio);
+    }
     let expected = if before_exec { 5 } else { 4 };
     for fd in 0..expected {
         // SAFETY: scalar descriptor flags queries.
@@ -1164,12 +1203,17 @@ fn final_fds(before_exec: bool) -> Result<()> {
         if flags < 0 || flags & libc::FD_CLOEXEC != if fd == 4 { libc::FD_CLOEXEC } else { 0 } {
             return Err(Error::DescriptorFlags);
         }
+        if fd <= 2 {
+            // SAFETY: exact fixed stdio descriptor is borrowed only for fstat;
+            // kernel character-device identity survives old-root detachment.
+            if approved_null(unsafe { BorrowedFd::borrow_raw(fd) })? != null {
+                return Err(Error::DescriptorStdio);
+            }
+            continue;
+        }
         let target = std::fs::read_link(format!("/proc/self/fd/{fd}"))
             .map_err(|_| Error::DescriptorInventory)?;
         let name = target.as_os_str().as_encoded_bytes();
-        if fd <= 2 && name != b"/dev/null" {
-            return Err(Error::DescriptorStdio);
-        }
         if fd == 3 && !name.starts_with(b"pipe:[") {
             return Err(Error::DescriptorHealth);
         }
@@ -1190,7 +1234,7 @@ fn final_fds(before_exec: bool) -> Result<()> {
 pub(super) fn probe_verify() -> Result<()> {
     verify_credentials()?;
     lsm_current()?;
-    final_fds(false)?;
+    final_fds(false, None)?;
     let s = std::fs::read_to_string("/proc/self/status").map_err(|_| Error::ConfinementPolicy)?;
     if !s.lines().any(|l| l == "Seccomp:\t2") {
         return Err(Error::ConfinementPolicy);
@@ -1231,23 +1275,32 @@ pub(super) fn probe_verify() -> Result<()> {
     if std::fs::write("/etc/forbidden", b"x").is_ok() {
         return Err(Error::MountIsolation);
     }
-    // Adversarial proc-root discovery sees only PID1 and own descendants, never
-    // host/container/peer roots. Every visible numeric process has this root.
+    // Before creating any descendant the private procfs must expose exactly
+    // the confined init and this worker, never host/container/peer processes.
+    use std::os::unix::fs::MetadataExt;
+    let own_root = std::fs::metadata("/").map_err(|_| Error::MountIsolation)?;
+    let mut visible = std::collections::BTreeSet::new();
     for entry in std::fs::read_dir("/proc").map_err(|_| Error::MountIsolation)? {
         let e = entry.map_err(|_| Error::MountIsolation)?;
         if e.file_name()
             .to_str()
             .is_some_and(|s| s.bytes().all(|b| b.is_ascii_digit()))
         {
-            if let Ok(root) = std::fs::read_link(e.path().join("root"))
-                && root != std::path::Path::new("/")
-            {
-                return Err(Error::MountIsolation);
-            }
-            if e.path().join("root/run/netns").exists() {
-                return Err(Error::MountIsolation);
+            let pid = e
+                .file_name()
+                .to_str()
+                .and_then(|s| s.parse::<u32>().ok())
+                .ok_or(Error::MountIsolation)?;
+            visible.insert(pid);
+            match std::fs::metadata(e.path().join("root")) {
+                Ok(root) if (root.dev(), root.ino()) == (own_root.dev(), own_root.ino()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
+                _ => return Err(Error::MountIsolation),
             }
         }
+    }
+    if visible != [1, std::process::id()].into() || std::process::id() != 2 {
+        return Err(Error::MountIsolation);
     }
     Ok(())
 }
@@ -1393,6 +1446,12 @@ pub(super) fn probe_container_reap() {
     }
 }
 #[cfg(test)]
+pub(super) fn probe_failure(error: Error) {
+    // SAFETY: post-exec probe owns fixed health FD3; only fixed enum byte emitted.
+    let fd = unsafe { BorrowedFd::borrow_raw(3) };
+    report_failure(fd, error);
+}
+#[cfg(test)]
 mod policy_tests {
     use super::*;
     fn verdict(arch: u32, nr: u32, arg: u64) -> u32 {
@@ -1478,10 +1537,4 @@ mod policy_tests {
             0x00050001
         );
     }
-}
-#[cfg(test)]
-pub(super) fn probe_failure(error: Error) {
-    // SAFETY: post-exec probe owns fixed health FD3; only fixed enum byte emitted.
-    let fd = unsafe { BorrowedFd::borrow_raw(3) };
-    report_failure(fd, error);
 }

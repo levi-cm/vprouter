@@ -134,6 +134,13 @@ fn workers(id: &str) -> Result<Vec<u32>> {
 }
 fn verify_worker(a: &Admission, pid: u32, data: &owned::OwnedNamespaces) -> Result<()> {
     a.process.verify_placement(pid, &a.spec)?;
+    let actual_state =
+        fs::metadata(format!("/proc/{pid}/root/state")).map_err(|_| Error::MountIsolation)?;
+    let selected_state =
+        fs::metadata(a.spec.exit.state_dir.join("worker")).map_err(|_| Error::MountIsolation)?;
+    if (actual_state.dev(), actual_state.ino()) != (selected_state.dev(), selected_state.ino()) {
+        return Err(Error::MountIsolation);
+    }
     let net = fs::metadata(format!("/proc/{pid}/ns/net")).map_err(|_| Error::NamespaceMismatch)?;
     if (owned::Identity {
         dev: net.dev(),

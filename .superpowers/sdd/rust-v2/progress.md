@@ -160,3 +160,9 @@ Task5 native attempt8 PASSexit0/0.22s,1passed/13filtered, binaryd2d739d6bd7e8bfb
 Task5 finalized a01d28d code +0631fb0 report; reviewer /root/review_network dispatched against48293d5..0631fb0 with brief/report/diff. Final passed payload bound to code hash in root evidence. Source suites not redundantly rerun;90tests+1doc, fmt/check/clippy and ARM64-library compile reported. Independent approval pending.
 
 Enrollment recheck: user-approved disposable client Running/online, same nnhXNghWF621CNTRL and100.120.226.13, not advertising exit. Separate guest gateway still NeedsLogin; current separate login link presented asynchronously. No identity reset, route advertisement, protected workload or production changes.
+
+Task5 reviewer identified Important ownership issue: public VethPair members permit mixing host/transport tokens from independent same-plan pairs whose namespace-local ifindices collide. Cleanup may delete actual unverified peer before post-check detects mismatch. No production exposure (DOWN-only component); task6 gate remains closed pending full verdict/fix/re-review.
+
+Task5 review verdict FAIL/Needs fixes; Important mixed pair cleanup and Minor Single multipart completion. Original implementer /root/native_network resumed fix1 for both, compile-fail + collision-before-mutation and framing regressions. Review preserved task-5-review.md. Unknown full runtime/traffic checks explicitly later gates, not component acceptance.
+
+Ruling: split prepared launch-helper package into task6 admission and task6b execution, keeping full requirements in task-6-launch-full-requirements.md — process/container/staging validation and privileged execution have distinct review surfaces; neither alone authorizes runtime. Cost if wrong: another integration/review boundary, with no reduced security requirement. Task6 not dispatched until task5 approval.

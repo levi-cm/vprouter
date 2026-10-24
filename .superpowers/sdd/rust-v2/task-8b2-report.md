@@ -113,3 +113,31 @@ TS_DEBUG_FIREWALL_MODE=nftables binds the native runner without secondary exec.
 Observer retains exact LANG=C/PATH=/bin only. New exact environment regression
 passes; focused27tests and clippy pass. Both static architecture builds and final
 post-payload init/context hashes verified. Actual05 runtime remains pending.
+
+
+## Candidate06 private mount isolation and demonstrated TUN pipe
+
+Unchanged05 root attempts7-9 remain FAIL and are retained. Attempt7 raw syscall
+metadata identifies successful TUNGETFEATURES/TUNSETIFF/offload/SIOCGIFINDEX,
+followed by three pipe2(O_CLOEXEC) calls denied EPERM in actual Go thread35771.
+Root attempt9 used an explicitly bounded FD2-only diagnostic in the fresh
+unenrolled fixture; root retained raw logs privately and emitted only fixed
+public-source error classifications for engine/TUN/operation-not-permitted.
+No state, LocalAPI, read/random, environment or identity payload was decoded.
+Candidate06 adds daemon-only pipe2 with exactly O_CLOEXEC and zero upper word;
+observer, inheritable, nonblocking/direct-mode and extra-bit variants stay denied.
+The broad pipe2-ALLOW mutation fails the focused policy test(exit101), and the
+restored exact policy passes(exit0). Evidence is retained in controller-local
+/tmp/task8b2-pipe2-{mutation,restored}-test.txt. The demonstrated nonfatal
+inotify_init1 failure receives no new allowance.
+
+The source also reveals an independent setup race: after fork, actual_exec
+remounted /proc readonly in the supervisor's shared mount namespace while that
+supervisor still needed its fixed AppArmor attr/current transition. Child setup
+now unshares its mount namespace before the readonly remount. This strengthens
+private mount isolation without adding post-exec authority; setup SYS_ADMIN is
+still removed before the fixed program exec. Two ignored-harness stage markers
+distinguish setup acknowledgement from live socket/program identity, neither of
+which mints readiness. Focused27tests, fmt and launch all-target clippy pass.
+Actual06 runtime/regression, exact daemon kernel-shape admission and lifecycle
+acceptance remain pending; no actual runtime PASS or production authority claimed.

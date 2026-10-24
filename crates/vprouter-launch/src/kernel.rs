@@ -2630,6 +2630,60 @@ fn allow_syscall(out: &mut Vec<libc::sock_filter>, nr: libc::c_long) {
 }
 fn runtime_filter(role: ActualRole) -> Vec<libc::sock_filter> {
     let mut out = filter()[..4].to_vec();
+    if role == ActualRole::Daemon {
+        // Pinned Go TUN construction uses only pipe2(O_CLOEXEC). Do not admit
+        // inheritable pipes, packet/direct mode, or any extra upper-word bits.
+        out.extend([
+            libc::sock_filter {
+                code: 0x15,
+                jt: 0,
+                jf: 6,
+                k: libc::SYS_pipe2 as u32,
+            },
+            libc::sock_filter {
+                code: 0x20,
+                jt: 0,
+                jf: 0,
+                k: 28,
+            },
+            libc::sock_filter {
+                code: 0x15,
+                jt: 0,
+                jf: 3,
+                k: 0,
+            },
+            libc::sock_filter {
+                code: 0x20,
+                jt: 0,
+                jf: 0,
+                k: 24,
+            },
+            libc::sock_filter {
+                code: 0x15,
+                jt: 0,
+                jf: 1,
+                k: libc::O_CLOEXEC as u32,
+            },
+            libc::sock_filter {
+                code: 0x06,
+                jt: 0,
+                jf: 0,
+                k: 0x7fff0000,
+            },
+            libc::sock_filter {
+                code: 0x06,
+                jt: 0,
+                jf: 0,
+                k: 0x00050001,
+            },
+            libc::sock_filter {
+                code: 0x20,
+                jt: 0,
+                jf: 0,
+                k: 0,
+            },
+        ]);
+    }
     // clone3 must report ENOSYS so libc may use the constrained clone fallback.
     out.extend([
         libc::sock_filter {
@@ -3004,6 +3058,11 @@ fn actual_exec(
     dup_fixed(&he, 3, true)?;
     dup_fixed(&ex, 4, true)?;
     let result: Result<()> = (|| {
+        // The supervisor still needs to write its own LSM transition after
+        // fork. Isolate this mount view before making proc readonly; otherwise
+        // the child's remount races that fixed supervisor transition with
+        // EROFS. Setup SYS_ADMIN is dropped below before the fixed exec.
+        unshare(libc::CLONE_NEWNS).map_err(|_| Error::MountPrivate)?;
         close_except(&[3, 4])?;
         lsm_exec()?;
         // Entire actual proc is readonly, with no writable host/namespace view.
@@ -3359,6 +3418,23 @@ mod policy_tests {
         };
         for role in [ActualRole::Observer, ActualRole::Daemon] {
             let policy = runtime_filter(role);
+            for flags in [
+                0,
+                libc::O_CLOEXEC as u64,
+                (libc::O_CLOEXEC | libc::O_NONBLOCK) as u64,
+                (libc::O_CLOEXEC | libc::O_DIRECT) as u64,
+                (1u64 << 32) | libc::O_CLOEXEC as u64,
+            ] {
+                assert_eq!(
+                    verdict_args(
+                        &policy,
+                        arch,
+                        libc::SYS_pipe2 as u32,
+                        [0, flags, 0, 0, 0, 0]
+                    ) == 0x7fff0000,
+                    role == ActualRole::Daemon && flags == libc::O_CLOEXEC as u64
+                );
+            }
             assert_eq!(
                 verdict_args(&policy, arch, libc::SYS_clone3 as u32, [0; 6]),
                 0x00050026

@@ -220,6 +220,7 @@ pub(super) fn run(
     let mut handoff = g.prepare_observation(a, &bundle)?;
     lab::stage("actual_daemon_fixed_program_launch");
     let mut daemon = handoff.launch_daemon(&bundle)?;
+    lab::stage("actual_daemon_setup_acknowledged");
     let end = Instant::now() + Duration::from_secs(5);
     let daemon_pid = loop {
         if daemon.try_wait_success()? {
@@ -239,6 +240,7 @@ pub(super) fn run(
         }
         std::thread::sleep(Duration::from_millis(10));
     };
+    lab::stage("actual_daemon_live_socket_program_identified");
     inspect(a, daemon_pid, true, dir)?;
     lab::case("actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds");
     super::transport_lab::actual_metadata(data_name, dir)?;

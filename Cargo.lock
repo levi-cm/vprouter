@@ -628,6 +628,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vprouter-launch"
+version = "0.1.0"
+dependencies = [
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "vprouter-core",
+ "vprouter-linux",
+]
+
+[[package]]
 name = "vprouter-linux"
 version = "0.1.0"
 dependencies = [

@@ -226,6 +226,122 @@ impl TryFrom<Inspect> for Container {
         })
     }
 }
+/// Dedicated enforcement projection. Unlike observational inventory, every
+/// required functional field is mandatory and retains its exact Docker value.
+/// No environment, command, auth or logging payload is deserialized.
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LaunchContainer {
+    pub id: String,
+    pub image: String,
+    pub state: LaunchState,
+    pub config: LaunchConfig,
+    pub host_config: LaunchHostConfig,
+    pub mounts: Vec<LaunchMount>,
+    #[serde(rename = "AppArmorProfile")]
+    pub app_armor_profile: String,
+    pub process_label: String,
+    pub mount_label: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LaunchState {
+    pub running: bool,
+    pub paused: bool,
+    pub restarting: bool,
+    pub dead: bool,
+    pub pid: u32,
+    pub started_at: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LaunchConfig {
+    pub labels: BTreeMap<String, String>,
+    pub user: String,
+    #[serde(deserialize_with = "required_option")]
+    pub volumes: Option<BTreeMap<String, serde_json::Value>>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LaunchHostConfig {
+    pub network_mode: String,
+    pub privileged: bool,
+    pub readonly_rootfs: bool,
+    pub pid_mode: String,
+    pub userns_mode: String,
+    pub cgroupns_mode: String,
+    pub ipc_mode: String,
+    #[serde(rename = "UTSMode")]
+    pub uts_mode: String,
+    #[serde(deserialize_with = "required_option")]
+    pub cap_add: Option<Vec<String>>,
+    #[serde(deserialize_with = "required_option")]
+    pub cap_drop: Option<Vec<String>>,
+    #[serde(deserialize_with = "required_option")]
+    pub security_opt: Option<Vec<String>>,
+    #[serde(deserialize_with = "required_option")]
+    pub binds: Option<Vec<String>>,
+    // Docker 26 omits this field when the option is inactive.
+    pub mounts: Option<Vec<serde_json::Value>>,
+    pub devices: Vec<serde_json::Value>,
+    #[serde(deserialize_with = "required_option")]
+    pub device_requests: Option<Vec<serde_json::Value>>,
+    #[serde(deserialize_with = "required_option")]
+    pub device_cgroup_rules: Option<Vec<String>>,
+    #[serde(deserialize_with = "required_option")]
+    pub volumes_from: Option<Vec<String>>,
+    // Docker 26 omits this field when the option is inactive.
+    pub tmpfs: Option<BTreeMap<String, String>>,
+    // Docker 26 omits this field when the option is inactive.
+    pub sysctls: Option<BTreeMap<String, String>>,
+    #[serde(deserialize_with = "required_option")]
+    pub group_add: Option<Vec<String>>,
+    pub cgroup_parent: String,
+    pub runtime: String,
+    // Docker 26 omits this field when the option is inactive.
+    pub init: Option<bool>,
+    #[serde(deserialize_with = "required_option")]
+    pub masked_paths: Option<Vec<String>>,
+    #[serde(deserialize_with = "required_option")]
+    pub readonly_paths: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub additional: BTreeMap<String, serde_json::Value>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LaunchMount {
+    #[serde(rename = "Type")]
+    pub kind: String,
+    pub source: String,
+    pub destination: String,
+    #[serde(rename = "RW")]
+    pub writable: bool,
+    pub propagation: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LaunchImage {
+    pub id: String,
+    pub repo_digests: Vec<String>,
+    pub os: String,
+    pub architecture: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct LaunchDaemon {
+    pub security_options: Vec<String>,
+    pub cgroup_driver: String,
+    pub cgroup_version: String,
+    #[serde(rename = "OSType")]
+    pub os_type: String,
+}
+fn required_option<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
 impl DockerClient {
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         // Every caller uses static endpoint syntax and validated hex IDs.
@@ -349,6 +465,32 @@ impl DockerClient {
         .await
         .map_err(|_| Error::DockerTimeout)?
     }
+    /// Root/socket checks and native compatibility negotiation precede use.
+    /// IDs are always complete content IDs; names/short IDs are refused.
+    pub async fn launch_container(&self, expected_id: &str) -> Result<LaunchContainer> {
+        if !id(expected_id) {
+            return Err(Error::InvalidInventory);
+        }
+        self.version().await?;
+        let value: LaunchContainer = self
+            .get(&format!("{API}/containers/{expected_id}/json"))
+            .await?;
+        if value.id != expected_id {
+            return Err(Error::InvalidInventory);
+        }
+        Ok(value)
+    }
+    pub async fn launch_image(&self, content_id: &str) -> Result<LaunchImage> {
+        if !content_id.strip_prefix("sha256:").is_some_and(id) {
+            return Err(Error::InvalidInventory);
+        }
+        self.version().await?;
+        self.get(&format!("{API}/images/{content_id}/json")).await
+    }
+    pub async fn launch_daemon(&self) -> Result<LaunchDaemon> {
+        self.version().await?;
+        self.get(&format!("{API}/info")).await
+    }
     pub(crate) fn socket_path(&self) -> &Path {
         &self.socket
     }
@@ -466,6 +608,72 @@ mod tests {
             requests[2]
                 .starts_with(format!("GET /v1.45/containers/{}/json ", "a".repeat(64)).as_bytes())
         );
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn launch_image_and_daemon_native_http_keep_fixed_get_paths() {
+        let t = Temp::new();
+        let socket = t.0.join("launch.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let content = format!("sha256:{}", "b".repeat(64));
+        let expected = content.clone();
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for body in [
+                serde_json::json!({"Version":"26.1.5","ApiVersion":"1.45","MinAPIVersion":"1.24"}),
+                serde_json::json!({"Id":expected,"RepoDigests":[format!("tailscale/tailscale@sha256:{}","a".repeat(64))],"Os":"linux","Architecture":"amd64","Config":{"Env":["DO_NOT_PRINT_SECRET"]}}),
+                serde_json::json!({"Version":"26.1.5","ApiVersion":"1.45","MinAPIVersion":"1.24"}),
+                serde_json::json!({"SecurityOptions":["name=seccomp,profile=builtin"],"CgroupDriver":"systemd","CgroupVersion":"2","OSType":"linux"}),
+                serde_json::json!({"Version":"26.1.5","ApiVersion":"1.45","MinAPIVersion":"1.24"}),
+                serde_json::json!({"Env":["DO_NOT_PRINT_SECRET"]}),
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = vec![0; 4096];
+                let n = stream.read(&mut request).await.unwrap();
+                request.truncate(n);
+                requests.push(request);
+                let body = serde_json::to_vec(&body).unwrap();
+                let mut reply =
+                    format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len())
+                        .into_bytes();
+                reply.extend(body);
+                stream.write_all(&reply).await.unwrap();
+            }
+            requests
+        });
+        let client = DockerClient {
+            socket,
+            stage: Duration::from_secs(1),
+            injected_test_socket: true,
+        };
+        let image = client.launch_image(&content).await.unwrap();
+        assert_eq!(image.id, content);
+        assert_eq!(
+            client.launch_daemon().await.unwrap().cgroup_driver,
+            "systemd"
+        );
+        let container_id = "a".repeat(64);
+        assert!(matches!(
+            client.launch_container(&container_id).await,
+            Err(Error::DockerProtocol)
+        ));
+        let requests = server.await.unwrap();
+        assert!(requests[0].starts_with(b"GET /version "));
+        assert!(requests[1].starts_with(format!("GET /v1.45/images/{content}/json ").as_bytes()));
+        assert!(requests[2].starts_with(b"GET /version "));
+        assert!(requests[3].starts_with(b"GET /v1.45/info "));
+        assert!(requests[4].starts_with(b"GET /version "));
+        assert!(
+            requests[5]
+                .starts_with(format!("GET /v1.45/containers/{container_id}/json ").as_bytes())
+        );
+        assert!(matches!(
+            client.launch_container("short").await,
+            Err(Error::InvalidInventory)
+        ));
+        assert!(matches!(
+            client.launch_image("sha256:short").await,
+            Err(Error::InvalidInventory)
+        ));
     }
     #[tokio::test(flavor = "current_thread")]
     async fn incompatible_version_never_proceeds_to_container_api() {

@@ -1,0 +1,24 @@
+[package]
+name = "vprouter-launch"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+vprouter-core = { path = "../vprouter-core" }
+vprouter-linux = { path = "../vprouter-linux" }
+serde.workspace = true
+serde_json.workspace = true
+rustix.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+
+[[bin]]
+name = "vprouter-launch-admit"
+path = "src/main.rs"
+
+[[test]]
+name = "admission_lab"
+path = "src/lab_main.rs"
+harness = false

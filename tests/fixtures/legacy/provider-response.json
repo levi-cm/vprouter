@@ -1,0 +1,5 @@
+{
+  "ip": "198.51.100.20",
+  "mullvad_exit_ip": true,
+  "mullvad_exit_ip_hostname": "fixture-wg-001"
+}

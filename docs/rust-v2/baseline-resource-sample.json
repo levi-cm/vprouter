@@ -1,0 +1,1646 @@
+{
+  "kind": "observed_short_sample",
+  "start_utc": "2026-10-24T11:43:44.095960+00:00",
+  "elapsed_seconds": 20.00011909098248,
+  "sample_count": 21,
+  "workload": "existing uncontrolled live traffic; no generated workload",
+  "acceptance": "NOT_RUN: repeated ten-minute same-workload one/five/six-exit runs",
+  "excluded": [
+    "Docker daemon/containerd/shared shims",
+    "kernel slab/shared system overhead",
+    "external clients and WAN throughput/latency"
+  ],
+  "limitations": [
+    "PSS snapshots may miss transient processes; cgroup CPU includes them",
+    "observer overhead excluded; no causal efficiency claim"
+  ],
+  "cgroups": {
+    "host_guard": "/sys/fs/cgroup/system.slice/system-vprouter.slice/vprouter@max-vprouter.service",
+    "max-vprouter": "/sys/fs/cgroup/system.slice/docker-c8cc9beb8825284bb58a5bbf614e4d240a1a9d23fc2cb16a539556162b8ed4f4.scope",
+    "max-vprouter-uplink": "/sys/fs/cgroup/system.slice/docker-070cc636e1af8ae7e89510aaccc5a0b431ce731a7b682fc1e31b3d0d8345576c.scope"
+  },
+  "summary": {
+    "host_guard": {
+      "cpu_percent_one_core": 3.876416917685038,
+      "mean_pss_kib": 11020,
+      "max_pss_kib": 11020,
+      "mean_memory_current_bytes": 15220540.952380951,
+      "first_memory_events": {
+        "low": "0",
+        "high": "0",
+        "max": "0",
+        "oom": "0",
+        "oom_kill": "0",
+        "oom_group_kill": "0"
+      },
+      "last_memory_events": {
+        "low": "0",
+        "high": "0",
+        "max": "0",
+        "oom": "0",
+        "oom_kill": "0",
+        "oom_group_kill": "0"
+      }
+    },
+    "max-vprouter": {
+      "cpu_percent_one_core": 1.859558927165019,
+      "mean_pss_kib": 92871.57142857143,
+      "max_pss_kib": 92875,
+      "mean_memory_current_bytes": 77433319.61904761,
+      "first_memory_events": {
+        "low": "0",
+        "high": "0",
+        "max": "0",
+        "oom": "0",
+        "oom_kill": "0",
+        "oom_group_kill": "0"
+      },
+      "last_memory_events": {
+        "low": "0",
+        "high": "0",
+        "max": "0",
+        "oom": "0",
+        "oom_kill": "0",
+        "oom_group_kill": "0"
+      }
+    },
+    "max-vprouter-uplink": {
+      "cpu_percent_one_core": 0.0,
+      "mean_pss_kib": 430,
+      "max_pss_kib": 430,
+      "mean_memory_current_bytes": 348160,
+      "first_memory_events": {
+        "low": "0",
+        "high": "0",
+        "max": "0",
+        "oom": "0",
+        "oom_kill": "0",
+        "oom_group_kill": "0"
+      },
+      "last_memory_events": {
+        "low": "0",
+        "high": "0",
+        "max": "0",
+        "oom": "0",
+        "oom_kill": "0",
+        "oom_group_kill": "0"
+      }
+    }
+  },
+  "samples": [
+    {
+      "elapsed_seconds": 2.4110195226967335e-06,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 71651688,
+          "memory_current_bytes": 15220736,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28383068,
+          "memory_current_bytes": 77361152,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 1.0000917160068639,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 71651688,
+          "memory_current_bytes": 15220736,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28390087,
+          "memory_current_bytes": 77361152,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 2.0000992210116237,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 71731331,
+          "memory_current_bytes": 15159296,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28405717,
+          "memory_current_bytes": 77361152,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 3.0000773960200604,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 71731331,
+          "memory_current_bytes": 15151104,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28407522,
+          "memory_current_bytes": 77357056,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 4.000084261002485,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 71808619,
+          "memory_current_bytes": 15187968,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28422472,
+          "memory_current_bytes": 77389824,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 5.00009343700367,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 71808619,
+          "memory_current_bytes": 15151104,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28443741,
+          "memory_current_bytes": 77357056,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 6.000072071008617,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 71888321,
+          "memory_current_bytes": 15155200,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28460058,
+          "memory_current_bytes": 77357056,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 7.0000805360032246,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 71888321,
+          "memory_current_bytes": 15155200,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28463752,
+          "memory_current_bytes": 77357056,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 8.000084081024397,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 71960835,
+          "memory_current_bytes": 15269888,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28477785,
+          "memory_current_bytes": 77418496,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 9.000092207017587,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 71960835,
+          "memory_current_bytes": 15159296,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28479294,
+          "memory_current_bytes": 77357056,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 10.000092741014669,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 72038487,
+          "memory_current_bytes": 15241216,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28529727,
+          "memory_current_bytes": 77361152,
+          "pss_kib": 92867,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21151,
+              "rss_kib": 21664
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 11.00008614701801,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 72038487,
+          "memory_current_bytes": 15159296,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28531824,
+          "memory_current_bytes": 77352960,
+          "pss_kib": 92867,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21151,
+              "rss_kib": 21664
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 12.000094042014098,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 72118406,
+          "memory_current_bytes": 15167488,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28550547,
+          "memory_current_bytes": 77631488,
+          "pss_kib": 92867,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21151,
+              "rss_kib": 21664
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71716,
+              "rss_kib": 71724
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 13.0000970060064,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 72118406,
+          "memory_current_bytes": 15167488,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28554107,
+          "memory_current_bytes": 77623296,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21151,
+              "rss_kib": 21664
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71720,
+              "rss_kib": 71728
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 14.000091021996923,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 72191158,
+          "memory_current_bytes": 15433728,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28619860,
+          "memory_current_bytes": 77783040,
+          "pss_kib": 92871,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21151,
+              "rss_kib": 21664
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71720,
+              "rss_kib": 71728
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 15.0000734369969,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 72191158,
+          "memory_current_bytes": 15163392,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28651653,
+          "memory_current_bytes": 77381632,
+          "pss_kib": 92875,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71720,
+              "rss_kib": 71728
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 16.00008275199798,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 72269378,
+          "memory_current_bytes": 15175680,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28675867,
+          "memory_current_bytes": 77381632,
+          "pss_kib": 92875,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71720,
+              "rss_kib": 71728
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 17.00007494702004,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 72269378,
+          "memory_current_bytes": 15167488,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28687876,
+          "memory_current_bytes": 77361152,
+          "pss_kib": 92875,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71720,
+              "rss_kib": 71728
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 18.000093792012194,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 72347391,
+          "memory_current_bytes": 15634432,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28720867,
+          "memory_current_bytes": 77533184,
+          "pss_kib": 92875,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71720,
+              "rss_kib": 71728
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 19.00008798800991,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 72347391,
+          "memory_current_bytes": 15310848,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28722227,
+          "memory_current_bytes": 77639680,
+          "pss_kib": 92875,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71720,
+              "rss_kib": 71728
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    },
+    {
+      "elapsed_seconds": 20.000121502002003,
+      "groups": {
+        "host_guard": {
+          "cpu_usage_usec": 72426976,
+          "memory_current_bytes": 15179776,
+          "pss_kib": 11020,
+          "processes": [
+            {
+              "pid": 1300649,
+              "comm": "python3",
+              "pss_kib": 11020,
+              "rss_kib": 18520
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter": {
+          "cpu_usage_usec": 28754982,
+          "memory_current_bytes": 77373440,
+          "pss_kib": 92875,
+          "processes": [
+            {
+              "pid": 1300984,
+              "comm": "python3",
+              "pss_kib": 21155,
+              "rss_kib": 21668
+            },
+            {
+              "pid": 1301394,
+              "comm": "tailscaled",
+              "pss_kib": 71720,
+              "rss_kib": 71728
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        },
+        "max-vprouter-uplink": {
+          "cpu_usage_usec": 16269,
+          "memory_current_bytes": 348160,
+          "pss_kib": 430,
+          "processes": [
+            {
+              "pid": 1300874,
+              "comm": "sleep",
+              "pss_kib": 430,
+              "rss_kib": 820
+            }
+          ],
+          "memory_events": {
+            "low": "0",
+            "high": "0",
+            "max": "0",
+            "oom": "0",
+            "oom_kill": "0",
+            "oom_group_kill": "0"
+          }
+        }
+      }
+    }
+  ]
+}

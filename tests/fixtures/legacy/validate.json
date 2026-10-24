@@ -1,0 +1,6 @@
+{
+  "name": "fixture-router",
+  "endpoint": "192.0.2.10:51820",
+  "image_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "state_dir": "/var/lib/vprouter-fixtures/fixture-router"
+}

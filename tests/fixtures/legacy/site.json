@@ -1,0 +1,7 @@
+{
+  "name": "fixture-router",
+  "profile": "/etc/vprouter-fixtures/fixture-router.conf",
+  "state_dir": "/var/lib/vprouter-fixtures/fixture-router",
+  "image_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "compose_dir": "/opt/vprouter-fixtures/release"
+}

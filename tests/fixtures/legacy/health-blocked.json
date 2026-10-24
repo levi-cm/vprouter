@@ -1,0 +1,6 @@
+{
+  "state": "BLOCKED",
+  "reason": "HTTPError (HTTP 503)",
+  "time": 1700000000,
+  "heartbeat": 1700000002
+}

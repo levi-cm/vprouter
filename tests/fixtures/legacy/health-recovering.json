@@ -1,0 +1,6 @@
+{
+  "state": "RECOVERING",
+  "reason": "starting Tailscale",
+  "time": 1700000000,
+  "heartbeat": 1700000002
+}

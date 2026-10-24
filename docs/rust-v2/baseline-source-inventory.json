@@ -1,0 +1,57 @@
+{
+  "kind": "observed_source_hashes",
+  "base_commit": "84fb353b128c0b6f7ca222be9cd3934183a4e34a",
+  "repair_commit": "528feced48f14fd46d48da0abdd64a2587e42b4f",
+  "github_fork_main": "e135adacd33501422fb24ba3ef2bce8693956557",
+  "runtime_root": "/opt/vprouter/current",
+  "files": [
+    {
+      "path": "router_runtime.py",
+      "base_sha256": "36a087a833d260fc6c951ed407c22db2448a1a6dea55fdbf5aa8928bb3e11901",
+      "runtime_sha256": "36a087a833d260fc6c951ed407c22db2448a1a6dea55fdbf5aa8928bb3e11901",
+      "equal": true
+    },
+    {
+      "path": "router.nft",
+      "base_sha256": "293643657b6cd6c97dcbb4dd17c3bfef292286ff07a844b752bdc0f31f6dd779",
+      "runtime_sha256": "293643657b6cd6c97dcbb4dd17c3bfef292286ff07a844b752bdc0f31f6dd779",
+      "equal": true
+    },
+    {
+      "path": "Dockerfile",
+      "base_sha256": "7f0afe683db1ce01c913ad6f5e7b7b29cb75ff07979585eecc3ee846a46a044f",
+      "runtime_sha256": "7f0afe683db1ce01c913ad6f5e7b7b29cb75ff07979585eecc3ee846a46a044f",
+      "equal": true
+    },
+    {
+      "path": "docker-compose.yaml",
+      "base_sha256": "6b1ae331aa18cf3acb76524cc1ac38c39de28302603444b6fdb4a010612cf1d6",
+      "runtime_sha256": "6b1ae331aa18cf3acb76524cc1ac38c39de28302603444b6fdb4a010612cf1d6",
+      "equal": true
+    },
+    {
+      "path": "host/orchestrate.py",
+      "base_sha256": "fe62364ae1c88c409f9e830f448a5a04f00e31927e5d02f24ea5a6b51f1296c9",
+      "runtime_sha256": "fe62364ae1c88c409f9e830f448a5a04f00e31927e5d02f24ea5a6b51f1296c9",
+      "equal": true
+    },
+    {
+      "path": "host/vprouter@.service",
+      "base_sha256": "6e978aaf0c00858089a74f8dfd02f1379b08f7e7a1793e965beee233c33d551d",
+      "runtime_sha256": "6e978aaf0c00858089a74f8dfd02f1379b08f7e7a1793e965beee233c33d551d",
+      "equal": true
+    },
+    {
+      "path": "host/collector_services.py",
+      "base_sha256": "8f28f2c1fb2ca0f0d78ea19962063282c7b1e6555d3eaabd318644591e8b72c2",
+      "runtime_sha256": "8f28f2c1fb2ca0f0d78ea19962063282c7b1e6555d3eaabd318644591e8b72c2",
+      "equal": true
+    },
+    {
+      "path": "host/collector-services.conf",
+      "base_sha256": "f6817ca944fd0dcc806d9036ed2d1e998b4b3b8e7575005bb219238776f7c64f",
+      "runtime_sha256": "f6817ca944fd0dcc806d9036ed2d1e998b4b3b8e7575005bb219238776f7c64f",
+      "equal": true
+    }
+  ]
+}

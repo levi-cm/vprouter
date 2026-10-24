@@ -1,0 +1,7 @@
+{
+  "public_exit": "198.51.100.20",
+  "relay": "fixture-wg-001",
+  "tunnel_healthy": true,
+  "dns_guard": true,
+  "ipv6_guard": true
+}

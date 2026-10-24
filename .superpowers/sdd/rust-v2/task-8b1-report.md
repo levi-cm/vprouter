@@ -270,3 +270,17 @@ result is preserved as evidence on its exact old bytes, not silently attributed
 to candidate04. The new unprivileged tests directly cover the two source findings.
 All previously listed actual observer/Go/protected mount/peer credential/image/
 ARM runtime/readiness/client gaps remain NOT_RUN for8b2/8c.
+
+Root subsequently ran exact candidate04: attempt4 PASS exit0 in2.154s, all8
+producer cases independently matched candidate03. Root matched all97 source
+inputs to4511476 (aggregate `6bf9ab58` prefix), independently verified both
+producer and both observer static ELF hashes/sizes/machines and both manifests'
+observer bindings. Raw `target/lab-state/producer-placement-run-4.json` SHA256
+`2cbbba919d7ac32894348f8b913f4a51593ce422472f0516d18f28e81faeedd4`.
+Final read-only `target/lab-state/producer-placement-inspect-4.json` SHA256
+`a39f935da35fceffeaa57644f8ae3ab409ee3d5ed00de1a0655e24a23ec81772`:
+all4 exact containers/parent cgroups absent, Activating ownership records retained,
+approval marker removed; final directory `task8b1-32649`. The same pin-file-only
+qualification applies. This refresh binds producer evidence to candidate04; it
+does not prove observer deadline/replay behavior, which the focused local tests
+cover. No observer/Go execution or8b2/8c gate was performed or inferred.

@@ -190,3 +190,9 @@ Task6 fix1 code338dcba280dbe0699640def7c63f9ed7f17e16c3: enumerated private daem
 Task6 fix round1/5:1addressed,0open; codec071837..6a00433 reviewed independently specPASS/qualityApproved. Task6 complete bounded admission component (47381e8..6a00433, reviewclean). Production launch remains unavailable. Task6b maybegin followingrootbookkeepingcommit.
 
 Ruling: task6b must verify seccomp/LSM confinement for host-launched workers rather than assume Docker inspect defaults are inherited — host exec doesnotinherit container taskfilters/labels. Testprobe mayuse test-only reviewedprofile, but production staysunavailable until realworker/Go policy is reviewed. Costifwrong: extra policy/staging integration work or compatibilityrestriction; avoids claiming confinement from unrelatedcontainerinit.
+
+Task6b /root/launch_execution dispatched from c4b2236 after task6 independent approval. No production activation or real state/profile reads; root alone runs isolated harness.
+
+Ruling: task6b synthetic execution profile retains zero worker capabilities and requires exact docker-default AppArmor plus reviewed minimal seccomp only for test probes — real worker/Go policies are absent and host-launched tasks do not inherit Docker confinement. Production loader remains unavailable; this component does not certify no-AppArmor execution or narrow the final Debian/Arch/Void platform contract. Cost if wrong: later confinement/capability integration work and additional kernel acceptance, rather than assuming unproved confinement.
+
+Enrollment recheck this continuation: disposable client Running/online with unchanged nnhXNghWF621CNTRL and100.120.226.13; separate lab gateway NeedsLogin on existing enrollment link. Neither advertises an exit; no state reset or routes changed.

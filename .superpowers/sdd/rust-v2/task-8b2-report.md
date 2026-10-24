@@ -141,3 +141,16 @@ distinguish setup acknowledgement from live socket/program identity, neither of
 which mints readiness. Focused27tests, fmt and launch all-target clippy pass.
 Actual06 runtime/regression, exact daemon kernel-shape admission and lifecycle
 acceptance remain pending; no actual runtime PASS or production authority claimed.
+
+
+## Candidate07 rejected-descriptor diagnostic witness
+
+Root unchanged06 attempt10 reached setup acknowledgement and live exact Go
+program/socket identity, then rejected DescriptorPolicy in the ignored inspector.
+Candidate07 changes only that test observer: it retains at most256 numeric FD
+kernel targets, flags, stat device/inode/mode before grammar validation; it also
+captures public link/address/route/rule/netfilter metadata immediately before
+process inspection. Pipes remain rejected pending this fresh witness. No guessed
+pipe count, descriptor inheritance, runtime filter or kernel baseline is admitted.
+Launch all-target clippy and both static payload/context builds pass. Runtime
+remains pending and failure evidence/quarantine are retained by root.

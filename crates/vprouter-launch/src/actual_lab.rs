@@ -141,9 +141,42 @@ fn inspect(a: &Admission, pid: u32, daemon: bool, dir: &Path) -> Result<()> {
     }
     let mut descriptors = Vec::new();
     for entry in fs::read_dir(format!("/proc/{pid}/fd")).map_err(|_| Error::DescriptorInventory)? {
+        if descriptors.len() >= 256 {
+            return Err(Error::DescriptorInventory);
+        }
         let entry = entry.map_err(|_| Error::DescriptorInventory)?;
+        let number: u32 = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse().ok())
+            .ok_or(Error::DescriptorInventory)?;
         let target = fs::read_link(entry.path()).map_err(|_| Error::DescriptorInventory)?;
         let text = target.to_str().ok_or(Error::DescriptorInventory)?;
+        let info = fs::read_to_string(format!("/proc/{pid}/fdinfo/{number}"))
+            .map_err(|_| Error::DescriptorInventory)?;
+        let flags = u32::from_str_radix(field(&info, "flags:")?, 8)
+            .map_err(|_| Error::DescriptorInventory)?;
+        let metadata = fs::metadata(entry.path()).map_err(|_| Error::DescriptorInventory)?;
+        descriptors.push(serde_json::json!({
+            "number":number,"target":text,"flags":flags,
+            "dev":metadata.dev(),"ino":metadata.ino(),"mode":metadata.mode()
+        }));
+    }
+    descriptors.sort_by_key(|value| value["number"].as_u64());
+    // Retain a bounded kernel-metadata witness before applying the descriptor
+    // grammar. A rejected shape stays rejected and is never learned/adopted.
+    lab::write(
+        &dir.join(if daemon {
+            "daemon-descriptors.json"
+        } else {
+            "observer-descriptors.json"
+        }),
+        &serde_json::to_vec(&descriptors).map_err(|_| Error::DescriptorInventory)?,
+    )?;
+    for descriptor in &descriptors {
+        let text = descriptor["target"]
+            .as_str()
+            .ok_or(Error::DescriptorInventory)?;
         if !(text == "/dev/null"
             || text == "/dev/net/tun"
             || text.starts_with("socket:[")
@@ -152,10 +185,6 @@ fn inspect(a: &Admission, pid: u32, daemon: bool, dir: &Path) -> Result<()> {
         {
             return Err(Error::DescriptorPolicy);
         }
-        descriptors.push((
-            entry.file_name().to_string_lossy().into_owned(),
-            text.to_owned(),
-        ));
     }
     let cgroup =
         fs::read_to_string(format!("/proc/{pid}/cgroup")).map_err(|_| Error::CgroupMismatch)?;
@@ -241,9 +270,9 @@ pub(super) fn run(
         std::thread::sleep(Duration::from_millis(10));
     };
     lab::stage("actual_daemon_live_socket_program_identified");
+    super::transport_lab::actual_metadata(data_name, dir)?;
     inspect(a, daemon_pid, true, dir)?;
     lab::case("actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds");
-    super::transport_lab::actual_metadata(data_name, dir)?;
     lab::stage("actual_observer_authenticated_launch");
     let mut observer = handoff.launch_observer(&bundle)?;
     let observer_pid = identify(a, &bundle, Role::WorkerObserver)?;

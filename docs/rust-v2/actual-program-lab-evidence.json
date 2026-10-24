@@ -976,10 +976,134 @@
         "execveat_calls": []
       },
       "observation": "Exact null identity and one paired FIFO inspection passes real Go role. Observer setup helper37614 open_tree of host-owned placement FD5 EINVAL after entering container mount namespace. Host tree cloning order needs provenance-preserving fix; parent-only scan was insufficient."
+    },
+    {
+      "attempt": 13,
+      "source_binding": {
+        "source_commit": "56f462d73944ccb11763cc10da97d00c474b3d1f",
+        "source_archive_sha256": "fa3c456595918398a52a287b73da17a0d0ea14bd2a8337b357fff4f3ef13f5d3",
+        "tracked_build_inputs_verified": 102,
+        "source_aggregate_sha256": "c818a1f57b6f8bac0ff7a678f156771beb386d694804a0d24802796348efcec6"
+      },
+      "artifact_sha256": "2d17d592e0febb44bf51ae6a1b5b9a6a1a31af2cee327d1efa882d6c1b814539",
+      "context_sha256": "6ac131fb58c0789d65a4f3bc0a74694573e13b7102ad6c6b26737b7b46fa6412",
+      "manifest_sha256": "e62ee36f9b332c7306ef54d15776a32d85e405f1d7153cc684c7a39ab6c6f80f",
+      "runner_sha256": "6d869dd87520efab0bd3d72ff6bb9d1dbc32b8fbb3c4125652049e464477c3a4",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 6.924,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "LAB_STAGE actual_daemon_identity_pinned",
+        "LAB_STAGE actual_observer_authenticated_launch",
+        "actual_lab: descriptor_inventory"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": true,
+      "peer_credential_metadata": false,
+      "actual_daemon_exec": "LIVE_DAEMON_CONFINEMENT_INSPECTION_PASS",
+      "actual_observer_exec": "EXEC_REACHED_BOOTSTRAP_REFUSED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-13.json",
+      "private_run_record_sha256": "3a1436d84041f72c4821ad8dd0a7e1d5184d09a052c491129c140dca0303deea",
+      "private_inventory": "target/lab-state/actual-program-inspect-13.json",
+      "private_inventory_sha256": "f4fdd925b2678c8486c21d112439f822d9ff8ae5dbb7138b166257f541b91d11",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-trace-13-summary.json",
+      "trace_summary_sha256": "ca52c8d5a8472626acac243f25567c3dfae0bb51c3e984c7283e229dbef56a2e",
+      "trace_files": 54,
+      "image_id": "sha256:6c75042c313567d695c2bb64e0d0df5ea993d8d0ea05cf8895e17a9aff70d885",
+      "image_layers": [
+        "sha256:7d4a53f2b2146a7c10ac2e54ea018ce5c7cc8af653563b781d69ea2b66945b8f"
+      ],
+      "observation": "Observer38142 execs, connects and SO_PEERCRED syscall succeeds, then closes before request; raw trace cannot establish returned credential integers. rustix UCred NonZeroI32 representation cannot safely hold legitimate namespace PID0. Parent descriptor inspection races observer exit."
+    },
+    {
+      "attempt": 14,
+      "source_binding": {
+        "source_commit": "56f462d73944ccb11763cc10da97d00c474b3d1f",
+        "source_archive_sha256": "fa3c456595918398a52a287b73da17a0d0ea14bd2a8337b357fff4f3ef13f5d3",
+        "tracked_build_inputs_verified": 102,
+        "source_aggregate_sha256": "c818a1f57b6f8bac0ff7a678f156771beb386d694804a0d24802796348efcec6"
+      },
+      "artifact_sha256": "2d17d592e0febb44bf51ae6a1b5b9a6a1a31af2cee327d1efa882d6c1b814539",
+      "context_sha256": "6ac131fb58c0789d65a4f3bc0a74694573e13b7102ad6c6b26737b7b46fa6412",
+      "manifest_sha256": "e62ee36f9b332c7306ef54d15776a32d85e405f1d7153cc684c7a39ab6c6f80f",
+      "runner_sha256": "7ef9c9501f6f7a1156713f5aa7966a7a63300b8a621268e9c04d9ebc76a01499",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 4.919,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "LAB_STAGE actual_daemon_identity_pinned",
+        "LAB_STAGE actual_observer_authenticated_launch",
+        "actual_lab: descriptor_inventory"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": false,
+      "peer_credential_metadata": true,
+      "actual_daemon_exec": "LIVE_DAEMON_CONFINEMENT_INSPECTION_PASS",
+      "actual_observer_exec": "INSPECTION_RACE_NO_PEERCRED_WITNESS",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-14.json",
+      "private_run_record_sha256": "df361e14ebb19bac02fe7562acdd031a74ff76ef2497815515a092e9ee2c677b",
+      "private_inventory": "target/lab-state/actual-program-inspect-14.json",
+      "private_inventory_sha256": "9736a95d4132e33fe025fc70062d12eb018d03510e41e0a94751011ef9bc755f",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-peer-trace-14-summary.json",
+      "trace_summary_sha256": "65c8af72a931a663b177773410f8b40f9f36a219c3d5f2a7ff76d2ad3b658fa1",
+      "trace_files": 53,
+      "image_id": "sha256:6c75042c313567d695c2bb64e0d0df5ea993d8d0ea05cf8895e17a9aff70d885",
+      "image_layers": [
+        "sha256:7d4a53f2b2146a7c10ac2e54ea018ce5c7cc8af653563b781d69ea2b66945b8f"
+      ],
+      "observation": "Metadata-only run captured no SO_PEERCRED call in53verified trace files. Parent descriptor inventory rejection can kill observer before authentication; this is inconclusive about kernel credential integers."
     }
   ],
   "diagnosis": {
-    "status": "ACTUAL_GO_CONFINEMENT_PASS_OBSERVER_HOST_TREE_CLONE_ORDER_PENDING",
+    "status": "ACTUAL_GO_CONFINEMENT_PASS_OBSERVER_PEERCRED_REPRESENTATION_AND_INSPECTION_RACE_PENDING",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

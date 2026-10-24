@@ -198,6 +198,11 @@ try:
   trace.mkdir(mode=0o700)
   print(json.dumps({'trace_directory':str(trace),'trace_kind':'private_bounded_fd2_writes_only_identity_free_fixture'}),flush=True)
   argv=['strace','-ff','-qq','-s','256','-e','trace=write,writev','-e','trace-fds=2','-o',str(trace/'syscall'),'--',*argv]
+ elif config['peer_credential_metadata']:
+  trace=root/('task8b2-peer-trace-'+config['payload']+'-'+str(os.getpid()))
+  trace.mkdir(mode=0o700)
+  print(json.dumps({'trace_directory':str(trace),'trace_kind':'getsockopt_metadata_only_no_io_or_environment'}),flush=True)
+  argv=['strace','-ff','-qq','-e','trace=getsockopt','-o',str(trace/'syscall'),'--',*argv]
  result=subprocess.run(argv,timeout=66)
  print(json.dumps({'harness_exit_code':result.returncode,'docker_forward_after':json.loads(run(['nft','-j','list','chain','ip','filter','FORWARD']))}),flush=True)
 finally:
@@ -208,15 +213,16 @@ raise SystemExit(result.returncode)
 
 
 def main():
-    assert 8 <= len(sys.argv) <= 10, 'usage: artifact sha256 source.tar sha256 context.tar sha256 full_source_commit [--legacy-fixed-init] [--raw-syscall-metadata | --file-path-metadata | --stderr-diagnostic]'
+    assert 8 <= len(sys.argv) <= 10, 'usage: artifact sha256 source.tar sha256 context.tar sha256 full_source_commit [--legacy-fixed-init] [--raw-syscall-metadata | --file-path-metadata | --stderr-diagnostic | --peer-credential-metadata]'
     artifact, digest, source, source_digest, context, context_digest, commit = sys.argv[1:8]
     options = set(sys.argv[8:])
-    assert len(options) == len(sys.argv[8:]) and options <= {'--legacy-fixed-init', '--raw-syscall-metadata', '--file-path-metadata', '--stderr-diagnostic'}
+    assert len(options) == len(sys.argv[8:]) and options <= {'--legacy-fixed-init', '--raw-syscall-metadata', '--file-path-metadata', '--stderr-diagnostic', '--peer-credential-metadata'}
     legacy_fixed_init = '--legacy-fixed-init' in options
     raw_syscall_metadata = '--raw-syscall-metadata' in options
     file_path_metadata = '--file-path-metadata' in options
     stderr_diagnostic = '--stderr-diagnostic' in options
-    assert sum([raw_syscall_metadata, file_path_metadata, stderr_diagnostic]) <= 1
+    peer_credential_metadata = '--peer-credential-metadata' in options
+    assert sum([raw_syscall_metadata, file_path_metadata, stderr_diagnostic, peer_credential_metadata]) <= 1
     assert re.fullmatch('[a-f0-9]{40}', commit)
     for path, expected in ((artifact, digest), (source, source_digest), (context, context_digest)):
         assert re.fullmatch('[a-f0-9]{64}', expected)
@@ -251,6 +257,7 @@ def main():
             'legacy_fixed_init': legacy_fixed_init, 'raw_syscall_metadata': raw_syscall_metadata,
             'file_path_metadata': file_path_metadata,
             'stderr_diagnostic': stderr_diagnostic,
+            'peer_credential_metadata': peer_credential_metadata,
         }))
         result = subprocess.run([*ssh, 'sudo unshare --mount --propagation private python3 -'],
                                 input=guest, capture_output=True, text=True, timeout=158)
@@ -273,6 +280,7 @@ def main():
         'raw_syscall_metadata': raw_syscall_metadata,
         'file_path_metadata': file_path_metadata,
         'stderr_diagnostic': stderr_diagnostic,
+        'peer_credential_metadata': peer_credential_metadata,
     }
     attempt = 1
     while (base / f'actual-program-run-{attempt}.json').exists():

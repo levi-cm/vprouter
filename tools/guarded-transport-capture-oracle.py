@@ -65,7 +65,19 @@ for phase in ['positive', 'negative']:
   counters = {label:int(m.group(1)) for label,pattern in [('captured',r'(\d+) packets? captured'),('received_by_filter',r'(\d+) packets? received by filter'),('dropped_by_kernel',r'(\d+) packets? dropped by kernel')] if (m:=re.search(pattern,stderr))}
   markers = {label:sum(packet.count(marker) for packet in packets) for label,marker in [('positive_data_health',b'VR8A_POSITIVE_DATA_HEALTH'),('positive_plaintext_control',b'VR8A_POSITIVE_PLAINTEXT_CAPTURE'),('forbidden_prefix',b'VR8A_FORBIDDEN_')]}
   rows.append({'file':p.name,'status':'FRAMING_VERIFIED','bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),'linktype':linktype,'records':len(packets),'capture_counters':counters,'marker_occurrences':markers})
-print(json.dumps({'observed_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'directory':str(directory),'read_only':True,'synthetic_capture_metadata_only':True,'complete_fault_verdict':'NOT_ESTABLISHED_BY_THIS_TOOL','real_client_acceptance':'NOT_RUN','production_changes':False,'captures':rows},indent=2))
+continuous = {'status':'NOT_PRESENT'}
+if (directory/'continuous-sender.json').exists():
+ c = json.loads(read(directory/'continuous-sender.json',65536))
+ assert c['bounded_nonblocking_sender'] is True and c['joined'] is True and isinstance(c['attempts'],int) and c['attempts'] >= 3
+ checkpoints = []
+ for point in c['checkpoints']:
+  assert isinstance(point['phase'],str) and re.fullmatch(r'[A-Za-z0-9_]{1,160}',point['phase'])
+  delta = point['attempts_after']-point['attempts_before']
+  assert delta >= 3 and c['attempts'] >= point['attempts_after']
+  checkpoints.append({'phase':point['phase'],'send_attempt_delta':delta})
+ assert checkpoints
+ continuous = {'status':'COUNTS_VERIFIED','send_attempts':c['attempts'],'joined':True,'checkpoints':checkpoints}
+print(json.dumps({'observed_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'directory':str(directory),'read_only':True,'synthetic_capture_metadata_only':True,'complete_fault_verdict':'NOT_ESTABLISHED_BY_THIS_TOOL','real_client_acceptance':'NOT_RUN','production_changes':False,'captures':rows,'continuous_sender':continuous},indent=2))
 '''.replace("DIRECTORY", repr(sys.argv[1]))
 base = pathlib.Path("target/lab-state")
 result = subprocess.run(

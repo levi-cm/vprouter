@@ -534,6 +534,2384 @@
         }
       ],
       "capture_oracle_sha256": "f9defc937ad2d0835c02e2621e50e7c342e1b1ec893047b8c2f2eec4cd4c275e"
+    },
+    {
+      "observed_at_utc": "2026-10-24T16:04:17.462115+00:00",
+      "artifact_sha256": "70cc35712987786415e215f5dfc8349293fb62e925a4bfc778d50b7fb6f522b9",
+      "source_archive_sha256": "a7e8586897f7d946b51d5a9932c690714db9ded7bf556161d0cfe81863a5a96d",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 0,
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\nLAB_STAGE inject_network_fault_0\nLAB_STAGE inject_network_fault_1\nLAB_STAGE inject_network_fault_2\nLAB_STAGE inject_network_fault_3\nLAB_STAGE inject_network_fault_4\nLAB_STAGE inject_network_fault_5\nLAB_STAGE inject_network_fault_6\nLAB_STAGE inject_network_fault_7\nLAB_STAGE inject_network_fault_8\nLAB_STAGE inject_network_fault_9\nLAB_STAGE inject_network_fault_10\nLAB_STAGE inject_network_fault_11\nLAB_STAGE inject_network_fault_12\nLAB_STAGE inject_network_fault_13\nLAB_STAGE inject_network_fault_14\n",
+      "wall_seconds": 3.981,
+      "attempt": 14,
+      "candidate": 17,
+      "scenario": "reversible",
+      "result": "PASS_PARTIAL_TRANSPORT_SMOKE",
+      "cases": [
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "independent_data_transport_host_positive_capture_sensitivity",
+          "result": "pass"
+        },
+        {
+          "case": "same_namespace_destination_port_other_socket_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "established_input_other_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_0_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_1_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_2_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_3_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_4_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_5_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_6_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_7_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_8_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_9_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_10_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_11_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_12_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_13_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_14_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "fixed_cli_failed_atomic_batch_exact_policy_retained_native_audit_and_health",
+          "result": "pass"
+        },
+        {
+          "case": "owned_table_vr_6a327c82d0383399_dq_removal_independent_filter_denial_and_emergency_restoration",
+          "result": "pass"
+        },
+        {
+          "case": "owned_table_vr_6a327c82d0383399_dp_removal_independent_filter_denial_and_emergency_restoration",
+          "result": "pass"
+        },
+        {
+          "case": "functional_quarantine_drift_refused_independent_permit_filter_and_emergency_retained",
+          "result": "pass"
+        },
+        {
+          "case": "encrypted_roundtrip_plaintext_negatives_and_actual_docker_forward_drop_cooperation",
+          "result": "pass"
+        },
+        {
+          "case": "native_owned_link_cooperation_and_empty_subgroup_cleanup_quarantine_retained",
+          "result": "pass"
+        },
+        {
+          "case": "transport_lab",
+          "result": "pass_partial_transport_smoke",
+          "production_readiness": false,
+          "quarantine_retained": true
+        }
+      ],
+      "capture_or_traffic": "actual synthetic WG health, authorized/unowned producers, continuous application markers through15network faults and firewall cases; realclientNOT_RUN",
+      "independent_capture_metadata": [
+        {
+          "file": "positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 162,
+          "sha256": "bb57f3418afa51e2bfbf2781d3e29bbdc6c645370fc850666b243eec6e594c43",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 2,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 893,
+          "sha256": "a1a910b56dca3c1fbc231e5d814a8c1c08c57135f257dbcc7235bfec8ff6144b",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 1075,
+          "sha256": "9a0e64a581ec198d91d08029b21a43079d7ffeecaa1ff2e07b35bdd5d2bc1730",
+          "linktype": 1,
+          "records": 9,
+          "capture_counters": {
+            "captured": 9,
+            "received_by_filter": 9,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 5934,
+          "sha256": "8596215baa09a8ff53754bcd38447b41716e8204743737a5b48a16f8def12d70",
+          "linktype": 276,
+          "records": 67,
+          "capture_counters": {
+            "captured": 67,
+            "received_by_filter": 67,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 12344,
+          "sha256": "5c794c6bd9dc88924c9b2127a97991915534367738f5351c40a3f43d514de681",
+          "linktype": 276,
+          "records": 77,
+          "capture_counters": {
+            "captured": 77,
+            "received_by_filter": 77,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 11766,
+          "sha256": "c8a44c5ba5d9d95308f416778842fae26a34468be0b1fba22d674a4435044797",
+          "linktype": 1,
+          "records": 75,
+          "capture_counters": {
+            "captured": 75,
+            "received_by_filter": 75,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "continuous_sender": {
+        "status": "COUNTS_VERIFIED",
+        "send_attempts": 737,
+        "joined": true,
+        "checkpoints": [
+          {
+            "phase": "started_after_all_namespace_and_cgroup_socket_setup",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_0_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_0_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_0_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_1_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_1_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_1_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_2_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_2_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_2_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_3_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_3_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_3_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_4_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_4_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_4_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_5_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_5_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_5_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_6_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_6_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_6_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_7_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_7_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_7_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_8_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_8_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_8_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_9_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_9_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_9_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_10_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_10_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_10_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_11_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_11_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_11_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_12_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_12_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_12_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_13_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_13_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_13_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_14_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_14_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_14_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "owned_filter_removed_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "owned_filter_removed_verified_offline",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "removed_filter_restored_bootstrap",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "owned_filter_removed_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "owned_filter_removed_verified_offline",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "removed_filter_restored_bootstrap",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "functional_quarantine_drift_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "functional_drift_verified_emergency_offline",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "functional_drift_exactly_repaired_bootstrap",
+            "send_attempt_delta": 3
+          }
+        ]
+      },
+      "cleanup_inspection": {
+        "producer_group_absent": true,
+        "foreign_docker_forward_chain_rules_and_handles_preserved_ignoring_counter_values": true,
+        "owned_links_absent_in_all_three_scopes": true,
+        "durable_phase": "offline",
+        "retained_policy_tables": {
+          "host": [
+            "vr_6a327c82d0383399_hq_e",
+            "vr_6a327c82d0383399_hq"
+          ],
+          "transport": [
+            "vr_6a327c82d0383399_tq_e",
+            "vr_6a327c82d0383399_tq"
+          ],
+          "data": [
+            "vr_6a327c82d0383399_dq_e",
+            "vr_6a327c82d0383399_dq"
+          ]
+        },
+        "read_only": true,
+        "production_changes": false
+      },
+      "capture_oracle_sha256": "1d55b9b3657be682864e3aa34350ccc5eadd6adfc908b3e38b9a060fd2a29a2c",
+      "resource_disposition": "native exactowned links+emptyproducer+cooperation removed by guard; fullq/emergency+ns/container retained; root removed only exact syntheticWAN after independent inspection",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-14.json",
+        "target/lab-state/guarded-transport-inspect-14.json",
+        "target/lab-state/guarded-transport-captures-14.json",
+        "target/lab-state/guarded-transport-cleanup-inspect-14.json",
+        "target/lab-state/guarded-transport-wan-cleanup-14.json"
+      ]
+    },
+    {
+      "observed_at_utc": "2026-10-24T16:09:45.818606+00:00",
+      "artifact_sha256": "bd7d9a0650f63ce7207d913ba18dd2eee1c85e9c94dbc029c445eae6a0c97521",
+      "source_archive_sha256": "7ce5d888721679bfb2e9a728761a3f3d04ac9df45a8b3b9ba2b2e3b8f87d91c5",
+      "runner_sha256": "d3cbe59b23208d5e74c7efd8f2630fe432459cc9627efaa43e7c28125e818363",
+      "exit_code": 0,
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\n",
+      "wall_seconds": 2.473,
+      "scenario": "deleted-wg",
+      "attempt": 15,
+      "candidate": 18,
+      "result": "PASS_PARTIAL_TRANSPORT_SCENARIO",
+      "cases": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "independent_data_transport_host_positive_capture_sensitivity",
+          "result": "pass"
+        },
+        {
+          "case": "same_namespace_destination_port_other_socket_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "established_input_other_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_fault_full_quarantine_actual_packet_witness",
+          "result": "pass"
+        },
+        {
+          "case": "encrypted_roundtrip_plaintext_negatives_and_actual_docker_forward_drop_cooperation",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_cleanup_or_interruption_retains_intent_and_restart_refuses_adoption",
+          "result": "pass"
+        },
+        {
+          "case": "transport_lab",
+          "result": "pass_partial_transport_smoke",
+          "production_readiness": false,
+          "quarantine_retained": true
+        }
+      ],
+      "independent_capture_metadata": [
+        {
+          "file": "positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 162,
+          "sha256": "5bc4e399d7f13fd1fac6cdba306768ff2754611f907a09ccab8ef19c97b0db89",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 2,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 893,
+          "sha256": "07bfe2cb251568043ea81aca1f11f78d3865f7dad5363c2cb3fca989df95eb1d",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 984,
+          "sha256": "6252e6760d824f99299396eed004174824bd670400f168de6121b86f8805ba04",
+          "linktype": 1,
+          "records": 8,
+          "capture_counters": {
+            "captured": 8,
+            "received_by_filter": 8,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 2600,
+          "sha256": "544a151dbbd1c6712cf552ad23b674151f1225ec403eb81a52f69852678a5546",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4664,
+          "sha256": "4fc108cc52a71de4bf06e5b951234b4c53677df47a401973f28543beadd1a919",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4490,
+          "sha256": "0a9c0366238c9dbe7f19f0aeeee4075a2e44e1f5f24714cb02b4f50d7e04cf2e",
+          "linktype": 1,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "continuous_sender": {
+        "status": "COUNTS_VERIFIED",
+        "send_attempts": 70,
+        "joined": true,
+        "checkpoints": [
+          {
+            "phase": "started_after_all_namespace_and_cgroup_socket_setup",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_verified_full_offline",
+            "send_attempt_delta": 3
+          }
+        ]
+      },
+      "cleanup_inspection": {
+        "attempt": 15,
+        "scenario": "deleted-wg",
+        "foreign_docker_forward_rules_and_handles_preserved_ignoring_counter_values": true,
+        "existing_rule_count": 14,
+        "producer_group": {
+          "present": true,
+          "empty": true
+        },
+        "durable_phase": "bootstrap",
+        "retained_policy_tables": {
+          "host": [
+            "vr_1a4456b9a5001893_hp",
+            "vr_1a4456b9a5001893_hq_e",
+            "vr_1a4456b9a5001893_hq"
+          ],
+          "transport": [
+            "vr_1a4456b9a5001893_tp",
+            "vr_1a4456b9a5001893_tq_e",
+            "vr_1a4456b9a5001893_tq"
+          ],
+          "data": [
+            "vr_1a4456b9a5001893_dp",
+            "vr_1a4456b9a5001893_dq_e",
+            "vr_1a4456b9a5001893_dq"
+          ]
+        },
+        "native_named_links_present": {
+          "host": [
+            "vh56b9a5001893"
+          ],
+          "transport": [
+            "vd56b9a5001893"
+          ],
+          "data": []
+        },
+        "read_only": true,
+        "production_changes": false
+      },
+      "capture_oracle_sha256": "1d55b9b3657be682864e3aa34350ccc5eadd6adfc908b3e38b9a060fd2a29a2c",
+      "resource_disposition": "exact syntheticWAN removed by controller after inventory; retained owned container/ns/q and ambiguous native links/emptyproducer deliberately not deleted; reversible guard removed exactnative links+producer+cooperation",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-15.json",
+        "target/lab-state/guarded-transport-inspect-15.json",
+        "target/lab-state/guarded-transport-captures-15.json",
+        "target/lab-state/guarded-transport-cleanup-inspect-15.json",
+        "target/lab-state/guarded-transport-wan-cleanup-15.json"
+      ]
+    },
+    {
+      "observed_at_utc": "2026-10-24T16:09:50.517951+00:00",
+      "artifact_sha256": "bd7d9a0650f63ce7207d913ba18dd2eee1c85e9c94dbc029c445eae6a0c97521",
+      "source_archive_sha256": "7ce5d888721679bfb2e9a728761a3f3d04ac9df45a8b3b9ba2b2e3b8f87d91c5",
+      "runner_sha256": "d3cbe59b23208d5e74c7efd8f2630fe432459cc9627efaa43e7c28125e818363",
+      "exit_code": 0,
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\n",
+      "wall_seconds": 2.381,
+      "scenario": "deleted-transport",
+      "attempt": 16,
+      "candidate": 18,
+      "result": "PASS_PARTIAL_TRANSPORT_SCENARIO",
+      "cases": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "independent_data_transport_host_positive_capture_sensitivity",
+          "result": "pass"
+        },
+        {
+          "case": "same_namespace_destination_port_other_socket_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "established_input_other_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_fault_full_quarantine_actual_packet_witness",
+          "result": "pass"
+        },
+        {
+          "case": "encrypted_roundtrip_plaintext_negatives_and_actual_docker_forward_drop_cooperation",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_cleanup_or_interruption_retains_intent_and_restart_refuses_adoption",
+          "result": "pass"
+        },
+        {
+          "case": "transport_lab",
+          "result": "pass_partial_transport_smoke",
+          "production_readiness": false,
+          "quarantine_retained": true
+        }
+      ],
+      "independent_capture_metadata": [
+        {
+          "file": "positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 162,
+          "sha256": "9b1795e3a2dcd6d9a0a960a07e52d5500f01e4ea83853a05020e412f5004bbe6",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 2,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 893,
+          "sha256": "dc7104477222ab9cd11a136c3ebe5c415b2100edeeee7c8cc14f770a73eb04f3",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 1075,
+          "sha256": "dc905d014c5c351fe7fdca9b0619d476dc7556c5b269234ad098d38f5066ac83",
+          "linktype": 1,
+          "records": 9,
+          "capture_counters": {
+            "captured": 9,
+            "received_by_filter": 9,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 2600,
+          "sha256": "219c8855b5a35b94a9207a75ce376e29337333389e4677d995de364b5e98b553",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4664,
+          "sha256": "6f8d4f0ac74bcb8f1c5f67adcf449a4eabb8fe63b72e1b5b9a807d7a324ba891",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4490,
+          "sha256": "f83b7e7c5475cff6bcac9f63d8f503907e0793080347b32c7807d5ef1f2f0819",
+          "linktype": 1,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "continuous_sender": {
+        "status": "COUNTS_VERIFIED",
+        "send_attempts": 27,
+        "joined": true,
+        "checkpoints": [
+          {
+            "phase": "started_after_all_namespace_and_cgroup_socket_setup",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_verified_full_offline",
+            "send_attempt_delta": 3
+          }
+        ]
+      },
+      "cleanup_inspection": {
+        "attempt": 16,
+        "scenario": "deleted-transport",
+        "foreign_docker_forward_rules_and_handles_preserved_ignoring_counter_values": true,
+        "existing_rule_count": 16,
+        "producer_group": {
+          "present": true,
+          "empty": true
+        },
+        "durable_phase": "bootstrap",
+        "retained_policy_tables": {
+          "host": [
+            "vr_b5ba8b4573b91079_hp",
+            "vr_b5ba8b4573b91079_hq_e",
+            "vr_b5ba8b4573b91079_hq"
+          ],
+          "transport": [
+            "vr_b5ba8b4573b91079_tp",
+            "vr_b5ba8b4573b91079_tq_e",
+            "vr_b5ba8b4573b91079_tq"
+          ],
+          "data": [
+            "vr_b5ba8b4573b91079_dp",
+            "vr_b5ba8b4573b91079_dq_e",
+            "vr_b5ba8b4573b91079_dq"
+          ]
+        },
+        "native_named_links_present": {
+          "host": [],
+          "transport": [],
+          "data": [
+            "wg8b4573b91079"
+          ]
+        },
+        "read_only": true,
+        "production_changes": false
+      },
+      "capture_oracle_sha256": "1d55b9b3657be682864e3aa34350ccc5eadd6adfc908b3e38b9a060fd2a29a2c",
+      "resource_disposition": "exact syntheticWAN removed by controller after inventory; retained owned container/ns/q and ambiguous native links/emptyproducer deliberately not deleted; reversible guard removed exactnative links+producer+cooperation",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-16.json",
+        "target/lab-state/guarded-transport-inspect-16.json",
+        "target/lab-state/guarded-transport-captures-16.json",
+        "target/lab-state/guarded-transport-cleanup-inspect-16.json",
+        "target/lab-state/guarded-transport-wan-cleanup-16.json"
+      ]
+    },
+    {
+      "observed_at_utc": "2026-10-24T16:09:55.269886+00:00",
+      "artifact_sha256": "bd7d9a0650f63ce7207d913ba18dd2eee1c85e9c94dbc029c445eae6a0c97521",
+      "source_archive_sha256": "7ce5d888721679bfb2e9a728761a3f3d04ac9df45a8b3b9ba2b2e3b8f87d91c5",
+      "runner_sha256": "d3cbe59b23208d5e74c7efd8f2630fe432459cc9627efaa43e7c28125e818363",
+      "exit_code": 0,
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\n",
+      "wall_seconds": 2.381,
+      "scenario": "cooperation-drift",
+      "attempt": 17,
+      "candidate": 18,
+      "result": "PASS_PARTIAL_TRANSPORT_SCENARIO",
+      "cases": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "independent_data_transport_host_positive_capture_sensitivity",
+          "result": "pass"
+        },
+        {
+          "case": "same_namespace_destination_port_other_socket_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "established_input_other_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_fault_full_quarantine_actual_packet_witness",
+          "result": "pass"
+        },
+        {
+          "case": "encrypted_roundtrip_plaintext_negatives_and_actual_docker_forward_drop_cooperation",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_cleanup_or_interruption_retains_intent_and_restart_refuses_adoption",
+          "result": "pass"
+        },
+        {
+          "case": "transport_lab",
+          "result": "pass_partial_transport_smoke",
+          "production_readiness": false,
+          "quarantine_retained": true
+        }
+      ],
+      "independent_capture_metadata": [
+        {
+          "file": "positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 162,
+          "sha256": "a1bd7fd6b7ec1d91a102ae8b05b3d70fb55717358b4b4b9520b3eeac18b7d32f",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 2,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 893,
+          "sha256": "7b2baa7790bc63c9d01d805df43c8b52cc6ebbc038b630dc717b325bef637f46",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 984,
+          "sha256": "3f4e35489538f4b4abb1692b1bcb2a5f220b17a067e0d97cacdf641af090a10b",
+          "linktype": 1,
+          "records": 8,
+          "capture_counters": {
+            "captured": 8,
+            "received_by_filter": 8,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 2600,
+          "sha256": "d7e6d6100a5b403ed0d482ea1090c8fcd0085dcd8001652f538ec6125e0e75d1",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4664,
+          "sha256": "142bbd05f013df9b2fd2ab4df0290733cbe883ec64531b17d7a31d74fed95a81",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4490,
+          "sha256": "42ecfc77f59e700ef6e3ba69dba112c0460ed1795529ae6058da39a158ef19b5",
+          "linktype": 1,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "continuous_sender": {
+        "status": "COUNTS_VERIFIED",
+        "send_attempts": 36,
+        "joined": true,
+        "checkpoints": [
+          {
+            "phase": "started_after_all_namespace_and_cgroup_socket_setup",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_verified_full_offline",
+            "send_attempt_delta": 3
+          }
+        ]
+      },
+      "cleanup_inspection": {
+        "attempt": 17,
+        "scenario": "cooperation-drift",
+        "foreign_docker_forward_rules_and_handles_preserved_ignoring_counter_values": true,
+        "existing_rule_count": 18,
+        "producer_group": {
+          "present": true,
+          "empty": true
+        },
+        "durable_phase": "bootstrap",
+        "retained_policy_tables": {
+          "host": [
+            "vr_91f2f0748f93fa92_hp",
+            "vr_91f2f0748f93fa92_hq_e",
+            "vr_91f2f0748f93fa92_hq"
+          ],
+          "transport": [
+            "vr_91f2f0748f93fa92_tp",
+            "vr_91f2f0748f93fa92_tq_e",
+            "vr_91f2f0748f93fa92_tq"
+          ],
+          "data": [
+            "vr_91f2f0748f93fa92_dp",
+            "vr_91f2f0748f93fa92_dq_e",
+            "vr_91f2f0748f93fa92_dq"
+          ]
+        },
+        "native_named_links_present": {
+          "host": [
+            "vhf0748f93fa92"
+          ],
+          "transport": [
+            "vdf0748f93fa92"
+          ],
+          "data": [
+            "wgf0748f93fa92"
+          ]
+        },
+        "read_only": true,
+        "production_changes": false
+      },
+      "capture_oracle_sha256": "1d55b9b3657be682864e3aa34350ccc5eadd6adfc908b3e38b9a060fd2a29a2c",
+      "resource_disposition": "exact syntheticWAN removed by controller after inventory; retained owned container/ns/q and ambiguous native links/emptyproducer deliberately not deleted; reversible guard removed exactnative links+producer+cooperation",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-17.json",
+        "target/lab-state/guarded-transport-inspect-17.json",
+        "target/lab-state/guarded-transport-captures-17.json",
+        "target/lab-state/guarded-transport-cleanup-inspect-17.json",
+        "target/lab-state/guarded-transport-wan-cleanup-17.json"
+      ]
+    },
+    {
+      "observed_at_utc": "2026-10-24T16:10:00.308047+00:00",
+      "artifact_sha256": "bd7d9a0650f63ce7207d913ba18dd2eee1c85e9c94dbc029c445eae6a0c97521",
+      "source_archive_sha256": "7ce5d888721679bfb2e9a728761a3f3d04ac9df45a8b3b9ba2b2e3b8f87d91c5",
+      "runner_sha256": "d3cbe59b23208d5e74c7efd8f2630fe432459cc9627efaa43e7c28125e818363",
+      "exit_code": 0,
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\n",
+      "wall_seconds": 2.369,
+      "scenario": "foreign-collision",
+      "attempt": 18,
+      "candidate": 18,
+      "result": "PASS_PARTIAL_TRANSPORT_SCENARIO",
+      "cases": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "independent_data_transport_host_positive_capture_sensitivity",
+          "result": "pass"
+        },
+        {
+          "case": "same_namespace_destination_port_other_socket_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "established_input_other_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_fault_full_quarantine_actual_packet_witness",
+          "result": "pass"
+        },
+        {
+          "case": "encrypted_roundtrip_plaintext_negatives_and_actual_docker_forward_drop_cooperation",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_cleanup_or_interruption_retains_intent_and_restart_refuses_adoption",
+          "result": "pass"
+        },
+        {
+          "case": "transport_lab",
+          "result": "pass_partial_transport_smoke",
+          "production_readiness": false,
+          "quarantine_retained": true
+        }
+      ],
+      "independent_capture_metadata": [
+        {
+          "file": "positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 162,
+          "sha256": "2274b037bef6cfc7ed4f75bb15bc66b58d5288a3bfb8f77640080ffcaaf1d8e6",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 2,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 893,
+          "sha256": "c68d7eb300d37ea24447202aa069b39ecad65b9019d50f79f08fc75e1ea46cdd",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 1054,
+          "sha256": "4e3575c4c25017f2c4ef0fbf1c48264557babadbbbbafe2bef32adec09e50f29",
+          "linktype": 1,
+          "records": 9,
+          "capture_counters": {
+            "captured": 9,
+            "received_by_filter": 9,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 2600,
+          "sha256": "a98025808cf8d98148fc6e27d2503a1df80718dbf14ba76391b13543c888ca76",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4664,
+          "sha256": "94707983acc807711990e95be0dd993f943efb0f5c3226217305074253f9e668",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4490,
+          "sha256": "63eeb946548be5ece04d06154d31cd6fec8eeeb34a4a81b91d2c8ce1860c0d31",
+          "linktype": 1,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "continuous_sender": {
+        "status": "COUNTS_VERIFIED",
+        "send_attempts": 69,
+        "joined": true,
+        "checkpoints": [
+          {
+            "phase": "started_after_all_namespace_and_cgroup_socket_setup",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_verified_full_offline",
+            "send_attempt_delta": 3
+          }
+        ]
+      },
+      "cleanup_inspection": {
+        "attempt": 18,
+        "scenario": "foreign-collision",
+        "foreign_docker_forward_rules_and_handles_preserved_ignoring_counter_values": true,
+        "existing_rule_count": 19,
+        "producer_group": {
+          "present": true,
+          "empty": true
+        },
+        "durable_phase": "bootstrap",
+        "retained_policy_tables": {
+          "host": [
+            "vr_eac1441f5cca1580_hp",
+            "vr_eac1441f5cca1580_hq_e",
+            "vr_eac1441f5cca1580_hq"
+          ],
+          "transport": [
+            "vr_eac1441f5cca1580_tp",
+            "vr_eac1441f5cca1580_tq_e",
+            "vr_eac1441f5cca1580_tq"
+          ],
+          "data": [
+            "vr_eac1441f5cca1580_dp",
+            "vr_eac1441f5cca1580_dq_e",
+            "vr_eac1441f5cca1580_dq"
+          ]
+        },
+        "native_named_links_present": {
+          "host": [
+            "vh441f5cca1580"
+          ],
+          "transport": [
+            "vd441f5cca1580"
+          ],
+          "data": [
+            "wg441f5cca1580"
+          ]
+        },
+        "read_only": true,
+        "production_changes": false
+      },
+      "capture_oracle_sha256": "1d55b9b3657be682864e3aa34350ccc5eadd6adfc908b3e38b9a060fd2a29a2c",
+      "resource_disposition": "exact syntheticWAN removed by controller after inventory; retained owned container/ns/q and ambiguous native links/emptyproducer deliberately not deleted; reversible guard removed exactnative links+producer+cooperation",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-18.json",
+        "target/lab-state/guarded-transport-inspect-18.json",
+        "target/lab-state/guarded-transport-captures-18.json",
+        "target/lab-state/guarded-transport-cleanup-inspect-18.json",
+        "target/lab-state/guarded-transport-wan-cleanup-18.json"
+      ]
+    },
+    {
+      "observed_at_utc": "2026-10-24T16:10:05.677370+00:00",
+      "artifact_sha256": "bd7d9a0650f63ce7207d913ba18dd2eee1c85e9c94dbc029c445eae6a0c97521",
+      "source_archive_sha256": "7ce5d888721679bfb2e9a728761a3f3d04ac9df45a8b3b9ba2b2e3b8f87d91c5",
+      "runner_sha256": "d3cbe59b23208d5e74c7efd8f2630fe432459cc9627efaa43e7c28125e818363",
+      "exit_code": 0,
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\n",
+      "wall_seconds": 2.329,
+      "scenario": "interrupted-activation",
+      "attempt": 19,
+      "candidate": 18,
+      "result": "PASS_PARTIAL_TRANSPORT_SCENARIO",
+      "cases": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "independent_data_transport_host_positive_capture_sensitivity",
+          "result": "pass"
+        },
+        {
+          "case": "same_namespace_destination_port_other_socket_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "established_input_other_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_fault_full_quarantine_actual_packet_witness",
+          "result": "pass"
+        },
+        {
+          "case": "encrypted_roundtrip_plaintext_negatives_and_actual_docker_forward_drop_cooperation",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_cleanup_or_interruption_retains_intent_and_restart_refuses_adoption",
+          "result": "pass"
+        },
+        {
+          "case": "transport_lab",
+          "result": "pass_partial_transport_smoke",
+          "production_readiness": false,
+          "quarantine_retained": true
+        }
+      ],
+      "independent_capture_metadata": [
+        {
+          "file": "positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 162,
+          "sha256": "a26e404c329495c2c94fbed37258e8f89d40b7000312abf0ae0860e59953d8e8",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 2,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 893,
+          "sha256": "98a519c4af84bd2a8bb5961af3bcae6354682031baae88037bd79dd7514ecc6a",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 1054,
+          "sha256": "c1beaabcfc28801ccb986c9cfd3f8190e4c410b7d7dac83991020c4353020fc0",
+          "linktype": 1,
+          "records": 9,
+          "capture_counters": {
+            "captured": 9,
+            "received_by_filter": 9,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 2600,
+          "sha256": "85eb8f5b5a0ce792a41c59ea954c2f775d6d51c575e00ff8d9588b6fe9cc0387",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4664,
+          "sha256": "400ee085f678a16b39b9fd4dc333aa53e5a29c9014b5c16ccd2213c5cfc1c8cd",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4490,
+          "sha256": "2988bd3c9a17d181908eaaa1022f440e71f2dc58217668315bd63ffe18254bf9",
+          "linktype": 1,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "continuous_sender": {
+        "status": "COUNTS_VERIFIED",
+        "send_attempts": 12,
+        "joined": true,
+        "checkpoints": [
+          {
+            "phase": "started_after_all_namespace_and_cgroup_socket_setup",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_verified_full_offline",
+            "send_attempt_delta": 3
+          }
+        ]
+      },
+      "cleanup_inspection": {
+        "attempt": 19,
+        "scenario": "interrupted-activation",
+        "foreign_docker_forward_rules_and_handles_preserved_ignoring_counter_values": true,
+        "existing_rule_count": 21,
+        "producer_group": {
+          "present": true,
+          "empty": true
+        },
+        "durable_phase": "activating",
+        "retained_policy_tables": {
+          "host": [
+            "vr_a470981a148cc5cb_hp",
+            "vr_a470981a148cc5cb_hq_e",
+            "vr_a470981a148cc5cb_hq"
+          ],
+          "transport": [
+            "vr_a470981a148cc5cb_tp",
+            "vr_a470981a148cc5cb_tq_e",
+            "vr_a470981a148cc5cb_tq"
+          ],
+          "data": [
+            "vr_a470981a148cc5cb_dp",
+            "vr_a470981a148cc5cb_dq_e",
+            "vr_a470981a148cc5cb_dq"
+          ]
+        },
+        "native_named_links_present": {
+          "host": [
+            "vh981a148cc5cb"
+          ],
+          "transport": [
+            "vd981a148cc5cb"
+          ],
+          "data": [
+            "wg981a148cc5cb"
+          ]
+        },
+        "read_only": true,
+        "production_changes": false
+      },
+      "capture_oracle_sha256": "1d55b9b3657be682864e3aa34350ccc5eadd6adfc908b3e38b9a060fd2a29a2c",
+      "resource_disposition": "exact syntheticWAN removed by controller after inventory; retained owned container/ns/q and ambiguous native links/emptyproducer deliberately not deleted; reversible guard removed exactnative links+producer+cooperation",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-19.json",
+        "target/lab-state/guarded-transport-inspect-19.json",
+        "target/lab-state/guarded-transport-captures-19.json",
+        "target/lab-state/guarded-transport-cleanup-inspect-19.json",
+        "target/lab-state/guarded-transport-wan-cleanup-19.json"
+      ]
+    },
+    {
+      "observed_at_utc": "2026-10-24T16:10:10.589867+00:00",
+      "artifact_sha256": "bd7d9a0650f63ce7207d913ba18dd2eee1c85e9c94dbc029c445eae6a0c97521",
+      "source_archive_sha256": "7ce5d888721679bfb2e9a728761a3f3d04ac9df45a8b3b9ba2b2e3b8f87d91c5",
+      "runner_sha256": "d3cbe59b23208d5e74c7efd8f2630fe432459cc9627efaa43e7c28125e818363",
+      "exit_code": 0,
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\n",
+      "wall_seconds": 2.18,
+      "scenario": "interrupted-cleanup",
+      "attempt": 20,
+      "candidate": 18,
+      "result": "PASS_PARTIAL_TRANSPORT_SCENARIO",
+      "cases": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "independent_data_transport_host_positive_capture_sensitivity",
+          "result": "pass"
+        },
+        {
+          "case": "same_namespace_destination_port_other_socket_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "established_input_other_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_fault_full_quarantine_actual_packet_witness",
+          "result": "pass"
+        },
+        {
+          "case": "encrypted_roundtrip_plaintext_negatives_and_actual_docker_forward_drop_cooperation",
+          "result": "pass"
+        },
+        {
+          "case": "terminal_cleanup_or_interruption_retains_intent_and_restart_refuses_adoption",
+          "result": "pass"
+        },
+        {
+          "case": "transport_lab",
+          "result": "pass_partial_transport_smoke",
+          "production_readiness": false,
+          "quarantine_retained": true
+        }
+      ],
+      "independent_capture_metadata": [
+        {
+          "file": "positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 162,
+          "sha256": "443c96bd1c0d18b493facaa511590bd9a14d53a98c567a192cadaadd0ce7488a",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 2,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 893,
+          "sha256": "2f6a70a6e67c0dd88d56e83f572f3aac106f85537f1b42077ea013c598249ce2",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 984,
+          "sha256": "d560c907cc0183567d5770c56b739f65c17275ee0884a9a5312553f64778c5a0",
+          "linktype": 1,
+          "records": 8,
+          "capture_counters": {
+            "captured": 8,
+            "received_by_filter": 8,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 2600,
+          "sha256": "a319330e623867a034379f702c554369654f445864dafb6c4b345dfc4c2ad56f",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4664,
+          "sha256": "a2d6c8ddd04594074dc6ba44a2e0aae825065be4e9d752e23bcd0b769bcf0969",
+          "linktype": 276,
+          "records": 29,
+          "capture_counters": {
+            "captured": 29,
+            "received_by_filter": 29,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4560,
+          "sha256": "0112c48e1334f83add68bb488d6702115127174eb544bba1b36e961308849f2e",
+          "linktype": 1,
+          "records": 30,
+          "capture_counters": {
+            "captured": 30,
+            "received_by_filter": 30,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "continuous_sender": {
+        "status": "COUNTS_VERIFIED",
+        "send_attempts": 13,
+        "joined": true,
+        "checkpoints": [
+          {
+            "phase": "started_after_all_namespace_and_cgroup_socket_setup",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "terminal_fault_verified_full_offline",
+            "send_attempt_delta": 3
+          }
+        ]
+      },
+      "cleanup_inspection": {
+        "attempt": 20,
+        "scenario": "interrupted-cleanup",
+        "foreign_docker_forward_rules_and_handles_preserved_ignoring_counter_values": true,
+        "existing_rule_count": 23,
+        "producer_group": {
+          "present": true,
+          "empty": true
+        },
+        "durable_phase": "bootstrap",
+        "retained_policy_tables": {
+          "host": [
+            "vr_a0b92011dd645b6f_hp",
+            "vr_a0b92011dd645b6f_hq_e",
+            "vr_a0b92011dd645b6f_hq"
+          ],
+          "transport": [
+            "vr_a0b92011dd645b6f_tp",
+            "vr_a0b92011dd645b6f_tq_e",
+            "vr_a0b92011dd645b6f_tq"
+          ],
+          "data": [
+            "vr_a0b92011dd645b6f_dp",
+            "vr_a0b92011dd645b6f_dq_e",
+            "vr_a0b92011dd645b6f_dq"
+          ]
+        },
+        "native_named_links_present": {
+          "host": [
+            "vh2011dd645b6f"
+          ],
+          "transport": [
+            "vd2011dd645b6f"
+          ],
+          "data": [
+            "wg2011dd645b6f"
+          ]
+        },
+        "read_only": true,
+        "production_changes": false
+      },
+      "capture_oracle_sha256": "1d55b9b3657be682864e3aa34350ccc5eadd6adfc908b3e38b9a060fd2a29a2c",
+      "resource_disposition": "exact syntheticWAN removed by controller after inventory; retained owned container/ns/q and ambiguous native links/emptyproducer deliberately not deleted; reversible guard removed exactnative links+producer+cooperation",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-20.json",
+        "target/lab-state/guarded-transport-inspect-20.json",
+        "target/lab-state/guarded-transport-captures-20.json",
+        "target/lab-state/guarded-transport-cleanup-inspect-20.json",
+        "target/lab-state/guarded-transport-wan-cleanup-20.json"
+      ]
+    },
+    {
+      "observed_at_utc": "2026-10-24T16:10:17.554875+00:00",
+      "artifact_sha256": "bd7d9a0650f63ce7207d913ba18dd2eee1c85e9c94dbc029c445eae6a0c97521",
+      "source_archive_sha256": "7ce5d888721679bfb2e9a728761a3f3d04ac9df45a8b3b9ba2b2e3b8f87d91c5",
+      "runner_sha256": "d3cbe59b23208d5e74c7efd8f2630fe432459cc9627efaa43e7c28125e818363",
+      "exit_code": 0,
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\nLAB_STAGE inject_network_fault_0\nLAB_STAGE inject_network_fault_1\nLAB_STAGE inject_network_fault_2\nLAB_STAGE inject_network_fault_3\nLAB_STAGE inject_network_fault_4\nLAB_STAGE inject_network_fault_5\nLAB_STAGE inject_network_fault_6\nLAB_STAGE inject_network_fault_7\nLAB_STAGE inject_network_fault_8\nLAB_STAGE inject_network_fault_9\nLAB_STAGE inject_network_fault_10\nLAB_STAGE inject_network_fault_11\nLAB_STAGE inject_network_fault_12\nLAB_STAGE inject_network_fault_13\nLAB_STAGE inject_network_fault_14\n",
+      "wall_seconds": 3.938,
+      "scenario": "reversible",
+      "attempt": 21,
+      "candidate": 18,
+      "result": "PASS_PARTIAL_TRANSPORT_SCENARIO",
+      "cases": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "independent_data_transport_host_positive_capture_sensitivity",
+          "result": "pass"
+        },
+        {
+          "case": "same_namespace_destination_port_other_socket_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "established_input_other_producer_denied",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_0_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_1_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_2_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_3_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_4_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_5_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_6_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_7_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_8_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_9_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_10_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_11_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_12_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_13_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "network_fault_14_full_quarantine_and_exact_recovery",
+          "result": "pass"
+        },
+        {
+          "case": "fixed_cli_failed_atomic_batch_exact_policy_retained_native_audit_and_health",
+          "result": "pass"
+        },
+        {
+          "case": "owned_table_vr_c1456bb016002a49_dq_removal_independent_filter_denial_and_emergency_restoration",
+          "result": "pass"
+        },
+        {
+          "case": "owned_table_vr_c1456bb016002a49_dp_removal_independent_filter_denial_and_emergency_restoration",
+          "result": "pass"
+        },
+        {
+          "case": "functional_quarantine_drift_refused_independent_permit_filter_and_emergency_retained",
+          "result": "pass"
+        },
+        {
+          "case": "encrypted_roundtrip_plaintext_negatives_and_actual_docker_forward_drop_cooperation",
+          "result": "pass"
+        },
+        {
+          "case": "native_owned_link_cooperation_and_empty_subgroup_cleanup_quarantine_retained",
+          "result": "pass"
+        },
+        {
+          "case": "transport_lab",
+          "result": "pass_partial_transport_smoke",
+          "production_readiness": false,
+          "quarantine_retained": true
+        }
+      ],
+      "independent_capture_metadata": [
+        {
+          "file": "positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 162,
+          "sha256": "3ca6cdd0047aad2e5ea58e2bc810552c810e7762bfb2c66c59a9ea7ca1fd88a8",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 2,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 893,
+          "sha256": "9143453c43a8d9abbc2c23e7915e3770c8ac59bc5d033aa9fe87b4027af7020d",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 984,
+          "sha256": "6c3c1dd840978e7d8e46cd25de4cfd907a30561e633f4af19f5cdc1ca6c31902",
+          "linktype": 1,
+          "records": 8,
+          "capture_counters": {
+            "captured": 8,
+            "received_by_filter": 8,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 5934,
+          "sha256": "700726f79504500c4fcdf09b689a5ff392625b02e78e4b14c75ccea034ebf45b",
+          "linktype": 276,
+          "records": 67,
+          "capture_counters": {
+            "captured": 67,
+            "received_by_filter": 67,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 12344,
+          "sha256": "e204ebb84cb052b1b4e1000c34fb68cc2e20262f7a4de6232c6c86d5e51baf4f",
+          "linktype": 276,
+          "records": 77,
+          "capture_counters": {
+            "captured": 77,
+            "received_by_filter": 77,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 11836,
+          "sha256": "488ca82110abf96b6a48168e8ac21a92ef7a2467e67ef7c2230dcb85517adb1c",
+          "linktype": 1,
+          "records": 76,
+          "capture_counters": {
+            "captured": 76,
+            "received_by_filter": 76,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "continuous_sender": {
+        "status": "COUNTS_VERIFIED",
+        "send_attempts": 697,
+        "joined": true,
+        "checkpoints": [
+          {
+            "phase": "started_after_all_namespace_and_cgroup_socket_setup",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_0_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_0_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_0_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_1_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_1_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_1_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_2_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_2_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_2_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_3_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_3_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_3_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_4_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_4_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_4_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_5_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_5_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_5_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_6_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_6_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_6_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_7_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_7_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_7_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_8_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_8_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_8_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_9_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_9_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_9_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_10_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_10_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_10_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_11_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_11_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_11_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_12_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_12_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_12_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_13_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_13_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_13_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_14_mutated_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_14_verified_offline_before_repair",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "network_fault_14_bootstrap_restored",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "owned_filter_removed_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "owned_filter_removed_verified_offline",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "removed_filter_restored_bootstrap",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "owned_filter_removed_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "owned_filter_removed_verified_offline",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "removed_filter_restored_bootstrap",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "functional_quarantine_drift_before_audit",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "functional_drift_verified_emergency_offline",
+            "send_attempt_delta": 3
+          },
+          {
+            "phase": "functional_drift_exactly_repaired_bootstrap",
+            "send_attempt_delta": 3
+          }
+        ]
+      },
+      "cleanup_inspection": {
+        "attempt": 21,
+        "scenario": "reversible",
+        "foreign_docker_forward_rules_and_handles_preserved_ignoring_counter_values": true,
+        "existing_rule_count": 25,
+        "producer_group": {
+          "present": false
+        },
+        "durable_phase": "offline",
+        "retained_policy_tables": {
+          "host": [
+            "vr_c1456bb016002a49_hq_e",
+            "vr_c1456bb016002a49_hq"
+          ],
+          "transport": [
+            "vr_c1456bb016002a49_tq_e",
+            "vr_c1456bb016002a49_tq"
+          ],
+          "data": [
+            "vr_c1456bb016002a49_dq_e",
+            "vr_c1456bb016002a49_dq"
+          ]
+        },
+        "native_named_links_present": {
+          "host": [],
+          "transport": [],
+          "data": []
+        },
+        "read_only": true,
+        "production_changes": false
+      },
+      "capture_oracle_sha256": "1d55b9b3657be682864e3aa34350ccc5eadd6adfc908b3e38b9a060fd2a29a2c",
+      "resource_disposition": "exact syntheticWAN removed by controller after inventory; retained owned container/ns/q and ambiguous native links/emptyproducer deliberately not deleted; reversible guard removed exactnative links+producer+cooperation",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-21.json",
+        "target/lab-state/guarded-transport-inspect-21.json",
+        "target/lab-state/guarded-transport-captures-21.json",
+        "target/lab-state/guarded-transport-cleanup-inspect-21.json",
+        "target/lab-state/guarded-transport-wan-cleanup-21.json"
+      ]
     }
   ],
   "production_changes": false,
@@ -552,5 +2930,21 @@
       "artifact_sha256_prefix": "e8c11d3c",
       "source_archive_sha256_prefix": "fdb20f37"
     }
+  ],
+  "final_candidate_source_binding": {
+    "source_commit": "222fa7c",
+    "source_archive_sha256": "7ce5d888721679bfb2e9a728761a3f3d04ac9df45a8b3b9ba2b2e3b8f87d91c5",
+    "verified_tracked_source_files": 81,
+    "sorted_path_sha256_lines_aggregate": "7f63dc65ff573c260341ba518ab1b8e04bc9e0281bdf8a618694171776d4b6af"
+  },
+  "remaining_component_limits": [
+    "independent task8a review pending",
+    "forwarded source-spoof actual packet coverage awaits real Tailscale forwarding in task8c",
+    "foreign collision proof is owned WG replacement by foreign dummy; preexisting startup collision not independently packet-tested",
+    "interrupted modes use test-only deterministic durable-phase checkpoints, not real process SIGKILL",
+    "actual worker and pinned Go placement/authority task8b pending",
+    "autonomous guard/watchdog/protocol task8c pending",
+    "hardcoded tested systemd Docker cgroup hierarchy; runit and other hierarchy certification unperformed",
+    "real-client release acceptance and performance gates remain NOT_RUN"
   ]
 }

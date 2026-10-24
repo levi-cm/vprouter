@@ -50,7 +50,12 @@ explicitly not_tested. Ready/advertised status is not real-client egress proof.
 Implement owned start/recovery/stop/container-death/watchdog paths and bounded
 signal/reap semantics. Actual process freeze/crash/OOM, malformed/delayed health,
 Docker unavailable, stale evidence with responsive worker, route/interface/peer/
-policy/producer drift must withdraw safe authority. Full cleanup only after exact
+policy/producer drift must withdraw safe authority. Include an actual preexisting
+startup resource-name collision and real process SIGKILL at durable activation/
+cleanup boundaries; 8a deterministic checkpoints and WG-to-foreign-dummy
+replacement do not independently prove these integrated startup cases. Actual
+Tailscale forwarding must include spoofed-source packets, not only policy units.
+Full cleanup only after exact
 current ownership verification; stopped state/intent survives interruption. Keep
 provider controls and enforcement independent; no one slow query may starve guard
 expiry or emergency quarantine. Socket pools remain inside their owning namespace.

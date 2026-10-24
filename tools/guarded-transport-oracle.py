@@ -15,9 +15,13 @@ import time
 
 
 def main():
-    if len(sys.argv) != 5:
-        raise SystemExit("usage: artifact artifact_sha256 source_archive source_sha256")
-    artifact, digest, source, source_digest = sys.argv[1:]
+    if len(sys.argv) not in (5, 6):
+        raise SystemExit("usage: artifact artifact_sha256 source_archive source_sha256 [scenario]")
+    artifact, digest, source, source_digest = sys.argv[1:5]
+    scenario = sys.argv[5] if len(sys.argv) == 6 else "reversible"
+    assert scenario in {"reversible", "deleted-wg", "deleted-transport",
+                        "cooperation-drift", "foreign-collision",
+                        "interrupted-activation", "interrupted-cleanup"}
     for value in (digest, source_digest):
         assert re.fullmatch(r"[a-f0-9]{64}", value)
     for path, expected in ((artifact, digest), (source, source_digest)):
@@ -52,6 +56,7 @@ assert os.geteuid()==0
 marker=root/'isolated-acceptance';s=marker.lstat()
 assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o600
 digest=DIGEST
+scenario=SCENARIO
 payload=root/('task8a-payload-'+digest);s=payload.lstat()
 assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o555
 assert hashlib.sha256(payload.read_bytes()).hexdigest()==digest
@@ -75,14 +80,14 @@ with os.fdopen(fd,'w') as f:
  json.dump({'artifact_sha256':digest,'network_dev':net.st_dev,'network_ino':net.st_ino},f);f.flush();os.fsync(f.fileno())
 print(json.dumps({'preflight':'PASS','host_namespace':{'dev':net.st_dev,'ino':net.st_ino},'docker_forward_before':chain,'routes_before':routes,'addresses_before':addresses}),flush=True)
 try:
- result=subprocess.run(['timeout','--kill-after=3s','60s',str(payload),'--ignored'],timeout=66)
+ result=subprocess.run(['timeout','--kill-after=3s','60s',str(payload),'--ignored','--scenario',scenario],timeout=66)
  print(json.dumps({'harness_exit_code':result.returncode,'docker_forward_after':json.loads(run(['nft','-j','list','chain','ip','filter','FORWARD']))}),flush=True)
 finally:
  s=approval.lstat();assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o600
  assert json.loads(approval.read_text())=={'artifact_sha256':digest,'network_dev':net.st_dev,'network_ino':net.st_ino}
  approval.unlink()
 raise SystemExit(result.returncode)
-'''.replace("DIGEST", repr(digest))
+'''.replace("DIGEST", repr(digest)).replace("SCENARIO", repr(scenario))
     started = time.monotonic()
     try:
         result = subprocess.run([*ssh, "sudo python3 -"], input=setup,
@@ -92,7 +97,7 @@ raise SystemExit(result.returncode)
         code = 124
         stdout = (error.stdout or b"").decode(errors="replace") if isinstance(error.stdout, bytes) else (error.stdout or "")
         stderr = (error.stderr or b"").decode(errors="replace") if isinstance(error.stderr, bytes) else (error.stderr or "")
-    evidence = {"observed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    evidence = {"scenario": scenario, "observed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "artifact_sha256": digest, "source_archive_sha256": source_digest,
                 "runner_sha256": hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
                 "exit_code": code, "wall_seconds": round(time.monotonic() - started, 3),

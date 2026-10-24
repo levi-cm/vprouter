@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 
@@ -39,7 +40,7 @@ def verify_boot_interfaces(names):
 
 
 def verify_egress_response(data):
-    if data.get("mullvad_exit_ip") is not True:
+    if not isinstance(data, dict) or data.get("mullvad_exit_ip") is not True:
         raise RuntimeErrorClosed("VPN provider did not confirm protected egress")
 
 
@@ -68,17 +69,42 @@ def wait_for_tailscaled(daemon, timeout=30):
     raise RuntimeErrorClosed("tailscaled control socket did not become ready")
 
 
-def provider_probe():
-    verify_interfaces(interface_names())
-    verify_default_route()
-    with urllib.request.urlopen(PROVIDER_CHECK, timeout=12) as response:
-        data = json.load(response)
-        verify_egress_response(data)
+def verify_handshake():
     rows = run("wg", "show", "wg0", "latest-handshakes").splitlines()
     now = time.time()
     if len(rows) != 1 or not 0 <= now - int(rows[0].split()[-1]) < HANDSHAKE_MAX_AGE:
         raise RuntimeErrorClosed("WireGuard handshake is stale")
-    return data
+
+
+def provider_probe():
+    for attempt in range(2):
+        verify_interfaces(interface_names())
+        verify_default_route()
+        if attempt:
+            verify_handshake()
+        try:
+            with urllib.request.urlopen(PROVIDER_CHECK, timeout=12) as response:
+                data = json.load(response)
+                verify_egress_response(data)
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            if attempt or not (exc.code in {408, 429} or 500 <= exc.code < 600):
+                raise
+            reason = failure_reason(exc)
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            if attempt:
+                raise
+            reason = failure_reason(exc)
+        else:
+            verify_handshake()
+            return data
+        # The namespace and firewall still allow only WireGuard egress. A
+        # failed web check alone gets one retry, never an unbounded grace period.
+        verify_interfaces(interface_names())
+        verify_default_route()
+        verify_handshake()
+        print(f"provider check transient failure: {reason}; retrying once", file=sys.stderr, flush=True)
+        time.sleep(1)
 
 
 def collector_probe():
@@ -129,6 +155,8 @@ def block_failed_provider(up, reason):
 
 def failure_reason(exc):
     # Internal check messages are safe; external errors can contain URLs.
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"HTTPError (HTTP {exc.code})"
     return str(exc) if isinstance(exc, RuntimeErrorClosed) else type(exc).__name__
 
 

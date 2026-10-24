@@ -152,6 +152,15 @@ host monitor that misses its 90-second watchdog. Monitor the systemd unit,
 both containers, WireGuard handshake, approval state, and a real test client's
 provider egress. Keep a verified hardened image for rollback.
 
+A transient provider-check HTTP error (408, 429, or 5xx), connection error, or
+timeout gets one retry after one second. The runtime revalidates interfaces,
+routes, and the WireGuard handshake before retrying. Each HTTPS attempt has a
+12-second timeout. A second failure withdraws Tailscale as before; negative or
+malformed provider confirmation, permanent HTTP errors, or unsafe tunnel state
+fail immediately. Retry and withdrawal logs include HTTP status codes without
+logging response bodies or URLs. The WireGuard-only firewall remains active
+throughout the retry.
+
 `python3 /opt/vprouter/current/host/orchestrate.py status --name <site>` exits
 nonzero unless both containers, the dedicated bridge, host guard, router
 firewall, WireGuard tunnel, and fresh READY record are present. Use it as one monitoring signal; a

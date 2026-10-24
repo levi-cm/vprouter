@@ -1,0 +1,96 @@
+{
+  "observed_at_utc": "2026-10-24T13:31:21.870000+00:00",
+  "environment": "owned disposable Debian13 KVM guest",
+  "container": "vprouter-v2-lab-primary-enrollment",
+  "method": "GET",
+  "requests": [
+    {
+      "path": "/localapi/v0/status",
+      "http_status": 200,
+      "fields": {
+        "Version": {
+          "present": true,
+          "type": "str",
+          "value": "1.102.5-1-t5fb2a81b0"
+        },
+        "BackendState": {
+          "present": true,
+          "type": "str",
+          "value": "NeedsLogin"
+        }
+      }
+    },
+    {
+      "path": "/localapi/v0/prefs",
+      "http_status": 200,
+      "fields": {
+        "WantRunning": {
+          "present": true,
+          "type": "bool",
+          "value": true
+        },
+        "LoggedOut": {
+          "present": true,
+          "type": "bool",
+          "value": false
+        },
+        "RouteAll": {
+          "present": true,
+          "type": "bool",
+          "value": false
+        },
+        "CorpDNS": {
+          "present": true,
+          "type": "bool",
+          "value": false
+        },
+        "AdvertiseRoutes": {
+          "present": true,
+          "type": "NoneType",
+          "value": null
+        },
+        "NetfilterMode": {
+          "present": true,
+          "type": "int",
+          "value": 2
+        },
+        "ExitNodeID": {
+          "present": true,
+          "type": "str",
+          "value": ""
+        },
+        "ExitNodeIP": {
+          "present": true,
+          "type": "str",
+          "value": ""
+        },
+        "NoStatefulFiltering": {
+          "present": true,
+          "type": "bool",
+          "value": true
+        }
+      }
+    }
+  ],
+  "writes_performed": false,
+  "production_changes": false,
+  "release_acceptance": "NOT_RUN",
+  "limitations": [
+    "Enrollment-only userspace daemon; no exit routes advertised or selected.",
+    "No preference writes, native worker integration or firewall checks.",
+    "Healthy approved exit and withdrawal/recovery still NOT_RUN.",
+    "No AuthURL, credentials, identity state or raw API payload retained."
+  ],
+  "query_contract": {
+    "transport": "AF_UNIX through pinned disposable container proc root",
+    "host": "local-tailscaled.sock",
+    "timeout_seconds": 3,
+    "response_limit_bytes": 1048576,
+    "endpoints": [
+      "/localapi/v0/status",
+      "/localapi/v0/prefs"
+    ],
+    "request_body": null,
+    "tools": "Python3 http.client + read-only Docker inspect PID; diagnostics only"
+  }
+}

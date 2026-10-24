@@ -69,3 +69,5 @@ kernel/integration acceptance, with evidence preserving failures. No real-client
 leakage claim from synthetic tests. Run focused checks, commit explicit files,
 report exact code hashes/commands/results/dependencies and remaining gaps. Return
 status/commits/short tests/concerns; report file carries detail.
+
+Controller independent read-only pinned LocalAPI oracle is in docs/rust-v2/localapi-lab-evidence.json: actual GET /localapi/v0/status and /localapi/v0/prefs both200 over Unix socket; actual1.102.5 version and nullable empty AdvertiseRoutes/empty ExitNodeID+IP shapes retained. Enrollment-only default NetfilterMode2 is explicitly unready; worker must establish reviewed mode0 before readiness. No write/withdraw/healthy advertised exit tested by this oracle.

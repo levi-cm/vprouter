@@ -1842,6 +1842,22 @@ pub(super) fn verify_pid_parent(pid: u32, expected: BorrowedFd<'_>) -> Result<()
     Ok(())
 }
 #[cfg(test)]
+fn cleanup_error(stage: &'static str, errno: Option<i32>) -> Error {
+    eprintln!(
+        "LAB_UNPIN_FAILURE {stage} {}",
+        match errno {
+            Some(libc::ENOENT) => "missing",
+            Some(libc::ESRCH) => "vanished",
+            Some(libc::EBUSY) => "busy",
+            Some(libc::EPERM | libc::EACCES) => "denied",
+            Some(libc::EINVAL) => "invalid",
+            None => "identity",
+            _ => "other",
+        }
+    );
+    Error::OwnershipMismatch
+}
+#[cfg(test)]
 pub(super) fn lab_unpin(dir: BorrowedFd<'_>, name: &str, id: super::owned::Identity) -> Result<()> {
     let fd = fs::openat(
         dir,
@@ -1849,9 +1865,9 @@ pub(super) fn lab_unpin(dir: BorrowedFd<'_>, name: &str, id: super::owned::Ident
         OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
         Mode::empty(),
     )
-    .map_err(|_| Error::OwnershipMismatch)?;
+    .map_err(|error| cleanup_error("pin_open", Some(error.raw_os_error())))?;
     if super::owned::Identity::network(&fd)? != id {
-        return Err(Error::OwnershipMismatch);
+        return Err(cleanup_error("pin_identity", None));
     }
     for e in std::fs::read_dir("/proc").map_err(|_| Error::OwnershipMismatch)? {
         let e = e.map_err(|_| Error::OwnershipMismatch)?;
@@ -1866,21 +1882,29 @@ pub(super) fn lab_unpin(dir: BorrowedFd<'_>, name: &str, id: super::owned::Ident
             Ok(m) => {
                 use std::os::unix::fs::MetadataExt;
                 if (m.dev(), m.ino()) == (id.dev, id.ino) {
-                    return Err(Error::OwnershipMismatch);
+                    return Err(cleanup_error("active_namespace_user", None));
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(Error::OwnershipMismatch),
+            Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ESRCH)) => {}
+            Err(error) => {
+                return Err(cleanup_error(
+                    "proc_namespace_metadata",
+                    error.raw_os_error(),
+                ));
+            }
         }
     }
     let target = c(&format!("/proc/self/fd/{}/{}", dir.as_raw_fd(), name))?;
     // SAFETY: descriptor-relative exact retained record name verified as nsfs;
     // no process uses this namespace. Test-only, not generic production cleanup.
-    cv(
-        unsafe { libc::umount2(target.as_ptr(), 0) },
-        Error::OwnershipMismatch,
-    )?;
-    fs::unlinkat(dir, name, fs::AtFlags::empty()).map_err(|_| Error::OwnershipMismatch)
+    if unsafe { libc::umount2(target.as_ptr(), 0) } < 0 {
+        return Err(cleanup_error(
+            "unmount",
+            std::io::Error::last_os_error().raw_os_error(),
+        ));
+    }
+    fs::unlinkat(dir, name, fs::AtFlags::empty())
+        .map_err(|error| cleanup_error("unlink_exact_pin", Some(error.raw_os_error())))
 }
 #[cfg(test)]
 pub(super) fn lab_parent_loss(

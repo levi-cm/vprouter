@@ -590,11 +590,14 @@ pub fn run() -> Result<()> {
     drop(one);
     drop(two);
     // Test-only exact-record cleanup, only after the cgroup's processes are gone.
+    lab::stage("cleanup_exact_namespace_pins");
     tx.lab_unpin()?;
     drop(tx);
     drop(store);
+    lab::stage("cleanup_exact_container");
     lab::docker(&["rm", "--force", &id])?;
     resources.id.clear();
+    lab::stage("cleanup_exact_synthetic_directory");
     fs::remove_dir_all(&resources.dir).map_err(|_| Error::OwnershipMismatch)?;
     println!(
         "{{\"case\":\"launch_execution_isolated_acceptance\",\"result\":\"pass\",\"guard_runtime\":false,\"activation\":false}}"

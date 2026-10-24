@@ -377,15 +377,17 @@ impl<'a> Transaction<'a> {
     }
     #[cfg(test)]
     pub fn lab_unpin(&self) -> Result<()> {
-        for e in &self.record.entries {
+        for (index, e) in self.record.entries.iter().enumerate() {
             if e.phase != Phase::Offline {
                 return Err(Error::Interrupted);
             }
+            eprintln!("LAB_UNPIN_RECORD exit_index={index} kind=data");
             kernel::lab_unpin(
                 self.dir.as_fd(),
                 &e.data_name,
                 e.data.ok_or(Error::Interrupted)?,
             )?;
+            eprintln!("LAB_UNPIN_RECORD exit_index={index} kind=transport");
             kernel::lab_unpin(
                 self.dir.as_fd(),
                 &e.transport_name,

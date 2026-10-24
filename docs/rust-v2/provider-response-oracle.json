@@ -1,0 +1,29 @@
+{
+  "observed_at_utc": "2026-10-24T14:33:50.247348+00:00",
+  "environment": "existing legacy primary data namespace; read-only bounded diagnostic",
+  "method": "one fixed HTTPS GET with certificate verification and ProxyHandler({}); maximum16384bytes; timeout12s; only public allowlisted fields printed",
+  "status": 200,
+  "field_projection": {
+    "mullvad_exit_ip": {
+      "type": "boolean",
+      "value": true
+    },
+    "ip": {
+      "type": "string",
+      "value": "169.150.211.139"
+    },
+    "mullvad_exit_ip_hostname": {
+      "type": "string",
+      "value": "de-fra-wg-404"
+    }
+  },
+  "production_configuration_changes": false,
+  "legacy_probe_invoked": false,
+  "native_worker_acceptance": "NOT_RUN",
+  "real_client_traffic_acceptance": "NOT_RUN",
+  "limits": [
+    "This proves the observed provider response field names/types and exact server string for one legacy namespace request.",
+    "It does not prove native TLS, route/server verification, client selection, capture sensitivity or fail-closed behavior.",
+    "Unprojected provider response fields were not printed or persisted."
+  ]
+}

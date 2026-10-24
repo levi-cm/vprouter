@@ -53,6 +53,20 @@ fn identity(fd: impl AsFd) -> Result<Identity> {
         ctime_ns: s.st_ctime_nsec as i64,
     })
 }
+fn same_cgroup_identity(pinned: Identity, current: Identity) -> bool {
+    // Creating/removing our owned child group changes the parent's directory
+    // timestamps (and potentially its size). Those are not object identity.
+    // Preserve exact inode/device/type/mode/ownership; process membership and
+    // cgroup2 mount provenance are checked independently before accepting it.
+    (pinned.dev, pinned.ino, pinned.mode, pinned.uid, pinned.gid)
+        == (
+            current.dev,
+            current.ino,
+            current.mode,
+            current.uid,
+            current.gid,
+        )
+}
 fn fs_type(fd: impl AsFd, magic: i64) -> Result<()> {
     if fstatfs(fd).map_err(|_| Error::UnsupportedPlatform)?.f_type as i64 != magic {
         return Err(Error::UnsupportedPlatform);
@@ -495,7 +509,7 @@ impl PinnedProcess {
             self.root_identity,
         )?;
         cgroup_path(&read_at(&self.proc, "cgroup", 4096)?, &s.container_id)?;
-        if identity(&self.cgroup)? != self.cgroup_identity
+        if !same_cgroup_identity(self.cgroup_identity, identity(&self.cgroup)?)
             || identity(&self.cgroup_root)?.dev != self.cgroup_identity.dev
         {
             return Err(Error::CgroupMismatch);
@@ -663,6 +677,42 @@ fn verify_executable(fd: impl AsFd, stage: &StagingEvidence) -> Result<Identity>
 mod descriptor_tests {
     use super::*;
     use std::{fs, os::unix::fs::PermissionsExt};
+    #[test]
+    fn owned_subgroup_directory_updates_preserve_only_exact_parent_identity() {
+        let pinned = Identity {
+            dev: 24,
+            ino: 20,
+            mode: 0o040755,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            mtime: 1,
+            mtime_ns: 2,
+            ctime: 3,
+            ctime_ns: 4,
+        };
+        let mut changed = pinned;
+        changed.size = 1;
+        changed.mtime = 5;
+        changed.mtime_ns = 6;
+        changed.ctime = 7;
+        changed.ctime_ns = 8;
+        assert!(same_cgroup_identity(pinned, changed));
+        for field in 0..5 {
+            let mut foreign = changed;
+            match field {
+                0 => foreign.dev += 1,
+                1 => foreign.ino += 1,
+                2 => foreign.mode ^= 0o002,
+                3 => foreign.uid = 65534,
+                _ => foreign.gid = 65534,
+            }
+            assert!(!same_cgroup_identity(pinned, foreign));
+        }
+        let mut foreign_type = changed;
+        foreign_type.mode = 0o100755;
+        assert!(!same_cgroup_identity(pinned, foreign_type));
+    }
     #[test]
     fn executable_hash_size_limit_and_metadata_changes_are_checked() {
         // Synthetic files only. Positive root ownership is tested in the owned

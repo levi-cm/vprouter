@@ -1,0 +1,1817 @@
+# Review package: 6a2cbb30af1bf803aaf22a4bed80204b115b96e1..427a124fbffd6777f99e2c77325fd681fa97f3f3
+
+## Commits
+427a124 docs(launch): record reviewed lifecycle fixes and fresh kernel proof
+1ce34fc docs: bind worker provider parsing to observed public response fields
+42b27b4 docs: record exact launch fix kernel evidence and review limits
+b62cc5c fix(launch): verify PID1 descriptors and bound signal shutdown
+b08d299 docs: prepare resumable migration and compatibility transaction gates
+41a5dc9 docs: prepare persistent client guard integration and traffic gates
+f58c88b docs: preserve launch review findings before scoped fixes
+f183d7c docs: prepare explicit direct-mode integration and isolation gates
+5874e56 docs: bind final launch review to complete implementation range
+
+## Files changed
+ .superpowers/sdd/rust-v2/progress.md            |   8 +
+ .superpowers/sdd/rust-v2/task-10-brief.md       |  62 ++++
+ .superpowers/sdd/rust-v2/task-11-brief.md       |  65 +++++
+ .superpowers/sdd/rust-v2/task-12-brief.md       |  74 +++++
+ .superpowers/sdd/rust-v2/task-6b-report.md      | 156 +++++++++-
+ .superpowers/sdd/rust-v2/task-6b-review.md      |  31 ++
+ .superpowers/sdd/rust-v2/task-7-brief.md        |   2 +
+ crates/vprouter-launch/src/execution.rs         |   4 +
+ crates/vprouter-launch/src/execution_lab.rs     | 126 ++++++++-
+ crates/vprouter-launch/src/kernel.rs            | 359 +++++++++++++++++++++---
+ crates/vprouter-launch/src/lib.rs               |   3 +-
+ crates/vprouter-launch/src/probe.rs             |   5 +-
+ docs/rust-v2/launch-execution-lab-evidence.json |  43 ++-
+ docs/rust-v2/launch-helper.md                   |  23 +-
+ docs/rust-v2/provider-response-oracle.json      |  29 ++
+ 15 files changed, 932 insertions(+), 58 deletions(-)
+
+## Diff
+diff --git a/.superpowers/sdd/rust-v2/progress.md b/.superpowers/sdd/rust-v2/progress.md
+index 2062526..7650e4a 100644
+--- a/.superpowers/sdd/rust-v2/progress.md
++++ b/.superpowers/sdd/rust-v2/progress.md
+@@ -236,10 +236,18 @@ Task6b attempt14 source3a49908 FAILexit1/.932s descriptor_scan_denied after4case
+ 
+ Task6b attempt15 sourcee515c86 FAILexit1/.901s capability_policy after4cases. Attempt16 sourcef5503e1 FAILexit1/.944s exactrole probe_after_exec status_read (before credential field parsing). Both strict ownedcleanups0pins/0containers retained. Root candidate16 static binary oracle confirms std::fs::read_to_string -> stdunixFile::open_c ->muslopen->SYS_open2, extending launch-musl-opendir-oracle.json. Earlier assumption normalstdfileI/O usedopenat was unverified and incorrect for this static target; correction uses bounded explicitopenat without SYS_open widening. No credential weakening or postexec success claimed.
+ 
+ Task6b attempt17 source98176e7 FAILexit1/.953s probe_proc_hidden_init after4cases. Explicit postexecboundedopenat removed prior statusreadfailure as first error; new exact witness is visibleprocset{2}/getpid2. Rootstrictcleanup0pins/0containers retained.
+ 
+ Ruling: private proc test requires selfPID2 and accepts only visible sets{2} or{1,2}, rejecting any otherPID; anyvisiblePID1 root must be same selected root or explicitPermissionDenied. Independent host MUST establish actual privatePID1 NSpid1 and matching worker root/mount/PIDnamespace plus separate exit isolation. hidepid2 plus nondumpablePID1 intentionally hides that process, so requiring its enumeration contradicts the stronger visibility boundary. Keep hidepid2/dumpability and all host checks unchanged. Cost if wrong: test could overaccept a missinginit absent the required independent host witness; witness is mandatory before component acceptance.
+ 
+ Task6b attempt18 sourcef803f5b FAILoverall exit1/2.071s ownership_mismatch during finalcleanup after10actual casesPASS: placement fault, twoexit privatePID/proc/root/state/FD/caps/seccomp/AppArmor, allsurvivingwrapperemptyroots, frozenreaping, launcherparentdeath andcontainerdeath. This is partial runtime evidence, not component acceptance. Root collector foundall4pins stillpresent,0netnsusers,onlylo/nodefaults and0syntheticcontainers; strict externalexactownedcleanup succeeded. Harness therefore refusedbeforefirstunpin, causepending fixedstage/errno diagnostics. No fullsuccess/readiness/release claim.
+ 
+ Task6b attempt19 source97fd1b8 FAILexit1/2.014s after10actualcasesPASS: exactfirstdata unmount busy, verificationFD itself retainedpinnedmountreference. All4pins retaineduntil strict externalcleanup,0residualresources. Attempt20 sourcebff77724213f0c275ecc1b1b119a3fcb605871fe PASSexit0/2.187s all11cases includingnormal exactownedunpin/container/directorycleanup. Exactlabhasha49a89a3e5db007e20242615422fed039f06bdf7e9dd32a33e324b9285e38be8/probehash7c6a7d16c02a48963dfbe79babbc353d46d37c78c2202dd28f85cd82ab42ae1c. Rootindependentlyverified0launchlabcontainers/0ownedpins; harnessselfcleanup,controllerremovednothing.19failedattemptsretained. Implementer exactsource109tests/0fail/2ignored/3standalonelabskip,fmt/clippy/ARM64libcheckPASSreported; reportfinalization/independentreviewpending. Task6b NOTcomplete yet; no actualworker/guard/transport/realclient/releaseacceptance.
++
++Task6b finalized report6a2cbb30af1bf803aaf22a4bed80204b115b96e1; sourcebff7772 unchanged. Root verifiedall20reportfile/artifactSHA256rows against currentbytes. Independent /root/review_launch_execution dispatched with brief/report/full43commitdiff c4b2236..6a2cbb3 and binding userconstraints, wrapper/proc rulings, exactkernel109test evidence. Implementationconcern2166lineunsafe module explicitly carried into review. Nexttask7 NOTdispatched before reviewapproval.
++
++Root prepared task10 explicitdirect brief only, gated on reviewed single/multiMullvad runtime; no direct configuration/identity/path created. Task6b independentreview ongoing, emerging concerns acknowledged but full verdict pending before fixdispatch.
++
++Task6b independent review /root/review_launch_execution specFAIL/qualityNeedsfixes:3Important (PID1 close enumeration/errors+exactFDverification; repeatedsignalsresetboundeddeadline; signaltestforcescleanupbeforeassertingforwarding) and2Minor (stalecratedescription; kernelsectionboundaries). Fullreviewpreservedtask-6b-review.md. Originalimplementer resumesfixround1/5 for all3Important andbothMinor, scopedbase6a2cbb3. Task7 remainsgated. Run20 evidence is synthetic partialPASS, not approved component.
++
++Task6b fix1 candidate b62cc5c kernel attempt21 PASS exit0/1.648s/all11cases. Actual stopped/forwarded/reaped/natural repeated-signal witness completed529ms; exact labccd0bcb8/probe808789d0 hashes verified locally+guest. Collector proves0residualpins/containers, harnessselfcleanup/controllerremovednothing. Original19failedattempts and run20 retained; run20 signalclaim explicitly invalidated by review. Fix report/fresh covering checks and scoped independent rereview pending. No production or release acceptance. Prepared tasks11client and12migration briefs only, commits41a5dc9/b08d299; no future implementation bypass.
+diff --git a/.superpowers/sdd/rust-v2/task-10-brief.md b/.superpowers/sdd/rust-v2/task-10-brief.md
+new file mode 100644
+index 0000000..5a75531
+--- /dev/null
++++ b/.superpowers/sdd/rust-v2/task-10-brief.md
+@@ -0,0 +1,62 @@
++# Explicit direct residential exit integration
++
++PREPARATION ONLY. Dispatch after reviewed actual single-exit guard/worker and
++multiple-Mullvad lifecycle tasks. Workdir /DATA/AppData/vprouter-rust-v2, rust/v2;
++no subagents. Binding docs/rust-v2/IMPLEMENTATION.md and user handoff. Controller
++alone runs privileged/credential-bearing tests in the isolated owned guest.
++
++Deliver direct mode only for explicitly configured+enabled stable exit IDs. Never
++create it as a Mullvad failure fallback or select it automatically. Use exact
++unsafe-direct-host-ip-{site}-exit naming (site debdev); apply existing duplicate
++name suffix/DNS-label63 rules to all conflicting names. Stable node ID/state
++remains independent from hostname. Direct mode with Mullvad metadata and Mullvad
++mode with direct settings are rejected before mutation. Keep IPv6 forwarding
++blocked. Report direct-exposed, never protected, including JSON/probe/diagnose and
++selection/migration plans; no constant DNS/IPv6 safety fields.
++
++Use one gateway and reviewed private PID/mount/state/FD/cgroup boundaries. Direct
++gets separately owned WAN connection/policy, never a shared permissive path or
++routing through primary/base. Its allowed WAN path must be unreachable from every
++Mullvad data/transport namespace; no cross-exit bridges. Retain guard-owned
++quarantine/activation authority, durable generation/ownership, exact scoped
++cleanup and independent emergency quarantine. Ordinary errors keep direct
++exposure disabled during incomplete startup. No production bypass of actual
++artifact/syscall/LSM admission, no additional SYS_ADMIN in gateway tasks.
++
++Permit public IPv4 application destinations only. Explicitly block host-management
++addresses including host public/local addresses, LAN/connected or declared local
++prefixes even when globally numbered, private/loopback/shared/link-local/metadata,
++unspecified/documentation/benchmark/reserved/multicast/broadcast and other
++non-public ranges. Account for known public-address infrastructure/metadata
++services; document conservative denied-range policy and its source/version.
++Do not assume a public numeric address is public internet traffic simply because
++it passes RFC1918 checks. Reconcile host address/prefix changes fail closed.
++Return/conntrack/NAT permissions must bind exact exit/interfaces/flow scope so
++established traffic cannot cross into another exit. DNS must follow permitted
++selected direct path, no host-management resolver exception. No IPv6 bypass.
++
++Direct enrollment is fresh interactive identity with protected state, never cloned.
++Direct selection requires explicit mode and stable node ID; hostname alone is
++not authorization. Protected client policies must reject exposed nodes. No
++Mullvad provider confirmation or protected label inferred for direct mode.
++Observed egress/exposure must be verified independently or remain not_tested.
++Keep single-exit efficiency and unaffected-exit lifecycle semantics.
++
++Normal tests: actual policy rendering/transaction/scoped transition logic,
++range boundaries and special cases, host-public/LAN prefix denial, missing/invalid
++metadata/mode/name/direct selection refusal, interrupted initialization and
++address-drift failure order. Ignored guest tests: actual public allowed positive
++control plus IPv4/DNS/IPv6/TCP/UDP forbidden markers against host/LAN/link-local/
++metadata/multicast and cross-exit paths; one direct and five-Mullvad-plus-direct;
++keep direct active during every scoped Mullvad fault and show Mullvad never uses
++it, healthy exits unchanged. Root runs real Tailscale-client acceptance separately;
++synthetic packets never replace mandatory release gates. Preserve failed attempts,
++capture sensitivity, exact artifacts/source and exact-owned cleanup evidence.
++
++Own minimal direct guard/worker/CLI/policy integration and focused docs/tests.
++No steady-state shell/CLI and no unrelated service/firewall changes. All unsafe
++in the reviewed Linux module; no unreviewed daemon capability/policy expansion.
++Focused fmt/test/clippy, static x86_64 and ARM64 checks, self-review, explicit
++owned-path commits and task-10-report.md with exact commands/results/source and
++artifact hashes, actual traffic limits and unperformed release/platform checks.
++Independent review mandatory before client integration or production cutover.
+diff --git a/.superpowers/sdd/rust-v2/task-11-brief.md b/.superpowers/sdd/rust-v2/task-11-brief.md
+new file mode 100644
+index 0000000..0c8a461
+--- /dev/null
++++ b/.superpowers/sdd/rust-v2/task-11-brief.md
+@@ -0,0 +1,65 @@
++# Persistent Linux client and userspace proxy guards
++
++PREPARATION ONLY. Dispatch after reviewed single-exit, multi-Mullvad and direct
++runtime integration (tasks8-10). Workdir /DATA/AppData/vprouter-rust-v2, rust/v2.
++No subagents, production changes, real profile/state reads or external operations.
++Root controller alone runs privileged tests in owned disposable environments.
++Binding docs/rust-v2/IMPLEMENTATION.md and original user handoff; read reviewed
++native nft, ownership and runtime contracts before implementation.
++
++Deliver client install/select/status JSON operations for kernel Tailscale Linux
++clients and userspace SOCKS/HTTP gateways. Install persistent enforcement BEFORE
++protected workloads start. An ordinary service stop, Tailscale stop, lost selected
++exit, route reset, restart or upstream failure must retain protection. Removing
++the guard is a separate explicit administrative operation with ownership checks.
++No transient direct path during install/select/reboot/recovery. Unknown policy,
++node authorization, ownership or application scope leaves protected clients offline.
++
++Protected policy selects stable node ID and explicit mullvad mode; reject exposed
++direct nodes. Direct selection requires explicit direct mode AND authorized node
++ID, with direct-exposed status; name match alone never authorizes exposure. Keep
++identity/state distinct from names and preserve existing enrollment and approvals.
++Do not clone enrolled state or require credentials in arguments/environment/logs.
++Status is observational and reports tested DNS/IPv6 fields or not_tested, never
++constant protection booleans or readiness inferred from route advertisements.
++
++Kernel client enforcement must block ordinary WAN internet/DNS/IPv6 fallback for
++protected applications. Allow encrypted Tailscale transport only from narrowly
++identified daemon traffic using actual verified process/cgroup/socket authority;
++never exempt all root, all UDP or all DNS. DNS must use selected authorized exit
++path, no generic WAN DNS exception. Reconcile exact owned atomic nft policy and
++selected-node/routing evidence continuously; drift quarantines before repair.
++No broad foreign-table changes, blanket Docker rules or daemon restarts.
++
++Userspace gateways bind only intended local listeners, preserve HTTP/SOCKS
++semantics and always connect applications through the authorized Tailscale path.
++On upstream failure drop/reject requests; no ordinary resolver or TCP fallback.
++Handle bypassed/absent application proxy settings with a persistent enclosing
++application guard, or explicitly refuse protected readiness when its scope cannot
++be enforced. An application promise to use the proxy is not a no-leak mechanism.
++Namespace-local sockets and DNS only, with bounded responses/deadlines and no
++cross-exit socket pools. Keep secrets and auth URLs out of support evidence.
++
++Use native Linux/Tailscale APIs and reviewed ownership/state primitives. No
++steady-state subprocesses, unsafe outside the reviewed Linux module, async setns
++or caller booleans granting quarantine bypass. Persist generation-bound root-owned
++client policy and installation records atomically with locking/fsync; interrupted
++installation or selection must remain resumable and fail closed. Provide systemd
++and runit startup ordering and precise scope/unsupported-client documentation.
++
++Offline meaningful tests cover selection authorization, exposed-node rejection,
++unknown identity, transaction interruption, policy drift, bounded proxy parsing,
++upstream loss, no generic DNS/root exception and ordinary-stop persistence.
++Ignored owned-guest tests continuously generate IPv4/DNS/IPv6/TCP/UDP markers from
++real disposable Tailscale clients while capturing client WAN, host WAN, transport
++and data. Test disappearing/changed exit, Tailscale restart, route reset, empty DNS
++cache, proxy failure, absent/bypassed settings, install/select boundaries and boot
++ordering. Positive capture controls mandatory. Zero forbidden plaintext markers;
++unknown/skipped checks remain unverified. Synthetic namespaces do not replace real
++Tailscale client acceptance. Keep previous failures and exact source/artifact hashes.
++
++Own minimal client/CLI/service integration, focused tests and documentation. Run
++focused fmt/test/clippy and static x86_64/ARM64 checks; explicit owned-file commits,
++self-review and task-11-report.md with exact commands/results, capability/syscall
++and subprocess inventory, actual scoped evidence and remaining platform gates.
++Independent review before migration can rely on client-coverage evidence.
+diff --git a/.superpowers/sdd/rust-v2/task-12-brief.md b/.superpowers/sdd/rust-v2/task-12-brief.md
+new file mode 100644
+index 0000000..1431b25
+--- /dev/null
++++ b/.superpowers/sdd/rust-v2/task-12-brief.md
+@@ -0,0 +1,74 @@
++# Transactional migration, dependency adapters and legacy compatibility
++
++PREPARATION ONLY. Dispatch after reviewed actual runtime and client-guard tasks.
++Workdir /DATA/AppData/vprouter-rust-v2, rust/v2, no subagents. Binding
++IMPLEMENTATION.md and original handoff. Root alone performs external/privileged
++lab tests; this task cannot migrate production or reset credentials/identities.
++Read observational migration artifacts and all runtime/ownership/client contracts.
++
++Implement inspect/plan/apply/resume/rollback JSON commands and declared dependency
++adapters using a durable locked journal with generation-bound atomic fsync state.
++Plan records exact changes and unchanged precondition fingerprints. Apply only an
++unchanged staged plan under the deployment lock; idempotent resume/reversal after
++any boundary. Validate supported host BEFORE altering existing installation.
++Unpinned/missing provenance, uncertain ownership, incomplete required adapters or
++unknown hostname dependencies block unattended cutover. Client coverage can be
++explicitly unverified but never represented as protection; release acceptance
++still requires actual client no-fallback verification.
++
++Required ordered transaction: inspect versions/images/service/config/identity/
++state/firewall/Docker dependents/hooks; stage immutable release/image/checksums
++and verify config/names/allocations; plan exact changes; establish quarantine
++independently of old supervisor; drain/stop adapters and old service; verify ALL
++old identity users stopped; take root-only stopped-state backups of identity,
++config, service/hooks, release metadata and allocations; activate transactionally
++into a root-owned REAL release directory; restore same nodeIDs/IPs/approvals;
++verify exact provider server then rename existing nodes; actual protected-client,
++mode/isolation and dependency verification; commit and resume workloads. Failure
++quarantines FIRST, restores last verified compatible release AND configuration/
++Tailscale state, or keeps affected exits offline if safe restoration unproved.
++
++Preserve primary service instance and container names, original WG profiles and
++state paths, Tailscale identities/addresses/approval. Stable exitID primary for
++legacy input; preserve deployment names separately. Never run two copies of one
++identity concurrently, delete/recreate credentials, clone enrollment, or change
++Mullvad server implicitly. Avoid symlink activation incompatible with old rollback
++checks. Backup creation/restore must not expose secrets or follow attacker paths.
++An old image alone is insufficient rollback compatibility proof; record format/
++state-version compatibility and stopped-state metadata. Unknown/ambiguous cleanup
++retains quarantine and ownership records rather than guessing what to remove.
++
++Adapters declare absolute executable argv arrays, bounded idempotent drain, stop,
++rebind, start and health-check operations. No shell strings, implicit eval, broad
++service restart or Docker/containerd restart. Inventory auto-detection is evidence,
++not authority to execute unknown custom hooks. Retain existing collector ordering:
++pre-start stop, post-start start, post-stop stop. Known hostname references may be
++updated by declared adapters; unknown external hostname users must be declared
++before unattended rename. Prefer stable nodeID selection. Fixed audited adapter
++subprocesses are lifecycle actions, never steady-state monitoring.
++
++Provide lightweight legacy router-runtime --status/--probe and host status/
++validate compatibility wrappers invoking the Rust CLI, without persistent Python.
++Preserve expected primary-exit JSON semantics while replacing falsely constant
++DNS/IPv6 assertions with verified fields or not_tested. Queries observational;
++no quarantine mutation from status/probe. Ordinary protected shutdown preserves
++guards; explicit ownership-checked uninstall is a separate operation.
++
++Offline tests use meaningful synthetic stopped-state fixtures from current main
++and retained local retry variant528fece/84fb353, not secret copies. Kill/resume at
++every transaction boundary; change preconditions; interrupted writes/full disk;
++missing adapters/ownership; renamed nodes; custom hooks; backup/state mismatch;
++rollback failure. Prove no duplicate identity process and correct quarantine-first
++ordering. Ignored owned-guest test migrates a NEW disposable legacy installation
++with its own fresh identity, stopped-state backups and declared fake dependents;
++validate real identity retention/name reconciliation and compatible rollback.
++Root may perform authorized final debdev canary only after release gates; second
++existing host remains inaccessible until administrative access is supplied.
++
++Own migration/adapter/wrapper integration plus exact agent instructions for
++preflight, inspect, plan, apply/resume, validation, recovery and rollback. Document
++systemd/runit procedures and compatibility/unsupported matrix. Focused tests,
++fmt/clippy, x86_64/ARM64 checks, explicit owned-file commits and self-review;
++task-12-report.md records exact source/artifact hashes, commands/results, redacted
++transaction evidence and unperformed gates. Independent review before packaging
++or production migration claims; synthetic tests do not certify final acceptance.
+diff --git a/.superpowers/sdd/rust-v2/task-6b-report.md b/.superpowers/sdd/rust-v2/task-6b-report.md
+index 28c9fa8..6e3138c 100644
+--- a/.superpowers/sdd/rust-v2/task-6b-report.md
++++ b/.superpowers/sdd/rust-v2/task-6b-report.md
+@@ -1,12 +1,15 @@
+ # Task 6b implementation report
+ 
++The initial candidate 20 report is retained below. The appended round 1 review-fix
++report supersedes its source/test identities and signal-forwarding/reaping claim.
++
+ Status: DONE_WITH_CONCERNS. Exact candidate 20 passed the controller's isolated
+ kernel smoke test; the 19 earlier failed attempts remain preserved. Independent
+ review of the final diff remains controller-owned and pending.
+ This report is not release acceptance or production activation authorization.
+ 
+ ## Scope and authority
+ 
+ Worktree `/DATA/AppData/vprouter-rust-v2`, branch `rust/v2`; reviewed task6 base
+ `c4b2236748c737837d5b613e2020cb4c4239cbcb`. Implementer never ran the privileged
+ harness locally, touched production runtime, read real state/profiles, enrolled a
+@@ -97,21 +100,21 @@ All final ordinary commands below passed against that exact source:
+ - `cargo check -p vprouter-launch --lib --target aarch64-unknown-linux-musl`:
+   passed; ARM64 runtime remains NOT_RUN.
+ - Both exact static release builds below passed. The workspace test/clippy/ARM64
+   checks afterward did not overwrite the release payloads.
+ 
+ | Static x86_64 musl artifact | SHA256 |
+ | --- | --- |
+ | `target/x86_64-unknown-linux-musl/release/deps/execution_lab-4bd2e8f5005f802d` | `a49a89a3e5db007e20242615422fed039f06bdf7e9dd32a33e324b9285e38be8` |
+ | `target/x86_64-unknown-linux-musl/release/deps/execution_probe-1a715b67f9c47d78` | `7c6a7d16c02a48963dfbe79babbc353d46d37c78c2202dd28f85cd82ab42ae1c` |
+ 
+-Controller run20 at `2026-10-24T14:20:51.053726+00:00` bound that exact commit and
++Controller run 20 at `2026-10-24T14:20:51.053726+00:00` bound that exact commit and
+ both hashes: exit code 0 in 2.187 seconds, all 11 cases PASS including terminal
+ isolated acceptance.
+ The controller independently verified zero launch-lab containers and zero owned
+ namespace pins afterward. Harness self-cleanup completed without controller
+ deletion. Evidence result is `PASS_PARTIAL_SMOKE`; release acceptance is NOT_RUN,
+ `guard_runtime:false`, `activation:false`, `production_changes:false`.
+ 
+ The 11 cases cover locked primary/extra namespace ownership; wrong selected-exit
+ token rejection; unexpected host directory/peer namespace/socket rejection;
+ killed placement-gated child never released/executed; actual cgroup/private PID/
+@@ -260,10 +263,161 @@ were read after final ordinary checks and match executable source commit bff7772
+   query is enforcement. Fixed192.0.2.53 resolver is test-only and unconnected.
+ - Mandatory docker-default plus zero caps is ONLY the synthetic TEST-PROBE
+   profile, not final Debian/Arch/Void policy. No-AppArmor execution is unsupported;
+   ordinary admission fixture coverage does not certify runtime execution.
+ - ARM64 library check/codegen is not ARM64 kernel runtime. Platform release matrix,
+   real networking/client/traffic/kill-leak and end-to-end migration remain NOT_RUN.
+ - The allocation lock/records protect against ordinary races, not a malicious root
+   operator/Docker daemon. Fresh identity checks cannot make inspect+kernel views
+   atomic against privileged mutation after validation.
+ - Independent review of this exact final diff remains controller-owned and pending.
++
++## Round 1 independent-review fixes (current implementation)
++
++Status: DONE_WITH_CONCERNS; all three Important and both Minor findings in
++`.superpowers/sdd/rust-v2/task-6b-review.md` have implementation changes and fresh
++kernel evidence. Controller-owned independent re-review is pending. Reviewed
++baseline was `6a2cbb30af1bf803aaf22a4bed80204b115b96e1`; current executable source is
++`b62cc5c81b40151f9d85c8191400436612c5f56e`.
++
++The historical 19 failures and candidate 20/run 20 output remain preserved. Run 20's
++signal case used forced cleanup before disappearance checks, so its output did
++not establish the claimed forwarding/PID1 reaping behavior. Run 21 replaces that
++claim with the stronger witness and natural-completion checks below. None of this
++is production, guard or release acceptance.
++
++### Changes mapped to findings
++
++1. **Strict close and PID1 final inventory.** `close_except` now uses explicit
++   native openat/getdents, propagates every enumeration/numeric-parsing failure,
++   rejects duplicate/missing scan entries and excludes only its exact owned scan
++   FD. It collects a complete inventory before closing inherited entries. Every
++   selected close is checked; Linux close errors are fatal without an unsafe
++   retry of an already-consumed descriptor. PID1 independently scans immediately
++   after closure and again after seccomp: exactly null stdio plus its retained
++   health descriptor are permitted. Each stdio's retained device identity and
++   non-CLOEXEC flags, and health FIFO type/CLOEXEC flags, are verified separately.
++   Failed closure/inventory/confinement exits directly without dropping inherited
++   FD owners; health close after readiness is checked too.
++2. **Monotonic lifecycle bound.** Shared earliest-deadline logic takes the minimum
++   of existing/new deadlines. Repeated TERM/INT/HUP cannot move it later, including
++   after the immediate deadline from main-worker exit. PID1 gets 500 ms before
++   escalation and 400 ms afterward; intermediate/outer wrappers get 1000/1500 ms
++   before escalation and 1000 ms afterward. Ordering lets inner escalation/reaping
++   finish before wrappers intervene. Synchronous wait errors, forwarding errors,
++   poll invalid/error flags, escalation failures and waitpid failures are explicit.
++   Only EAGAIN/EINTR for timed signal wait, ESRCH for no descendant targets, and an
++   ESRCH plus actually-ready pinned child during forwarding are benign. Successful
++   PID1 completion requires actual ECHILD after reaping the main worker; successful
++   wrappers require their own direct child to exit normally with status 0.
++3. **Unmasked guest signal proof.** Before signaling, the host polls actual
++   protected proc status and requires exactly each worker's namespace-PID3 child
++   to have State T (stopped). The fixed probe blocks shutdown signals before
++   readiness, synchronously observes forwarded TERM and writes only the fixed
++   `/state/forwarded-signal` marker. It remains alive alongside its frozen child,
++   so worker default signal exit cannot hide a moved escalation deadline. PID1
++   writes `/state/reaped-descendant` only after actual waitpid returns that extra
++   descendant. The harness repeatedly delivers TERM/INT/HUP every 25 ms and requires
++   both marker sets plus natural exit status 0 for both launch chains within a
++   fixed 2 second total bound. It performs no forced termination on the success
++   path; Child Drop/force cleanup is reserved for errors. Disappearance checks
++   follow successful natural completion, rather than making force-kill success
++   look like signal forwarding/reaping.
++4. **Minor findings.** The crate summary now states public admission refusal and
++   private synthetic staged execution accurately. Section boundaries identify
++   namespace/mount setup, lifecycle, descriptor closure, identity/LSM, BPF, fixed
++   exec, test-only helpers and offline regressions inside the sole unsafe module.
++   No module split or broad restructuring was performed.
++
++Changed owned files: `crates/vprouter-launch/src/{execution.rs,execution_lab.rs,
++kernel.rs,lib.rs,probe.rs}`, `docs/rust-v2/launch-helper.md`, and this report.
++`execution.rs` only adds a test-only safe natural-wait wrapper. Synthetic signal/
++reap witnesses use already allowed signal-mask/timed-wait/openat/write operations;
++no syscall list, BPF instruction policy, capability, UID/LSM policy, production
++constructor or public activation path was widened. All unsafe stays in kernel.rs.
++
++### Covering verification on exact source b62cc5c
++
++The three added offline regressions are:
++
++- `descriptor_scan_errors_and_malformed_names_are_fatal`: injects an iteration
++  failure after valid entries, invalid UTF8/numeric/negative/overflow names,
++  duplicate scan entries and missing actual scan FD; none can silently succeed.
++- `descriptor_close_failure_cannot_reach_success_and_final_inventory_is_exact`:
++  injects a selected-close error, checks immediate failure with no success path,
++  verifies a real invalid-close failure, and rejects unexpected/missing PID1 FDs.
++- `repeated_signals_never_extend_shutdown_or_worker_exit_deadline`: repeated later
++  deadlines preserve the first, and later signals preserve an earlier worker-exit
++  deadline. Fresh actual frozen-child execution is separately required below.
++
++Commands/results (final outputs clean):
++
++```text
++cargo test -p vprouter-launch --lib
++  18 passed; 0 failed; 0 ignored
++cargo clippy -p vprouter-launch --all-targets -- -D warnings
++  passed
++cargo fmt --all --check
++  passed
++cargo test --workspace --all-targets
++  112 passed; 0 failed; 2 ignored Rust kernel tests
++  3 standalone lab/probe entrypoints safely skipped
++cargo clippy --workspace --all-targets -- -D warnings
++  passed
++cargo check -p vprouter-launch --lib --target aarch64-unknown-linux-musl
++  passed (ARM64 kernel runtime NOT_RUN)
++cargo rustc -p vprouter-launch --release --target x86_64-unknown-linux-musl --test execution_lab -- -C relocation-model=static
++  passed
++cargo rustc -p vprouter-launch --release --target x86_64-unknown-linux-musl --test execution_probe -- -C relocation-model=static
++  passed
++```
++
++The focused tests/clippy and both static builds preceded the fresh controller
++run. After run 21 succeeded, full exact-source fmt/workspace tests/workspace
++clippy/ARM64 checks passed. The release payloads were preserved; `file` identifies
++both as statically linked ELF64 x86-64 executables, and final `sha256sum` checks
++match the controller's payloads:
++
++| Static payload | SHA256 |
++| --- | --- |
++| `target/x86_64-unknown-linux-musl/release/deps/execution_lab-4bd2e8f5005f802d` | `ccd0bcb8c75fc90d91b0bc7660e88828c36667d50a01d08fdc5eb520bc282fa9` |
++| `target/x86_64-unknown-linux-musl/release/deps/execution_probe-1a715b67f9c47d78` | `808789d0d5d59b673c7f6fd55b306c3ecfc05ef0bbdd65731cff2ae7695bd828` |
++
++Controller run 21 observed at `2026-10-24T14:32:50.384492+00:00` bound source
++b62cc5c and both hashes: all 11 cases PASS, exit code 0, overall 1.648 seconds, including:
++
++```text
++LAB_SIGNAL_PROOF stopped_forwarded_reaped_natural repeated_signals elapsed_ms=529
++```
++
++The controller independently verified zero residual launch-lab containers and
++zero owned namespace pins. Harness self-cleanup completed; the controller deleted
++nothing. Full output/identities are retained in `target/lab-state/launch-execution-run-21.json`
++and the committed controller evidence ledger. Result remains `PASS_PARTIAL_SMOKE`,
++release acceptance NOT_RUN, guard_runtime:false, activation:false, production
++changes:false. The implementer ran no privileged harness locally.
++
++### Current changed-source SHA256 identities
++
++These supersede the five corresponding candidate 20 source entries above; all
++other implementer source/lock entries are unchanged.
++
++| Source file | SHA256 |
++| --- | --- |
++| `crates/vprouter-launch/src/execution.rs` | `6c738894993c91342482aac45e485e244e26aed06dba64c46fb3eb34d897cfa1` |
++| `crates/vprouter-launch/src/execution_lab.rs` | `ac6bf948e466de909691c57eae43493a243ec69d8ea35c7a0c864e07cfb42d52` |
++| `crates/vprouter-launch/src/kernel.rs` | `3c0d3621f583d10ccce7e04cbde5c734d0d36852481fa4a354b3cca27350b833` |
++| `crates/vprouter-launch/src/lib.rs` | `46899ccb7268871d470c6f2250159932194d96a4fdaffc7459beae910888f38d` |
++| `crates/vprouter-launch/src/probe.rs` | `80e301163916f7e883de03f34ff5597852954273be67f3f0d36555c1271efcfc` |
++
++### Remaining concerns and unperformed gates
++
++The sole unsafe module is now 2439 lines including BPF/test helpers; sectioning
++improves navigation but its size remains an independent-review concern. The
++unsafe/syscall/subprocess inventory above still applies: no new privileged
++syscall class or production subprocess. Re-review of 6a2cbb3..finalfixHEAD belongs
++to the controller and is pending. ARM64 execution, final Debian/Arch/Void policy,
++actual Rust worker/Go Tailscale artifacts and policies, production resolver/state
++migration authority, independent guard/quarantine, usable networking/real-client
++leakage and release acceptance remain unavailable or NOT_RUN. Public production
++launch continues to refuse; ordinary tests and one successful synthetic kernel
++run do not accept these later gates.
+diff --git a/.superpowers/sdd/rust-v2/task-6b-review.md b/.superpowers/sdd/rust-v2/task-6b-review.md
+new file mode 100644
+index 0000000..8fa5c02
+--- /dev/null
++++ b/.superpowers/sdd/rust-v2/task-6b-review.md
+@@ -0,0 +1,31 @@
++# Independent task6b review
++
++Reviewer /root/review_launch_execution, reviewed c4b2236..6a2cbb3.
++Spec compliance FAIL; task quality Needs fixes; no Critical.
++
++## Important findings (verbatim)
++
++1. **PID1 descriptor isolation can succeed without being verified.**
++   `crates/vprouter-launch/src/kernel.rs:1019` silently discards directory enumeration and parsing errors; individual `close` results are also ignored. PID1 calls this helper at `kernel.rs:945` and proceeds to confinement/readiness without independently checking its remaining descriptor set. Unlike the worker’s `final_fds`, this path can accept a partial scan and retain inherited authority. Make enumeration errors fatal, close using a checked strategy, and verify PID1’s exact final descriptor inventory before readiness. Add focused failure-path coverage.
++
++2. **Repeated signals can postpone escalation indefinitely.**
++   `crates/vprouter-launch/src/kernel.rs:743` and `kernel.rs:971` replace the shutdown deadline whenever another TERM/INT/HUP arrives. Signals arriving faster than the grace period can therefore prevent escalation against frozen descendants; a later signal can also postpone the immediate deadline established after worker exit. Preserve the earliest deadline, and handle forwarding/escalation errors explicitly. Test repeated signals against a frozen descendant with a fixed total shutdown bound.
++
++3. **The signal test masks failed forwarding/reaping with forced cleanup.**
++   `crates/vprouter-launch/src/execution_lab.rs:551` sends TERM, sleeps, then unconditionally calls `terminate()` at line 554 before checking process disappearance. `terminate()` sends SIGKILL to the outer child, whose death chain can remove descendants even if signal forwarding or PID1 escalation never worked. Thus the case can pass with broken behavior. Assert bounded natural completion before forced cleanup, prove the descendant actually reached its frozen state, and use a separate observable witness for forwarded signals. Reserve forced termination for failure cleanup.
++
++## Minor findings (verbatim)
++
++- `crates/vprouter-launch/src/lib.rs:2` — The crate description still says it performs no namespace entry, mutation, or execution, although private execution modules now exist. Update it to describe the public admission-only boundary and private staged executor accurately.
++- `crates/vprouter-launch/src/kernel.rs:1` — Keeping unsafe operations in one module satisfies the requested boundary. Its internal functions have identifiable roles, but section boundaries separating namespace/mount setup, lifecycle, confinement, and test-only helpers would make this 2,166-line review surface easier to maintain.
++
++## Strengths and verification limits
++
++Test-only probe authority binds artifact and compiled policy; ownership binds real
++allocation lock; exclusive generation-bound namespace creation retains interrupted
++state offline; wrappers release roots/authority; host proves worker/privatePID1
++state and namespace identity. Report distinguishes synthetic success from release.
++Actual worker/Go policy, production resolver/state integration, guard/quarantine,
++usable transport, real-client leakage and other platforms remain NOT_RUN.
++Review read full diff sequentially; no source reopening, unchanged-code exploration,
++test execution, privileged/live commands or checkout mutations.
+diff --git a/.superpowers/sdd/rust-v2/task-7-brief.md b/.superpowers/sdd/rust-v2/task-7-brief.md
+index f08c306..58338ae 100644
+--- a/.superpowers/sdd/rust-v2/task-7-brief.md
++++ b/.superpowers/sdd/rust-v2/task-7-brief.md
+@@ -66,10 +66,12 @@ Normal tests use only loopback/Unix sockets, no external provider/profile/state.
+ Provide ignored owned-guest harness for actual pinned tailscaled LocalAPI without
+ advertising routes unless root authorizes under full quarantine. Root runs any
+ kernel/integration acceptance, with evidence preserving failures. No real-client
+ leakage claim from synthetic tests. Run focused checks, commit explicit files,
+ report exact code hashes/commands/results/dependencies and remaining gaps. Return
+ status/commits/short tests/concerns; report file carries detail.
+ 
+ Controller independent read-only pinned LocalAPI oracle is in docs/rust-v2/localapi-lab-evidence.json: actual GET /localapi/v0/status and /localapi/v0/prefs both200 over Unix socket; actual1.102.5 version and nullable empty AdvertiseRoutes/empty ExitNodeID+IP shapes retained. Enrollment-only default NetfilterMode2 is explicitly unready; worker must establish reviewed mode0 before readiness. No write/withdraw/healthy advertised exit tested by this oracle.
+ 
+ Controller public-source oracle docs/rust-v2/tailscale-routing-source-oracle.json binds the peeled v1.102.5 commit to the actual lab version prefix. Upstream Linux route code moved under wgengine/router/osrouter. It documents exact rule intent (5210/5230/5250/5270, marks/mask, disabled sentinel values) and route constructor, but does NOT prove installed kernel metadata. Native Rule projection currently lacks mark/action fields; retain and audit every functional attribute rather than silently ignoring them. Independent kernel shapes and appropriate identity/control witness remain necessary; never allow arbitrary observed table52/default/LAN routes.
++
++Independent observed provider shape: docs/rust-v2/provider-response-oracle.json records one certificate-verified bounded diagnostic GET inside legacy primary data namespace, bypassing proxy environment and not invoking mutating legacy probe. The public projected fields were mullvad_exit_ip:boolean true, ip:string publicIPv4, mullvad_exit_ip_hostname:string de-fra-wg-404 exactly. No unprojected response fields persisted; this is field-shape evidence only, not native worker/provider security or real-client acceptance.
+diff --git a/crates/vprouter-launch/src/execution.rs b/crates/vprouter-launch/src/execution.rs
+index 8fefd80..13e1cf4 100644
+--- a/crates/vprouter-launch/src/execution.rs
++++ b/crates/vprouter-launch/src/execution.rs
+@@ -46,20 +46,24 @@ impl Running {
+     pub fn pid(&self) -> u32 {
+         self.child.pid()
+     }
+     pub fn terminate(self) -> Result<()> {
+         self.child.terminate()
+     }
+     #[cfg(test)]
+     pub fn signal(&self, signal: i32) -> Result<()> {
+         self.child.signal(signal)
+     }
++    #[cfg(test)]
++    pub fn try_wait_success(&mut self) -> Result<bool> {
++        self.child.try_wait_success()
++    }
+ }
+ /// Reject unexpected inherited descriptors before forking. All observed sockets
+ /// (including dormant async reactors) are forbidden. Child final inventory is
+ /// independently closed and verified before exec; stderr is /dev/null too.
+ fn inherited_descriptors() -> Result<()> {
+     super::inventory::verify()
+ }
+ fn state(a: &Admission) -> Result<OwnedFd> {
+     // Allocation validation proves non-overlap with every peer path. Strict
+     // ancestors and a private selected directory prohibit symlink selection.
+diff --git a/crates/vprouter-launch/src/execution_lab.rs b/crates/vprouter-launch/src/execution_lab.rs
+index 6c1d233..20abe4b 100644
+--- a/crates/vprouter-launch/src/execution_lab.rs
++++ b/crates/vprouter-launch/src/execution_lab.rs
+@@ -368,20 +368,133 @@ fn wait_absent(pids: &[u32]) -> Result<()> {
+         }
+         if absent {
+             return Ok(());
+         }
+         if Instant::now() > end {
+             return Err(Error::Deadline);
+         }
+         std::thread::sleep(Duration::from_millis(30));
+     }
+ }
++fn prove_frozen_descendants(id: &str, workers: &[u32]) -> Result<()> {
++    let end = Instant::now() + Duration::from_secs(1);
++    loop {
++        let mut stopped_parents = std::collections::BTreeSet::new();
++        for pid in container_pids(id)? {
++            let status = fs::read_to_string(format!("/proc/{pid}/status"))
++                .map_err(|_| Error::ProcessUnavailable)?;
++            let parent = status
++                .lines()
++                .find_map(|line| line.strip_prefix("PPid:"))
++                .and_then(|value| value.trim().parse::<u32>().ok())
++                .ok_or(Error::ProcessUnavailable)?;
++            if !workers.contains(&parent) {
++                continue;
++            }
++            let ids = status
++                .lines()
++                .find_map(|line| line.strip_prefix("NSpid:"))
++                .ok_or(Error::NamespaceMismatch)?
++                .split_whitespace()
++                .collect::<Vec<_>>();
++            if ids.len() != 3 || ids[2] != "3" {
++                return Err(Error::NamespaceMismatch);
++            }
++            if status
++                .lines()
++                .find_map(|line| line.strip_prefix("State:"))
++                .and_then(|state| state.split_whitespace().next())
++                == Some("T")
++                && !stopped_parents.insert(parent)
++            {
++                return Err(Error::ChildFailed);
++            }
++        }
++        if stopped_parents.len() == workers.len() {
++            return Ok(());
++        }
++        if Instant::now() >= end {
++            return Err(Error::Deadline);
++        }
++        std::thread::sleep(Duration::from_millis(10));
++    }
++}
++fn state_witness(path: &Path, expected: &[u8]) -> Result<bool> {
++    match fs::read(path) {
++        Ok(bytes) if bytes == expected => Ok(true),
++        // Creation and the one small write are separate syscalls. An empty
++        // transient file is not evidence and remains subject to the same bound.
++        Ok(bytes) if bytes.is_empty() => Ok(false),
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
++        _ => Err(Error::ChildFailed),
++    }
++}
++fn signal_and_wait_naturally(
++    one: &mut execution::Running,
++    two: &mut execution::Running,
++    record: &AllocationRecord,
++) -> Result<()> {
++    let start = Instant::now();
++    let mut done = [false; 2];
++    let mut forwarded = false;
++    let mut iteration = 0;
++    loop {
++        // Every signal goes through the actual outer/intermediate/PID1 chain.
++        // Keep delivering faster than every grace period until natural exit.
++        let signal = if !forwarded {
++            libc::SIGTERM
++        } else {
++            [libc::SIGTERM, libc::SIGINT, libc::SIGHUP][iteration % 3]
++        };
++        for (index, child) in [&mut *one, &mut *two].into_iter().enumerate() {
++            if !done[index] {
++                done[index] = child.try_wait_success()?;
++                if !done[index]
++                    && let Err(error) = child.signal(signal)
++                {
++                    if child.try_wait_success()? {
++                        done[index] = true;
++                    } else {
++                        return Err(error);
++                    }
++                }
++            }
++        }
++        forwarded = record
++            .exits
++            .iter()
++            .map(|exit| state_witness(&exit.state_dir.join("worker/forwarded-signal"), b"TERM"))
++            .collect::<Result<Vec<_>>>()?
++            .into_iter()
++            .all(|seen| seen);
++        if start.elapsed() >= Duration::from_secs(2) {
++            return Err(Error::Deadline);
++        }
++        if done == [true, true] {
++            if !forwarded {
++                return Err(Error::ChildFailed);
++            }
++            for exit in &record.exits {
++                if !state_witness(&exit.state_dir.join("worker/reaped-descendant"), b"reaped")? {
++                    return Err(Error::ChildFailed);
++                }
++            }
++            eprintln!(
++                "LAB_SIGNAL_PROOF stopped_forwarded_reaped_natural repeated_signals elapsed_ms={}",
++                start.elapsed().as_millis()
++            );
++            return Ok(());
++        }
++        iteration += 1;
++        std::thread::sleep(Duration::from_millis(25));
++    }
++}
+ pub fn run() -> Result<()> {
+     lab::admit_lab()?;
+     lab::stage("execution_lab_admitted_owned_guest");
+     let dir = PathBuf::from(format!(
+         "/var/lib/vprouter-v2-lab/task6b-{}",
+         std::process::id()
+     ));
+     private(&dir)?;
+     let mut resources = Resources {
+         id: String::new(),
+@@ -499,24 +612,24 @@ pub fn run() -> Result<()> {
+         return Err(Error::PlacementFailed);
+     }
+     for exit in &record.exits {
+         match fs::metadata(exit.state_dir.join("worker/probe")) {
+             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+             _ => return Err(Error::PlacementFailed),
+         }
+     }
+     lab::case("killed_placement_gated_child_never_released_or_executed");
+     lab::stage("launch_first_private_probe");
+-    let running_one =
++    let mut running_one =
+         execution::launch(&one, &tx, &first, execution::VerifiedProgram::probe(&one)?)?;
+     lab::stage("launch_second_private_probe");
+-    let running_two =
++    let mut running_two =
+         execution::launch(&two, &tx, &second, execution::VerifiedProgram::probe(&two)?)?;
+     let pids = workers(&id)?;
+     if pids.len() != 2 {
+         return Err(Error::NamespaceMismatch);
+     }
+     for pid in &pids {
+         let net =
+             fs::metadata(format!("/proc/{pid}/ns/net")).map_err(|_| Error::NamespaceMismatch)?;
+         if (net.dev(), net.ino())
+             == (
+@@ -541,25 +654,24 @@ pub fn run() -> Result<()> {
+             != b"selected-exit-only"
+         {
+             return Err(Error::MountIsolation);
+         }
+     }
+     lab::case("actual_cgroup_nested_pid_proc_private_root_state_fd_cap_seccomp_apparmor");
+     lab::case("post_exec_adversarial_proc_root_and_two_exit_state_isolation");
+     verify_launch_tree(&id)?;
+     lab::case("all_surviving_wrappers_empty_ro_roots_cwd_exact_pidfd_null_caps_lsm_seccomp");
+     let old = container_pids(&id)?;
+-    running_one.signal(libc::SIGTERM)?;
+-    running_two.signal(libc::SIGTERM)?;
+-    std::thread::sleep(Duration::from_millis(1000));
+-    running_one.terminate()?;
+-    running_two.terminate()?;
++    prove_frozen_descendants(&id, &pids)?;
++    // On failure Child::drop remains emergency cleanup. No terminate/SIGKILL
++    // from the harness is permitted before successful natural completion proof.
++    signal_and_wait_naturally(&mut running_one, &mut running_two, &record)?;
+     let after = container_pids(&id)?;
+     if after.len() != 1 {
+         return Err(Error::ChildFailed);
+     }
+     wait_absent(
+         &old.into_iter()
+             .filter(|p| !after.contains(p))
+             .collect::<Vec<_>>(),
+     )?;
+     lab::case("signal_forwarding_pid1_reaping_frozen_descendants");
+diff --git a/crates/vprouter-launch/src/kernel.rs b/crates/vprouter-launch/src/kernel.rs
+index 61aab96..dd10406 100644
+--- a/crates/vprouter-launch/src/kernel.rs
++++ b/crates/vprouter-launch/src/kernel.rs
+@@ -7,20 +7,21 @@
+ //! whose descriptors were closed. All C pointers below borrow live fixed strings
+ //! or initialized buffers across synchronous syscalls only. No signal handlers
+ //! access Rust state: blocked signals are synchronously consumed by PID1.
+ use super::{Error, Result, process};
+ use rustix::fs::{self, Mode, OFlags};
+ use std::{
+     ffi::{CStr, CString},
+     os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd},
+     time::{Duration, Instant},
+ };
++// ---- Fixed diagnostics and checked syscall primitives ----
+ fn cv(r: i32, e: Error) -> Result<()> {
+     if r < 0 { Err(e) } else { Ok(()) }
+ }
+ fn c(s: &str) -> Result<CString> {
+     CString::new(s).map_err(|_| Error::MountIsolation)
+ }
+ fn fdpath(fd: impl AsFd) -> Result<CString> {
+     c(&format!("/proc/self/fd/{}", fd.as_fd().as_raw_fd()))
+ }
+ fn stage_byte(e: Error) -> u8 {
+@@ -82,20 +83,21 @@ fn enter(fd: BorrowedFd<'_>, kind: i32) -> Result<()> {
+         libc::CLONE_NEWNET => T::Network,
+         libc::CLONE_NEWNS => T::Mount,
+         libc::CLONE_NEWPID => T::ProcessID,
+         libc::CLONE_NEWIPC => T::InterProcessCommunication,
+         libc::CLONE_NEWUTS => T::HostNameAndNISDomainName,
+         libc::CLONE_NEWCGROUP => T::ControlGroup,
+         _ => return Err(Error::NamespaceOperation),
+     };
+     rustix::thread::move_into_link_name_space(fd, Some(t)).map_err(|_| Error::NamespaceOperation)
+ }
++// ---- Owned network namespace entry and exclusive pinning ----
+ fn unshare(flags: i32) -> Result<()> {
+     process::single_threaded()?; // SAFETY: dedicated one-task helper, no async runtime or shared descriptor owners in another thread.
+     cv(unsafe { libc::unshare(flags) }, Error::NamespaceOperation)
+ }
+ fn network() -> Result<OwnedFd> {
+     fs::open(
+         "/proc/thread-self/ns/net",
+         OFlags::RDONLY | OFlags::CLOEXEC,
+         Mode::empty(),
+     )
+@@ -149,20 +151,21 @@ pub(super) fn pin_network(target: impl AsFd, source: Option<BorrowedFd<'_>>) ->
+ pub(super) struct ContainerFds<'a> {
+     pub mount: BorrowedFd<'a>,
+     pub pid: BorrowedFd<'a>,
+     pub network: BorrowedFd<'a>,
+     pub ipc: BorrowedFd<'a>,
+     pub uts: BorrowedFd<'a>,
+     pub cgroup_ns: BorrowedFd<'a>,
+     pub root: BorrowedFd<'a>,
+     pub executable: BorrowedFd<'a>,
+ }
++// ---- Gated child ownership, readiness and parent-death lifecycle ----
+ fn pipe() -> Result<(OwnedFd, OwnedFd)> {
+     let mut fds = [-1; 2]; // SAFETY: two initialized integers, ownership transferred once on successful pipe2.
+     cv(
+         unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) },
+         Error::DescriptorPolicy,
+     )?;
+     // SAFETY: successful pipe2 returns two distinct new descriptors.
+     Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
+ }
+ fn pidfd(pid: i32) -> Result<OwnedFd> {
+@@ -191,20 +194,23 @@ fn send(fd: impl AsFd, sig: i32) -> Result<()> {
+ fn wait_ready(fd: impl AsFd, timeout: Duration) -> Result<bool> {
+     let mut p = libc::pollfd {
+         fd: fd.as_fd().as_raw_fd(),
+         events: libc::POLLIN,
+         revents: 0,
+     }; // SAFETY: one initialized pollfd, bounded timeout.
+     let r = unsafe { libc::poll(&mut p, 1, timeout.as_millis().min(i32::MAX as u128) as i32) };
+     if r < 0 {
+         return Err(Error::ChildFailed);
+     }
++    if p.revents & (libc::POLLERR | libc::POLLNVAL) != 0 {
++        return Err(Error::ChildFailed);
++    }
+     Ok(r > 0)
+ }
+ fn write_byte(fd: impl AsFd, byte: u8) -> Result<()> {
+     // SAFETY: one-byte live buffer; no raw external payload emitted.
+     if unsafe { libc::write(fd.as_fd().as_raw_fd(), (&byte as *const u8).cast(), 1) } != 1 {
+         return Err(Error::ChildFailed);
+     }
+     Ok(())
+ }
+ fn read_byte(fd: impl AsFd) -> Result<u8> {
+@@ -356,20 +362,40 @@ impl Child {
+                 221 => return Err(Error::MountStateClone),
+                 _ => return Err(Error::ChildFailed),
+             }
+         }
+         Ok(())
+     }
+     pub fn signal(&self, sig: i32) -> Result<()> {
+         send(&self.pidfd, sig)
+     }
+     #[cfg(test)]
++    pub fn try_wait_success(&mut self) -> Result<bool> {
++        if self.reaped {
++            return Ok(true);
++        }
++        if !wait_ready(&self.pidfd, Duration::ZERO)? {
++            return Ok(false);
++        }
++        let mut status = 0;
++        // SAFETY: exact unreaped direct child, with identity retained by pidfd.
++        if unsafe { libc::waitpid(self.pid as i32, &mut status, 0) } != self.pid as i32 {
++            return Err(Error::ChildFailed);
++        }
++        self.reaped = true;
++        if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0 {
++            Ok(true)
++        } else {
++            Err(Error::ChildFailed)
++        }
++    }
++    #[cfg(test)]
+     pub fn kill_gated(&mut self) -> Result<()> {
+         send(&self.pidfd, libc::SIGKILL)?;
+         // Leave the dead child unreaped until normal failed-placement cleanup;
+         // its numeric PID cannot be reused before the cgroup write is attempted.
+         if wait_ready(&self.pidfd, Duration::from_secs(3))? {
+             Ok(())
+         } else {
+             Err(Error::Deadline)
+         }
+     }
+@@ -469,20 +495,21 @@ pub(super) fn spawn(
+     Ok(Child {
+         _inventory: inventory,
+         release_inventory: Some(release_inventory),
+         pid: pid as u32,
+         pidfd: pinned,
+         release: Some(release_w),
+         health: health_r,
+         reaped: false,
+     })
+ }
++// ---- Container namespace entry and isolated mount-root construction ----
+ fn mount(
+     source: Option<&CStr>,
+     target: &CStr,
+     kind: Option<&CStr>,
+     flags: libc::c_ulong,
+     data: Option<&CStr>,
+ ) -> Result<()> {
+     // SAFETY: all optional C strings live across synchronous mount; no borrowed kernel buffers retained.
+     let result = cv(
+         unsafe {
+@@ -705,64 +732,100 @@ fn init_root() -> Result<()> {
+     .map_err(|_| Error::MountProc)?;
+     mount(
+         None,
+         c"/",
+         None,
+         libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV,
+         None,
+     )
+     .map_err(|_| Error::MountReadonly)
+ }
++// ---- Synchronous signal forwarding, bounded escalation and PID1 reaping ----
+ fn blocked_signals() -> Result<libc::sigset_t> {
+     // SAFETY: zero is initialized storage subsequently initialized by sigemptyset; libc consumes exact sigset size.
+     let mut set = unsafe { std::mem::zeroed() };
+     unsafe {
+         libc::sigemptyset(&mut set);
+         for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGCHLD] {
+             libc::sigaddset(&mut set, sig);
+         }
+     }
+     cv(
+         unsafe { libc::sigprocmask(libc::SIG_BLOCK, &set, std::ptr::null_mut()) },
+         Error::ChildFailed,
+     )?;
+     Ok(set)
+ }
+-fn pending(set: &libc::sigset_t) -> i32 {
++fn pending(set: &libc::sigset_t) -> Result<Option<i32>> {
+     let t = libc::timespec {
+         tv_sec: 0,
+         tv_nsec: 50_000_000,
+     }; // SAFETY: initialized fixed sigset and bounded timespec, no handlers.
+-    unsafe { libc::sigtimedwait(set, std::ptr::null_mut(), &t) }
++    let signal = unsafe { libc::sigtimedwait(set, std::ptr::null_mut(), &t) };
++    if signal >= 0 {
++        return Ok(Some(signal));
++    }
++    match std::io::Error::last_os_error().raw_os_error() {
++        Some(libc::EAGAIN | libc::EINTR) => Ok(None),
++        _ => Err(Error::ChildFailed),
++    }
++}
++fn earliest_deadline(deadline: &mut Option<Instant>, candidate: Instant) {
++    *deadline = Some(deadline.map_or(candidate, |old| old.min(candidate)));
++}
++fn send_or_exited(fd: BorrowedFd<'_>, signal: i32) -> Result<()> {
++    match send(fd, signal) {
++        Ok(()) => Ok(()),
++        Err(error) => {
++            // A pinned child may exit between wait and signal. No numeric PID
++            // fallback; only actual pidfd readiness makes that race harmless.
++            if std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
++                && wait_ready(fd, Duration::ZERO)?
++            {
++                Ok(())
++            } else {
++                Err(error)
++            }
++        }
++    }
+ }
+-fn forward_and_wait(pid: i32, fd: BorrowedFd<'_>, set: &libc::sigset_t) -> Result<()> {
++fn forward_and_wait(
++    pid: i32,
++    fd: BorrowedFd<'_>,
++    set: &libc::sigset_t,
++    grace: Duration,
++) -> Result<()> {
+     let mut deadline = None;
++    let mut escalation = None;
+     loop {
+-        let sig = pending(set);
+-        if matches!(sig, libc::SIGTERM | libc::SIGINT | libc::SIGHUP) {
+-            let _ = send(fd, sig);
+-            deadline = Some(Instant::now() + Duration::from_millis(700));
++        if let Some(sig @ (libc::SIGTERM | libc::SIGINT | libc::SIGHUP)) = pending(set)? {
++            send_or_exited(fd, sig)?;
++            earliest_deadline(&mut deadline, Instant::now() + grace);
+         }
+-        if deadline.is_some_and(|d| Instant::now() >= d) {
+-            let _ = send(fd, libc::SIGKILL);
++        if escalation.is_none() && deadline.is_some_and(|d| Instant::now() >= d) {
++            send_or_exited(fd, libc::SIGKILL)?;
++            escalation = Some(Instant::now() + Duration::from_secs(1));
+         }
+         if wait_ready(fd, Duration::ZERO)? {
+             let mut status = 0; // SAFETY: our unreaped direct child, pinned by fd.
+             if unsafe { libc::waitpid(pid, &mut status, 0) } != pid {
+                 return Err(Error::ChildFailed);
+             }
+             return if libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0 {
+                 Ok(())
+             } else {
+                 Err(Error::ChildFailed)
+             };
+         }
++        if escalation.is_some_and(|d| Instant::now() >= d) {
++            return Err(Error::Deadline);
++        }
+     }
+ }
+ fn wait_role(
+     pid: i32,
+     child: BorrowedFd<'_>,
+     set: &libc::sigset_t,
+     parent: BorrowedFd<'_>,
+     health: BorrowedFd<'_>,
+     ready: u8,
+ ) -> Result<()> {
+@@ -853,21 +916,24 @@ fn wait_role(
+         for n in 0..3 {
+             if approved_null(unsafe { BorrowedFd::borrow_raw(n) })? != expected_null {
+                 return Err(Error::DescriptorStdio);
+             }
+         }
+         apply_filter(&wait_filter()).map_err(|_| Error::WaitFilter)?;
+         write_byte(health, ready)?;
+         unsafe {
+             libc::close(4);
+         }
+-        let result = forward_and_wait(pid, child, set);
++        // PID1 gets 500ms; its immediate wrapper gets 1000ms, the outer 1500ms.
++        // These fixed bounds permit inner escalation and actual reaping first.
++        let grace = Duration::from_millis(if ready == 8 { 1000 } else { 1500 });
++        let result = forward_and_wait(pid, child, set, grace);
+         die(if result.is_ok() { 0 } else { 112 });
+     })();
+     if let Err(e) = result {
+         // One atomic pipe write keeps role+stage together amid other readiness.
+         let bytes = [253u8, ready, stage_byte(e)];
+         unsafe {
+             libc::write(report_fd, bytes.as_ptr().cast(), bytes.len());
+         }
+     }
+     die(111)
+@@ -935,106 +1001,206 @@ fn supervise(
+         let _ = result;
+         die(119);
+     }
+     // Close ALL inherited host handles in PID1 too; Rust FD owners are never
+     // dropped here. Namespace init must not remain a privileged escape target.
+     lsm_supervisor()?;
+     reduce_privileges(16, health)?;
+     if wait_ready(parent, Duration::ZERO)? {
+         return Err(Error::ChildFailed);
+     }
+-    close_except(&[health.as_raw_fd()])?;
+-    if let Err(e) = seccomp() {
++    let confined: Result<()> = (|| {
++        close_except(&[health.as_raw_fd()])?;
++        supervisor_fds(health, null_identity)?;
++        seccomp()?;
++        supervisor_fds(health, null_identity)
++    })();
++    if let Err(e) = confined {
+         report_failure(health, e);
+         die(115);
+     }
+     if write_byte(health, 2).is_err() {
+         die(114);
+     }
+     // SAFETY: supervisor consumes its health descriptor and never unwinds these
+     // inherited FD owners. The signal/reap loop exits via _exit only.
+-    unsafe {
+-        libc::close(health.as_raw_fd());
++    if checked_close(health.as_raw_fd()).is_err() {
++        die(114);
+     }
+     let result = supervisor_loop(set, worker);
+     die(if result.is_ok() { 0 } else { 113 });
+ }
+ fn supervisor_loop(set: &libc::sigset_t, worker: i32) -> Result<()> {
+     let mut deadline = None;
++    let mut escalation = None;
+     let mut main_exited = false;
+     loop {
+-        let sig = pending(set);
+-        if matches!(sig, libc::SIGTERM | libc::SIGINT | libc::SIGHUP) {
+-            // SAFETY: PID1 private namespace; -1 can only address its own descendants.
+-            unsafe {
+-                libc::kill(-1, sig);
+-            }
+-            deadline = Some(Instant::now() + Duration::from_millis(500));
++        if let Some(sig @ (libc::SIGTERM | libc::SIGINT | libc::SIGHUP)) = pending(set)? {
++            signal_descendants(sig)?;
++            earliest_deadline(&mut deadline, Instant::now() + Duration::from_millis(500));
+         }
+-        if deadline.is_some_and(|d| Instant::now() >= d) {
+-            unsafe {
+-                libc::kill(-1, libc::SIGKILL);
+-            }
++        if escalation.is_none() && deadline.is_some_and(|d| Instant::now() >= d) {
++            signal_descendants(libc::SIGKILL)?;
++            escalation = Some(Instant::now() + Duration::from_millis(400));
+         }
+         loop {
+             let mut status = 0; // SAFETY: wait only any direct/adopted children in this private PID namespace.
+             let p = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
+             if p == worker {
+                 main_exited = true;
+-                deadline = Some(Instant::now());
++                earliest_deadline(&mut deadline, Instant::now());
++            } else if p > 0 {
++                #[cfg(test)]
++                write_test_state("/state/reaped-descendant", b"reaped")?;
+             }
+             if p == 0 {
+                 break;
+             }
+             if p < 0 {
+-                return if main_exited {
+-                    Ok(())
+-                } else {
+-                    Err(Error::ChildFailed)
+-                };
++                match std::io::Error::last_os_error().raw_os_error() {
++                    Some(libc::EINTR) => continue,
++                    Some(libc::ECHILD) if main_exited => return Ok(()),
++                    _ => return Err(Error::ChildFailed),
++                }
+             }
+         }
++        if escalation.is_some_and(|d| Instant::now() >= d) {
++            return Err(Error::Deadline);
++        }
+     }
+ }
++fn signal_descendants(signal: i32) -> Result<()> {
++    // SAFETY: private PID1; -1 addresses only descendants of this namespace.
++    if unsafe { libc::kill(-1, signal) } == 0 {
++        return Ok(());
++    }
++    match std::io::Error::last_os_error().raw_os_error() {
++        // No remaining signal targets is benign; waitpid must still establish
++        // ECHILD before successful supervision completion.
++        Some(libc::ESRCH) => Ok(()),
++        _ => Err(Error::ChildFailed),
++    }
++}
++// ---- Descriptor closure and independently verified final inventories ----
+ fn dup_fixed(fd: impl AsFd, to: i32, cloexec: bool) -> Result<()> {
+     // SAFETY: fixed child-only targets, duplicate first to avoid source/target collisions.
+     let saved = unsafe { libc::fcntl(fd.as_fd().as_raw_fd(), libc::F_DUPFD_CLOEXEC, 100) };
+     if saved < 0 {
+         return Err(Error::DescriptorDuplicate);
+     }
+     let result = cv(
+         unsafe { libc::dup3(saved, to, if cloexec { libc::O_CLOEXEC } else { 0 }) },
+         Error::DescriptorDuplicate,
+     );
+     unsafe {
+         libc::close(saved);
+     }
+     result
+ }
+ fn close_except(keep: &[i32]) -> Result<()> {
+     // CLOEXEC is not enough: remove host dirs, sockets, roots and namespace FDs
+     // before untrusted code. Enumeration closes only numeric descriptors; owners
+     // remain inert until this child execs/_exits, never Rust unwinding.
+-    let fds: Vec<_> = std::fs::read_dir("/proc/self/fd")
+-        .map_err(|_| Error::DescriptorClose)?
+-        .filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok())
+-        .collect();
++    close_numbers(descriptor_inventory()?, keep, checked_close)
++}
++fn close_numbers(
++    fds: std::collections::BTreeSet<i32>,
++    keep: &[i32],
++    mut close: impl FnMut(i32) -> Result<()>,
++) -> Result<()> {
+     for fd in fds {
+         if fd > 2 && !keep.contains(&fd) {
+-            // SAFETY: child owns its descriptor table exclusively and will never drop inherited owners.
+-            unsafe {
+-                libc::close(fd);
+-            }
++            close(fd)?;
++        }
++    }
++    Ok(())
++}
++fn checked_close(fd: i32) -> Result<()> {
++    // SAFETY: caller exclusively owns this child's descriptor table; inherited
++    // Rust owners never run after closure. On Linux close consumes the FD even
++    // on EINTR; report failure without a potentially dangerous retry.
++    cv(unsafe { libc::close(fd) }, Error::DescriptorClose)
++}
++fn descriptor_numbers(
++    entries: impl IntoIterator<Item = Result<Vec<u8>>>,
++    scan_fd: i32,
++) -> Result<std::collections::BTreeSet<i32>> {
++    let mut numbers = std::collections::BTreeSet::new();
++    for entry in entries {
++        let name = entry?;
++        if name == b"." || name == b".." {
++            continue;
++        }
++        if name.is_empty() || !name.iter().all(u8::is_ascii_digit) {
++            return Err(Error::DescriptorInventory);
++        }
++        let fd = std::str::from_utf8(&name)
++            .ok()
++            .and_then(|name| name.parse::<i32>().ok())
++            .ok_or(Error::DescriptorInventory)?;
++        if !numbers.insert(fd) {
++            return Err(Error::DescriptorInventory);
++        }
++    }
++    if !numbers.remove(&scan_fd) {
++        return Err(Error::DescriptorInventory);
++    }
++    Ok(numbers)
++}
++fn descriptor_inventory() -> Result<std::collections::BTreeSet<i32>> {
++    let directory = fs::openat(
++        fs::CWD,
++        "/proc/self/fd",
++        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
++        Mode::empty(),
++    )
++    .map_err(|_| Error::DescriptorScanOpen)?;
++    let mut scan = fs::Dir::new(directory).map_err(|_| Error::DescriptorInventory)?;
++    let scan_fd = scan
++        .fd()
++        .map_err(|_| Error::DescriptorInventory)?
++        .as_raw_fd();
++    descriptor_numbers(
++        (&mut scan).map(|entry| {
++            entry
++                .map(|entry| entry.file_name().to_bytes().to_vec())
++                .map_err(|_| Error::DescriptorInventory)
++        }),
++        scan_fd,
++    )
++}
++fn supervisor_fds(health: BorrowedFd<'_>, expected_null: StdioIdentity) -> Result<()> {
++    let health_fd = health.as_raw_fd();
++    supervisor_inventory(descriptor_inventory()?, health_fd)?;
++    for fd in 0..3 {
++        // SAFETY: exact final child stdio is borrowed only for identity checks.
++        if approved_null(unsafe { BorrowedFd::borrow_raw(fd) })? != expected_null
++            || unsafe { libc::fcntl(fd, libc::F_GETFD) } != 0
++        {
++            return Err(Error::DescriptorStdio);
+         }
+     }
++    let stat = fs::fstat(health).map_err(|_| Error::DescriptorHealth)?;
++    if fs::FileType::from_raw_mode(stat.st_mode) != fs::FileType::Fifo
++        || unsafe { libc::fcntl(health_fd, libc::F_GETFD) } != libc::FD_CLOEXEC
++    {
++        return Err(Error::DescriptorHealth);
++    }
+     Ok(())
+ }
++fn supervisor_inventory(fds: std::collections::BTreeSet<i32>, health_fd: i32) -> Result<()> {
++    if health_fd <= 2 || fds != [0, 1, 2, health_fd].into() {
++        return Err(Error::DescriptorInventory);
++    }
++    Ok(())
++}
++// ---- Capability, identity and LSM confinement ----
+ fn reduce_privileges(role: u8, health: BorrowedFd<'_>) -> Result<()> {
+     drop_privileges()?;
+     verify_credentials(role, health)
+ }
+ fn drop_privileges() -> Result<()> {
+     // SAFETY: scalar prctl calls on current child only. Securebits lock all
+     // root/setuid/ambient regain paths; every supported bounding capability drops.
+     cv(
+         unsafe { libc::prctl(libc::PR_SET_SECUREBITS, 0xef, 0, 0, 0) },
+         Error::CapabilityPolicy,
+@@ -1153,31 +1319,31 @@ fn read_fixed(path: &str, limit: usize) -> std::io::Result<Vec<u8>> {
+     let mut bytes = Vec::new();
+     std::fs::File::from(fd)
+         .take(limit as u64 + 1)
+         .read_to_end(&mut bytes)?;
+     if bytes.len() > limit {
+         return Err(std::io::ErrorKind::InvalidData.into());
+     }
+     Ok(bytes)
+ }
+ #[cfg(test)]
+-fn write_probe_state() -> Result<()> {
++fn write_test_state(path: &'static str, value: &[u8]) -> Result<()> {
+     use std::io::Write;
+     let fd = fs::openat(
+         fs::CWD,
+-        "/state/probe",
++        path,
+         OFlags::WRONLY | OFlags::CREATE | OFlags::TRUNC | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+         Mode::RUSR | Mode::WUSR,
+     )
+     .map_err(|_| Error::ProbeStateWrite)?;
+     std::fs::File::from(fd)
+-        .write_all(b"selected-exit-only")
++        .write_all(value)
+         .map_err(|_| Error::ProbeStateWrite)
+ }
+ fn verify_credentials_text(s: &str, role: u8, health: BorrowedFd<'_>) -> Result<()> {
+     for (field, (key, expected)) in [
+         ("Uid:", vec!["65534"; 4]),
+         ("Gid:", vec!["65534"; 4]),
+         ("Groups:", vec![]),
+         ("NoNewPrivs:", vec!["1"]),
+     ]
+     .into_iter()
+@@ -1230,20 +1396,21 @@ fn lsm_exec() -> Result<()> {
+     // Explicit transition required: host-launched tasks inherit no Docker LSM.
+     // Exact profile is fixed by the test-program policy, never caller-supplied.
+     std::fs::write("/proc/self/attr/exec", b"exec docker-default")
+         .map_err(|_| Error::ConfinementPolicy)
+ }
+ fn lsm_supervisor() -> Result<()> {
+     std::fs::write("/proc/self/attr/current", b"changeprofile docker-default")
+         .map_err(|_| Error::ConfinementPolicy)?;
+     lsm_current()
+ }
++// ---- Manifest-bound probe and reduced wait-role seccomp programs ----
+ fn filter() -> Vec<libc::sock_filter> {
+     let mut out = vec![
+         libc::sock_filter {
+             code: 0x20,
+             jt: 0,
+             jf: 0,
+             k: 4,
+         }, // seccomp_data.arch
+         libc::sock_filter {
+             code: 0x15,
+@@ -1536,20 +1703,21 @@ fn apply_filter(f: &[libc::sock_filter]) -> Result<()> {
+     }; // SAFETY: initialized BPF slice lives across synchronous prctl, kernel copies complete program before return.
+     cv(
+         unsafe { libc::prctl(libc::PR_SET_SECCOMP, 2, &p, 0, 0) },
+         Error::ConfinementPolicy,
+     )?;
+     if unsafe { libc::prctl(libc::PR_GET_SECCOMP, 0, 0, 0, 0) } != 2 {
+         return Err(Error::ConfinementPolicy);
+     }
+     Ok(())
+ }
++// ---- Fixed worker exec and post-exec descriptor checks ----
+ fn worker_exec(
+     executable: BorrowedFd<'_>,
+     health: BorrowedFd<'_>,
+     null_identity: StdioIdentity,
+ ) -> Result<()> {
+     process::single_threaded()?;
+     parent_death(1)?;
+     // Duplicate both sources above fixed targets before replacing either one.
+     // SAFETY: creates new child-owned CLOEXEC descriptors; never transferred to Rust owners after final closure.
+     let ex = unsafe { libc::fcntl(executable.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 110) };
+@@ -1694,20 +1862,21 @@ fn final_fds(before_exec: bool, expected_null: Option<StdioIdentity>) -> Result<
+         .fd()
+         .map_err(|_| Error::DescriptorInventory)?
+         .as_raw_fd()
+         != expected
+         || entries != (0..=expected).collect()
+     {
+         return Err(Error::DescriptorScanCount);
+     }
+     Ok(())
+ }
++// ---- Test-only post-exec adversarial probe and isolated guest helpers ----
+ #[cfg(test)]
+ pub(super) fn probe_verify() -> Result<()> {
+     verify_credentials(64, unsafe { BorrowedFd::borrow_raw(3) })?;
+     lsm_current()?;
+     final_fds(false, None)?;
+     let bytes = read_fixed("/proc/self/status", 16384).map_err(|_| Error::ConfinementPolicy)?;
+     let s = std::str::from_utf8(&bytes).map_err(|_| Error::ConfinementPolicy)?;
+     if !s.lines().any(|l| l == "Seccomp:\t2") {
+         return Err(Error::ConfinementPolicy);
+     }
+@@ -1736,21 +1905,21 @@ pub(super) fn probe_verify() -> Result<()> {
+     for path in [
+         "/old",
+         "/run/netns",
+         "/var/run/docker.sock",
+         "/sys/fs/cgroup",
+     ] {
+         if std::fs::metadata(path).is_ok() {
+             return Err(Error::ProbeForbiddenRoot);
+         }
+     }
+-    write_probe_state()?;
++    write_test_state("/state/probe", b"selected-exit-only")?;
+     if fs::openat(
+         fs::CWD,
+         "/etc/forbidden",
+         OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+         Mode::RUSR | Mode::WUSR,
+     )
+     .is_ok()
+     {
+         return Err(Error::ProbeReadonly);
+     }
+@@ -1784,20 +1953,23 @@ pub(super) fn probe_verify() -> Result<()> {
+             }
+         }
+     }
+     if (visible != [2].into() && visible != [1, 2].into()) || std::process::id() != 2 {
+         return Err(Error::ProbeProcSet);
+     }
+     Ok(())
+ }
+ #[cfg(test)]
+ pub(super) fn probe_descendant() -> Result<()> {
++    // Install synchronous handling before clone/readiness. The frozen descendant
++    // inherits blocked shutdown signals and can only be removed by escalation.
++    blocked_signals()?;
+     // SAFETY: one-task post-exec test probe; SIGCHLD alone copies address space
+     // and current stack, never CLONE_VM. x86_64/ARM64 order the ancillary tid/tls
+     // arguments differently, but every such argument is the same null value.
+     // Child only freezes then _exits; no libc atfork state is used after clone.
+     let p = unsafe {
+         libc::syscall(
+             libc::SYS_clone,
+             libc::SIGCHLD,
+             0usize,
+             0usize,
+@@ -1810,20 +1982,40 @@ pub(super) fn probe_descendant() -> Result<()> {
+     }
+     if p == 0 {
+         unsafe {
+             libc::kill(libc::getpid(), libc::SIGSTOP);
+         }
+         die(0);
+     }
+     Ok(())
+ }
+ #[cfg(test)]
++pub(super) fn probe_signal_loop() -> Result<()> {
++    let set = blocked_signals()?;
++    let mut witnessed = false;
++    loop {
++        if let Some(signal @ (libc::SIGTERM | libc::SIGINT | libc::SIGHUP)) = pending(&set)?
++            && !witnessed
++        {
++            let value: &[u8] = match signal {
++                libc::SIGTERM => b"TERM",
++                libc::SIGINT => b"INT",
++                _ => b"HUP",
++            };
++            write_test_state("/state/forwarded-signal", value)?;
++            witnessed = true;
++            // Remain alive so repeated signals cannot hide a moved PID1 deadline
++            // behind ordinary worker exit. Actual SIGKILL must reap both roles.
++        }
++    }
++}
++#[cfg(test)]
+ pub(super) fn probe_ready() -> Result<()> {
+     // SAFETY: fixed health descriptor was verified pipe after exec.
+     let fd = unsafe { BorrowedFd::borrow_raw(3) };
+     write_byte(fd, 1)
+ }
+ #[cfg(test)]
+ pub(super) fn verify_pid_parent(pid: u32, expected: BorrowedFd<'_>) -> Result<()> {
+     let fd = fs::open(
+         format!("/proc/{pid}/ns/pid"),
+         OFlags::RDONLY | OFlags::CLOEXEC,
+@@ -1972,23 +2164,104 @@ pub(super) fn probe_container_reap() {
+             break;
+         }
+     }
+ }
+ #[cfg(test)]
+ pub(super) fn probe_failure(error: Error) {
+     // SAFETY: post-exec probe owns fixed health FD3; only fixed enum byte emitted.
+     let fd = unsafe { BorrowedFd::borrow_raw(3) };
+     report_failure(fd, error);
+ }
++// ---- Offline policy, descriptor-fault and monotonic-deadline regressions ----
+ #[cfg(test)]
+ mod policy_tests {
+     use super::*;
++    #[test]
++    fn descriptor_scan_errors_and_malformed_names_are_fatal() {
++        assert_eq!(
++            descriptor_numbers(
++                [
++                    Ok(b"0".to_vec()),
++                    Err(Error::DescriptorInventory),
++                    Ok(b"9".to_vec())
++                ],
++                9
++            ),
++            Err(Error::DescriptorInventory)
++        );
++        for invalid in [b"x".as_slice(), b"-1", b"", b"2147483648", b"\xff"] {
++            assert_eq!(
++                descriptor_numbers([Ok(b"9".to_vec()), Ok(invalid.to_vec())], 9),
++                Err(Error::DescriptorInventory)
++            );
++        }
++        // Scan FD must itself be present exactly once, never an arbitrary entry
++        // silently ignored because it disappeared or failed to parse.
++        assert_eq!(
++            descriptor_numbers([Ok(b"0".to_vec())], 9),
++            Err(Error::DescriptorInventory)
++        );
++        assert_eq!(
++            descriptor_numbers([Ok(b"9".to_vec()), Ok(b"9".to_vec())], 9),
++            Err(Error::DescriptorInventory)
++        );
++        assert_eq!(
++            descriptor_numbers(
++                [
++                    Ok(b".".to_vec()),
++                    Ok(b"..".to_vec()),
++                    Ok(b"0".to_vec()),
++                    Ok(b"9".to_vec())
++                ],
++                9
++            ),
++            Ok([0].into())
++        );
++    }
++    #[test]
++    fn descriptor_close_failure_cannot_reach_success_and_final_inventory_is_exact() {
++        let mut visited = Vec::new();
++        assert_eq!(
++            close_numbers([0, 1, 2, 3, 40, 41].into(), &[3], |fd| {
++                visited.push(fd);
++                Err(Error::DescriptorClose)
++            }),
++            Err(Error::DescriptorClose)
++        );
++        assert_eq!(visited, [40]);
++        assert_eq!(checked_close(-1), Err(Error::DescriptorClose));
++        assert_eq!(supervisor_inventory([0, 1, 2, 3].into(), 3), Ok(()));
++        for fds in [vec![0, 1, 2, 3, 40], vec![0, 1, 3], vec![0, 1, 2]] {
++            assert_eq!(
++                supervisor_inventory(fds.into_iter().collect(), 3),
++                Err(Error::DescriptorInventory)
++            );
++        }
++        assert_eq!(
++            supervisor_inventory([0, 1, 2].into(), 2),
++            Err(Error::DescriptorInventory)
++        );
++    }
++    #[test]
++    fn repeated_signals_never_extend_shutdown_or_worker_exit_deadline() {
++        let now = Instant::now();
++        let first = now + Duration::from_millis(500);
++        let mut deadline = None;
++        earliest_deadline(&mut deadline, first);
++        for later in 1..100 {
++            earliest_deadline(&mut deadline, first + Duration::from_millis(later * 50));
++            assert_eq!(deadline, Some(first));
++        }
++        earliest_deadline(&mut deadline, now);
++        earliest_deadline(&mut deadline, first);
++        assert_eq!(deadline, Some(now));
++    }
+     fn verdict(arch: u32, nr: u32, arg: u64) -> u32 {
+         verdict_program(&filter(), arch, nr, arg)
+     }
+     fn verdict_program(instructions: &[libc::sock_filter], arch: u32, nr: u32, arg: u64) -> u32 {
+         let mut pc = 0;
+         let mut accumulator = 0;
+         for _ in 0..2048 {
+             let i = &instructions[pc];
+             match i.code {
+                 0x20 => {
+diff --git a/crates/vprouter-launch/src/lib.rs b/crates/vprouter-launch/src/lib.rs
+index 15f5582..263233d 100644
+--- a/crates/vprouter-launch/src/lib.rs
++++ b/crates/vprouter-launch/src/lib.rs
+@@ -1,12 +1,13 @@
+ #![deny(unsafe_code)]
+-//! Descriptor-backed admission only. No namespace entry, mutation or execution.
++//! Public descriptor-backed admission refuses activation. The private staged
++//! executor supports only the synthetic, manifest-bound test probe.
+ mod evidence;
+ #[allow(dead_code)]
+ mod execution;
+ #[cfg(test)]
+ pub mod execution_lab;
+ #[allow(dead_code)]
+ mod inventory;
+ #[allow(unsafe_code, dead_code)]
+ mod kernel;
+ #[cfg(test)]
+diff --git a/crates/vprouter-launch/src/probe.rs b/crates/vprouter-launch/src/probe.rs
+index d14d4ee..4267a06 100644
+--- a/crates/vprouter-launch/src/probe.rs
++++ b/crates/vprouter-launch/src/probe.rs
+@@ -11,14 +11,15 @@ pub fn main() {
+     if args != ["--isolated-probe"] {
+         std::process::exit(118);
+     }
+     let result = super::kernel::probe_verify()
+         .and_then(|()| super::kernel::probe_descendant())
+         .and_then(|()| super::kernel::probe_ready());
+     if let Err(e) = result {
+         super::kernel::probe_failure(e);
+         std::process::exit(117);
+     }
+-    loop {
+-        std::thread::sleep(std::time::Duration::from_secs(60));
++    if let Err(error) = super::kernel::probe_signal_loop() {
++        super::kernel::probe_failure(error);
++        std::process::exit(117);
+     }
+ }
+diff --git a/docs/rust-v2/launch-execution-lab-evidence.json b/docs/rust-v2/launch-execution-lab-evidence.json
+index 8c03ba5..3c45f32 100644
+--- a/docs/rust-v2/launch-execution-lab-evidence.json
++++ b/docs/rust-v2/launch-execution-lab-evidence.json
+@@ -294,20 +294,35 @@
+         "launch-execution-lab": "a49a89a3e5db007e20242615422fed039f06bdf7e9dd32a33e324b9285e38be8",
+         "launch-execution-probe": "7c6a7d16c02a48963dfbe79babbc353d46d37c78c2202dd28f85cd82ab42ae1c"
+       },
+       "exit_code": 0,
+       "wall_seconds": 2.187,
+       "stdout": "{\"case\":\"owned_generation_locked_primary_base_and_independent_extra_namespaces\",\"result\":\"pass\"}\n{\"case\":\"wrong_selected_exit_namespace_token_executes_nothing\",\"result\":\"pass\"}\n{\"case\":\"unexpected_host_directory_peer_namespace_socket_execute_nothing\",\"result\":\"pass\"}\n{\"case\":\"killed_placement_gated_child_never_released_or_executed\",\"result\":\"pass\"}\n{\"case\":\"actual_cgroup_nested_pid_proc_private_root_state_fd_cap_seccomp_apparmor\",\"result\":\"pass\"}\n{\"case\":\"post_exec_adversarial_proc_root_and_two_exit_state_isolation\",\"result\":\"pass\"}\n{\"case\":\"all_surviving_wrappers_empty_ro_roots_cwd_exact_pidfd_null_caps_lsm_seccomp\",\"result\":\"pass\"}\n{\"case\":\"signal_forwarding_pid1_reaping_frozen_descendants\",\"result\":\"pass\"}\n{\"case\":\"launcher_parent_death_kills_and_reaps_namespace_descendants\",\"result\":\"pass\"}\n{\"case\":\"container_death_kills_all_launch_children\",\"result\":\"pass\"}\n{\"case\":\"launch_execution_isolated_acceptance\",\"result\":\"pass\",\"guard_runtime\":false,\"activation\":false}\n",
+       "stderr": "LAB_STAGE execution_lab_admitted_owned_guest\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_STAGE launch_first_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE launch_second_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE parent_loss_kills_actual_launch_tree\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE container_death_kills_actual_launch_tree\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE cleanup_exact_namespace_pins\nLAB_UNPIN_RECORD exit_index=0 kind=data\nLAB_UNPIN_RECORD exit_index=0 kind=transport\nLAB_UNPIN_RECORD exit_index=1 kind=data\nLAB_UNPIN_RECORD exit_index=1 kind=transport\nLAB_STAGE cleanup_exact_container\nLAB_STAGE cleanup_exact_synthetic_directory\n",
+       "result": "PASS_PARTIAL_SMOKE",
+       "release_acceptance": "NOT_RUN",
+       "production_changes": false
++    },
++    {
++      "observed_at_utc": "2026-10-24T14:32:50.384492+00:00",
++      "implementation_commit": "b62cc5c81b40151f9d85c8191400436612c5f56e",
++      "artifacts": {
++        "launch-execution-lab": "ccd0bcb8c75fc90d91b0bc7660e88828c36667d50a01d08fdc5eb520bc282fa9",
++        "launch-execution-probe": "808789d0d5d59b673c7f6fd55b306c3ecfc05ef0bbdd65731cff2ae7695bd828"
++      },
++      "exit_code": 0,
++      "wall_seconds": 1.648,
++      "stdout": "{\"case\":\"owned_generation_locked_primary_base_and_independent_extra_namespaces\",\"result\":\"pass\"}\n{\"case\":\"wrong_selected_exit_namespace_token_executes_nothing\",\"result\":\"pass\"}\n{\"case\":\"unexpected_host_directory_peer_namespace_socket_execute_nothing\",\"result\":\"pass\"}\n{\"case\":\"killed_placement_gated_child_never_released_or_executed\",\"result\":\"pass\"}\n{\"case\":\"actual_cgroup_nested_pid_proc_private_root_state_fd_cap_seccomp_apparmor\",\"result\":\"pass\"}\n{\"case\":\"post_exec_adversarial_proc_root_and_two_exit_state_isolation\",\"result\":\"pass\"}\n{\"case\":\"all_surviving_wrappers_empty_ro_roots_cwd_exact_pidfd_null_caps_lsm_seccomp\",\"result\":\"pass\"}\n{\"case\":\"signal_forwarding_pid1_reaping_frozen_descendants\",\"result\":\"pass\"}\n{\"case\":\"launcher_parent_death_kills_and_reaps_namespace_descendants\",\"result\":\"pass\"}\n{\"case\":\"container_death_kills_all_launch_children\",\"result\":\"pass\"}\n{\"case\":\"launch_execution_isolated_acceptance\",\"result\":\"pass\",\"guard_runtime\":false,\"activation\":false}\n",
++      "stderr": "LAB_STAGE execution_lab_admitted_owned_guest\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_STAGE launch_first_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE launch_second_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_SIGNAL_PROOF stopped_forwarded_reaped_natural repeated_signals elapsed_ms=529\nLAB_STAGE parent_loss_kills_actual_launch_tree\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE container_death_kills_actual_launch_tree\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE cleanup_exact_namespace_pins\nLAB_UNPIN_RECORD exit_index=0 kind=data\nLAB_UNPIN_RECORD exit_index=0 kind=transport\nLAB_UNPIN_RECORD exit_index=1 kind=data\nLAB_UNPIN_RECORD exit_index=1 kind=transport\nLAB_STAGE cleanup_exact_container\nLAB_STAGE cleanup_exact_synthetic_directory\n",
++      "result": "PASS_PARTIAL_SMOKE",
++      "release_acceptance": "NOT_RUN",
++      "production_changes": false
+     }
+   ],
+   "cleanups": [
+     {
+       "task_directory": "/var/lib/vprouter-v2-lab/task6b-6229",
+       "ownership_snapshot": {
+         "schema_version": 1,
+         "allocation": {
+           "schema_version": 2,
+           "deployment_id": "launchlab",
+@@ -1874,35 +1889,57 @@
+       "exact_owned_pins_unmounted": [
+         "vr-data-5899ff8938d06f4f",
+         "vr-data-f75016890123b845",
+         "vr-trans-5899ff8938d06f4f",
+         "vr-trans-f75016890123b845"
+       ],
+       "remaining_pins": [],
+       "records_retained": true,
+       "production_changes": false
+     },
++    {
++      "remaining_pins": [],
++      "residual_containers": 0,
++      "post_run_absence_verified": true,
++      "harness_self_cleanup": true,
++      "controller_removed_resources": false,
++      "production_changes": false
++    },
+     {
+       "remaining_pins": [],
+       "residual_containers": 0,
+       "post_run_absence_verified": true,
+       "harness_self_cleanup": true,
+       "controller_removed_resources": false,
+       "production_changes": false
+     }
+   ],
+   "component_acceptance": "PASS_ISOLATED_SYNTHETIC_EXECUTION_PENDING_INDEPENDENT_REVIEW",
+   "production_changes": false,
+   "real_worker_execution": "NOT_RUN",
+   "real_client_leakage_acceptance": "NOT_RUN",
+   "release_acceptance": "NOT_RUN",
+   "limitations": [
+     "Test-only synthetic direct-mode allocation has no usable network path, addresses/defaults/link activation or direct exposure.",
+     "No provider credentials or real Tailscale identity state used by launch harness.",
+     "First two attempts failed before any successful post-exec worker case.",
+     "Offline ownership records retained after exact test-only pin cleanup.",
+     "Nineteen failed attempts retained, including successful runtime checks with final cleanup failure.",
+-    "Successful test-built static probe does not implement or certify the actual Rust worker, Go tailscaled policy, running host guard, usable transport, client no-fallback or release traffic gates."
++    "Successful test-built static probe does not implement or certify the actual Rust worker, Go tailscaled policy, running host guard, usable transport, client no-fallback or release traffic gates.",
++    "Attempt20 signal-forwarding/reaping claim was invalidated by independent review: the harness forced cleanup before asserting natural completion. Attempt21 requires host-observed frozen descendants, a forwarded-signal marker, an actual PID1 descendant waitpid marker, and natural exit0 under repeated signals. Fix review remains pending."
+   ],
+-  "passed_source_commit": "bff77724213f0c275ecc1b1b119a3fcb605871fe",
+-  "passed_attempt": 20
++  "passed_source_commit": "b62cc5c81b40151f9d85c8191400436612c5f56e",
++  "passed_attempt": 21,
++  "review": {
++    "initial_verdict": "FAIL",
++    "reviewed_head": "6a2cbb30af1bf803aaf22a4bed80204b115b96e1",
++    "important_findings": [
++      "pid1_descriptor_failure_not_fail_closed",
++      "signals_reset_shutdown_deadline",
++      "forced_cleanup_masks_signal_test"
++    ],
++    "fix_round": 1,
++    "fixed_source_commit": "b62cc5c81b40151f9d85c8191400436612c5f56e",
++    "kernel_fix_smoke": "PASS",
++    "independent_rereview": "PENDING"
++  }
+ }
+diff --git a/docs/rust-v2/launch-helper.md b/docs/rust-v2/launch-helper.md
+index 56798b5..2918255 100644
+--- a/docs/rust-v2/launch-helper.md
++++ b/docs/rust-v2/launch-helper.md
+@@ -202,22 +202,34 @@ confinement. The test profile has UID/GID65534, no supplementary groups and zero
+ effective/permitted/inheritable/ambient/bounding capabilities. Securebits0xef and
+ no_new_privs are set and verified. Child stdio is fixed `/dev/null`; worker FD3 is
+ a pipe for fixed health/error bytes; CLOEXEC FD4 is the verified executable and
+ is consumed via fixed `execveat(AT_EMPTY_PATH)`. All other descriptors are closed
+ and final inventory verified. Fixed argv is `vprouter-worker --isolated-probe`;
+ fixed environment is exactly `LANG=C`, `PATH=/bin`. No inherited secret/proxy env
+ is passed. Parent readiness requires both explicit confined-PID1 readiness and
+ post-exec worker verification and both reduced wrapper readiness messages.
+ Post-closure failures `_exit`, never unwind through inherited FD owners.
+ 
++PID1 closure uses strict native enumeration: any entry, numeric parsing or close
++failure refuses readiness. Only the exact temporary scan FD is excluded. An
++independent scan before and after seccomp requires precisely approved null
++stdio plus the retained CLOEXEC health pipe; identity/type and descriptor flags
++are checked separately. The health descriptor is closed with a checked operation
++after readiness, leaving no host authority.
++
+ Synchronous blocked-signal handling forwards TERM/INT/HUP and PID1 reaps adopted
+-descendants. Bounded escalation kills frozen descendants. pidfds avoid host PID
++descendants. Shutdown retains the earliest monotonic deadline across repeated
++signals and worker exit. PID1 escalates after 500 ms; intermediate and outer wait
++roles allow 1000ms and1500 ms respectively, so inner reaping precedes outer
++escalation. Post-escalation waits are also bounded. Signal, wait and close errors
++are fatal; only explicit no-target/observed pinned-child-exit races are benign.
++Bounded escalation kills frozen descendants. pidfds avoid host PID
+ reuse, PDEATHSIG links the launch chain, and private PID1 death kills its PID
+ namespace. Actual kernel behavior, not Docker GET/status, is the evidence gate.
+ Independent host guard/quarantine remains a separate future failure boundary.
+ 
+ The two surviving placement wrappers each create an independent empty read-only
+ tmpfs root and cwd, pivot out and detach their old root. Neither retains proc,
+ state, host root, namespace or cgroup descriptors. After setting approved null
+ stdio and establishing confinement, the only extra descriptor is an exact child
+ pidfd. A separate wait-role filter denies all pathname operations, namespace
+ changes, network access, fork and exec. All roles clear the inherited environment;
+@@ -257,10 +269,19 @@ Controller alone installs current exact hashes under protected lab paths
+ unshare --net /var/lib/vprouter-v2-lab/launch-execution-lab --ignored
+ ```
+ 
+ The harness creates only new disposable network-none containers and synthetic
+ `task6b-PID` state. Normal tests never run it. Failed attempts retain ownership
+ records/mount pins offline for explicit ownership-safe controller cleanup. A
+ successful run unpins only its exact records after container/process death and
+ verifying no live process uses each network identity. Historical failed attempts
+ are not replaced by later successes. See controller evidence and task6b report for
+ actual per-case PASS/FAIL/NOT_RUN; this document is not kernel acceptance proof.
++
++The strengthened signal case requires host-observed stopped state for each exact
++worker's descendant before signals, a fixed selected-state witness written by
++the worker after actually receiving forwarded TERM, and a separate test-only
++PID1 witness written after actual descendant waitpid. Repeated TERM/INT/HUP
++continue until both launch chains naturally exit successfully within 2 seconds.
++The harness cannot invoke force termination to establish that result; forced
++cleanup remains a failure path. These witnesses use existing admitted syscalls
++and selected synthetic state, with no policy or capability expansion.
+diff --git a/docs/rust-v2/provider-response-oracle.json b/docs/rust-v2/provider-response-oracle.json
+new file mode 100644
+index 0000000..2fbc1c2
+--- /dev/null
++++ b/docs/rust-v2/provider-response-oracle.json
+@@ -0,0 +1,29 @@
++{
++  "observed_at_utc": "2026-10-24T14:33:50.247348+00:00",
++  "environment": "existing legacy primary data namespace; read-only bounded diagnostic",
++  "method": "one fixed HTTPS GET with certificate verification and ProxyHandler({}); maximum16384bytes; timeout12s; only public allowlisted fields printed",
++  "status": 200,
++  "field_projection": {
++    "mullvad_exit_ip": {
++      "type": "boolean",
++      "value": true
++    },
++    "ip": {
++      "type": "string",
++      "value": "169.150.211.139"
++    },
++    "mullvad_exit_ip_hostname": {
++      "type": "string",
++      "value": "de-fra-wg-404"
++    }
++  },
++  "production_configuration_changes": false,
++  "legacy_probe_invoked": false,
++  "native_worker_acceptance": "NOT_RUN",
++  "real_client_traffic_acceptance": "NOT_RUN",
++  "limits": [
++    "This proves the observed provider response field names/types and exact server string for one legacy namespace request.",
++    "It does not prove native TLS, route/server verification, client selection, capture sensitivity or fail-closed behavior.",
++    "Unprojected provider response fields were not printed or persisted."
++  ]
++}

@@ -1913,7 +1913,7 @@
       "production_changes": false
     }
   ],
-  "component_acceptance": "PASS_ISOLATED_SYNTHETIC_EXECUTION_PENDING_INDEPENDENT_REVIEW",
+  "component_acceptance": "PASS_ISOLATED_SYNTHETIC_EXECUTION_INDEPENDENT_REVIEW_APPROVED",
   "production_changes": false,
   "real_worker_execution": "NOT_RUN",
   "real_client_leakage_acceptance": "NOT_RUN",
@@ -1940,6 +1940,8 @@
     "fix_round": 1,
     "fixed_source_commit": "b62cc5c81b40151f9d85c8191400436612c5f56e",
     "kernel_fix_smoke": "PASS",
-    "independent_rereview": "PENDING"
+    "independent_rereview": "PASS",
+    "reviewed_fix_head": "427a124fbffd6777f99e2c77325fd681fa97f3f3",
+    "reviewer": "/root/review_launch_execution"
   }
 }

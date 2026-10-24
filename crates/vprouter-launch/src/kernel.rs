@@ -248,6 +248,35 @@ impl Child {
                 2 => init = true,
                 4 => outer = true,
                 8 => intermediate = true,
+                253 => {
+                    let role = read_byte(&self.health)?;
+                    let stage = read_byte(&self.health)?;
+                    let error = match stage {
+                        201 => Error::NamespaceOperation,
+                        204 => Error::CapabilityPolicy,
+                        211 => Error::MountPrivate,
+                        212 => Error::MountTmp,
+                        215 => Error::MountPivot,
+                        217 => Error::MountReadonly,
+                        242 => Error::WaitLsmTransition,
+                        243 => Error::WaitLsmRead,
+                        244 => Error::WaitLsmLabel,
+                        245 => Error::WaitFilter,
+                        _ => Error::ChildFailed,
+                    };
+                    #[cfg(test)]
+                    eprintln!(
+                        "LAB_WAIT_ROLE {} {error}",
+                        match role {
+                            4 => "outer",
+                            8 => "intermediate",
+                            _ => "invalid",
+                        }
+                    );
+                    #[cfg(not(test))]
+                    let _ = role;
+                    return Err(error);
+                }
                 201 => return Err(Error::NamespaceOperation),
                 202 => return Err(Error::MountIsolation),
                 203 => return Err(Error::DescriptorPolicy),
@@ -593,6 +622,9 @@ fn setup(
         // survival and dies/kills PID1 as one unit on parent/container loss.
         let result = (|| {
             parent_death(0)?;
+            // fork copied the mount-namespace reference. PID1 must unshare before
+            // pivot/detach so it cannot disconnect its intermediate parent's root.
+            unshare(libc::CLONE_NEWNS).map_err(|_| Error::MountPrivate)?;
             init_root()?;
             supervise(health, &signals, init_parent.as_fd(), null_identity)
         })();
@@ -793,7 +825,11 @@ fn wait_role(
         die(if result.is_ok() { 0 } else { 112 });
     })();
     if let Err(e) = result {
-        report_failure(unsafe { BorrowedFd::borrow_raw(report_fd) }, e);
+        // One atomic pipe write keeps role+stage together amid other readiness.
+        let bytes = [253u8, ready, stage_byte(e)];
+        unsafe {
+            libc::write(report_fd, bytes.as_ptr().cast(), bytes.len());
+        }
     }
     die(111)
 }
@@ -801,14 +837,16 @@ fn wait_root() -> Result<()> {
     // The wrapper gets a new mount namespace so neither host nor confined init
     // sees this empty root. No directory/state/proc survives the pivot.
     unshare(libc::CLONE_NEWNS)?;
-    mount(None, c"/", None, libc::MS_REC | libc::MS_PRIVATE, None)?;
+    mount(None, c"/", None, libc::MS_REC | libc::MS_PRIVATE, None)
+        .map_err(|_| Error::MountPrivate)?;
     mount(
         Some(c"tmpfs"),
         c"/tmp",
         Some(c"tmpfs"),
         libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
         Some(c"mode=0755,size=64k"),
-    )?;
+    )
+    .map_err(|_| Error::MountTmp)?;
     std::fs::create_dir("/tmp/old").map_err(|_| Error::MountPivot)?;
     cv(
         unsafe {
@@ -829,6 +867,7 @@ fn wait_root() -> Result<()> {
         libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
         None,
     )
+    .map_err(|_| Error::MountReadonly)
 }
 fn supervise(
     health: BorrowedFd<'_>,

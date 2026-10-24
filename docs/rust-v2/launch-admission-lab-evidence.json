@@ -1,0 +1,143 @@
+{
+  "observed_at_utc": "2026-10-24T13:14:47.113720+00:00",
+  "environment": "owned disposable Debian13 KVM guest",
+  "command": "sudo unshare --net /var/lib/vprouter-v2-lab/launch-admission-lab --ignored",
+  "production_changes": false,
+  "guard_runtime": false,
+  "launch_available": false,
+  "attempts": [
+    {
+      "implementation_commit": "uncommitted task6 candidate based on47381e8",
+      "payload_sha256": "223d4c87dc61c9d10c4b189b4d5f758af83be32be30b283ff99ba0478aa2eb91",
+      "probe_sha256": "2c1068174b100fd21339c6a633a76f5318c0fa0ff02bd71dafcec0a6d22cc362",
+      "exit_code": 1,
+      "wall_seconds": 0.698,
+      "result": "FAIL",
+      "completed_cases": [],
+      "stages": [
+        "admitted_owned_isolated_guest",
+        "create_new_disposable_pinned_container"
+      ],
+      "reason": "docker_unavailable",
+      "output": "No raw Docker/env/process payloads emitted."
+    },
+    {
+      "implementation_commit": "uncommitted task6 candidate with documented optional field handling",
+      "payload_sha256": "ca9b082473a8e97bdd6d99535959855b651f1aaeb3e0b1eac6b6ee42716ed691",
+      "probe_sha256": "2c1068174b100fd21339c6a633a76f5318c0fa0ff02bd71dafcec0a6d22cc362",
+      "exit_code": 1,
+      "wall_seconds": 0.626,
+      "result": "FAIL",
+      "completed_cases": [],
+      "stages": [
+        "admitted_owned_isolated_guest",
+        "create_new_disposable_pinned_container",
+        "native_container_inspect",
+        "native_image_inspect",
+        "positive_native_docker_proc_fd_admission"
+      ],
+      "reason": "unsupported_configuration"
+    },
+    {
+      "implementation_commit": "task6 candidate preceding final test-only dependency update",
+      "payload_sha256": "4185cb908d271309b0bebe0dba530e8e5156b7c42e2250ecdf8f1c8185e00375",
+      "probe_sha256": "2c1068174b100fd21339c6a633a76f5318c0fa0ff02bd71dafcec0a6d22cc362",
+      "exit_code": 0,
+      "wall_seconds": 1.279,
+      "result": "PASS",
+      "completed_cases": [
+        "native_docker_proc_root_cgroup_namespaces_static_executable_admitted",
+        "real_wrong_namespace_and_cgroup_descriptors_refused",
+        "actual_artifact_bytes_hash_mismatch_refused",
+        "changed_starttime_container_manifest_hash_refused",
+        "real_foreign_deployment_container_refused",
+        "paused_and_dead_container_stale_handles_refused"
+      ],
+      "guard_runtime": false,
+      "activation": false
+    },
+    {
+      "implementation_commit": "5dbcccb9d37af11d11cb5e0f0fc766a89f71ea87",
+      "payload_sha256": "cc51f123326640a730639171d138f4132d09ca71dff98d243f14a2de2928605b",
+      "probe_sha256": "2c1068174b100fd21339c6a633a76f5318c0fa0ff02bd71dafcec0a6d22cc362",
+      "exit_code": 0,
+      "wall_seconds": 1.139,
+      "result": "PASS",
+      "completed_cases": [
+        "native_docker_proc_root_cgroup_namespaces_static_executable_admitted",
+        "real_wrong_namespace_and_cgroup_descriptors_refused",
+        "actual_artifact_bytes_hash_mismatch_refused",
+        "changed_starttime_container_manifest_hash_refused",
+        "real_foreign_deployment_container_refused",
+        "paused_and_dead_container_stale_handles_refused"
+      ],
+      "guard_runtime": false,
+      "activation": false
+    }
+  ],
+  "diagnostics": [
+    {
+      "kind": "read_only_unix_socket",
+      "path": "/run/docker.sock",
+      "owner_uid": 0,
+      "group_gid": 104,
+      "mode": "0660",
+      "direct_version_http_status": 200
+    },
+    {
+      "kind": "new_disposable_probe_container",
+      "run_exit": 0,
+      "cleanup": "only exact created full ID removed",
+      "projected_field_shapes": {
+        "Config.Volumes": "present null",
+        "HostConfig.Mounts": "absent",
+        "HostConfig.Init": "absent",
+        "HostConfig.Tmpfs": "absent",
+        "HostConfig.Sysctls": "absent",
+        "HostConfig.CapAdd": "present null",
+        "HostConfig.DeviceRequests": "present null",
+        "HostConfig.DeviceCgroupRules": "present null",
+        "HostConfig.VolumesFrom": "present null",
+        "HostConfig.GroupAdd": "present null",
+        "AppArmorProfile": "present string",
+        "ProcessLabel": "present string",
+        "MountLabel": "present string"
+      },
+      "verified_residual_containers": 0
+    },
+    {
+      "kind": "exact_default_mask_profile",
+      "runtime": "runc",
+      "security_opt": [
+        "no-new-privileges"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "single_bind_read_only": true,
+      "propagation": "rprivate",
+      "masked_paths_difference_from_hardened12": [
+        "/proc/interrupts absent from exact Docker26 default11"
+      ],
+      "interrupts_metadata": {
+        "exists": true,
+        "type": "regular",
+        "mode": "0444",
+        "rdev": 0,
+        "exact_mount_entry": false,
+        "file_bytes_read": false
+      },
+      "correction": "only exact known11 or hardened12 profile accepted, arbitrary subsets rejected"
+    }
+  ],
+  "component_acceptance": "PASS_ISOLATED_ADMISSION_ONLY_PENDING_REVIEW",
+  "real_worker_execution": "NOT_RUN",
+  "release_acceptance": "NOT_RUN",
+  "residual_synthetic_containers_after_final_run": 0,
+  "limitations": [
+    "No namespace entry, mounts, cgroup placement, worker exec, capabilities or descriptor closure tested.",
+    "Admission descriptor ownership is not selected-exit placement or quarantine authority.",
+    "Systemd cgroup2 profile only; Void/runit and cgroupfs support remain unimplemented.",
+    "No real credentials, Tailscale routes, protected traffic or production changes."
+  ]
+}

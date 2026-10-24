@@ -537,6 +537,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vprouter-netfilter"
+version = "0.1.0"
+dependencies = [
+ "rustix",
+ "serde",
+ "serde_json",
+ "vprouter-core",
+]
+
+[[package]]
 name = "want"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

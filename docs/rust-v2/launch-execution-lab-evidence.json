@@ -241,6 +241,21 @@
       "result": "FAIL",
       "release_acceptance": "NOT_RUN",
       "production_changes": false
+    },
+    {
+      "observed_at_utc": "2026-10-24T14:15:09.222161+00:00",
+      "implementation_commit": "98176e7",
+      "artifacts": {
+        "launch-execution-lab": "9c8eb8b3d49cd06d3580b90aa4970bba56b1b24c1c5326a309a4d8ba561acf45",
+        "launch-execution-probe": "522d28657fdd0a53eaa855fd7603ed4d3c988aaef1f6cafa4ca630e7fc3e2315"
+      },
+      "exit_code": 1,
+      "wall_seconds": 0.953,
+      "stdout": "{\"case\":\"owned_generation_locked_primary_base_and_independent_extra_namespaces\",\"result\":\"pass\"}\n{\"case\":\"wrong_selected_exit_namespace_token_executes_nothing\",\"result\":\"pass\"}\n{\"case\":\"unexpected_host_directory_peer_namespace_socket_execute_nothing\",\"result\":\"pass\"}\n{\"case\":\"killed_placement_gated_child_never_released_or_executed\",\"result\":\"pass\"}\n",
+      "stderr": "LAB_STAGE execution_lab_admitted_owned_guest\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_STAGE launch_first_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nexecution_lab: probe_proc_hidden_init\n",
+      "result": "FAIL",
+      "release_acceptance": "NOT_RUN",
+      "production_changes": false
     }
   ],
   "cleanups": [
@@ -1514,6 +1529,89 @@
               "exit_id": "two",
               "mode": "direct",
               "state_dir": "/var/lib/vprouter-v2-lab/task6b-13838/two",
+              "data_namespace": "vr-data-5899ff8938d06f4f",
+              "transport_namespace": "vr-trans-5899ff8938d06f4f",
+              "nft_table": "vr_5899ff8938d06f4f",
+              "host_interface": "vhff8938d06f4f",
+              "data_interface": "vdff8938d06f4f",
+              "wireguard_interface": null,
+              "transport_subnet": "10.201.189.60/30"
+            }
+          ]
+        },
+        "primary_exit_id": "one",
+        "base_network": {
+          "dev": 4,
+          "ino": 4026532321
+        },
+        "entries": [
+          {
+            "exit_id": "one",
+            "data_name": "vr-data-f75016890123b845",
+            "transport_name": "vr-trans-f75016890123b845",
+            "phase": "offline",
+            "data": {
+              "dev": 4,
+              "ino": 4026532321
+            },
+            "transport": {
+              "dev": 4,
+              "ino": 4026532379
+            }
+          },
+          {
+            "exit_id": "two",
+            "data_name": "vr-data-5899ff8938d06f4f",
+            "transport_name": "vr-trans-5899ff8938d06f4f",
+            "phase": "offline",
+            "data": {
+              "dev": 4,
+              "ino": 4026532436
+            },
+            "transport": {
+              "dev": 4,
+              "ino": 4026532493
+            }
+          }
+        ]
+      },
+      "live_netns_users": [],
+      "only_loopback_and_no_default_verified": true,
+      "exact_owned_pins_unmounted": [
+        "vr-data-5899ff8938d06f4f",
+        "vr-data-f75016890123b845",
+        "vr-trans-5899ff8938d06f4f",
+        "vr-trans-f75016890123b845"
+      ],
+      "remaining_pins": [],
+      "records_retained": true,
+      "production_changes": false
+    },
+    {
+      "task_directory": "/var/lib/vprouter-v2-lab/task6b-14352",
+      "ownership_snapshot": {
+        "schema_version": 1,
+        "allocation": {
+          "schema_version": 2,
+          "deployment_id": "launchlab",
+          "generation": 1,
+          "exits": [
+            {
+              "exit_id": "one",
+              "mode": "direct",
+              "state_dir": "/var/lib/vprouter-v2-lab/task6b-14352/one",
+              "data_namespace": "vr-data-f75016890123b845",
+              "transport_namespace": "vr-trans-f75016890123b845",
+              "nft_table": "vr_f75016890123b845",
+              "host_interface": "vh16890123b845",
+              "data_interface": "vd16890123b845",
+              "wireguard_interface": null,
+              "transport_subnet": "10.202.225.20/30"
+            },
+            {
+              "exit_id": "two",
+              "mode": "direct",
+              "state_dir": "/var/lib/vprouter-v2-lab/task6b-14352/two",
               "data_namespace": "vr-data-5899ff8938d06f4f",
               "transport_namespace": "vr-trans-5899ff8938d06f4f",
               "nft_table": "vr_5899ff8938d06f4f",

@@ -217,10 +217,15 @@ Commands/results for this fix, all without host network mutation or credentials:
 8. `git diff --check` and `git diff --cached --check`: PASS.
 
 Because cleanup's public preflight changed, the updated payload is supplied for
-controller rerun of the existing ignored guest harness. The earlier attempt8 PASS
-above applies only to the previous payload, not this fix. This implementer has
-not run the updated payload in a guest. No new ignored lab execution or runtime
-acceptance is claimed; controller evidence remains separately owned.
+controller rerun of the existing ignored guest harness. The controller reported
+attempt9 PASS for SHA256 `584577685bd0b61a45dc610c0e708ef04f0171e823060681d1f8d6a6b7a2f284`:
+exit0, 1 passed/15 filtered, .23s test duration (.36s SSH wall), all five existing
+cases and final JSON passed, `guard_runtime:false`, `activation:false`. The
+controller used the same owned disposable guest and command documented above.
+This supersedes attempt8 only for the current payload; prior failed attempts and
+their evidence remain preserved. This implementer did not execute the guest
+harness; controller evidence remains separately owned. Scoped component success
+does not establish runtime, traffic, activation or release acceptance.
 
 Only `crates/vprouter-network/src/{native,socket}.rs`,
 `docs/rust-v2/network.md`, and this report were changed/staged by this implementer.

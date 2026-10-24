@@ -263,3 +263,39 @@ readiness is added. Focused regression, full worker42 tests, fmt and all-target
 launch/worker clippy pass; botharchitecture fixed observers/init/payload/contexts
 are rebuilt before root uses a new exact source freeze. Runtime acceptance and
 strict live-bound kernel/lifecycle work remain pending.
+
+
+## Candidate12 exact zero-Self observation status
+
+Root frozen11 attempt17 remains FAILchild_failed and retained. Its54 FD2-only
+metadata traces classify observer39758 status types[4,4,6,1], Self types[4,2,2,1],
+prefs types[2,2,2,2,5,3,4,4,2,2,2], then status_parse_refused. No API values or
+body were emitted. This witnesses a Self object and null top/Self IP slices.
+
+Public source https://raw.githubusercontent.com/tailscale/tailscale/v1.102.5/ipn/ipnstate/ipnstate.go
+is retained only under target/public-source/ipnstate.go (24600B), SHA256
+f0a1ec32918502b0c248a095c5d123704e4ad47a4bbc72db6e3e18f3af084268.
+Lines418-419 state `if sb.st.Self == nil { sb.st.Self = new(PeerStatus) }`;
+PeerStatus has `TailscaleIPs []netip.Addr` and zero ID/Online/ExitNodeOption fields.
+Public source https://raw.githubusercontent.com/tailscale/tailscale/v1.102.5/ipn/ipnlocal/local.go
+is target/public-source/ipnlocal-local.go (312260B), SHA256
+e3f29a92e870ee23fdbecf8d1c0a0ccc1f3b7e0858785d9121224dc290ee403d.
+StatusWithoutPeers(lines1442-1445) always calls UpdateStatus. Lines1517 onward
+always call `sb.MutateSelfStatus(...)`, setting OS and Online; node ID and IPs
+are assigned only inside `if nm != nil`, with TailscaleIPs appended only there.
+Nil Go slices marshal to null; zero Self therefore exists without enrollment.
+
+Candidate12 adds separate observation-only status/node types. Only null/empty
+IP slices are accepted; a nonnull Self must have exactly blankID, Online=false,
+ExitNodeOption=false and zero IPs. Required relevant fields keep strict types.
+Top IPs must be empty and version/backend predicates remain exact. The existing
+production Ready DaemonStatus/Node parser is unchanged and still rejects null
+IP arrays. Regression independently rejects nonblankID, online, approval,
+Self/top IPs, unknown version, Running state, arbitrary/partial Self and invalid
+IP data. A fixed four-boolean node predicate vector gives fresh runtime proof
+of all required zero-Self properties without values; existing diagnostic vector
+sizes remain unchanged. Diagnostics will be removed from the normal observer
+path after this isolated proof. Full worker43 tests, fmt and all-target launch/
+worker clippy pass; botharchitecture static artifacts are rebuilt/source-bound.
+No enrolled identity/ready/kernel-shape authority or daemon networking success
+is claimed by this compatibility fix; recvmmsgEPERM remains unapproved/unverified.

@@ -7,8 +7,8 @@
     {
       "role": "worker_observer",
       "path": "/usr/local/bin/vprouter-worker-observe",
-      "sha256": "0c1a241ebb9a0ceb40e3947c30384ba9fd613d5a3c6924e8fe193189451238bb",
-      "bytes": 2832960,
+      "sha256": "d3284d28e4b411164a0f0b5c542f9d3635fa2d2c15677f1a4856f6ca0858efd6",
+      "bytes": 2834904,
       "policy": "observation-only-zero-caps-private-root-v2"
     },
     {

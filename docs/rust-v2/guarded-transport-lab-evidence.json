@@ -252,6 +252,33 @@
         "target/lab-state/guarded-transport-inspect-11.json",
         "target/lab-state/guarded-transport-wan-cleanup-11.json"
       ]
+    },
+    {
+      "observed_at_utc": "2026-10-24T15:57:28.386760+00:00",
+      "artifact_sha256": "5fb811e1b05b8b3351486ef7e73a90f721fba006e397c30e7d6b2355de7e5f1e",
+      "source_archive_sha256": "4c39ccfa36407c1aaf5c2206cedc622e21007383a3cd486f8e06a50089cbf701",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\nLAB_STAGE inject_network_fault_0\nLAB_NATIVE_FAILURE stage=lab_restore_audit reason=DataDrift\ntransport_lab: network_operation\n",
+      "wall_seconds": 2.136,
+      "attempt": 12,
+      "candidate": 14,
+      "result": "FAIL_FIRST_FAULT_DATA_ROUTE_RESTORATION",
+      "partial_cases": [
+        "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+        "independent_data_transport_host_positive_capture_sensitivity",
+        "same_namespace_destination_port_other_socket_producer_denied",
+        "established_input_other_producer_denied"
+      ],
+      "quarantine_observation": "full offline quarantine retained after injected WGdown/up and refused restoration audit",
+      "capture_or_traffic": "initial synthetic roundtrip and independent positive controls passed; complete fault/capture verdict unavailable",
+      "diagnosis": "nonpromiscuous capture removes instrumentation interference; fresh pre-fault audit passes; WGdown removes IPv4 default which linkUP alone does not restore",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; other native/test ownership retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-12.json",
+        "target/lab-state/guarded-transport-inspect-12.json",
+        "target/lab-state/guarded-transport-wan-cleanup-12.json"
+      ]
     }
   ],
   "production_changes": false,

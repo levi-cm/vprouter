@@ -1894,6 +1894,11 @@ pub(super) fn lab_unpin(dir: BorrowedFd<'_>, name: &str, id: super::owned::Ident
             }
         }
     }
+    // The validated bind-mount FD itself holds a mount reference. Release only
+    // this local proof handle after identity and zero-user checks, before normal
+    // unmount. The locked root0700 directory/name remain retained and protected;
+    // never lazy-detach, force-unmount or fall back to another path.
+    drop(fd);
     let target = c(&format!("/proc/self/fd/{}/{}", dir.as_raw_fd(), name))?;
     // SAFETY: descriptor-relative exact retained record name verified as nsfs;
     // no process uses this namespace. Test-only, not generic production cleanup.

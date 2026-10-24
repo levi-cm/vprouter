@@ -76,7 +76,9 @@ constructor assignment or asserts unconditional launch_unavailable alone.
 Provide ignored owned-guest harness with existing root-only lab-marker and
 self-vs-PID1 netns admission. Fixed external Docker commands allowed ONLY test
 code, no shell. Create NEW labeled disposable network-none/read-only/capdropALL
-container from pinned known image with synthetic static Rust probe. Native API
+container from pinned image
+`tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065`
+(Tailscale1.102.5, already in guest) with synthetic static Rust probe. Native API
 and proc/FD evidence must positively admit correct configuration and refuse
 foreign label/container, wrong image/manifest/hash/starttime/cgroup/namespace.
 Revalidate after container exit to prove stale handles do not authorize launch.

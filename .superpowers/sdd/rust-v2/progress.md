@@ -170,3 +170,7 @@ Ruling: split prepared launch-helper package into task6 admission and task6b exe
 Task5 fix1 code8a1c97c reports247991f+d63050e;15unit+compilefaildoc/fmt/clippy/ARM64compile/staticbuild PASS reported. Root reran changed cleanup payload584577685bd0b61a45dc610c0e708ef04f0171e823060681d1f8d6a6b7a2f284: guest attempt9 PASSexit0/.23s with5cases and0residualnamespaces. Review /root/review_network resumed scoped0631fb0..d63050e; approval pending.
 
 Task5 fix round1/5:2addressed,0open; commits0631fb0..d63050e, independent /root/review_network spec PASS/quality Approved. Task5 complete bounded DOWN-only native network component (48293d5..d63050e, review clean). Full WP3/4/5 guard/activation/runtime gates remain pending; no READY claim. Task6 admission may begin after root evidence bookkeeping commit.
+
+Task6 /root/launch_admission dispatched at47381e8, admission only per split ruling; exact pinned Tailscale digest added to task6 brief and supplied to implementer.
+
+Root independent WG socket-birth kernel oracle (external ip/wg, no native component invoked) attempt1 FAILED positive capture sensitivity before tunnel; fixed tcpdump immediate mode. Attempt2 PASS with3encrypted ping replies after moving WG to data namespace containing only lo+WG. Positive control2plaintext markers; tunnel capture8outer WG UDP/0ICMP/0plaintext markers, root verified0residualnamednamespaces. Source+hash/evidence retained, no provider/Tailscale/fulltraffic gate claim. Native end-to-end socket-birth verification remains pending.

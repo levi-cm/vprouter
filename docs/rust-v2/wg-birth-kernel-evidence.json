@@ -1,0 +1,54 @@
+{
+  "observed_at_utc": "2026-10-24T13:09:04.401316+00:00",
+  "environment": "owned disposable Debian13 KVM guest, kernel6.12.113+deb13-cloud-amd64",
+  "command": "sudo unshare --net python3 /root/wg-birth-oracle.py",
+  "source": "tools/wg-birth-kernel-oracle.py",
+  "script_sha256": "7746a2db1988136a9d3d3c05bca98718607eedc5554245301d78c2f54b7010e6",
+  "attempts": [
+    {
+      "script_sha256": "006ab7beab3b9bc74c73b836cfb7095e81333950342d80afb6e590db436f0bd0",
+      "result": "FAIL",
+      "exit_code": 1,
+      "reason": "positive_capture_control_failed; test stopped before tunnel experiment",
+      "correction": "tcpdump immediate mode so queued packets reach capture before SIGINT"
+    },
+    {
+      "script_sha256": "7746a2db1988136a9d3d3c05bca98718607eedc5554245301d78c2f54b7010e6",
+      "exit_code": 0,
+      "case": "independent_wireguard_socket_birth_namespace",
+      "result": "PASS",
+      "encrypted_ping_replies": 3,
+      "data_interfaces": [
+        "lo",
+        "wgbirth"
+      ],
+      "positive_capture": {
+        "packets": 5,
+        "wireguard_port_udp_packets": 0,
+        "icmp_packets": 1,
+        "plaintext_marker_packets": 2
+      },
+      "encrypted_capture": {
+        "packets": 13,
+        "wireguard_port_udp_packets": 8,
+        "icmp_packets": 0,
+        "plaintext_marker_packets": 0
+      },
+      "keys": "fresh_disposable_not_output_or_persisted",
+      "provider_credentials_used": false,
+      "native_component_invoked": false,
+      "real_client_acceptance": "NOT_RUN"
+    }
+  ],
+  "residual_named_namespaces": 0,
+  "production_changes": false,
+  "guard_runtime": false,
+  "native_network_component_exercised": false,
+  "limitations": [
+    "Independent external ip/wg kernel-property oracle only; not native actuator end-to-end.",
+    "No provider credentials, Tailscale traffic, direct exit or actual application test client.",
+    "No firewall containment or full leak fault matrix claim.",
+    "Disposable synthetic keys in process memory/stdin only; not production secrets.",
+    "Mandatory release acceptance remains NOT_RUN."
+  ]
+}

@@ -301,6 +301,21 @@
       "result": "PASS_PARTIAL_SMOKE",
       "release_acceptance": "NOT_RUN",
       "production_changes": false
+    },
+    {
+      "observed_at_utc": "2026-10-24T14:32:50.384492+00:00",
+      "implementation_commit": "b62cc5c81b40151f9d85c8191400436612c5f56e",
+      "artifacts": {
+        "launch-execution-lab": "ccd0bcb8c75fc90d91b0bc7660e88828c36667d50a01d08fdc5eb520bc282fa9",
+        "launch-execution-probe": "808789d0d5d59b673c7f6fd55b306c3ecfc05ef0bbdd65731cff2ae7695bd828"
+      },
+      "exit_code": 0,
+      "wall_seconds": 1.648,
+      "stdout": "{\"case\":\"owned_generation_locked_primary_base_and_independent_extra_namespaces\",\"result\":\"pass\"}\n{\"case\":\"wrong_selected_exit_namespace_token_executes_nothing\",\"result\":\"pass\"}\n{\"case\":\"unexpected_host_directory_peer_namespace_socket_execute_nothing\",\"result\":\"pass\"}\n{\"case\":\"killed_placement_gated_child_never_released_or_executed\",\"result\":\"pass\"}\n{\"case\":\"actual_cgroup_nested_pid_proc_private_root_state_fd_cap_seccomp_apparmor\",\"result\":\"pass\"}\n{\"case\":\"post_exec_adversarial_proc_root_and_two_exit_state_isolation\",\"result\":\"pass\"}\n{\"case\":\"all_surviving_wrappers_empty_ro_roots_cwd_exact_pidfd_null_caps_lsm_seccomp\",\"result\":\"pass\"}\n{\"case\":\"signal_forwarding_pid1_reaping_frozen_descendants\",\"result\":\"pass\"}\n{\"case\":\"launcher_parent_death_kills_and_reaps_namespace_descendants\",\"result\":\"pass\"}\n{\"case\":\"container_death_kills_all_launch_children\",\"result\":\"pass\"}\n{\"case\":\"launch_execution_isolated_acceptance\",\"result\":\"pass\",\"guard_runtime\":false,\"activation\":false}\n",
+      "stderr": "LAB_STAGE execution_lab_admitted_owned_guest\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_STAGE launch_first_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE launch_second_private_probe\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_SIGNAL_PROOF stopped_forwarded_reaped_natural repeated_signals elapsed_ms=529\nLAB_STAGE parent_loss_kills_actual_launch_tree\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE container_death_kills_actual_launch_tree\nLAB_EXEC_STAGE selected_state_admission\nLAB_EXEC_STAGE descriptor_admission\nLAB_EXEC_STAGE placement_gated_spawn\nLAB_EXEC_STAGE post_exec_readiness\nLAB_STAGE cleanup_exact_namespace_pins\nLAB_UNPIN_RECORD exit_index=0 kind=data\nLAB_UNPIN_RECORD exit_index=0 kind=transport\nLAB_UNPIN_RECORD exit_index=1 kind=data\nLAB_UNPIN_RECORD exit_index=1 kind=transport\nLAB_STAGE cleanup_exact_container\nLAB_STAGE cleanup_exact_synthetic_directory\n",
+      "result": "PASS_PARTIAL_SMOKE",
+      "release_acceptance": "NOT_RUN",
+      "production_changes": false
     }
   ],
   "cleanups": [
@@ -1888,6 +1903,14 @@
       "harness_self_cleanup": true,
       "controller_removed_resources": false,
       "production_changes": false
+    },
+    {
+      "remaining_pins": [],
+      "residual_containers": 0,
+      "post_run_absence_verified": true,
+      "harness_self_cleanup": true,
+      "controller_removed_resources": false,
+      "production_changes": false
     }
   ],
   "component_acceptance": "PASS_ISOLATED_SYNTHETIC_EXECUTION_PENDING_INDEPENDENT_REVIEW",
@@ -1901,8 +1924,22 @@
     "First two attempts failed before any successful post-exec worker case.",
     "Offline ownership records retained after exact test-only pin cleanup.",
     "Nineteen failed attempts retained, including successful runtime checks with final cleanup failure.",
-    "Successful test-built static probe does not implement or certify the actual Rust worker, Go tailscaled policy, running host guard, usable transport, client no-fallback or release traffic gates."
+    "Successful test-built static probe does not implement or certify the actual Rust worker, Go tailscaled policy, running host guard, usable transport, client no-fallback or release traffic gates.",
+    "Attempt20 signal-forwarding/reaping claim was invalidated by independent review: the harness forced cleanup before asserting natural completion. Attempt21 requires host-observed frozen descendants, a forwarded-signal marker, an actual PID1 descendant waitpid marker, and natural exit0 under repeated signals. Fix review remains pending."
   ],
-  "passed_source_commit": "bff77724213f0c275ecc1b1b119a3fcb605871fe",
-  "passed_attempt": 20
+  "passed_source_commit": "b62cc5c81b40151f9d85c8191400436612c5f56e",
+  "passed_attempt": 21,
+  "review": {
+    "initial_verdict": "FAIL",
+    "reviewed_head": "6a2cbb30af1bf803aaf22a4bed80204b115b96e1",
+    "important_findings": [
+      "pid1_descriptor_failure_not_fail_closed",
+      "signals_reset_shutdown_deadline",
+      "forced_cleanup_masks_signal_test"
+    ],
+    "fix_round": 1,
+    "fixed_source_commit": "b62cc5c81b40151f9d85c8191400436612c5f56e",
+    "kernel_fix_smoke": "PASS",
+    "independent_rereview": "PENDING"
+  }
 }

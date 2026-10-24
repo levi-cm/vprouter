@@ -259,3 +259,11 @@ Examples are in [`examples/v2`](../../examples/v2/README.md). They contain
 synthetic schema fixtures and a digest placeholder, not usable credentials or
 an approved image. All runtime, client, migration, platform and performance
 acceptance gates in `IMPLEMENTATION.md` remain unperformed by this package.
+
+Known WireGuard profile option names are ASCII case insensitive for compatibility
+with legacy ConfigParser output (`privatekey`, `address`, `dns`, `publickey`,
+`allowedips`, `endpoint`). This includes optional `mtu` and `persistentkeepalive`.
+Duplicates are rejected after case normalization, so `PrivateKey` and
+`privatekey` cannot coexist. Section names, allowed options, values and server
+validation remain strict. Migration keeps the original profile path, including
+generic names such as `max-vprouter.conf`.

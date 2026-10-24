@@ -86,13 +86,15 @@ impl Profile {
                 continue;
             }
             let (field, value) = line.split_once('=').ok_or_else(invalid)?;
-            let (field, value) = (field.trim(), value.trim());
-            if value.is_empty() || !fields.insert((section, field)) {
+            // Legacy ConfigParser writes known option names in lowercase. Normalize
+            // before duplicate detection; section names and values stay strict.
+            let (field, value) = (field.trim().to_ascii_lowercase(), value.trim());
+            if value.is_empty() || !fields.insert((section, field.clone())) {
                 return Err(invalid());
             }
-            match (section, field) {
-                ("[Interface]", "PrivateKey") => private_key = Some(SecretKey(decode_key(value)?)),
-                ("[Interface]", "Address") => {
+            match (section, field.as_str()) {
+                ("[Interface]", "privatekey") => private_key = Some(SecretKey(decode_key(value)?)),
+                ("[Interface]", "address") => {
                     let mut seen = HashSet::new();
                     for network in value.split(',').map(str::trim) {
                         if !seen.insert(network) {
@@ -119,12 +121,12 @@ impl Profile {
                         }
                     }
                 }
-                ("[Interface]", "DNS") => {
+                ("[Interface]", "dns") => {
                     for dns in value.split(',') {
                         dns.trim().parse::<IpAddr>().map_err(|_| invalid())?;
                     }
                 }
-                ("[Interface]", "MTU") => {
+                ("[Interface]", "mtu") => {
                     if !value
                         .parse::<u16>()
                         .ok()
@@ -133,15 +135,15 @@ impl Profile {
                         return Err(invalid());
                     }
                 }
-                ("[Peer]", "PublicKey") => public_key = Some(decode_key(value)?),
-                ("[Peer]", "Endpoint") => {
+                ("[Peer]", "publickey") => public_key = Some(decode_key(value)?),
+                ("[Peer]", "endpoint") => {
                     let ep = value.parse::<SocketAddrV4>().map_err(|_| invalid())?;
                     if ep.port() == 0 || !public_ipv4(*ep.ip()) {
                         return Err(invalid());
                     }
                     endpoint = Some(ep);
                 }
-                ("[Peer]", "AllowedIPs") => {
+                ("[Peer]", "allowedips") => {
                     let mut seen = HashSet::new();
                     for network in value.split(',').map(str::trim) {
                         if !seen.insert(network) {
@@ -167,7 +169,7 @@ impl Profile {
                         }
                     }
                 }
-                ("[Peer]", "PersistentKeepalive") => {
+                ("[Peer]", "persistentkeepalive") => {
                     value.parse::<u16>().map_err(|_| invalid())?;
                 }
                 _ => return Err(invalid()),

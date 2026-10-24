@@ -302,3 +302,91 @@ fn clamp_equivalent_wireguard_keys_are_one_identity_even_when_disabled() {
         }
     }
 }
+
+#[test]
+fn lowercase_legacy_profile_retains_generic_source_path_and_public_fields() {
+    // Synthetic keys and public endpoint; models ConfigParser's lowercased options.
+    let legacy = profile(KEY)
+        .lines()
+        .map(|line| match line.split_once('=') {
+            Some((field, value)) => format!("{}={value}", field.to_ascii_lowercase()),
+            None => line.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let generic = "/profiles/max-vprouter.conf";
+    let raw =
+        input(&exit("primary", "/state/primary")).replace("/profiles/de-fra-wg-404.conf", generic);
+    let config = Configuration::parse(raw.as_bytes())
+        .unwrap()
+        .validate_with(|path, server| {
+            assert_eq!(path, std::path::Path::new(generic));
+            Profile::parse(legacy.as_bytes(), server, Some(path))
+        })
+        .unwrap();
+    let validated = &config.exits()[0];
+    match &validated.exit().mode {
+        vprouter_core::config::Mode::Mullvad { profile, .. } => {
+            assert_eq!(profile, std::path::Path::new(generic))
+        }
+        _ => panic!("expected Mullvad fixture"),
+    }
+    let parsed = validated.profile().unwrap();
+    assert_eq!(parsed.endpoint().to_string(), "185.65.134.88:51820");
+    assert_eq!(parsed.address().to_string(), "10.64.0.2");
+    assert_eq!(parsed.expected_server(), "de-fra-wg-404");
+    assert!(parsed.has_matching_server_hint());
+}
+
+#[test]
+fn profile_known_options_are_ascii_case_insensitive_and_duplicates_still_fail() {
+    let base = profile(KEY)
+        .replace("DNS =", "MTU = 1420\nDNS =")
+        .replace("Endpoint =", "PersistentKeepalive = 25\nEndpoint =");
+    let mixed = base
+        .replace("PrivateKey", "pRiVaTeKeY")
+        .replace("Address", "aDdReSs")
+        .replace("DNS", "dNs")
+        .replace("MTU", "mTu")
+        .replace("PublicKey", "pUbLiCkEy")
+        .replace("AllowedIPs", "aLlOwEdIpS")
+        .replace("Endpoint", "eNdPoInT")
+        .replace("PersistentKeepalive", "pErSiStEnTkEePaLiVe");
+    assert!(Profile::parse(mixed.as_bytes(), "de-fra-wg-404", None).is_ok());
+    for name in [
+        "PrivateKey",
+        "Address",
+        "DNS",
+        "MTU",
+        "PublicKey",
+        "AllowedIPs",
+        "Endpoint",
+        "PersistentKeepalive",
+    ] {
+        let line = base
+            .lines()
+            .find(|line| line.starts_with(&format!("{name} =")))
+            .unwrap();
+        let duplicate = format!(
+            "{line}\n{}",
+            line.replacen(name, &name.to_ascii_lowercase(), 1)
+        );
+        let invalid = base.replace(line, &duplicate);
+        assert_eq!(
+            Profile::parse(invalid.as_bytes(), "de-fra-wg-404", None)
+                .err()
+                .unwrap()
+                .reason(),
+            Reason::InvalidProfile
+        );
+    }
+    for invalid in [
+        mixed.replace("[Interface]", "[interface]"),
+        mixed.replace("dNs =", "pOsTuP ="),
+        mixed.replace("dNs =", "dNſ ="),
+        mixed.replace("de-fra-wg-404", "de-fra-wg-405"),
+        mixed.replace("185.65.134.88", "127.0.0.1"),
+    ] {
+        assert!(Profile::parse(invalid.as_bytes(), "de-fra-wg-404", None).is_err());
+    }
+}

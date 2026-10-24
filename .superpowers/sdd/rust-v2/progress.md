@@ -304,3 +304,23 @@ read-only RTM_GETLINK attribute inventory collected afterattr56 to avoid further
 per-attribute mutation cycles. Only exact failed synthetic WAN veths removed with
 snapshot identity/ownership checks; all quarantines/container/ns/group state
 retained. Attempts and exact binaries/source archives kept, capturesNOT_RUN.
+Task8a attempts5-9 retained with exactsource/payloads: raw bridge INFO_DATA
+framing was still rejected before explicit projection; fixed with raw positive
+bridge/negative peergrammar tests. Next whole-host address and route gaps were
+resolved with complete read-only raw RTM address/route fixtures, retaining full
+flags/broadcast/metric/NHID/preference and rejecting unexpected protected values.
+Attempt8/9 reached actual WGcreate+move and IPv4assignment; hostpeer route failed
+errno100 ENETDOWN while allcontrolledlinks stillDOWN behind offlinequarantine.
+Ruling: bring exactownedlinksUP before routeinstallation, retaining fresh
+three-scopeofflinepolicy verification beforeeveryoperation — kernelrequiresUP,
+and userrequiresquarantinebeforeUP, not routesbeforeUP. Costifwrong: new ordering
+needs exactpacket/fault proof; no activation/readyauthority granted.
+Agent selfreview identified pre-staged broadpermit behindrestrictedbootstrapq:
+removingq could expose localOUTPUT beforeaudit. Bothpermit+q must remain actual
+producerrestricted bootstrapfilters and reconcile exactstage; independent removal
+faulttests must show zeroforbiddenmarkers throughout. No readinessconstructor.
+Ruling: task8a failedatomic test uses fixed ignoredharness nftCLI batch against
+actualbootstrap, requires failure+exactunchangedpolicy+nativeaudit+health. Existing
+task4 covers nativeactuator failurebatch; cite separately. No new Cargo test
+actuationfeature/API — avoids expanding production authority just for injection.
+Costifwrong: narrower component evidence; fullruntimefault acceptance staysclosed.

@@ -89,6 +89,118 @@
         "target/lab-state/guarded-transport-wan-cleanup-4.json",
         "target/lab-state/host-link-attribute-oracle-1.json"
       ]
+    },
+    {
+      "attempt": 5,
+      "candidate": 6,
+      "observed_at_utc": "2026-10-24T15:40:33.567834+00:00",
+      "artifact_sha256": "b3da3ca153fc7537dd1962c5dbe0d664b0d125342219338b73e8c182181099af",
+      "source_archive_sha256": "4100baf6cbf93c0431478eafa60d93a59372a0d58be6f1438b195aa33b4133b4",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "result": "FAIL_CREATE_VETH_UNSUPPORTED",
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_NATIVE_FAILURE stage=create_veth_down reason=Unsupported\ntransport_lab: network_operation\n",
+      "quarantine_observation": "all three scopes retain main+emergency tables; no owned veth/WG created",
+      "docker_forward_preserved": "same chain/rules ignoring counters",
+      "capture_or_traffic": "NOT_RUN",
+      "diagnosis": "generic Unsupported before native pair creation; remaining generic projection origins need typed diagnostics",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; namespace pins, empty producer, test container and quarantine retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-5.json",
+        "target/lab-state/guarded-transport-inspect-5.json",
+        "target/lab-state/guarded-transport-wan-cleanup-5.json"
+      ]
+    },
+    {
+      "attempt": 6,
+      "candidate": 7,
+      "observed_at_utc": "2026-10-24T15:42:20.443483+00:00",
+      "artifact_sha256": "07b96451e3327724d4de26ccd229eaff4c8801a7c68d6ff426da718b164dd423",
+      "source_archive_sha256": "a52b92d39a46d92e431be09d90ea89e6928453f1391cdccfaaa91dca7b92397f",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "result": "FAIL_POST_NEWLINK_HOST_ADDRESS_PROJECTION",
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_NATIVE_FAILURE stage=create_veth_down reason=Unsupported\ntransport_lab: network_operation\n",
+      "quarantine_observation": "all scopes retain main+emergency tables; native host/transport pair DOWN and unaddressed, no WG",
+      "native_pair_observed": {
+        "host_interface": "vhc8cdfc851fa8",
+        "host_index": 12,
+        "transport_interface": "vdc8cdfc851fa8",
+        "transport_index": 2
+      },
+      "docker_forward_preserved": "same chain/rules ignoring counters",
+      "capture_or_traffic": "NOT_RUN",
+      "diagnosis": "created_down inspects all host addresses; dynamic IPv6 flags rejected before target-index check. Next fix retains full observed flags and strict protected flags",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; DOWN native pair plus namespace pins, empty producer, test container and quarantine retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-6.json",
+        "target/lab-state/guarded-transport-inspect-6.json",
+        "target/lab-state/guarded-transport-wan-cleanup-6.json"
+      ]
+    },
+    {
+      "attempt": 7,
+      "candidate": 8,
+      "observed_at_utc": "2026-10-24T15:44:11.205313+00:00",
+      "artifact_sha256": "f80b62b226247c0bd1e60ccd3680a954d32693b7f0c6a64eda0d7cd5c61cc7e0",
+      "source_archive_sha256": "94fd7fdc571f24323bd11aba2ce200e603921c0cd08a5dc640c7f632836ee1fe",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "result": "FAIL_POST_NEWLINK_HOST_ADDRESS_BROADCAST",
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_NATIVE_FAILURE stage=create_veth_down reason=UnsupportedAddressAttribute(4)\ntransport_lab: network_operation\n",
+      "quarantine_observation": "all scopes retain main+emergency tables; native host/transport pair DOWN and unaddressed, no WG",
+      "docker_forward_preserved": "same chain/rules ignoring counters",
+      "capture_or_traffic": "NOT_RUN",
+      "diagnosis": "host broadcast address attr4 rejected; complete raw address+route oracle collected, including prefix metric and IPv6 NHID, for offline parser regressions",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; DOWN native pair plus namespace pins, empty producer, test container and quarantine retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-7.json",
+        "target/lab-state/guarded-transport-inspect-7.json",
+        "target/lab-state/guarded-transport-wan-cleanup-7.json",
+        "target/lab-state/host-route-attribute-oracle-1.json"
+      ]
+    },
+    {
+      "attempt": 8,
+      "candidate": 9,
+      "observed_at_utc": "2026-10-24T15:46:56.132039+00:00",
+      "artifact_sha256": "b14d76335a285e230855e7b8775f514e870e97fd6f8fc72cb804632e425f2611",
+      "source_archive_sha256": "355bc870ba1e90eceef9e89c1555211a393e162c56805fb2c3e9f7924ab7ca0e",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "result": "FAIL_QUARANTINED_ACTIVATION_KERNEL_REJECTED",
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_NATIVE_FAILURE stage=activate_quarantined reason=KernelRejected\ntransport_lab: network_operation\n",
+      "quarantine_observation": "all scopes retain main+emergency tables; native host/transport/WG links DOWN with intended IPv4 /32 addresses; custom routes absent",
+      "docker_forward_preserved": "same chain/rules ignoring counters",
+      "capture_or_traffic": "NOT_RUN",
+      "diagnosis": "native provision and WG move succeeded; activation rejected after address assignment, before first custom route. Next diagnostic must identify operation and errno",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; native links/addresses plus namespace pins, empty producer, test container and quarantine retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-8.json",
+        "target/lab-state/guarded-transport-inspect-8.json",
+        "target/lab-state/guarded-transport-wan-cleanup-8.json"
+      ]
+    },
+    {
+      "attempt": 9,
+      "candidate": 10,
+      "observed_at_utc": "2026-10-24T15:48:45.871454+00:00",
+      "artifact_sha256": "417497bffe62188ee547a30ce075daba70aaf11ce74fc5aca371652e7dacbe53",
+      "source_archive_sha256": "1ef2d9579e3ebb0d7af8b1072fd1e1bdcc534ae15121e76d85ee2825449b0934",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "result": "FAIL_HOST_PEER_ROUTE_ENETDOWN",
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_NATIVE_FAILURE stage=activate_quarantined reason=ActivationKernel { step: \"host_peer_route\", errno: 100 }\ntransport_lab: network_operation\n",
+      "quarantine_observation": "native host/transport/WG links DOWN with intended IPv4 /32 addresses behind main+emergency offline quarantine",
+      "docker_forward_preserved": "same chain/rules ignoring counters",
+      "capture_or_traffic": "NOT_RUN",
+      "diagnosis": "host_peer_route rejected errno100 ENETDOWN. Exact owned UP operations may precede routeinstall while every mutation remains behind three-scope offline verification",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; native links/addresses plus namespace pins, empty producer, test container and quarantine retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-9.json",
+        "target/lab-state/guarded-transport-inspect-9.json",
+        "target/lab-state/guarded-transport-wan-cleanup-9.json"
+      ]
     }
   ],
   "production_changes": false,

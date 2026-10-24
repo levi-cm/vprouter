@@ -1,0 +1,15 @@
+{
+  "observed_at_utc": "2026-10-24T11:48:01.898724+00:00",
+  "method": "read-only legacy runtime probe and HTTPS Mullvad relay catalog",
+  "runtime_probe": {
+    "public_exit": "169.150.211.139",
+    "relay": "de-fra-wg-404",
+    "tunnel_healthy": true
+  },
+  "profile_public_endpoint": "169.150.211.175:51820",
+  "relay_catalog_match": "de-fra-wg-404",
+  "proposed_name": "mullvad-debdev-exit-de-fra-wg-404",
+  "client_selection_verified": false,
+  "client_dns_ipv6_test": "NOT_RUN",
+  "note": "Legacy dns_guard/ipv6_guard constants omitted. This point observation is not Rust runtime or client containment acceptance."
+}

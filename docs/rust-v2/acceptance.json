@@ -1,0 +1,427 @@
+{
+  "schema_version": 1,
+  "candidate_base": "84fb353b128c0b6f7ca222be9cd3934183a4e34a",
+  "release_ready": false,
+  "traffic_protocols": [
+    "ipv4",
+    "dns",
+    "ipv6",
+    "tcp",
+    "udp"
+  ],
+  "observation_points": [
+    "client_wan",
+    "host_wan",
+    "transport",
+    "data"
+  ],
+  "positive_controls": "NOT_RUN",
+  "boot_capture_operational_before_traffic": "NOT_RUN",
+  "configurations": [
+    {
+      "name": "one_mullvad",
+      "mullvad_exits": 1,
+      "direct_exits": 0,
+      "scenarios": {
+        "tunnel_provider": {
+          "wireguard_deleted": "NOT_RUN",
+          "wireguard_down": "NOT_RUN",
+          "handshake_stale": "NOT_RUN",
+          "endpoint_wrong": "NOT_RUN",
+          "peer_key_wrong": "NOT_RUN",
+          "transport_loss": "NOT_RUN",
+          "http_transient": "NOT_RUN",
+          "http_permanent": "NOT_RUN",
+          "provider_malformed": "NOT_RUN",
+          "provider_negative": "NOT_RUN",
+          "server_wrong": "NOT_RUN"
+        },
+        "routing": {
+          "ordinary_default_restored": "NOT_RUN",
+          "endpoint_route": "NOT_RUN",
+          "docker_subnet_route": "NOT_RUN",
+          "docker_gateway_route": "NOT_RUN",
+          "unexpected_interface": "NOT_RUN",
+          "spoofed_source": "NOT_RUN",
+          "ipv6_route": "NOT_RUN"
+        },
+        "firewall": {
+          "data_policy_drift": "NOT_RUN",
+          "data_policy_removed": "NOT_RUN",
+          "host_guard_drift": "NOT_RUN",
+          "host_guard_removed": "NOT_RUN",
+          "atomic_update_failed": "NOT_RUN",
+          "bridge_identity_changed": "NOT_RUN",
+          "foreign_conflict": "NOT_RUN"
+        },
+        "process": {
+          "worker_crash": "NOT_RUN",
+          "worker_freeze": "NOT_RUN",
+          "host_guard_crash": "NOT_RUN",
+          "host_guard_freeze": "NOT_RUN",
+          "tailscale_crash": "NOT_RUN",
+          "container_kill": "NOT_RUN",
+          "oom": "NOT_RUN",
+          "service_restart": "NOT_RUN",
+          "docker_restart": "NOT_RUN"
+        },
+        "resources": {
+          "disk_full": "NOT_RUN",
+          "tmpfs_full": "NOT_RUN",
+          "runtime_operation_failure": "NOT_RUN",
+          "docker_api_unavailable": "NOT_RUN",
+          "api_delayed": "NOT_RUN",
+          "health_malformed": "NOT_RUN",
+          "host_reboot": "NOT_RUN"
+        },
+        "identity": {
+          "approval_revoked": "NOT_RUN",
+          "credential_expired": "NOT_RUN",
+          "credential_revoked": "NOT_RUN",
+          "control_plane_loss": "NOT_RUN",
+          "duplicate_identity": "NOT_RUN",
+          "name_server_mismatch": "NOT_RUN"
+        },
+        "isolation": {
+          "exit_failure_others_active": "NOT_RUN",
+          "exit_restart_others_active": "NOT_RUN",
+          "shared_endpoint": "NOT_RUN",
+          "overlapping_vpn_addresses": "NOT_RUN",
+          "direct_active_during_mullvad_faults": "NOT_RUN"
+        },
+        "clients": {
+          "exit_disappears": "NOT_RUN",
+          "selected_node_changes": "NOT_RUN",
+          "tailscale_restarts": "NOT_RUN",
+          "routes_reset": "NOT_RUN",
+          "dns_cache_empty": "NOT_RUN",
+          "proxy_upstream_failed": "NOT_RUN",
+          "proxy_settings_absent": "NOT_RUN",
+          "proxy_settings_bypassed": "NOT_RUN"
+        },
+        "migration": {
+          "inspect": "NOT_RUN",
+          "stage": "NOT_RUN",
+          "plan": "NOT_RUN",
+          "protect": "NOT_RUN",
+          "drain_stop": "NOT_RUN",
+          "backup": "NOT_RUN",
+          "activate": "NOT_RUN",
+          "restore_identity": "NOT_RUN",
+          "verify": "NOT_RUN",
+          "commit": "NOT_RUN",
+          "recover": "NOT_RUN"
+        }
+      },
+      "forbidden_markers": null,
+      "evidence": []
+    },
+    {
+      "name": "five_mullvad",
+      "mullvad_exits": 5,
+      "direct_exits": 0,
+      "scenarios": {
+        "tunnel_provider": {
+          "wireguard_deleted": "NOT_RUN",
+          "wireguard_down": "NOT_RUN",
+          "handshake_stale": "NOT_RUN",
+          "endpoint_wrong": "NOT_RUN",
+          "peer_key_wrong": "NOT_RUN",
+          "transport_loss": "NOT_RUN",
+          "http_transient": "NOT_RUN",
+          "http_permanent": "NOT_RUN",
+          "provider_malformed": "NOT_RUN",
+          "provider_negative": "NOT_RUN",
+          "server_wrong": "NOT_RUN"
+        },
+        "routing": {
+          "ordinary_default_restored": "NOT_RUN",
+          "endpoint_route": "NOT_RUN",
+          "docker_subnet_route": "NOT_RUN",
+          "docker_gateway_route": "NOT_RUN",
+          "unexpected_interface": "NOT_RUN",
+          "spoofed_source": "NOT_RUN",
+          "ipv6_route": "NOT_RUN"
+        },
+        "firewall": {
+          "data_policy_drift": "NOT_RUN",
+          "data_policy_removed": "NOT_RUN",
+          "host_guard_drift": "NOT_RUN",
+          "host_guard_removed": "NOT_RUN",
+          "atomic_update_failed": "NOT_RUN",
+          "bridge_identity_changed": "NOT_RUN",
+          "foreign_conflict": "NOT_RUN"
+        },
+        "process": {
+          "worker_crash": "NOT_RUN",
+          "worker_freeze": "NOT_RUN",
+          "host_guard_crash": "NOT_RUN",
+          "host_guard_freeze": "NOT_RUN",
+          "tailscale_crash": "NOT_RUN",
+          "container_kill": "NOT_RUN",
+          "oom": "NOT_RUN",
+          "service_restart": "NOT_RUN",
+          "docker_restart": "NOT_RUN"
+        },
+        "resources": {
+          "disk_full": "NOT_RUN",
+          "tmpfs_full": "NOT_RUN",
+          "runtime_operation_failure": "NOT_RUN",
+          "docker_api_unavailable": "NOT_RUN",
+          "api_delayed": "NOT_RUN",
+          "health_malformed": "NOT_RUN",
+          "host_reboot": "NOT_RUN"
+        },
+        "identity": {
+          "approval_revoked": "NOT_RUN",
+          "credential_expired": "NOT_RUN",
+          "credential_revoked": "NOT_RUN",
+          "control_plane_loss": "NOT_RUN",
+          "duplicate_identity": "NOT_RUN",
+          "name_server_mismatch": "NOT_RUN"
+        },
+        "isolation": {
+          "exit_failure_others_active": "NOT_RUN",
+          "exit_restart_others_active": "NOT_RUN",
+          "shared_endpoint": "NOT_RUN",
+          "overlapping_vpn_addresses": "NOT_RUN",
+          "direct_active_during_mullvad_faults": "NOT_RUN"
+        },
+        "clients": {
+          "exit_disappears": "NOT_RUN",
+          "selected_node_changes": "NOT_RUN",
+          "tailscale_restarts": "NOT_RUN",
+          "routes_reset": "NOT_RUN",
+          "dns_cache_empty": "NOT_RUN",
+          "proxy_upstream_failed": "NOT_RUN",
+          "proxy_settings_absent": "NOT_RUN",
+          "proxy_settings_bypassed": "NOT_RUN"
+        },
+        "migration": {
+          "inspect": "NOT_RUN",
+          "stage": "NOT_RUN",
+          "plan": "NOT_RUN",
+          "protect": "NOT_RUN",
+          "drain_stop": "NOT_RUN",
+          "backup": "NOT_RUN",
+          "activate": "NOT_RUN",
+          "restore_identity": "NOT_RUN",
+          "verify": "NOT_RUN",
+          "commit": "NOT_RUN",
+          "recover": "NOT_RUN"
+        }
+      },
+      "forbidden_markers": null,
+      "evidence": []
+    },
+    {
+      "name": "one_direct",
+      "mullvad_exits": 0,
+      "direct_exits": 1,
+      "scenarios": {
+        "tunnel_provider": {
+          "wireguard_deleted": "NOT_RUN",
+          "wireguard_down": "NOT_RUN",
+          "handshake_stale": "NOT_RUN",
+          "endpoint_wrong": "NOT_RUN",
+          "peer_key_wrong": "NOT_RUN",
+          "transport_loss": "NOT_RUN",
+          "http_transient": "NOT_RUN",
+          "http_permanent": "NOT_RUN",
+          "provider_malformed": "NOT_RUN",
+          "provider_negative": "NOT_RUN",
+          "server_wrong": "NOT_RUN"
+        },
+        "routing": {
+          "ordinary_default_restored": "NOT_RUN",
+          "endpoint_route": "NOT_RUN",
+          "docker_subnet_route": "NOT_RUN",
+          "docker_gateway_route": "NOT_RUN",
+          "unexpected_interface": "NOT_RUN",
+          "spoofed_source": "NOT_RUN",
+          "ipv6_route": "NOT_RUN"
+        },
+        "firewall": {
+          "data_policy_drift": "NOT_RUN",
+          "data_policy_removed": "NOT_RUN",
+          "host_guard_drift": "NOT_RUN",
+          "host_guard_removed": "NOT_RUN",
+          "atomic_update_failed": "NOT_RUN",
+          "bridge_identity_changed": "NOT_RUN",
+          "foreign_conflict": "NOT_RUN"
+        },
+        "process": {
+          "worker_crash": "NOT_RUN",
+          "worker_freeze": "NOT_RUN",
+          "host_guard_crash": "NOT_RUN",
+          "host_guard_freeze": "NOT_RUN",
+          "tailscale_crash": "NOT_RUN",
+          "container_kill": "NOT_RUN",
+          "oom": "NOT_RUN",
+          "service_restart": "NOT_RUN",
+          "docker_restart": "NOT_RUN"
+        },
+        "resources": {
+          "disk_full": "NOT_RUN",
+          "tmpfs_full": "NOT_RUN",
+          "runtime_operation_failure": "NOT_RUN",
+          "docker_api_unavailable": "NOT_RUN",
+          "api_delayed": "NOT_RUN",
+          "health_malformed": "NOT_RUN",
+          "host_reboot": "NOT_RUN"
+        },
+        "identity": {
+          "approval_revoked": "NOT_RUN",
+          "credential_expired": "NOT_RUN",
+          "credential_revoked": "NOT_RUN",
+          "control_plane_loss": "NOT_RUN",
+          "duplicate_identity": "NOT_RUN",
+          "name_server_mismatch": "NOT_RUN"
+        },
+        "isolation": {
+          "exit_failure_others_active": "NOT_RUN",
+          "exit_restart_others_active": "NOT_RUN",
+          "shared_endpoint": "NOT_RUN",
+          "overlapping_vpn_addresses": "NOT_RUN",
+          "direct_active_during_mullvad_faults": "NOT_RUN"
+        },
+        "clients": {
+          "exit_disappears": "NOT_RUN",
+          "selected_node_changes": "NOT_RUN",
+          "tailscale_restarts": "NOT_RUN",
+          "routes_reset": "NOT_RUN",
+          "dns_cache_empty": "NOT_RUN",
+          "proxy_upstream_failed": "NOT_RUN",
+          "proxy_settings_absent": "NOT_RUN",
+          "proxy_settings_bypassed": "NOT_RUN"
+        },
+        "migration": {
+          "inspect": "NOT_RUN",
+          "stage": "NOT_RUN",
+          "plan": "NOT_RUN",
+          "protect": "NOT_RUN",
+          "drain_stop": "NOT_RUN",
+          "backup": "NOT_RUN",
+          "activate": "NOT_RUN",
+          "restore_identity": "NOT_RUN",
+          "verify": "NOT_RUN",
+          "commit": "NOT_RUN",
+          "recover": "NOT_RUN"
+        }
+      },
+      "forbidden_markers": null,
+      "evidence": []
+    },
+    {
+      "name": "five_mullvad_one_direct",
+      "mullvad_exits": 5,
+      "direct_exits": 1,
+      "scenarios": {
+        "tunnel_provider": {
+          "wireguard_deleted": "NOT_RUN",
+          "wireguard_down": "NOT_RUN",
+          "handshake_stale": "NOT_RUN",
+          "endpoint_wrong": "NOT_RUN",
+          "peer_key_wrong": "NOT_RUN",
+          "transport_loss": "NOT_RUN",
+          "http_transient": "NOT_RUN",
+          "http_permanent": "NOT_RUN",
+          "provider_malformed": "NOT_RUN",
+          "provider_negative": "NOT_RUN",
+          "server_wrong": "NOT_RUN"
+        },
+        "routing": {
+          "ordinary_default_restored": "NOT_RUN",
+          "endpoint_route": "NOT_RUN",
+          "docker_subnet_route": "NOT_RUN",
+          "docker_gateway_route": "NOT_RUN",
+          "unexpected_interface": "NOT_RUN",
+          "spoofed_source": "NOT_RUN",
+          "ipv6_route": "NOT_RUN"
+        },
+        "firewall": {
+          "data_policy_drift": "NOT_RUN",
+          "data_policy_removed": "NOT_RUN",
+          "host_guard_drift": "NOT_RUN",
+          "host_guard_removed": "NOT_RUN",
+          "atomic_update_failed": "NOT_RUN",
+          "bridge_identity_changed": "NOT_RUN",
+          "foreign_conflict": "NOT_RUN"
+        },
+        "process": {
+          "worker_crash": "NOT_RUN",
+          "worker_freeze": "NOT_RUN",
+          "host_guard_crash": "NOT_RUN",
+          "host_guard_freeze": "NOT_RUN",
+          "tailscale_crash": "NOT_RUN",
+          "container_kill": "NOT_RUN",
+          "oom": "NOT_RUN",
+          "service_restart": "NOT_RUN",
+          "docker_restart": "NOT_RUN"
+        },
+        "resources": {
+          "disk_full": "NOT_RUN",
+          "tmpfs_full": "NOT_RUN",
+          "runtime_operation_failure": "NOT_RUN",
+          "docker_api_unavailable": "NOT_RUN",
+          "api_delayed": "NOT_RUN",
+          "health_malformed": "NOT_RUN",
+          "host_reboot": "NOT_RUN"
+        },
+        "identity": {
+          "approval_revoked": "NOT_RUN",
+          "credential_expired": "NOT_RUN",
+          "credential_revoked": "NOT_RUN",
+          "control_plane_loss": "NOT_RUN",
+          "duplicate_identity": "NOT_RUN",
+          "name_server_mismatch": "NOT_RUN"
+        },
+        "isolation": {
+          "exit_failure_others_active": "NOT_RUN",
+          "exit_restart_others_active": "NOT_RUN",
+          "shared_endpoint": "NOT_RUN",
+          "overlapping_vpn_addresses": "NOT_RUN",
+          "direct_active_during_mullvad_faults": "NOT_RUN"
+        },
+        "clients": {
+          "exit_disappears": "NOT_RUN",
+          "selected_node_changes": "NOT_RUN",
+          "tailscale_restarts": "NOT_RUN",
+          "routes_reset": "NOT_RUN",
+          "dns_cache_empty": "NOT_RUN",
+          "proxy_upstream_failed": "NOT_RUN",
+          "proxy_settings_absent": "NOT_RUN",
+          "proxy_settings_bypassed": "NOT_RUN"
+        },
+        "migration": {
+          "inspect": "NOT_RUN",
+          "stage": "NOT_RUN",
+          "plan": "NOT_RUN",
+          "protect": "NOT_RUN",
+          "drain_stop": "NOT_RUN",
+          "backup": "NOT_RUN",
+          "activate": "NOT_RUN",
+          "restore_identity": "NOT_RUN",
+          "verify": "NOT_RUN",
+          "commit": "NOT_RUN",
+          "recover": "NOT_RUN"
+        }
+      },
+      "forbidden_markers": null,
+      "evidence": []
+    }
+  ],
+  "other_gates": {
+    "single_exit_native_guard_parity": "NOT_RUN",
+    "namespace_firewall_unsafe_independent_review": "NOT_RUN",
+    "helper_cgroup_capability_fd_isolation": "NOT_RUN",
+    "existing_identity_canary_debdev": "NOT_RUN",
+    "second_existing_installation_migration": "NOT_RUN",
+    "mixed_mode_24_hour_soak": "NOT_RUN",
+    "repeated_ten_minute_one_five_six_exit_benchmarks": "NOT_RUN",
+    "throughput_latency_load": "NOT_RUN",
+    "x86_64_arm64_artifacts_provenance": "NOT_RUN",
+    "systemd_reboot_update_rollback_uninstall": "NOT_RUN",
+    "runit_reboot_update_rollback_uninstall": "NOT_RUN"
+  }
+}

@@ -99,7 +99,7 @@ provider responses to an exact expected server; v2 must add that requirement.
 
 ## Hooks, dependencies, ownership and rollback limits
 
-`host/collector-services.conf` adds pre-stop/post-start/post-stop Python hooks
+`host/collector-services.conf` adds pre-start stop/post-start start/post-stop stop Python hooks
 and 180s startup timeout. `collector_services.py` uses hard-coded
 `immo-mullvad-1`, `immo-collector-v4.service`,
 `pfarr-dietl-app-suggestions-1`, and Compose project `pfarr-dietl-app` with

@@ -237,10 +237,109 @@
           "execveat(0x4, 0x6a2408, 0x7ffe8c883890, 0x7ffe8c883960, 0x1000) = 0"
         ]
       }
+    },
+    {
+      "attempt": 4,
+      "source_binding": {
+        "source_commit": "5be564b3e807a75ec702dfcf3bd8710a20faabfb",
+        "source_archive_sha256": "2c00d01c9373513f14090def6ed503fca95ad3b5f8125244153a412dcf574cde",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "d9309ae2257e5dc50c71765ad8f3f9c865120f3011d273fab610d015eadb9727"
+      },
+      "artifact_sha256": "917065c6ba8ddb8a30d4d93850bbd908d036f44035d224de749c13e692dff729",
+      "context_sha256": "fc7f332b45b911e1b7bdae5edc5db903430ddffcc0567208b1066b795009abb4",
+      "manifest_sha256": "ba21cb832fe50a1775d23f133ba84a877741b2c544dc8771b9d4c73d69de1736",
+      "image_id": "sha256:c101ec92628352f9c7334bbf2b931e5c8938dcd53bfb1870f4b9b82f920a7939",
+      "image_layers": [
+        "sha256:dfcc17be33560057042dabb6c92dc316a9d38844df43ffd2b4f74287722df258"
+      ],
+      "runner_sha256": "fb2ffba4fd8ad252f0fed72131dadec00ca78d3fc871cb0a8a8aac0ec9b50aee",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 6.875,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "actual_lab: child_failed"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": true,
+      "actual_daemon_exec": "REACHED_RUNTIME_THREAD_CREATION_FAILED",
+      "actual_observer_exec": "NOT_REACHED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-4.json",
+      "private_run_record_sha256": "d265265bc90ae578b68a4261ff612a577f00090ee1f749885bca119ff819c216",
+      "private_inventory": "target/lab-state/actual-program-inspect-4.json",
+      "private_inventory_sha256": "0de890d2302e1a98053248da11924416feb2fdf25223c05ab04bed8f07de293f",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-trace-4-summary.json",
+      "trace_summary_sha256": "1f8f88bfd953afb8e229b45c3b5afb6ec93e330700891dd78621b798a5201394",
+      "trace_files_no_decoded_strings": 36,
+      "go_exec_and_failure_witness": {
+        "file": "syscall.34751",
+        "bytes": 26775,
+        "sha256": "d85c403fcca4f672bc450c2d87e6ff960bbf3cb87ec23926d67aec06dc651a8f",
+        "lines": 569,
+        "last_errors": [
+          {
+            "line": 164,
+            "syscall": "prctl(0x17, 0x29, 0, 0, 0)              = -1 EINVAL (Invalid argument)"
+          },
+          {
+            "line": 222,
+            "syscall": "openat(0xffffff9c, 0x1fdd820, 0, 0)     = -1 ENOENT (No such file or directory)"
+          },
+          {
+            "line": 225,
+            "syscall": "prctl(0x53564d41, 0, 0x7f3320594000, 0x40000, 0x7ffc1435a8e8) = -1 EINVAL (Invalid argument)"
+          },
+          {
+            "line": 380,
+            "syscall": "clone(0xd0f00, 0xfda26372000, 0, 0, 0xfda2637e090) = -1 EPERM (Operation not permitted)"
+          }
+        ],
+        "tail": [
+          "write(0x2, 0x151b5f0, 0x1)              = 0x1",
+          "write(0x2, 0x151b5b8, 0x1)              = 0x1",
+          "write(0x2, 0x15178c0, 0x1)              = 0x1",
+          "write(0x2, 0x1470cc4, 0x2)              = 0x2",
+          "write(0x2, 0x1517440, 0x1)              = 0x1",
+          "write(0x2, 0x17da865, 0x13)             = 0x13",
+          "write(0x2, 0x15177f0, 0x1)              = 0x1",
+          "write(0x2, 0x7ffc1435a3cc, 0x4)         = 0x4",
+          "write(0x2, 0x1470cc6, 0x2)              = 0x2",
+          "write(0x2, 0x7ffc1435a3a5, 0x3)         = 0x3",
+          "write(0x2, 0x1471783, 0x4)              = 0x4",
+          "write(0x2, 0x7ffc1435a39b, 0xd)         = 0xd",
+          "write(0x2, 0x1471777, 0x4)              = 0x4",
+          "write(0x2, 0x7ffc1435a39b, 0xd)         = 0xd",
+          "write(0x2, 0x1471753, 0x4)              = 0x4",
+          "write(0x2, 0x7ffc1435a3a0, 0x8)         = 0x8",
+          "write(0x2, 0x1517478, 0x1)              = 0x1",
+          "exit_group(0x2)                         = ?"
+        ],
+        "execveat_calls": [
+          "execveat(0x4, 0x6a2408, 0x7ffe7ddfc4b0, 0x7ffe7ddfc580, 0x1000) = 0"
+        ]
+      }
     }
   ],
   "diagnosis": {
-    "status": "ORDERING_FIX_REACHED_GO_EXEC_LATER_INIT_FILTER_FIX_PENDING",
+    "status": "INIT_FIX_PASSED_EXACT_GO_THREAD_FLAG_ADMISSION_PENDING",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

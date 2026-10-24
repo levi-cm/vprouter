@@ -2974,6 +2974,22 @@ fn runtime_filter(role: ActualRole) -> Vec<libc::sock_filter> {
     });
     out
 }
+fn actual_environment(role: ActualRole) -> &'static [&'static CStr] {
+    match role {
+        ActualRole::Observer => &[c"LANG=C", c"PATH=/bin"],
+        ActualRole::Daemon => &[
+            c"LANG=C",
+            c"PATH=/bin",
+            // Pinned linuxfw.New otherwise defaults to an iptables CLI runner
+            // even with netfilterMode off. Never admit a secondary executable.
+            c"TS_DEBUG_FIREWALL_MODE=nftables",
+            // Pinned logpolicy ignores --statedir when choosing log state and
+            // panics if /var/lib, HOME and /tmp are unavailable. Keep every
+            // writable file in the same selected daemon-only noexec state view.
+            c"TS_LOGS_DIR=/state",
+        ],
+    }
+}
 fn actual_exec(
     executable: BorrowedFd<'_>,
     health: BorrowedFd<'_>,
@@ -3037,6 +3053,11 @@ fn actual_exec(
         {
             return Err(Error::DescriptorPolicy);
         }
+        let mut env: Vec<_> = actual_environment(role)
+            .iter()
+            .map(|value| value.as_ptr())
+            .collect();
+        env.push(std::ptr::null());
         apply_filter(&runtime_filter(role))?;
         // Setup acknowledgement ONLY. It is never daemon health, ObserveOnce or
         // advertisement/readiness. Both control/executable FDs are CLOEXEC.
@@ -3053,7 +3074,6 @@ fn actual_exec(
             c"--config=/etc/tailscale.json".as_ptr(),
             std::ptr::null(),
         ];
-        let env = [c"LANG=C".as_ptr(), c"PATH=/bin".as_ptr(), std::ptr::null()];
         let args = if role == ActualRole::Observer {
             worker.as_ptr()
         } else {
@@ -3307,6 +3327,28 @@ mod policy_tests {
             }
         }
         panic!("unbounded filter")
+    }
+    #[test]
+    fn fixed_actual_environments_have_no_inherited_resolver_home_or_program_overrides() {
+        let values = |role| {
+            actual_environment(role)
+                .iter()
+                .map(|value| value.to_bytes())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            values(ActualRole::Observer),
+            [b"LANG=C".as_slice(), b"PATH=/bin"]
+        );
+        assert_eq!(
+            values(ActualRole::Daemon),
+            [
+                b"LANG=C".as_slice(),
+                b"PATH=/bin",
+                b"TS_DEBUG_FIREWALL_MODE=nftables",
+                b"TS_LOGS_DIR=/state"
+            ]
+        );
     }
     #[test]
     fn actual_profiles_bind_exec_thread_memory_and_network_authority() {

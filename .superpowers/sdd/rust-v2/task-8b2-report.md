@@ -90,3 +90,26 @@ variants and every upper-word bit remain denied and are regression checked.
 No general clone, clone3, exec, privilege, socket-family or mount allowance was
 added. Focused26tests and clippy pass; both static payload/image-input builds
 and post-payload init manifest verification pass. Further actual runtime pending.
+
+## Candidate05 pinned native firewall and log-state environment
+
+Root unchanged04 attempts5(raw syscall metadata) and6(file-metadata-only trace,
+no IO/random/exec/environment decoding) bind startup panic to readonly `.local`
+creation and absent `/tmp/tailscaled-log-*` fallback. Exact pinned source
+`https://raw.githubusercontent.com/tailscale/tailscale/v1.102.5/logpolicy/logpolicy.go`
+SHA2561668c4d220b34bca51d482ddef08b8ce251c8a2944e28ed61d3ef2a9ec7d4321
+shows LogsDir ignores --statedir, tries default/user/current/tmp paths and panics
+when none exists. Fixed **daemon-only** TS_LOGS_DIR=/state directs log state to
+its already selected private noexec/nosuid/nodev700 directory. Root/tmp remain
+readonly/absent; getcwd and access are not broadened to hide the path error.
+
+Pinned native firewall source
+`https://raw.githubusercontent.com/tailscale/tailscale/v1.102.5/util/linuxfw/nftables_runner.go`
+SHA256198b3472a1905577df2ea91de7a15d6be37eec0eba603fb0dd21caded44314b7
+New defaults to the iptables runner unless prefHint/environment requests nftables.
+Router setup initializes that runner even when netfilterMode=off. ConfigVAlpha
+has no NetfilterKind field. Fixed **daemon-only**
+TS_DEBUG_FIREWALL_MODE=nftables binds the native runner without secondary exec.
+Observer retains exact LANG=C/PATH=/bin only. New exact environment regression
+passes; focused27tests and clippy pass. Both static architecture builds and final
+post-payload init/context hashes verified. Actual05 runtime remains pending.

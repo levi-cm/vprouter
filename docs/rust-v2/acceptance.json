@@ -423,5 +423,21 @@
     "x86_64_arm64_artifacts_provenance": "NOT_RUN",
     "systemd_reboot_update_rollback_uninstall": "NOT_RUN",
     "runit_reboot_update_rollback_uninstall": "NOT_RUN"
+  },
+  "test_execution_scope": {
+    "instruction": "all testing locally",
+    "environments": [
+      "local_host",
+      "isolated_local_vms",
+      "local_disposable_tailscale_clients"
+    ],
+    "remote_installation_access": "OUT_OF_SCOPE_PER_USER",
+    "second_existing_installation_migration": "separate local legacy deployment with independent established test identity and declared adapters",
+    "remote_installation_validation": "NOT_PERFORMED",
+    "external_protocol_services": [
+      "Tailscale",
+      "Mullvad"
+    ],
+    "unavailable_platform_checks": "remain explicitly unverified"
   }
 }

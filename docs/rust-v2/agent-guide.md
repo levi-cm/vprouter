@@ -181,6 +181,6 @@ implicit direct exit or credentials are produced.
 `diagnose` emits authored statuses, capabilities, preflight checks and a
 `NOT_RUN` acceptance manifest. Single/five/direct/mixed real-client tests,
 positive capture controls, fault matrix, boot-capture reboot, 24-hour soak,
-performance comparison, second existing host, independent unsafe-launcher
+performance comparison, second local legacy deployment, independent unsafe-launcher
 review and architecture artifacts/SBOM/provenance remain unperformed. Tests of
 synthetic profiles and mock APIs provide no runtime or performance claims.

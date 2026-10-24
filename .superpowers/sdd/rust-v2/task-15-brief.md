@@ -4,7 +4,8 @@ PREPARATION ONLY; dispatch after reviewed complete implementation and immutable
 candidate, including client guards/migration/release/performance. Workdir
 /DATA/AppData/vprouter-rust-v2, rust/v2, no subagents. Binding original handoff and
 IMPLEMENTATION.md; acceptance.json enumerates mandatory scenarios. Controller
-alone performs privileged/external/credential-bearing actions. No publication or
+alone performs privileged/credential-bearing actions on local hosts/VMs. Protocol
+traffic to Tailscale/Mullvad remains necessary, but no remote installation access. No publication or
 shared-branch push before all release gates; never fake unavailable acceptance.
 
 Build/run real disposable Tailscale clients generating continuous distinct IPv4,
@@ -33,10 +34,11 @@ Only after preceding compatibility/security/artifact gates: migrate debdev's
 existing primary through reviewed declared adapters while preserving identity,
 credentials/IPs/approval; verify renamed node using actual protected client; add
 further imported distinct-device profiles; add direct ONLY via explicit config;
-run mixed faults and24hour soak. Migrate a second existing installation through
-its declared adapters and verify compatible rollback. Its access currently
-unavailable; report external blocker precisely without substituting new lab for
-existing installation. Interactive approval links are user-selected enrollment;
+run mixed faults and24hour soak. Per latest explicit user instruction all testing is local. Migrate a separate
+local legacy installation through its declared adapters and verify compatible
+rollback, preserving its independently established test identity. Report this as
+local compatibility-deployment migration; do not claim a remote installation was
+validated, request remote SSH, or silently skip the second local migration case. Interactive approval links are user-selected enrollment;
 preserve approved lab client/gateway identities and do not re-enroll/reset them.
 
 Deliver machine-readable validation/security-test mappings, redacted migration

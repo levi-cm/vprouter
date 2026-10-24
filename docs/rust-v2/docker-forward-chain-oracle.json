@@ -1,0 +1,231 @@
+{
+  "observed_at_utc": "2026-10-24T15:17:20.489966+00:00",
+  "authority": "read_only_owned_guest_chain_shape_only",
+  "nft_chain": {
+    "nftables": [
+      {
+        "metainfo": {
+          "version": "1.1.3",
+          "release_name": "Commodore Bullmoose #4",
+          "json_schema_version": 1
+        }
+      },
+      {
+        "chain": {
+          "family": "ip",
+          "table": "filter",
+          "name": "FORWARD",
+          "handle": 6,
+          "type": "filter",
+          "hook": "forward",
+          "prio": 0,
+          "policy": "drop"
+        }
+      },
+      {
+        "rule": {
+          "family": "ip",
+          "table": "filter",
+          "chain": "FORWARD",
+          "handle": 23,
+          "expr": [
+            {
+              "counter": {
+                "packets": 2297,
+                "bytes": 244608
+              }
+            },
+            {
+              "jump": {
+                "target": "DOCKER-USER"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "rule": {
+          "family": "ip",
+          "table": "filter",
+          "chain": "FORWARD",
+          "handle": 18,
+          "expr": [
+            {
+              "counter": {
+                "packets": 2297,
+                "bytes": 244608
+              }
+            },
+            {
+              "jump": {
+                "target": "DOCKER-ISOLATION-STAGE-1"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "rule": {
+          "family": "ip",
+          "table": "filter",
+          "chain": "FORWARD",
+          "handle": 17,
+          "expr": [
+            {
+              "match": {
+                "op": "==",
+                "left": {
+                  "meta": {
+                    "key": "oifname"
+                  }
+                },
+                "right": "docker0"
+              }
+            },
+            {
+              "xt": {
+                "type": "match",
+                "name": "conntrack"
+              }
+            },
+            {
+              "counter": {
+                "packets": 1158,
+                "bytes": 146831
+              }
+            },
+            {
+              "accept": null
+            }
+          ]
+        }
+      },
+      {
+        "rule": {
+          "family": "ip",
+          "table": "filter",
+          "chain": "FORWARD",
+          "handle": 16,
+          "expr": [
+            {
+              "match": {
+                "op": "==",
+                "left": {
+                  "meta": {
+                    "key": "oifname"
+                  }
+                },
+                "right": "docker0"
+              }
+            },
+            {
+              "counter": {
+                "packets": 0,
+                "bytes": 0
+              }
+            },
+            {
+              "jump": {
+                "target": "DOCKER"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "rule": {
+          "family": "ip",
+          "table": "filter",
+          "chain": "FORWARD",
+          "handle": 15,
+          "expr": [
+            {
+              "match": {
+                "op": "==",
+                "left": {
+                  "meta": {
+                    "key": "iifname"
+                  }
+                },
+                "right": "docker0"
+              }
+            },
+            {
+              "match": {
+                "op": "!=",
+                "left": {
+                  "meta": {
+                    "key": "oifname"
+                  }
+                },
+                "right": "docker0"
+              }
+            },
+            {
+              "counter": {
+                "packets": 1139,
+                "bytes": 97777
+              }
+            },
+            {
+              "accept": null
+            }
+          ]
+        }
+      },
+      {
+        "rule": {
+          "family": "ip",
+          "table": "filter",
+          "chain": "FORWARD",
+          "handle": 14,
+          "expr": [
+            {
+              "match": {
+                "op": "==",
+                "left": {
+                  "meta": {
+                    "key": "iifname"
+                  }
+                },
+                "right": "docker0"
+              }
+            },
+            {
+              "match": {
+                "op": "==",
+                "left": {
+                  "meta": {
+                    "key": "oifname"
+                  }
+                },
+                "right": "docker0"
+              }
+            },
+            {
+              "counter": {
+                "packets": 0,
+                "bytes": 0
+              }
+            },
+            {
+              "accept": null
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "raw_chain_messages": [
+    {
+      "type": 2563,
+      "flags": 0,
+      "payload_hex": "020000280b00010066696c74657200000c000300464f5257415244000c0002000000000000000006140004000800010000000002080002000000000008000500000000000b00070066696c74657200001c0008000c00020000000000000000000c000100000000000000000008000a00000000010800060000000006"
+    }
+  ],
+  "raw_request_type": 2564,
+  "nft_stderr": "",
+  "runtime_changes": false,
+  "packet_acceptance": "NOT_RUN",
+  "source_sha256": "2130ddbc5dfb6f8afa1c8c2af0b82b2207d2911d0d0cd237cf6a9aa870091cff"
+}

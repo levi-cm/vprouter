@@ -63,7 +63,9 @@ ordering. Ignored owned-guest test migrates a NEW disposable legacy installation
 with its own fresh identity, stopped-state backups and declared fake dependents;
 validate real identity retention/name reconciliation and compatible rollback.
 Root may perform authorized final debdev canary only after release gates; second
-existing host remains inaccessible until administrative access is supplied.
+installation migration testing is local only per latest user instruction: use a
+separate local legacy deployment with its own established test identity/adapters.
+Do not request remote SSH or claim remote-installation validation.
 
 Own migration/adapter/wrapper integration plus exact agent instructions for
 preflight, inspect, plan, apply/resume, validation, recovery and rollback. Document

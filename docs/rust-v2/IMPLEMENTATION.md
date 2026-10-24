@@ -103,3 +103,16 @@ Artifacts: schema + 1/5/mixed examples, exact agent/systemd/runit migration,
 validation/recovery/rollback guide, compatibility matrix, redacted reports,
 security-to-test mapping, workload/accounted benchmarks, immutable artifacts,
 SBOM/provenance, unsupported environments. Do not publish until all gates pass.
+
+## Execution-scope amendment: local testing only
+
+On2026-10-24 the user explicitly required: "i want you to do all the testing
+locally". Run acceptance on this host and isolated local VMs/disposable clients;
+do not seek or use SSH access to remote immo/other installations. Tailscale and
+Mullvad protocol/provider traffic from those local test systems remains part of
+the required real-client tests. The second migration case uses a separate local
+legacy deployment with an independently enrolled test identity, recorded state
+and declared adapters; preserve that existing test identity through cutover and
+rollback. Label this evidence as local compatibility-deployment migration, not
+validation of a remote installation. Preserve all fault, containment, identity,
+benchmark and soak gates; unavailable platform/hardware checks remain explicit.

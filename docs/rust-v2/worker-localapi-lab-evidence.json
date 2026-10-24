@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "authority": "controller_owned_disposable_guest_read_only_parser_only",
+  "source_commit": "ad9b38d4e238c7e0418cbb7db822a7d23a66f97d",
+  "source_set_sha256": "050ad3d3a39820e203414f1c0ad4b4e018cb61c7c9000defee7a4f1b1cc6cd84",
+  "controller_verified_source_files": 24,
+  "attempts": [
+    {
+      "observed_at_utc": "2026-10-24T14:57:47.292741+00:00",
+      "source_commit": "ad9b38d4e238c7e0418cbb7db822a7d23a66f97d",
+      "artifact_sha256": "b00029b8b140c473212e3f90fd7a4d3ffcb6b7d243263121812f787d006fc1f2",
+      "setup_sha256": "b7313ebc93dc0f82625f5b2fa77b62728e922cf699556889bba79d2e46dd2ae0",
+      "exit_code": 1,
+      "wall_seconds": 0.191,
+      "stdout": "",
+      "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 19, in <module>\n  File \"/usr/lib/python3.13/pathlib/_local.py\", line 517, in stat\n    return os.stat(self, follow_symlinks=follow_symlinks)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: '/run/tailscale/tailscaled.sock'\n",
+      "result": "FAIL",
+      "native_worker_placement": "NOT_RUN",
+      "native_tls_provider": "NOT_RUN",
+      "real_client_traffic": "NOT_RUN",
+      "production_changes": false
+    },
+    {
+      "observed_at_utc": "2026-10-24T14:58:50.897017+00:00",
+      "source_commit": "ad9b38d4e238c7e0418cbb7db822a7d23a66f97d",
+      "artifact_sha256": "b00029b8b140c473212e3f90fd7a4d3ffcb6b7d243263121812f787d006fc1f2",
+      "setup_sha256": "85503f2e7896351782e0b1ccc4ba944d32677ff5bac28a09ae62e6ccbcbf8a75",
+      "exit_code": 0,
+      "wall_seconds": 0.15,
+      "stdout": "{\"container_id\": \"b6ef3d7e8b772fce99595e35a35be0194ec12c18920183efeb3c9a0112934f0d\", \"source_pid\": 1269, \"private_mount_and_no_wan_namespace\": true, \"same_actual_socket_inode\": true, \"exit_code\": 0, \"stdout\": \"{\\\"activation_ready\\\":false,\\\"advertised_route_count\\\":0,\\\"guard_runtime\\\":false,\\\"netfilter_mode\\\":2,\\\"online\\\":true,\\\"running\\\":true,\\\"version_pinned\\\":true}\\n\", \"stderr\": \"\", \"production_changes\": false, \"native_worker_placement\": \"NOT_RUN\", \"native_tls_provider\": \"NOT_RUN\", \"real_client_traffic\": \"NOT_RUN\"}\n",
+      "stderr": "",
+      "result": "PASS_NATIVE_LOCALAPI_PARSER_ONLY",
+      "native_worker_placement": "NOT_RUN",
+      "native_tls_provider": "NOT_RUN",
+      "real_client_traffic": "NOT_RUN",
+      "production_changes": false
+    }
+  ],
+  "controller_tools": {
+    "tools/worker-localapi-parser-oracle.py": "d9cd4b6e2af6d8fa660ab997b150d30af98b559f15825129dc71800cbc8053f8",
+    "tools/worker-localapi-parser-guest.py": "85503f2e7896351782e0b1ccc4ba944d32677ff5bac28a09ae62e6ccbcbf8a75"
+  },
+  "failed_setup_source": "target/lab-state/run-worker-localapi-guest-attempt1.py",
+  "failed_setup_sha256": "b7313ebc93dc0f82625f5b2fa77b62728e922cf699556889bba79d2e46dd2ae0",
+  "limits": [
+    "No actual worker placement or production manifest tested",
+    "No preference writes, advertisement, approval transition or guard enforcement",
+    "No provider TLS through native placed worker",
+    "No real client traffic, leak, platform or release acceptance",
+    "Private network namespace has no WAN; fixed GET parser accesses actual Unix socket via validated proc-root symlink in private readonly tmpfs"
+  ],
+  "production_changes": false,
+  "release_ready": false
+}

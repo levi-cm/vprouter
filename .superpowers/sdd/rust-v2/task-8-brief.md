@@ -76,3 +76,15 @@ evidence, unsafe/capability/subprocess inventory, remaining platform and traffic
 acceptance gaps. Independent review is mandatory before multi-exit work.
 
 Bootstrap protection requirement: existing full quarantine drops every non-loopback input/output/forward packet, so provider checks/handshakes cannot progress while it remains fully installed. Add an exact owned, atomic, retained-authority bootstrap stage after full policy installation and stale-advertisement withdrawal: permit only required namespace-local health/control through verified WG and its endpoint-only transport, while protected Tailscale forwarding remains dropped. Only actual provider/structure/online/approval readiness allows full exit forwarding. On any failure restore full quarantine before child stop. Do not relabel full offline quarantine as permitting health or unconditionally release application forwarding to fix initialization. Guard ACKs/health must distinguish bootstrap/offline/ready enforcement states with exit/generation/peer binding rather than a caller proof boolean. Source oracle confirms ExitNodeOption is offered&&approved; withdrawn recovery must not deadlock on it before explicitly advertising under retained bootstrap protection.
+
+Integration gaps carried from task7: core Profile currently validates DNS strings
+but discards them. Retain approved resolver addresses in protected parsed profile
+authority and bind provider DNS to that source; no host resolver/environment or
+synthetic fallback. Current worker Plan intentionally rejects real Tailscale
+rule/table52/link-local metadata: accept only independently observed pinned shapes
+plus actual identity/control authority, remove/suppress unexpected IPv6 metadata
+rather than weaken IPv6 containment. Worker draft ACK recorded:true is merely
+observational; replace it with the independently enforced protocol stages above,
+never interpret successful recording as quarantine. The bounded health publisher
+can leave one blocking fsync thread; worker runtime shutdown must remain bounded
+without waiting forever for that filesystem operation.

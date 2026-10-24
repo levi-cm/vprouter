@@ -1,0 +1,1831 @@
+{
+  "observed_at_utc": "2026-10-24T14:39:03.474980+00:00",
+  "environment": "isolated Debian13 KVM guest",
+  "script_sha256": "e5a4c60c23ebb4f3bad07d0a12ba12743e95d3dbaf45e2e855b33640bf8b9817",
+  "exit_code": 0,
+  "native_worker_acceptance": "NOT_RUN",
+  "real_client_acceptance": "NOT_RUN",
+  "limits": [
+    "Fresh no-login memory-only daemon: kernel rule/link/address metadata only.",
+    "No approved node identity, peer route authorization or table52 active routes were proved.",
+    "NetfilterMode0 setup does not remove Tailscale policy routing rules.",
+    "The observed default tailscale0 kernel link-local IPv6 must not silently expand protected forwarding policy; initialization must suppress or remove unexpected metadata before readiness.",
+    "AF_UNSPEC raw rule dump includes non-IPv4/IPv6 families128/129; no authorization is implied by capturing them."
+  ],
+  "image": "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065",
+  "container": "dc3c5cf10a181645b28b92d9039a774bb501ebadd986f424b55387fe91d3cede",
+  "state": "mem:",
+  "network": "none",
+  "credential_or_identity_state_used": false,
+  "advertised_exit": false,
+  "production_changes": false,
+  "before": {
+    "prefs": {
+      "WantRunning": false,
+      "AdvertiseRoutes": null,
+      "NetfilterMode": 2,
+      "RouteAll": false,
+      "ExitNodeID": "",
+      "ExitNodeIP": ""
+    },
+    "kernel": {
+      "link": [
+        {
+          "ifindex": 1,
+          "ifname": "lo",
+          "flags": [
+            "LOOPBACK",
+            "UP",
+            "LOWER_UP"
+          ],
+          "mtu": 65536,
+          "qdisc": "noqueue",
+          "operstate": "UNKNOWN",
+          "linkmode": "DEFAULT",
+          "group": "default",
+          "txqlen": 1000,
+          "link_type": "loopback",
+          "address": "00:00:00:00:00:00",
+          "broadcast": "00:00:00:00:00:00",
+          "promiscuity": 0,
+          "allmulti": 0,
+          "min_mtu": 0,
+          "max_mtu": 0,
+          "inet6_addr_gen_mode": "eui64",
+          "num_tx_queues": 1,
+          "num_rx_queues": 1,
+          "gso_max_size": 65536,
+          "gso_max_segs": 65535,
+          "tso_max_size": 524280,
+          "tso_max_segs": 65535,
+          "gro_max_size": 65536,
+          "gso_ipv4_max_size": 65536,
+          "gro_ipv4_max_size": 65536
+        },
+        {
+          "ifindex": 2,
+          "ifname": "tailscale0",
+          "flags": [
+            "POINTOPOINT",
+            "MULTICAST",
+            "NOARP",
+            "UP",
+            "LOWER_UP"
+          ],
+          "mtu": 1280,
+          "qdisc": "fq_codel",
+          "operstate": "UNKNOWN",
+          "linkmode": "DEFAULT",
+          "group": "default",
+          "txqlen": 500,
+          "link_type": "none",
+          "promiscuity": 0,
+          "allmulti": 0,
+          "min_mtu": 68,
+          "max_mtu": 65535,
+          "linkinfo": {
+            "info_kind": "tun",
+            "info_data": {
+              "type": "tun",
+              "pi": false,
+              "vnet_hdr": true,
+              "multi_queue": false,
+              "persist": false
+            }
+          },
+          "inet6_addr_gen_mode": "random",
+          "num_tx_queues": 1,
+          "num_rx_queues": 1,
+          "gso_max_size": 65536,
+          "gso_max_segs": 65535,
+          "tso_max_size": 65536,
+          "tso_max_segs": 65535,
+          "gro_max_size": 65536,
+          "gso_ipv4_max_size": 65536,
+          "gro_ipv4_max_size": 65536
+        }
+      ],
+      "address": [
+        {
+          "ifindex": 1,
+          "ifname": "lo",
+          "flags": [
+            "LOOPBACK",
+            "UP",
+            "LOWER_UP"
+          ],
+          "mtu": 65536,
+          "qdisc": "noqueue",
+          "operstate": "UNKNOWN",
+          "group": "default",
+          "txqlen": 1000,
+          "link_type": "loopback",
+          "address": "00:00:00:00:00:00",
+          "broadcast": "00:00:00:00:00:00",
+          "promiscuity": 0,
+          "allmulti": 0,
+          "min_mtu": 0,
+          "max_mtu": 0,
+          "num_tx_queues": 1,
+          "num_rx_queues": 1,
+          "gso_max_size": 65536,
+          "gso_max_segs": 65535,
+          "tso_max_size": 524280,
+          "tso_max_segs": 65535,
+          "gro_max_size": 65536,
+          "gso_ipv4_max_size": 65536,
+          "gro_ipv4_max_size": 65536,
+          "addr_info": [
+            {
+              "family": "inet",
+              "local": "127.0.0.1",
+              "prefixlen": 8,
+              "scope": "host",
+              "label": "lo",
+              "valid_life_time": 4294967295,
+              "preferred_life_time": 4294967295
+            },
+            {
+              "family": "inet6",
+              "local": "::1",
+              "prefixlen": 128,
+              "scope": "host",
+              "protocol": "kernel_lo",
+              "valid_life_time": 4294967295,
+              "preferred_life_time": 4294967295
+            }
+          ]
+        },
+        {
+          "ifindex": 2,
+          "ifname": "tailscale0",
+          "flags": [
+            "POINTOPOINT",
+            "MULTICAST",
+            "NOARP",
+            "UP",
+            "LOWER_UP"
+          ],
+          "mtu": 1280,
+          "qdisc": "fq_codel",
+          "operstate": "UNKNOWN",
+          "group": "default",
+          "txqlen": 500,
+          "link_type": "none",
+          "promiscuity": 0,
+          "allmulti": 0,
+          "min_mtu": 68,
+          "max_mtu": 65535,
+          "linkinfo": {
+            "info_kind": "tun",
+            "info_data": {
+              "type": "tun",
+              "pi": false,
+              "vnet_hdr": true,
+              "multi_queue": false,
+              "persist": false
+            }
+          },
+          "num_tx_queues": 1,
+          "num_rx_queues": 1,
+          "gso_max_size": 65536,
+          "gso_max_segs": 65535,
+          "tso_max_size": 65536,
+          "tso_max_segs": 65535,
+          "gro_max_size": 65536,
+          "gso_ipv4_max_size": 65536,
+          "gro_ipv4_max_size": 65536,
+          "addr_info": [
+            {
+              "family": "inet6",
+              "local": "fe80::1392:39a:7e3b:ce3f",
+              "prefixlen": 64,
+              "scope": "link",
+              "stable-privacy": true,
+              "protocol": "kernel_ll",
+              "valid_life_time": 4294967295,
+              "preferred_life_time": 4294967295
+            }
+          ]
+        }
+      ],
+      "-4": {
+        "rule": [
+          {
+            "priority": 0,
+            "src": "all",
+            "table": "local",
+            "protocol": "kernel"
+          },
+          {
+            "priority": 5210,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "table": "main",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5230,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "table": "default",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5250,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "action": "unreachable",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5270,
+            "src": "all",
+            "table": "52",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 32766,
+            "src": "all",
+            "table": "main",
+            "protocol": "kernel"
+          },
+          {
+            "priority": 32767,
+            "src": "all",
+            "table": "default",
+            "protocol": "kernel"
+          }
+        ],
+        "route": [
+          {
+            "type": "local",
+            "dst": "127.0.0.0/8",
+            "dev": "lo",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "host",
+            "prefsrc": "127.0.0.1",
+            "flags": []
+          },
+          {
+            "type": "local",
+            "dst": "127.0.0.1",
+            "dev": "lo",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "host",
+            "prefsrc": "127.0.0.1",
+            "flags": []
+          },
+          {
+            "type": "broadcast",
+            "dst": "127.255.255.255",
+            "dev": "lo",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "link",
+            "prefsrc": "127.0.0.1",
+            "flags": []
+          }
+        ]
+      },
+      "-6": {
+        "rule": [
+          {
+            "priority": 0,
+            "src": "all",
+            "table": "local",
+            "protocol": "kernel"
+          },
+          {
+            "priority": 5210,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "table": "main",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5230,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "table": "default",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5250,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "action": "unreachable",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5270,
+            "src": "all",
+            "table": "52",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 32766,
+            "src": "all",
+            "table": "main",
+            "protocol": "kernel"
+          }
+        ],
+        "route": [
+          {
+            "type": "unicast",
+            "dst": "fe80::/64",
+            "dev": "tailscale0",
+            "table": "main",
+            "protocol": "kernel",
+            "scope": "global",
+            "metric": 256,
+            "flags": [],
+            "pref": "medium"
+          },
+          {
+            "type": "local",
+            "dst": "::1",
+            "dev": "lo",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "global",
+            "metric": 0,
+            "flags": [],
+            "pref": "medium"
+          },
+          {
+            "type": "local",
+            "dst": "fe80::1392:39a:7e3b:ce3f",
+            "dev": "tailscale0",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "global",
+            "metric": 0,
+            "flags": [],
+            "pref": "medium"
+          },
+          {
+            "type": "multicast",
+            "dst": "ff00::/8",
+            "dev": "tailscale0",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "global",
+            "metric": 256,
+            "flags": [],
+            "pref": "medium"
+          }
+        ]
+      },
+      "raw_rules": [
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000ff0000010000000008000f00ff00000008000e00ffffffff0500150002000000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000fe0000010000000008000f00fe00000008000e00ffffffff0500150000000000080006005a14000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000fd0000010000000008000f00fd00000008000e00ffffffff0500150000000000080006006e14000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000000000070000000008000f000000000008000e00ffffffff0500150000000000080006008214000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000340000010000000008000f003400000008000e00ffffffff05001500000000000800060096140000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600fe7f0000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000fd0000010000000008000f00fd00000008000e00ffffffff050015000200000008000600ff7f0000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "80000000fd0000010000000008000f00fd00000008000e00ffffffff050015000200000008000600ff7f0000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "81000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600ff7f0000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000ff0000010000000008000f00ff00000008000e00ffffffff0500150002000000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000fe0000010000000008000f00fe00000008000e00ffffffff0500150000000000080006005a14000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000fd0000010000000008000f00fd00000008000e00ffffffff0500150000000000080006006e14000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000000000070000000008000f000000000008000e00ffffffff0500150000000000080006008214000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000340000010000000008000f003400000008000e00ffffffff05001500000000000800060096140000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600fe7f0000"
+        }
+      ]
+    }
+  },
+  "after_mode_off": {
+    "prefs": {
+      "WantRunning": false,
+      "AdvertiseRoutes": null,
+      "NetfilterMode": 0,
+      "RouteAll": false,
+      "ExitNodeID": "",
+      "ExitNodeIP": ""
+    },
+    "kernel": {
+      "link": [
+        {
+          "ifindex": 1,
+          "ifname": "lo",
+          "flags": [
+            "LOOPBACK",
+            "UP",
+            "LOWER_UP"
+          ],
+          "mtu": 65536,
+          "qdisc": "noqueue",
+          "operstate": "UNKNOWN",
+          "linkmode": "DEFAULT",
+          "group": "default",
+          "txqlen": 1000,
+          "link_type": "loopback",
+          "address": "00:00:00:00:00:00",
+          "broadcast": "00:00:00:00:00:00",
+          "promiscuity": 0,
+          "allmulti": 0,
+          "min_mtu": 0,
+          "max_mtu": 0,
+          "inet6_addr_gen_mode": "eui64",
+          "num_tx_queues": 1,
+          "num_rx_queues": 1,
+          "gso_max_size": 65536,
+          "gso_max_segs": 65535,
+          "tso_max_size": 524280,
+          "tso_max_segs": 65535,
+          "gro_max_size": 65536,
+          "gso_ipv4_max_size": 65536,
+          "gro_ipv4_max_size": 65536
+        },
+        {
+          "ifindex": 2,
+          "ifname": "tailscale0",
+          "flags": [
+            "POINTOPOINT",
+            "MULTICAST",
+            "NOARP",
+            "UP",
+            "LOWER_UP"
+          ],
+          "mtu": 1280,
+          "qdisc": "fq_codel",
+          "operstate": "UNKNOWN",
+          "linkmode": "DEFAULT",
+          "group": "default",
+          "txqlen": 500,
+          "link_type": "none",
+          "promiscuity": 0,
+          "allmulti": 0,
+          "min_mtu": 68,
+          "max_mtu": 65535,
+          "linkinfo": {
+            "info_kind": "tun",
+            "info_data": {
+              "type": "tun",
+              "pi": false,
+              "vnet_hdr": true,
+              "multi_queue": false,
+              "persist": false
+            }
+          },
+          "inet6_addr_gen_mode": "random",
+          "num_tx_queues": 1,
+          "num_rx_queues": 1,
+          "gso_max_size": 65536,
+          "gso_max_segs": 65535,
+          "tso_max_size": 65536,
+          "tso_max_segs": 65535,
+          "gro_max_size": 65536,
+          "gso_ipv4_max_size": 65536,
+          "gro_ipv4_max_size": 65536
+        }
+      ],
+      "address": [
+        {
+          "ifindex": 1,
+          "ifname": "lo",
+          "flags": [
+            "LOOPBACK",
+            "UP",
+            "LOWER_UP"
+          ],
+          "mtu": 65536,
+          "qdisc": "noqueue",
+          "operstate": "UNKNOWN",
+          "group": "default",
+          "txqlen": 1000,
+          "link_type": "loopback",
+          "address": "00:00:00:00:00:00",
+          "broadcast": "00:00:00:00:00:00",
+          "promiscuity": 0,
+          "allmulti": 0,
+          "min_mtu": 0,
+          "max_mtu": 0,
+          "num_tx_queues": 1,
+          "num_rx_queues": 1,
+          "gso_max_size": 65536,
+          "gso_max_segs": 65535,
+          "tso_max_size": 524280,
+          "tso_max_segs": 65535,
+          "gro_max_size": 65536,
+          "gso_ipv4_max_size": 65536,
+          "gro_ipv4_max_size": 65536,
+          "addr_info": [
+            {
+              "family": "inet",
+              "local": "127.0.0.1",
+              "prefixlen": 8,
+              "scope": "host",
+              "label": "lo",
+              "valid_life_time": 4294967295,
+              "preferred_life_time": 4294967295
+            },
+            {
+              "family": "inet6",
+              "local": "::1",
+              "prefixlen": 128,
+              "scope": "host",
+              "protocol": "kernel_lo",
+              "valid_life_time": 4294967295,
+              "preferred_life_time": 4294967295
+            }
+          ]
+        },
+        {
+          "ifindex": 2,
+          "ifname": "tailscale0",
+          "flags": [
+            "POINTOPOINT",
+            "MULTICAST",
+            "NOARP",
+            "UP",
+            "LOWER_UP"
+          ],
+          "mtu": 1280,
+          "qdisc": "fq_codel",
+          "operstate": "UNKNOWN",
+          "group": "default",
+          "txqlen": 500,
+          "link_type": "none",
+          "promiscuity": 0,
+          "allmulti": 0,
+          "min_mtu": 68,
+          "max_mtu": 65535,
+          "linkinfo": {
+            "info_kind": "tun",
+            "info_data": {
+              "type": "tun",
+              "pi": false,
+              "vnet_hdr": true,
+              "multi_queue": false,
+              "persist": false
+            }
+          },
+          "num_tx_queues": 1,
+          "num_rx_queues": 1,
+          "gso_max_size": 65536,
+          "gso_max_segs": 65535,
+          "tso_max_size": 65536,
+          "tso_max_segs": 65535,
+          "gro_max_size": 65536,
+          "gso_ipv4_max_size": 65536,
+          "gro_ipv4_max_size": 65536,
+          "addr_info": [
+            {
+              "family": "inet6",
+              "local": "fe80::1392:39a:7e3b:ce3f",
+              "prefixlen": 64,
+              "scope": "link",
+              "stable-privacy": true,
+              "protocol": "kernel_ll",
+              "valid_life_time": 4294967295,
+              "preferred_life_time": 4294967295
+            }
+          ]
+        }
+      ],
+      "-4": {
+        "rule": [
+          {
+            "priority": 0,
+            "src": "all",
+            "table": "local",
+            "protocol": "kernel"
+          },
+          {
+            "priority": 5210,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "table": "main",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5230,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "table": "default",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5250,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "action": "unreachable",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5270,
+            "src": "all",
+            "table": "52",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 32766,
+            "src": "all",
+            "table": "main",
+            "protocol": "kernel"
+          },
+          {
+            "priority": 32767,
+            "src": "all",
+            "table": "default",
+            "protocol": "kernel"
+          }
+        ],
+        "route": [
+          {
+            "type": "local",
+            "dst": "127.0.0.0/8",
+            "dev": "lo",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "host",
+            "prefsrc": "127.0.0.1",
+            "flags": []
+          },
+          {
+            "type": "local",
+            "dst": "127.0.0.1",
+            "dev": "lo",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "host",
+            "prefsrc": "127.0.0.1",
+            "flags": []
+          },
+          {
+            "type": "broadcast",
+            "dst": "127.255.255.255",
+            "dev": "lo",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "link",
+            "prefsrc": "127.0.0.1",
+            "flags": []
+          }
+        ]
+      },
+      "-6": {
+        "rule": [
+          {
+            "priority": 0,
+            "src": "all",
+            "table": "local",
+            "protocol": "kernel"
+          },
+          {
+            "priority": 5210,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "table": "main",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5230,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "table": "default",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5250,
+            "src": "all",
+            "fwmark": "0x80000",
+            "fwmask": "0xff0000",
+            "action": "unreachable",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 5270,
+            "src": "all",
+            "table": "52",
+            "protocol": "unspec"
+          },
+          {
+            "priority": 32766,
+            "src": "all",
+            "table": "main",
+            "protocol": "kernel"
+          }
+        ],
+        "route": [
+          {
+            "type": "unicast",
+            "dst": "fe80::/64",
+            "dev": "tailscale0",
+            "table": "main",
+            "protocol": "kernel",
+            "scope": "global",
+            "metric": 256,
+            "flags": [],
+            "pref": "medium"
+          },
+          {
+            "type": "local",
+            "dst": "::1",
+            "dev": "lo",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "global",
+            "metric": 0,
+            "flags": [],
+            "pref": "medium"
+          },
+          {
+            "type": "local",
+            "dst": "fe80::1392:39a:7e3b:ce3f",
+            "dev": "tailscale0",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "global",
+            "metric": 0,
+            "flags": [],
+            "pref": "medium"
+          },
+          {
+            "type": "multicast",
+            "dst": "ff00::/8",
+            "dev": "tailscale0",
+            "table": "local",
+            "protocol": "kernel",
+            "scope": "global",
+            "metric": 256,
+            "flags": [],
+            "pref": "medium"
+          }
+        ]
+      },
+      "raw_rules": [
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000ff0000010000000008000f00ff00000008000e00ffffffff0500150002000000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000fe0000010000000008000f00fe00000008000e00ffffffff0500150000000000080006005a14000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000fd0000010000000008000f00fd00000008000e00ffffffff0500150000000000080006006e14000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000000000070000000008000f000000000008000e00ffffffff0500150000000000080006008214000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000340000010000000008000f003400000008000e00ffffffff05001500000000000800060096140000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600fe7f0000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "02000000fd0000010000000008000f00fd00000008000e00ffffffff050015000200000008000600ff7f0000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "80000000fd0000010000000008000f00fd00000008000e00ffffffff050015000200000008000600ff7f0000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "81000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600ff7f0000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000ff0000010000000008000f00ff00000008000e00ffffffff0500150002000000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000fe0000010000000008000f00fe00000008000e00ffffffff0500150000000000080006005a14000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000fd0000010000000008000f00fd00000008000e00ffffffff0500150000000000080006006e14000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000000000070000000008000f000000000008000e00ffffffff0500150000000000080006008214000008000a0000000800080010000000ff00"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000340000010000000008000f003400000008000e00ffffffff05001500000000000800060096140000"
+        },
+        {
+          "type": 32,
+          "flags": 2,
+          "payload_hex": "0a000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600fe7f0000"
+        }
+      ]
+    }
+  },
+  "result": "PASS_SHAPE_ORACLE_ONLY",
+  "cleanup_exact_container_absent": true,
+  "script": "tools/tailscale-kernel-rule-oracle.py",
+  "prior_observations": [
+    {
+      "observed_at_utc": "2026-10-24T14:38:15.409511+00:00",
+      "environment": "isolated Debian13 KVM guest",
+      "script_sha256": "815e9940a2c237f3fc7def4e6df83f9b3835708a110d6f852f2cacfc37fbd7e7",
+      "exit_code": 0,
+      "native_worker_acceptance": "NOT_RUN",
+      "real_client_acceptance": "NOT_RUN",
+      "limits": [
+        "Fresh no-login memory-only daemon: kernel rule/link/address metadata only.",
+        "No approved node identity, peer route authorization or table52 active routes were proved.",
+        "NetfilterMode0 setup does not remove Tailscale policy routing rules.",
+        "The observed default tailscale0 kernel link-local IPv6 must not silently expand protected forwarding policy; initialization must suppress or remove unexpected metadata before readiness.",
+        "AF_UNSPEC raw rule dump includes non-IPv4/IPv6 families128/129; no authorization is implied by capturing them."
+      ],
+      "image": "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065",
+      "container": "064d35c4af52c9e38a56db4d384fa1d3941afc2c9d3d69d013399b8f268db217",
+      "state": "mem:",
+      "network": "none",
+      "credential_or_identity_state_used": false,
+      "advertised_exit": false,
+      "production_changes": false,
+      "before": {
+        "prefs": {
+          "WantRunning": false,
+          "AdvertiseRoutes": null,
+          "NetfilterMode": 2,
+          "RouteAll": false,
+          "ExitNodeID": "",
+          "ExitNodeIP": ""
+        },
+        "kernel": {
+          "link": [
+            {
+              "ifindex": 1,
+              "ifname": "lo",
+              "flags": [
+                "LOOPBACK",
+                "UP",
+                "LOWER_UP"
+              ],
+              "mtu": 65536,
+              "qdisc": "noqueue",
+              "operstate": "UNKNOWN",
+              "linkmode": "DEFAULT",
+              "group": "default",
+              "txqlen": 1000,
+              "link_type": "loopback",
+              "address": "00:00:00:00:00:00",
+              "broadcast": "00:00:00:00:00:00",
+              "promiscuity": 0,
+              "allmulti": 0,
+              "min_mtu": 0,
+              "max_mtu": 0,
+              "inet6_addr_gen_mode": "eui64",
+              "num_tx_queues": 1,
+              "num_rx_queues": 1,
+              "gso_max_size": 65536,
+              "gso_max_segs": 65535,
+              "tso_max_size": 524280,
+              "tso_max_segs": 65535,
+              "gro_max_size": 65536,
+              "gso_ipv4_max_size": 65536,
+              "gro_ipv4_max_size": 65536
+            },
+            {
+              "ifindex": 2,
+              "ifname": "tailscale0",
+              "flags": [
+                "POINTOPOINT",
+                "MULTICAST",
+                "NOARP",
+                "UP",
+                "LOWER_UP"
+              ],
+              "mtu": 1280,
+              "qdisc": "fq_codel",
+              "operstate": "UNKNOWN",
+              "linkmode": "DEFAULT",
+              "group": "default",
+              "txqlen": 500,
+              "link_type": "none",
+              "promiscuity": 0,
+              "allmulti": 0,
+              "min_mtu": 68,
+              "max_mtu": 65535,
+              "linkinfo": {
+                "info_kind": "tun",
+                "info_data": {
+                  "type": "tun",
+                  "pi": false,
+                  "vnet_hdr": true,
+                  "multi_queue": false,
+                  "persist": false
+                }
+              },
+              "inet6_addr_gen_mode": "random",
+              "num_tx_queues": 1,
+              "num_rx_queues": 1,
+              "gso_max_size": 65536,
+              "gso_max_segs": 65535,
+              "tso_max_size": 65536,
+              "tso_max_segs": 65535,
+              "gro_max_size": 65536,
+              "gso_ipv4_max_size": 65536,
+              "gro_ipv4_max_size": 65536
+            }
+          ],
+          "address": [
+            {
+              "ifindex": 1,
+              "ifname": "lo",
+              "flags": [
+                "LOOPBACK",
+                "UP",
+                "LOWER_UP"
+              ],
+              "mtu": 65536,
+              "qdisc": "noqueue",
+              "operstate": "UNKNOWN",
+              "group": "default",
+              "txqlen": 1000,
+              "link_type": "loopback",
+              "address": "00:00:00:00:00:00",
+              "broadcast": "00:00:00:00:00:00",
+              "promiscuity": 0,
+              "allmulti": 0,
+              "min_mtu": 0,
+              "max_mtu": 0,
+              "num_tx_queues": 1,
+              "num_rx_queues": 1,
+              "gso_max_size": 65536,
+              "gso_max_segs": 65535,
+              "tso_max_size": 524280,
+              "tso_max_segs": 65535,
+              "gro_max_size": 65536,
+              "gso_ipv4_max_size": 65536,
+              "gro_ipv4_max_size": 65536,
+              "addr_info": [
+                {
+                  "family": "inet",
+                  "local": "127.0.0.1",
+                  "prefixlen": 8,
+                  "scope": "host",
+                  "label": "lo",
+                  "valid_life_time": 4294967295,
+                  "preferred_life_time": 4294967295
+                },
+                {
+                  "family": "inet6",
+                  "local": "::1",
+                  "prefixlen": 128,
+                  "scope": "host",
+                  "protocol": "kernel_lo",
+                  "valid_life_time": 4294967295,
+                  "preferred_life_time": 4294967295
+                }
+              ]
+            },
+            {
+              "ifindex": 2,
+              "ifname": "tailscale0",
+              "flags": [
+                "POINTOPOINT",
+                "MULTICAST",
+                "NOARP",
+                "UP",
+                "LOWER_UP"
+              ],
+              "mtu": 1280,
+              "qdisc": "fq_codel",
+              "operstate": "UNKNOWN",
+              "group": "default",
+              "txqlen": 500,
+              "link_type": "none",
+              "promiscuity": 0,
+              "allmulti": 0,
+              "min_mtu": 68,
+              "max_mtu": 65535,
+              "linkinfo": {
+                "info_kind": "tun",
+                "info_data": {
+                  "type": "tun",
+                  "pi": false,
+                  "vnet_hdr": true,
+                  "multi_queue": false,
+                  "persist": false
+                }
+              },
+              "num_tx_queues": 1,
+              "num_rx_queues": 1,
+              "gso_max_size": 65536,
+              "gso_max_segs": 65535,
+              "tso_max_size": 65536,
+              "tso_max_segs": 65535,
+              "gro_max_size": 65536,
+              "gso_ipv4_max_size": 65536,
+              "gro_ipv4_max_size": 65536,
+              "addr_info": [
+                {
+                  "family": "inet6",
+                  "local": "fe80::d87a:409f:d7f7:56f7",
+                  "prefixlen": 64,
+                  "scope": "link",
+                  "stable-privacy": true,
+                  "protocol": "kernel_ll",
+                  "valid_life_time": 4294967295,
+                  "preferred_life_time": 4294967295
+                }
+              ]
+            }
+          ],
+          "-4": {
+            "rule": [
+              {
+                "priority": 0,
+                "src": "all",
+                "table": "local",
+                "protocol": "kernel"
+              },
+              {
+                "priority": 5210,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "table": "main",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5230,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "table": "default",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5250,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "action": "unreachable",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5270,
+                "src": "all",
+                "table": "52",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 32766,
+                "src": "all",
+                "table": "main",
+                "protocol": "kernel"
+              },
+              {
+                "priority": 32767,
+                "src": "all",
+                "table": "default",
+                "protocol": "kernel"
+              }
+            ],
+            "route": [
+              {
+                "type": "local",
+                "dst": "127.0.0.0/8",
+                "dev": "lo",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "host",
+                "prefsrc": "127.0.0.1",
+                "flags": []
+              },
+              {
+                "type": "local",
+                "dst": "127.0.0.1",
+                "dev": "lo",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "host",
+                "prefsrc": "127.0.0.1",
+                "flags": []
+              },
+              {
+                "type": "broadcast",
+                "dst": "127.255.255.255",
+                "dev": "lo",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "link",
+                "prefsrc": "127.0.0.1",
+                "flags": []
+              }
+            ]
+          },
+          "-6": {
+            "rule": [
+              {
+                "priority": 0,
+                "src": "all",
+                "table": "local",
+                "protocol": "kernel"
+              },
+              {
+                "priority": 5210,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "table": "main",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5230,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "table": "default",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5250,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "action": "unreachable",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5270,
+                "src": "all",
+                "table": "52",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 32766,
+                "src": "all",
+                "table": "main",
+                "protocol": "kernel"
+              }
+            ],
+            "route": [
+              {
+                "type": "unicast",
+                "dst": "fe80::/64",
+                "dev": "tailscale0",
+                "table": "main",
+                "protocol": "kernel",
+                "scope": "global",
+                "metric": 256,
+                "flags": [],
+                "pref": "medium"
+              },
+              {
+                "type": "local",
+                "dst": "::1",
+                "dev": "lo",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "global",
+                "metric": 0,
+                "flags": [],
+                "pref": "medium"
+              },
+              {
+                "type": "local",
+                "dst": "fe80::d87a:409f:d7f7:56f7",
+                "dev": "tailscale0",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "global",
+                "metric": 0,
+                "flags": [],
+                "pref": "medium"
+              },
+              {
+                "type": "multicast",
+                "dst": "ff00::/8",
+                "dev": "tailscale0",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "global",
+                "metric": 256,
+                "flags": [],
+                "pref": "medium"
+              }
+            ]
+          },
+          "raw_rules": [
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000ff0000010000000008000f00ff00000008000e00ffffffff0500150002000000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000fe0000010000000008000f00fe00000008000e00ffffffff0500150000000000080006005a14000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000fd0000010000000008000f00fd00000008000e00ffffffff0500150000000000080006006e14000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000000000070000000008000f000000000008000e00ffffffff0500150000000000080006008214000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000340000010000000008000f003400000008000e00ffffffff05001500000000000800060096140000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600fe7f0000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000fd0000010000000008000f00fd00000008000e00ffffffff050015000200000008000600ff7f0000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "80000000fd0000010000000008000f00fd00000008000e00ffffffff050015000200000008000600ff7f0000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "81000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600ff7f0000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000ff0000010000000008000f00ff00000008000e00ffffffff0500150002000000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000fe0000010000000008000f00fe00000008000e00ffffffff0500150000000000080006005a14000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000fd0000010000000008000f00fd00000008000e00ffffffff0500150000000000080006006e14000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000000000070000000008000f000000000008000e00ffffffff0500150000000000080006008214000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000340000010000000008000f003400000008000e00ffffffff05001500000000000800060096140000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600fe7f0000"
+            }
+          ]
+        }
+      },
+      "after_mode_off": {
+        "prefs": {
+          "WantRunning": false,
+          "AdvertiseRoutes": null,
+          "NetfilterMode": 0,
+          "RouteAll": false,
+          "ExitNodeID": "",
+          "ExitNodeIP": ""
+        },
+        "kernel": {
+          "link": [
+            {
+              "ifindex": 1,
+              "ifname": "lo",
+              "flags": [
+                "LOOPBACK",
+                "UP",
+                "LOWER_UP"
+              ],
+              "mtu": 65536,
+              "qdisc": "noqueue",
+              "operstate": "UNKNOWN",
+              "linkmode": "DEFAULT",
+              "group": "default",
+              "txqlen": 1000,
+              "link_type": "loopback",
+              "address": "00:00:00:00:00:00",
+              "broadcast": "00:00:00:00:00:00",
+              "promiscuity": 0,
+              "allmulti": 0,
+              "min_mtu": 0,
+              "max_mtu": 0,
+              "inet6_addr_gen_mode": "eui64",
+              "num_tx_queues": 1,
+              "num_rx_queues": 1,
+              "gso_max_size": 65536,
+              "gso_max_segs": 65535,
+              "tso_max_size": 524280,
+              "tso_max_segs": 65535,
+              "gro_max_size": 65536,
+              "gso_ipv4_max_size": 65536,
+              "gro_ipv4_max_size": 65536
+            },
+            {
+              "ifindex": 2,
+              "ifname": "tailscale0",
+              "flags": [
+                "POINTOPOINT",
+                "MULTICAST",
+                "NOARP",
+                "UP",
+                "LOWER_UP"
+              ],
+              "mtu": 1280,
+              "qdisc": "fq_codel",
+              "operstate": "UNKNOWN",
+              "linkmode": "DEFAULT",
+              "group": "default",
+              "txqlen": 500,
+              "link_type": "none",
+              "promiscuity": 0,
+              "allmulti": 0,
+              "min_mtu": 68,
+              "max_mtu": 65535,
+              "linkinfo": {
+                "info_kind": "tun",
+                "info_data": {
+                  "type": "tun",
+                  "pi": false,
+                  "vnet_hdr": true,
+                  "multi_queue": false,
+                  "persist": false
+                }
+              },
+              "inet6_addr_gen_mode": "random",
+              "num_tx_queues": 1,
+              "num_rx_queues": 1,
+              "gso_max_size": 65536,
+              "gso_max_segs": 65535,
+              "tso_max_size": 65536,
+              "tso_max_segs": 65535,
+              "gro_max_size": 65536,
+              "gso_ipv4_max_size": 65536,
+              "gro_ipv4_max_size": 65536
+            }
+          ],
+          "address": [
+            {
+              "ifindex": 1,
+              "ifname": "lo",
+              "flags": [
+                "LOOPBACK",
+                "UP",
+                "LOWER_UP"
+              ],
+              "mtu": 65536,
+              "qdisc": "noqueue",
+              "operstate": "UNKNOWN",
+              "group": "default",
+              "txqlen": 1000,
+              "link_type": "loopback",
+              "address": "00:00:00:00:00:00",
+              "broadcast": "00:00:00:00:00:00",
+              "promiscuity": 0,
+              "allmulti": 0,
+              "min_mtu": 0,
+              "max_mtu": 0,
+              "num_tx_queues": 1,
+              "num_rx_queues": 1,
+              "gso_max_size": 65536,
+              "gso_max_segs": 65535,
+              "tso_max_size": 524280,
+              "tso_max_segs": 65535,
+              "gro_max_size": 65536,
+              "gso_ipv4_max_size": 65536,
+              "gro_ipv4_max_size": 65536,
+              "addr_info": [
+                {
+                  "family": "inet",
+                  "local": "127.0.0.1",
+                  "prefixlen": 8,
+                  "scope": "host",
+                  "label": "lo",
+                  "valid_life_time": 4294967295,
+                  "preferred_life_time": 4294967295
+                },
+                {
+                  "family": "inet6",
+                  "local": "::1",
+                  "prefixlen": 128,
+                  "scope": "host",
+                  "protocol": "kernel_lo",
+                  "valid_life_time": 4294967295,
+                  "preferred_life_time": 4294967295
+                }
+              ]
+            },
+            {
+              "ifindex": 2,
+              "ifname": "tailscale0",
+              "flags": [
+                "POINTOPOINT",
+                "MULTICAST",
+                "NOARP",
+                "UP",
+                "LOWER_UP"
+              ],
+              "mtu": 1280,
+              "qdisc": "fq_codel",
+              "operstate": "UNKNOWN",
+              "group": "default",
+              "txqlen": 500,
+              "link_type": "none",
+              "promiscuity": 0,
+              "allmulti": 0,
+              "min_mtu": 68,
+              "max_mtu": 65535,
+              "linkinfo": {
+                "info_kind": "tun",
+                "info_data": {
+                  "type": "tun",
+                  "pi": false,
+                  "vnet_hdr": true,
+                  "multi_queue": false,
+                  "persist": false
+                }
+              },
+              "num_tx_queues": 1,
+              "num_rx_queues": 1,
+              "gso_max_size": 65536,
+              "gso_max_segs": 65535,
+              "tso_max_size": 65536,
+              "tso_max_segs": 65535,
+              "gro_max_size": 65536,
+              "gso_ipv4_max_size": 65536,
+              "gro_ipv4_max_size": 65536,
+              "addr_info": [
+                {
+                  "family": "inet6",
+                  "local": "fe80::d87a:409f:d7f7:56f7",
+                  "prefixlen": 64,
+                  "scope": "link",
+                  "stable-privacy": true,
+                  "protocol": "kernel_ll",
+                  "valid_life_time": 4294967295,
+                  "preferred_life_time": 4294967295
+                }
+              ]
+            }
+          ],
+          "-4": {
+            "rule": [
+              {
+                "priority": 0,
+                "src": "all",
+                "table": "local",
+                "protocol": "kernel"
+              },
+              {
+                "priority": 5210,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "table": "main",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5230,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "table": "default",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5250,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "action": "unreachable",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5270,
+                "src": "all",
+                "table": "52",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 32766,
+                "src": "all",
+                "table": "main",
+                "protocol": "kernel"
+              },
+              {
+                "priority": 32767,
+                "src": "all",
+                "table": "default",
+                "protocol": "kernel"
+              }
+            ],
+            "route": [
+              {
+                "type": "local",
+                "dst": "127.0.0.0/8",
+                "dev": "lo",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "host",
+                "prefsrc": "127.0.0.1",
+                "flags": []
+              },
+              {
+                "type": "local",
+                "dst": "127.0.0.1",
+                "dev": "lo",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "host",
+                "prefsrc": "127.0.0.1",
+                "flags": []
+              },
+              {
+                "type": "broadcast",
+                "dst": "127.255.255.255",
+                "dev": "lo",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "link",
+                "prefsrc": "127.0.0.1",
+                "flags": []
+              }
+            ]
+          },
+          "-6": {
+            "rule": [
+              {
+                "priority": 0,
+                "src": "all",
+                "table": "local",
+                "protocol": "kernel"
+              },
+              {
+                "priority": 5210,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "table": "main",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5230,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "table": "default",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5250,
+                "src": "all",
+                "fwmark": "0x80000",
+                "fwmask": "0xff0000",
+                "action": "unreachable",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 5270,
+                "src": "all",
+                "table": "52",
+                "protocol": "unspec"
+              },
+              {
+                "priority": 32766,
+                "src": "all",
+                "table": "main",
+                "protocol": "kernel"
+              }
+            ],
+            "route": [
+              {
+                "type": "unicast",
+                "dst": "fe80::/64",
+                "dev": "tailscale0",
+                "table": "main",
+                "protocol": "kernel",
+                "scope": "global",
+                "metric": 256,
+                "flags": [],
+                "pref": "medium"
+              },
+              {
+                "type": "local",
+                "dst": "::1",
+                "dev": "lo",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "global",
+                "metric": 0,
+                "flags": [],
+                "pref": "medium"
+              },
+              {
+                "type": "local",
+                "dst": "fe80::d87a:409f:d7f7:56f7",
+                "dev": "tailscale0",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "global",
+                "metric": 0,
+                "flags": [],
+                "pref": "medium"
+              },
+              {
+                "type": "multicast",
+                "dst": "ff00::/8",
+                "dev": "tailscale0",
+                "table": "local",
+                "protocol": "kernel",
+                "scope": "global",
+                "metric": 256,
+                "flags": [],
+                "pref": "medium"
+              }
+            ]
+          },
+          "raw_rules": [
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000ff0000010000000008000f00ff00000008000e00ffffffff0500150002000000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000fe0000010000000008000f00fe00000008000e00ffffffff0500150000000000080006005a14000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000fd0000010000000008000f00fd00000008000e00ffffffff0500150000000000080006006e14000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000000000070000000008000f000000000008000e00ffffffff0500150000000000080006008214000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000340000010000000008000f003400000008000e00ffffffff05001500000000000800060096140000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600fe7f0000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "02000000fd0000010000000008000f00fd00000008000e00ffffffff050015000200000008000600ff7f0000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "80000000fd0000010000000008000f00fd00000008000e00ffffffff050015000200000008000600ff7f0000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "81000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600ff7f0000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000ff0000010000000008000f00ff00000008000e00ffffffff0500150002000000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000fe0000010000000008000f00fe00000008000e00ffffffff0500150000000000080006005a14000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000fd0000010000000008000f00fd00000008000e00ffffffff0500150000000000080006006e14000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000000000070000000008000f000000000008000e00ffffffff0500150000000000080006008214000008000a0000000800080010000000ff00"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000340000010000000008000f003400000008000e00ffffffff05001500000000000800060096140000"
+            },
+            {
+              "type": 32,
+              "flags": 2,
+              "payload_hex": "0a000000fe0000010000000008000f00fe00000008000e00ffffffff050015000200000008000600fe7f0000"
+            }
+          ]
+        }
+      },
+      "result": "PASS_SHAPE_ORACLE_ONLY",
+      "cleanup_exact_container_absent": true
+    }
+  ]
+}

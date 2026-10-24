@@ -53,7 +53,11 @@ a trusted helper must validate/enter the namespace synchronously, then reopen
 socket handle and differ from the source. Plan identities must match exactly.
 No caller boolean can manufacture quarantine evidence.
 
-Handles have private fields. Before moving or cleaning up, the library checks
+Handles have private fields. A veth pair retains its original host and transport
+namespace identities together; endpoint getters only borrow, so callers cannot
+recombine tokens from different pairs. Cleanup binds both caller namespaces to
+that pair before any netlink request; reciprocal numeric ifindices alone cannot
+identify a peer across namespaces. Before moving or cleaning up, the library checks
 ifindex, exact name/kind/MTU/alias/DOWN state, absence of addresses and routes,
 and expected device/peer identity and endpoint. Veth cleanup checks both endpoint
 indices/names/aliases/kinds and reciprocal peer indices. It deletes only the

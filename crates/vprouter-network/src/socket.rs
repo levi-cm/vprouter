@@ -33,6 +33,15 @@ pub(crate) struct Socket {
     poisoned: bool,
 }
 impl Socket {
+    #[cfg(test)]
+    pub(crate) fn unavailable_for_test() -> Self {
+        Self {
+            fd: std::fs::File::open("/dev/null").unwrap().into(),
+            port: 0,
+            seq: u32::MAX,
+            poisoned: false,
+        }
+    }
     pub fn open(generic: bool) -> Result<Self> {
         // NETLINK_ROUTE is protocol zero, represented as None by rustix.
         let fd = net::socket_with(
@@ -308,7 +317,8 @@ impl Replies {
                 4 => return Err(Error::Oversized),
                 k if k == self.expected_type => {
                     if matches!(self.completion, Completion::Ack)
-                        || matches!(self.completion, Completion::Single) && !self.data.is_empty()
+                        || matches!(self.completion, Completion::Single)
+                            && (!self.data.is_empty() || flags & 2 != 0)
                         || matches!(self.completion, Completion::Dump) && flags & 2 == 0
                     {
                         return Err(Error::Malformed);
@@ -386,13 +396,42 @@ mod tests {
         );
     }
     #[test]
+    fn single_rejects_multipart_data_in_either_ack_order() {
+        let mut payload = vec![0; 4];
+        payload.extend(frame(18, 0, &[]));
+        let ack = frame(2, 0, &payload);
+        for ack_first in [false, true] {
+            let mut r = Replies::new(1, 5, 18, 16, Completion::Single);
+            if ack_first {
+                r.ingest(&ack).unwrap();
+                assert!(!r.complete());
+            }
+            assert_eq!(r.ingest(&frame(16, 2, &[])), Err(Error::Malformed));
+            assert!(r.data.is_empty());
+            assert!(!r.complete());
+
+            let mut r = Replies::new(1, 5, 18, 16, Completion::Single);
+            let data = frame(16, 0, &[]);
+            let (first, last) = if ack_first {
+                (&ack, &data)
+            } else {
+                (&data, &ack)
+            };
+            r.ingest(first).unwrap();
+            assert!(!r.complete());
+            r.ingest(last).unwrap();
+            assert!(r.complete());
+            assert_eq!(r.data.len(), 1);
+        }
+        let mut r = Replies::new(1, 5, 18, 16, Completion::Dump);
+        r.ingest(&frame(16, 2, &[])).unwrap();
+        assert!(!r.complete());
+        r.ingest(&frame(3, 0, &[0; 4])).unwrap();
+        assert!(r.complete());
+    }
+    #[test]
     fn deadline_poison_and_sequence_refuse_before_io() {
-        let mut s = Socket {
-            fd: std::fs::File::open("/dev/null").unwrap().into(),
-            port: 0,
-            seq: u32::MAX,
-            poisoned: false,
-        };
+        let mut s = Socket::unavailable_for_test();
         assert_eq!(
             s.wait(PollFlags::IN, Instant::now() - Duration::from_secs(1)),
             Err(Error::Deadline)

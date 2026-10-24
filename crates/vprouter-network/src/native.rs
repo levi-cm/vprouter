@@ -79,9 +79,26 @@ impl DownLink {
         &self.link.name
     }
 }
+/// An inseparable host/transport pair bound to its creation namespaces.
+/// Inspection borrows the endpoints; callers cannot recombine owned tokens.
+///
+/// ```compile_fail,E0616
+/// use vprouter_network::VethPair;
+/// fn recombine(a: VethPair, b: VethPair) -> VethPair {
+///     VethPair { host: a.host, transport: b.transport }
+/// }
+/// ```
 pub struct VethPair {
-    pub host: DownLink,
-    pub transport: DownLink,
+    host: DownLink,
+    transport: DownLink,
+}
+impl VethPair {
+    pub fn host(&self) -> &DownLink {
+        &self.host
+    }
+    pub fn transport(&self) -> &DownLink {
+        &self.transport
+    }
 }
 
 /// These two native sockets stay bound to their construction namespace even
@@ -558,6 +575,16 @@ impl NativeNetwork {
         complete(end, ())
     }
     pub fn cleanup_veth_pair_down(&mut self, transport: &mut Self, pair: VethPair) -> Result<()> {
+        // Local ifindices (including reciprocal peer indices) can collide
+        // across unrelated namespace pairs. Bind BOTH callers to this original,
+        // inseparable pair before any observation or deletion request.
+        if self.namespace != pair.host.namespace
+            || transport.namespace != pair.transport.namespace
+            || self.namespace == transport.namespace
+            || self.plan != transport.plan
+        {
+            return Err(Error::NamespaceUnverified);
+        }
         let end = deadline();
         let h = self.owned_down(&pair.host, end)?;
         let t = transport.owned_down(&pair.transport, end)?;
@@ -594,5 +621,64 @@ fn complete<T>(end: Instant, value: T) -> Result<T> {
         Err(Error::Deadline)
     } else {
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn network(plan: &Plan, namespace: NamespaceIdentity) -> NativeNetwork {
+        NativeNetwork {
+            plan: plan.clone(),
+            route: Socket::unavailable_for_test(),
+            generic: Socket::unavailable_for_test(),
+            family: None,
+            namespace,
+        }
+    }
+    fn pair(plan: &Plan, host: NamespaceIdentity, transport: NamespaceIdentity) -> VethPair {
+        let endpoint = |name: &str, namespace| DownLink {
+            link: Link {
+                name: name.into(),
+                index: 2,
+                peer_index: Some(2),
+                kind: "veth".into(),
+                up: false,
+                mtu: 1420,
+                alias: plan.alias.clone(),
+                hardware_type: 1,
+            },
+            namespace,
+        };
+        VethPair {
+            host: endpoint(plan.host_name(), host),
+            transport: endpoint(plan.transport_name(), transport),
+        }
+    }
+    #[test]
+    fn colliding_veth_indices_in_other_namespace_pairs_refuse_before_io() {
+        let plan = crate::tests::plan();
+        let (h1, t1, h2, t2) = ((1, 11), (1, 12), (1, 21), (1, 22));
+        let a = pair(&plan, h1, t1);
+        let b = pair(&plan, h2, t2);
+        // The public link facts and reciprocal indices cannot distinguish the
+        // original two pairs. Their retained namespace identities must do so.
+        assert_eq!(a.host.link, b.host.link);
+        assert_eq!(a.transport.link, b.transport.link);
+        assert_eq!((a.host().index(), a.transport().index()), (2, 2));
+        assert_eq!(a.host().name(), plan.host_name());
+        assert_eq!(a.transport().name(), plan.transport_name());
+        // These sockets reject every request with SequenceMismatch, before any
+        // I/O. NamespaceUnverified therefore proves refusal precedes all
+        // observations and, in particular, deletion of either real peer.
+        assert_eq!(
+            network(&plan, h1).cleanup_veth_pair_down(&mut network(&plan, t2), a),
+            Err(Error::NamespaceUnverified)
+        );
+        assert_eq!(
+            network(&plan, h1).cleanup_veth_pair_down(&mut network(&plan, t2), b),
+            Err(Error::NamespaceUnverified)
+        );
     }
 }

@@ -17,3 +17,4 @@ e={'observed_at_utc':datetime.now(timezone.utc).isoformat(),'source_commit':sour
 attempt=1
 while (b/f'worker-localapi-run-{attempt}.json').exists():attempt+=1
 path=b/f'worker-localapi-run-{attempt}.json';assert not path.exists();path.write_text(json.dumps(e,indent=2)+'\n');print(json.dumps(e,indent=2))
+sys.exit(0 if r.returncode == 0 else 1)

@@ -88,3 +88,11 @@ observational; replace it with the independently enforced protocol stages above,
 never interpret successful recording as quarantine. The bounded health publisher
 can leave one blocking fsync thread; worker runtime shutdown must remain bounded
 without waiting forever for that filesystem operation.
+
+Control-plane freshness must distinguish last heartbeat receipt from last complete
+verified provider/structure/identity sample. Ongoing heartbeats during bounded
+provider work cannot refresh stale readiness evidence or extend the45s verification
+window. Bind monotonic samples and sequences to exit/generation, and quarantine
+on stale verification even while the worker is responsive. Include real freeze/
+resume and delayed-provider tests; task7 expiry fix is necessary but does not
+replace independent guard enforcement.

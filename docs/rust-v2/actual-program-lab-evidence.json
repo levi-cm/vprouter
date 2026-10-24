@@ -619,10 +619,65 @@
         "sha256": "487556df4abd722596e641282e568d522c78802406c766f3d8924db5f29241e7",
         "observation": "FD2-only tokens identify Go TUN engine operation-not-permitted error. Prior raw7 thread35771 witnesses successful TUN ioctls then pipe2 O_CLOEXEC EPERM three times; no need to decode payloads or broaden general exec."
       }
+    },
+    {
+      "attempt": 10,
+      "source_binding": {
+        "source_commit": "ae1983e93f5155c79f66bd751229dade13905b58",
+        "source_archive_sha256": "d2eace2f93807349052cb477aadc3d090546921ceaae225d20791a61ebaaa752",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "435c4ddb788e8c9d99fe100ca1e99750b3b1b5cd38954c09af5e602394b102de"
+      },
+      "artifact_sha256": "cb1071b77facc45e08cd8bee5f2758394dd8a92d39e5df35a6a9b535bc3dd34a",
+      "context_sha256": "8d81b3ef91e94a15b4d8939662a3b3692263207b9df08c3ba69a1f3b502414a1",
+      "manifest_sha256": "773f8757938bde28e0ee393685bb2c54df1612826a9a464f8fa9d8c11def6c74",
+      "image_id": "sha256:75305d096f9cb2c4f741e94a5ca899370df24c86a979f64182d23d2a13f636b1",
+      "image_layers": [
+        "sha256:67b608f3fd126d081b7a1d09bd8e8abbfeccd727a7690d3ebde68954cbb4b404"
+      ],
+      "runner_sha256": "b5e86679458030354e04965079b574ed0118a776bb5f6e12df46b0eb60f86c98",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 6.937,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "actual_lab: descriptor_policy"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": true,
+      "actual_daemon_exec": "LIVE_SOCKET_AND_PROGRAM_IDENTITY_REACHED_INSPECTION_FAILED",
+      "actual_observer_exec": "NOT_REACHED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-10.json",
+      "private_run_record_sha256": "8116170cd1414aeb7c731ece45aff855cdf5c0f8250c3a793b15650f8724a2f7",
+      "private_inventory": "target/lab-state/actual-program-inspect-10.json",
+      "private_inventory_sha256": "edcb240ee7329da1735f848416fa4925a623034c77e2947b6274a0bd1e0c9ba9",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-trace-10-summary.json",
+      "trace_summary_sha256": "1b35b9a10c56b836b67324068dd6a3548726b56e3af8c5470d8fb37c986c2f2a",
+      "trace_files": 43,
+      "observation": "Candidate06 private mount isolation plus daemon-only exact CLOEXEC pipe enables setup acknowledgement and live daemon socket/program identity. Harness descriptor_policy refuses runtime descriptor before writing proof. Pipe descriptor hypothesis not independently confirmed yet."
     }
   ],
   "diagnosis": {
-    "status": "NARROW_PRIVATE_PROC_AND_DAEMON_CLOEXEC_PIPE_FIX_PENDING",
+    "status": "PRIVATE_PROC_AND_PIPE_FIX_REACHES_LIVE_DAEMON_DESCRIPTOR_CHECK_PENDING",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/vprouter-core", "crates/vprouter-linux", "crates/vprouter", "crates/vprouter-netfilter", "crates/vprouter-network", "crates/vprouter-launch"]
+members = ["crates/vprouter-core", "crates/vprouter-linux", "crates/vprouter", "crates/vprouter-netfilter", "crates/vprouter-network", "crates/vprouter-launch", "crates/vprouter-worker"]
 resolver = "3"
 
 [workspace.package]
@@ -24,3 +24,8 @@ netlink-packet-generic = "=0.5.0"
 netlink-packet-wireguard = "=0.5.0"
 x25519-dalek = "=3.0.0"
 zeroize = "=1.9.1"
+
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "=1.0.11"
+hickory-proto = { version = "=0.26.3", default-features = false, features = ["std"] }

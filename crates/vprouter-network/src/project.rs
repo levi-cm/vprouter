@@ -57,6 +57,33 @@ pub struct Rule {
     pub ipv6: bool,
     pub priority: u32,
     pub table: u32,
+    pub action: u8,
+    pub flags: u32,
+    pub fwmark: Option<u32>,
+    pub fwmask: Option<u32>,
+    pub suppress_prefixlen: Option<u32>,
+    pub suppress_ifgroup: Option<u32>,
+    pub goto: Option<u32>,
+    pub realm: Option<u32>,
+    pub protocol: Option<u8>,
+}
+impl Default for Rule {
+    fn default() -> Self {
+        Self {
+            ipv6: false,
+            priority: 0,
+            table: 0,
+            action: 1,
+            flags: 0,
+            fwmark: None,
+            fwmask: None,
+            suppress_prefixlen: Some(u32::MAX),
+            suppress_ifgroup: None,
+            goto: None,
+            realm: None,
+            protocol: Some(2),
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Peer {
@@ -299,13 +326,7 @@ pub(crate) fn rule(m: netlink_packet_route::rule::RuleMessage) -> Result<Rule> {
     unique(&m.attributes)?;
     let h = m.header;
     let family: u8 = h.family.into();
-    if ![2, 10].contains(&family)
-        || h.dst_len != 0
-        || h.src_len != 0
-        || h.tos != 0
-        || u8::from(h.action) != 1
-        || !h.flags.is_empty()
-    {
+    if ![2, 10].contains(&family) || h.dst_len != 0 || h.src_len != 0 || h.tos != 0 {
         #[cfg(test)]
         eprintln!(
             "LAB_UNSUPPORTED_RULE_HEADER family={} dst={} src={} tos={} action={} flags={}",
@@ -322,6 +343,15 @@ pub(crate) fn rule(m: netlink_packet_route::rule::RuleMessage) -> Result<Rule> {
         ipv6: family == 10,
         priority: 0,
         table: u32::from(h.table),
+        action: h.action.into(),
+        flags: h.flags.bits(),
+        fwmark: None,
+        fwmask: None,
+        suppress_prefixlen: None,
+        suppress_ifgroup: None,
+        goto: None,
+        realm: None,
+        protocol: None,
     };
     for a in m.attributes {
         #[cfg(test)]
@@ -334,10 +364,13 @@ pub(crate) fn rule(m: netlink_packet_route::rule::RuleMessage) -> Result<Rule> {
                 }
                 out.table = v;
             }
-            U::Protocol(netlink_packet_route::route::RouteProtocol::Kernel) => {}
-            // Kernel fib_rule dumps use -1/U32_MAX for disabled suppression.
-            // Any functional prefix threshold remains unsupported.
-            U::SuppressPrefixLen(u32::MAX) => {}
+            U::Protocol(p) => out.protocol = Some(p.into()),
+            U::FwMark(v) => out.fwmark = Some(v),
+            U::FwMask(v) => out.fwmask = Some(v),
+            U::SuppressPrefixLen(v) => out.suppress_prefixlen = Some(v),
+            U::SuppressIfGroup(v) => out.suppress_ifgroup = Some(v),
+            U::Goto(v) => out.goto = Some(v),
+            U::Realm(v) => out.realm = Some((u32::from(v.source) << 16) | u32::from(v.destination)),
             _ => {
                 #[cfg(test)]
                 {

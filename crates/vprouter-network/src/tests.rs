@@ -106,26 +106,31 @@ fn snapshot(p: &Plan) -> Snapshot {
                 ipv6: false,
                 priority: 0,
                 table: 255,
+                ..Rule::default()
             },
             Rule {
                 ipv6: false,
                 priority: 32766,
                 table: 254,
+                ..Rule::default()
             },
             Rule {
                 ipv6: false,
                 priority: 32767,
                 table: 253,
+                ..Rule::default()
             },
             Rule {
                 ipv6: true,
                 priority: 0,
                 table: 255,
+                ..Rule::default()
             },
             Rule {
                 ipv6: true,
                 priority: 32766,
                 table: 254,
+                ..Rule::default()
             },
         ],
         wireguard: Some(Wireguard {
@@ -280,6 +285,7 @@ fn restored_default_endpoint_docker_extra_routes_rules_interfaces_and_ipv6_rejec
         ipv6: false,
         priority: 1,
         table: 52,
+        ..Rule::default()
     });
     assert!(matches!(p.audit(Some(&s), 4, 1000.0), Audit::Rejected(_)));
     let mut s = base.clone();
@@ -408,7 +414,7 @@ fn multipath_encapsulation_rules_and_malformed_attributes_fail_closed() {
     rule.header.family = netlink_packet_route::AddressFamily::Inet;
     rule.header.action = netlink_packet_route::rule::RuleAction::ToTable;
     rule.attributes.push(U::FwMark(1));
-    assert_eq!(crate::project::rule(rule), Err(Error::Unsupported));
+    assert_eq!(crate::project::rule(rule).unwrap().fwmark, Some(1));
     let mut bytes = vec![0; crate::socket::MAX_PACKET + 1];
     assert_eq!(
         crate::project::preflight(&bytes, true),
@@ -457,7 +463,7 @@ fn only_empty_hardware_metadata_and_explicit_no_xdp_are_bookkeeping() {
 }
 
 #[test]
-fn disabled_rule_suppression_sentinel_does_not_admit_functional_suppression() {
+fn rule_suppression_is_retained_not_silently_discarded() {
     use netlink_packet_route::{
         AddressFamily,
         rule::{RuleAction, RuleAttribute as U, RuleMessage},
@@ -472,11 +478,99 @@ fn disabled_rule_suppression_sentinel_does_not_admit_functional_suppression() {
         Ok(Rule {
             ipv6: false,
             priority: 0,
-            table: 255
+            table: 255,
+            protocol: None,
+            ..Rule::default()
         })
     );
     for prefix in [0, 1, 32, 128, u32::MAX - 1] {
         m.attributes = vec![U::SuppressPrefixLen(prefix)];
-        assert_eq!(crate::project::rule(m.clone()), Err(Error::Unsupported));
+        assert_eq!(
+            crate::project::rule(m.clone()).unwrap().suppress_prefixlen,
+            Some(prefix)
+        );
+    }
+}
+
+#[test]
+fn independent_pinned_daemon_raw_rules_preserve_all_functional_metadata() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../tests/fixtures/tailscale-rules.json")).unwrap();
+    let mut projected = Vec::new();
+    for value in fixture["rules"].as_array().unwrap() {
+        let text = value["payload_hex"].as_str().unwrap();
+        let payload: Vec<u8> = (0..text.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
+            .collect();
+        let mut bytes = vec![0; 16];
+        bytes.extend_from_slice(&payload);
+        let n = bytes.len() as u32;
+        bytes[..4].copy_from_slice(&n.to_ne_bytes());
+        bytes[4..6].copy_from_slice(&32u16.to_ne_bytes());
+        let message = crate::project::route_message(&bytes).unwrap();
+        let netlink_packet_route::RouteNetlinkMessage::NewRule(message) = message else {
+            panic!("rule expected")
+        };
+        if ![2, 10].contains(&payload[0]) {
+            assert_eq!(crate::project::rule(message), Err(Error::Unsupported));
+            continue;
+        }
+        let rule = crate::project::rule(message).unwrap();
+        assert_eq!(rule.suppress_prefixlen, Some(u32::MAX));
+        assert_eq!(rule.suppress_ifgroup, None);
+        assert_eq!(rule.goto, None);
+        assert_eq!(rule.realm, None);
+        assert_eq!(rule.flags, 0);
+        match rule.priority {
+            5210 | 5230 => {
+                assert_eq!(rule.action, 1);
+                assert_eq!(rule.fwmark, Some(0x80000));
+                assert_eq!(rule.fwmask, Some(0xff0000));
+                assert_eq!(rule.protocol, Some(0));
+            }
+            5250 => {
+                assert_eq!(rule.action, 7);
+                assert_eq!(rule.table, 0);
+                assert_eq!(rule.fwmark, Some(0x80000));
+                assert_eq!(rule.fwmask, Some(0xff0000));
+                assert_eq!(rule.protocol, Some(0));
+            }
+            5270 => {
+                assert_eq!(rule.table, 52);
+                assert_eq!(rule.action, 1);
+                assert_eq!(rule.fwmark, None);
+                assert_eq!(rule.protocol, Some(0));
+            }
+            _ => {
+                assert_eq!(rule.protocol, Some(2));
+                assert_eq!(rule.action, 1);
+                assert_eq!(rule.fwmark, None);
+            }
+        }
+        projected.push(rule);
+    }
+    assert_eq!(projected.len(), 13);
+    // This no-login oracle is not permission to accept unbound Tailscale policy.
+    let p = plan();
+    let mut s = snapshot(&p);
+    s.rules = projected;
+    assert!(matches!(p.audit(Some(&s), 4, 1000.0), Audit::Rejected(_)));
+    let base = snapshot(&p);
+    for mutate in 0..9 {
+        let mut s = base.clone();
+        let r = &mut s.rules[0];
+        match mutate {
+            0 => r.action = 7,
+            1 => r.flags = 2,
+            2 => r.fwmark = Some(0),
+            3 => r.fwmask = Some(u32::MAX),
+            4 => r.suppress_prefixlen = Some(0),
+            5 => r.suppress_ifgroup = Some(0),
+            6 => r.goto = Some(0),
+            7 => r.realm = Some(0),
+            _ => r.protocol = Some(0),
+        }
+        assert!(matches!(p.audit(Some(&s), 4, 1000.0), Audit::Rejected(_)));
     }
 }

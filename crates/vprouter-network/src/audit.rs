@@ -149,26 +149,31 @@ pub(crate) fn expected_rules() -> Vec<Rule> {
             ipv6: false,
             priority: 0,
             table: 255,
+            ..Rule::default()
         },
         Rule {
             ipv6: false,
             priority: 32766,
             table: 254,
+            ..Rule::default()
         },
         Rule {
             ipv6: false,
             priority: 32767,
             table: 253,
+            ..Rule::default()
         },
         Rule {
             ipv6: true,
             priority: 0,
             table: 255,
+            ..Rule::default()
         },
         Rule {
             ipv6: true,
             priority: 32766,
             table: 254,
+            ..Rule::default()
         },
     ]
 }

@@ -195,3 +195,78 @@ capability, LSM/seccomp/TUN needs and startup; fresh actual-daemon kernel metada
 final minimal immutable image; ARM64 runtime; enrollment/approved identity;
 provider/real-client traffic, watchdog/readiness/release staging. The probe cannot
 certify these. Independent spec and quality review is required before8b2.
+
+## Independent review fixes, round1/5
+
+Review `.superpowers/sdd/rust-v2/task-8b1-review.md` identified two Important
+findings: blocking AF_UNIX connection establishment before framing deadlines,
+and missing focused one-use/request/response replay refusal coverage. Both were
+fixed in `45114766f6b20986098f3ad982ab92b2877ae349`, based on `8761fb8`.
+This section supersedes the earlier final-source/artifact labels for review;
+earlier payloads, source archives and unsuccessful attempt evidence are preserved.
+
+`bootstrap.rs` now creates the control socket with NONBLOCK|CLOEXEC, refuses Linux
+AF_UNIX backlog EAGAIN and connection refusal explicitly, and handles pending
+connection completion with the existing deadline-bound poll, SO_ERROR and
+connected-peer check. The worker uses one absolute two-second deadline across
+connect, request write and response prefix/body read. Timeout/refusal never
+constructs monitoring clients. There is no new unsafe, dependency, privilege or
+activation authority. The host one-use state/request binding and worker response
+binding were extracted into small private units used by the real handoff paths.
+The host still consumes before authority checks/accept/request validation.
+
+Meaningful local red/green evidence, without privileged tests:
+
+- `cargo test -p vprouter-worker --lib
+  full_unix_backlog_refuses_within_connection_deadline --offline --locked`:
+  RED exit101 with the original blocking connector wrapped behind the helper;
+  the test's250ms receive deadline expired. The test deliberately closes its
+  listener and joins the connector before asserting so a regression cannot hang
+  the suite. GREEN after NONBLOCK fix,1 passed in0.00s. It creates a local
+  backlog0 listener, fills its queue and verifies another connection refuses.
+- `cargo test -p vprouter-worker --lib bootstrap::tests --offline --locked`:
+  GREEN8 passed. Added local stalled-listener/expired-deadline/refused-connection
+  coverage and framed current/stale digest, nonce and schema response cases.
+- `cargo test -p vprouter-launch --lib handoff::tests --offline --locked`:
+  GREEN2 passed. Tests cover success then second-attempt refusal, authority
+  failure before a request, and bad digest/nonce/schema then valid retry refusal.
+- Mutation RED check of that same host test command temporarily disabled
+  consume; both tests failed exit101 because a second attempt returned Ok.
+  A second mutation removed worker nonce rejection; `cargo test -p
+  vprouter-worker --lib
+  fresh_configuration_rejects_stale_response_digest_nonce_and_schema --offline
+  --locked` failed exit101 because a stale response was admitted. Exact output
+  is retained in `target/review-fix-round1-mutation-red.log`. A finally block
+  restored source after each mutation; neither mutation was committed or used
+  in frozen artifacts.
+- Restored final `cargo test --workspace --all-targets --offline --locked`:
+  GREEN166 passed,2 ignored, including39 worker and24 launch tests. Privileged
+  custom entrypoints remained inert. After the final manifest refresh,
+  `cargo test -p vprouter-launch --lib --offline --locked`:24 passed.
+- `cargo fmt --all --check`, `git diff --check`,
+  `cargo clippy --workspace --all-targets --offline --locked -- -D warnings`:
+  pass. ARM64 all-target check uses the exact command above and passed.
+
+Both observers and dependent producer payloads were rebuilt with the exact static
+relocation/toolchain commands above. Both manifests now bind the new observer
+bytes. ELF parsing again confirms machines62/183 and no PT_INTERP/PT_DYNAMIC.
+
+| Round1 frozen artifact | Bytes | SHA256 |
+| --- | ---: | --- |
+| `/tmp/task8b1-candidate04-observer-amd64` |2077376|`fcc6552f8b244d72f37351dd6f1a5c39c08b76c438d12d40f886893a26ef1d19`|
+| `/tmp/task8b1-candidate04-observer-arm64` |2390168|`edb80289a1bd0512fc62da6c395ba3812d8e170ca97097aea2ac6e73cd5ce6a0`|
+| `/tmp/task8b1-candidate04` |2500088|`09c6f9b0515eccaa2085e08344e88569a66fc271bf69853a5bacb56a985a24f1`|
+| `/tmp/task8b1-candidate04-arm64` |2982200|`8dcbcc2a97692e9d77491e47acc46123f8403eef3038c3471578b5a15599f934`|
+| `/tmp/task8b1-candidate04-source.tar` |1085440|`73b5eabdd5a15a9d32f08e9ce939572e78a24a4131c2c5468d49dd3cd5de3c3d`|
+
+The archive binds source4511476 with all97 build-input paths, including both
+compile-included manifests. Candidate04 uses the same `--ignored` CLI, protected
+marker schema (new artifact hash), existing approved6b prerequisite hash and
+cleanup rules. Root alone decides/executes any new guest run; the implementer
+performed none. Producer logic did not change in this round. A root rerun of
+candidate04 can refresh producer source/artifact coverage but cannot certify the
+new observer connection or live handoff behavior. Candidate03's prior passing VM
+result is preserved as evidence on its exact old bytes, not silently attributed
+to candidate04. The new unprivileged tests directly cover the two source findings.
+All previously listed actual observer/Go/protected mount/peer credential/image/
+ARM runtime/readiness/client gaps remain NOT_RUN for8b2/8c.

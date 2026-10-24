@@ -433,6 +433,9 @@ impl PinnedProcess {
         }
         self.revalidate(spec, stage)
     }
+    pub(super) fn root(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.root.as_fd()
+    }
     pub(super) fn cgroup_parent(&self) -> std::os::fd::BorrowedFd<'_> {
         self.cgroup.as_fd()
     }

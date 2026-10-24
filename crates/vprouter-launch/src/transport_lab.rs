@@ -29,6 +29,7 @@ const SERVER_KEY: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
 const CLIENT_KEY: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Scenario {
+    Actual,
     Reversible,
     DeletedWg,
     DeletedTransport,
@@ -106,7 +107,7 @@ struct HostAdmission {
     network_dev: u64,
     network_ino: u64,
 }
-fn admit() -> Result<()> {
+fn admit(actual: bool) -> Result<()> {
     process::single_threaded()?;
     if rustix::process::geteuid().as_raw() != 0 {
         return Err(Error::LabRequired);
@@ -122,7 +123,14 @@ fn admit() -> Result<()> {
     };
     read(Path::new(&format!("{ROOT}/isolated-acceptance")), 4096)?;
     let m: HostAdmission = serde_json::from_slice(&read(
-        Path::new(&format!("{ROOT}/task8a-host-acceptance")),
+        Path::new(&format!(
+            "{ROOT}/{}",
+            if actual {
+                "task8b2-host-acceptance"
+            } else {
+                "task8a-host-acceptance"
+            }
+        )),
         4096,
     )?)
     .map_err(|_| Error::LabRequired)?;
@@ -909,14 +917,34 @@ fn nft_faults(
     Ok(())
 }
 pub fn run(scenario: Scenario) -> Result<()> {
-    admit()?;
+    admit(scenario == Scenario::Actual)?;
     lab::stage("transport_admitted_exact_hash_guest_host_namespace");
     let pid = std::process::id();
-    let dir = PathBuf::from(format!("{ROOT}/task8a-{pid}"));
+    let dir = PathBuf::from(format!(
+        "{ROOT}/{}-{pid}",
+        if scenario == Scenario::Actual {
+            "task8b2"
+        } else {
+            "task8a"
+        }
+    ));
     private(&dir)?;
     let deployment = format!("transportlab{pid}");
     let record = allocation(&dir, &deployment)?;
     private(&record.exits[0].state_dir)?;
+    if scenario == Scenario::Actual {
+        for role in ["worker", "daemon"] {
+            let path = record.exits[0].state_dir.join(role);
+            private(&path)?;
+            let fd = owned::directory(&path)?;
+            rustix::fs::fchown(
+                &fd,
+                Some(rustix::process::Uid::from_raw(65534)),
+                Some(rustix::process::Gid::from_raw(65534)),
+            )
+            .map_err(|_| Error::UnsafeInput)?;
+        }
+    }
     let records = dir.join("records");
     private(&records)?;
     let store =
@@ -926,39 +954,71 @@ pub fn run(scenario: Scenario) -> Result<()> {
         .map_err(|_| Error::LockBusy)?
         .commit(None, &record)
         .map_err(|_| Error::AllocationMismatch)?;
-    let probe = vprouter_linux::storage::read(
-        Path::new(PROBE),
-        vprouter_linux::storage::Kind::PublicFile,
-        super::spec::LIMIT,
-    )
-    .map_err(|_| Error::UnsafeInput)?;
-    let digest = vprouter_linux::sha256(&probe);
-    let bind = format!("{PROBE}:{}:ro", super::spec::WORKER);
-    let label = format!("io.vprouter.deployment={deployment}");
-    let id = String::from_utf8(lab::docker(&[
-        "run",
-        "--detach",
-        "--network",
-        "none",
-        "--read-only",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--label",
-        &label,
-        "--label",
-        "io.vprouter.role=gateway",
-        "--volume",
-        &bind,
-        "--entrypoint",
-        super::spec::WORKER,
-        lab::IMAGE,
-        "--test-probe-container",
-    ])?)
-    .map_err(|_| Error::DockerUnavailable)?
-    .trim()
-    .to_string();
+    let actual_image = if scenario == Scenario::Actual {
+        Some(super::actual_lab::image()?)
+    } else {
+        None
+    };
+    let (id, digest, probe_size) = if let Some(image) = &actual_image {
+        let label = format!("io.vprouter.deployment={deployment}");
+        let id = String::from_utf8(lab::docker(&[
+            "run",
+            "--detach",
+            "--network",
+            "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--device",
+            "/dev/net/tun:/dev/net/tun:rwm",
+            "--label",
+            &label,
+            "--label",
+            "io.vprouter.role=gateway",
+            image,
+        ])?)
+        .map_err(|_| Error::DockerUnavailable)?
+        .trim()
+        .to_owned();
+        (id, String::new(), 0)
+    } else {
+        let probe = vprouter_linux::storage::read(
+            Path::new(PROBE),
+            vprouter_linux::storage::Kind::PublicFile,
+            super::spec::LIMIT,
+        )
+        .map_err(|_| Error::UnsafeInput)?;
+        let digest = vprouter_linux::sha256(&probe);
+        let bind = format!("{PROBE}:{}:ro", super::spec::WORKER);
+        let label = format!("io.vprouter.deployment={deployment}");
+        let id = String::from_utf8(lab::docker(&[
+            "run",
+            "--detach",
+            "--network",
+            "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--label",
+            &label,
+            "--label",
+            "io.vprouter.role=gateway",
+            "--volume",
+            &bind,
+            "--entrypoint",
+            super::spec::WORKER,
+            lab::IMAGE,
+            "--test-probe-container",
+        ])?)
+        .map_err(|_| Error::DockerUnavailable)?
+        .trim()
+        .to_string();
+        (id, digest, probe.len() as u64)
+    };
     if !super::spec::digest(&id) {
         return Err(Error::DockerUnavailable);
     }
@@ -967,7 +1027,11 @@ pub fn run(scenario: Scenario) -> Result<()> {
     let other = format!("vr8o{pid}");
     lab::write(&dir.join("resources.json"),&serde_json::to_vec(&serde_json::json!({"container":id,"wan_namespace":peer,"wan_host":wan,"records":records,"deployment":deployment,"allocation":record})).map_err(|_|Error::InvalidSpec)?)?;
     setup_wan(&peer, &wan, &other, &dir)?;
-    let a: Admission = execution_lab::inspect(&id, &record, 0, &digest, probe.len() as u64)?;
+    let a: Admission = if let Some(image) = &actual_image {
+        execution_lab::inspect_actual(&id, &record, image)?
+    } else {
+        execution_lab::inspect(&id, &record, 0, &digest, probe_size)?
+    };
     let mut tx =
         owned::Transaction::open(&store, &records, &a.spec, "one", a.process.base_network())?;
     let namespaces = tx.acquire(&a.spec, a.process.base_network())?;
@@ -1028,6 +1092,15 @@ pub fn run(scenario: Scenario) -> Result<()> {
     let mut guard = GuardTransport::activate(tx, namespaces, &a, &profile()?, &wan)?;
     guard.audit()?;
     lab::case("durable_primary_base_native_transport_socket_birth_and_bootstrap");
+    if scenario == Scenario::Actual {
+        drop(server);
+        drop(pf);
+        super::actual_lab::run(&a, &mut guard, &dir, &data_name)?;
+        // End the actual phase before the existing packet/fault suite. Its
+        // generated state is retained; stopped/unenrolled evidence is separate
+        // from later8c enabled/advertised real-client acceptance.
+        return Ok(());
+    }
     lab::stage("bootstrap_positive_capture_controls");
     let positive = [
         Capture::start(
@@ -1170,7 +1243,7 @@ pub fn run(scenario: Scenario) -> Result<()> {
                 )?;
             }
             Scenario::InterruptedActivation | Scenario::InterruptedCleanup => {}
-            Scenario::Reversible => unreachable!(),
+            Scenario::Reversible | Scenario::Actual => unreachable!(),
         }
         continuous.checkpoint("terminal_fault_before_audit")?;
         forbidden_burst(&application, "TERMINAL_BEFORE_AUDIT");
@@ -1241,5 +1314,66 @@ pub fn run(scenario: Scenario) -> Result<()> {
     println!(
         "{{\"case\":\"transport_lab\",\"result\":\"pass_partial_transport_smoke\",\"production_readiness\":false,\"quarantine_retained\":true}}"
     );
+    Ok(())
+}
+
+pub(super) fn actual_metadata(namespace: &str, dir: &Path) -> Result<()> {
+    let mut records = serde_json::Map::new();
+    for (name, args) in [
+        ("links", vec!["-j", "-d", "link", "show"]),
+        ("addresses", vec!["-j", "address", "show"]),
+        ("routes4", vec!["-j", "-4", "route", "show", "table", "all"]),
+        ("routes6", vec!["-j", "-6", "route", "show", "table", "all"]),
+        ("rules4", vec!["-j", "-4", "rule", "show"]),
+        ("rules6", vec!["-j", "-6", "rule", "show"]),
+    ] {
+        let mut argv = vec!["netns", "exec", namespace, "ip"];
+        argv.extend(args);
+        let data = command("ip", &argv)?;
+        records.insert(
+            name.into(),
+            serde_json::from_slice(&data).map_err(|_| Error::NetworkOperation)?,
+        );
+    }
+    records.insert("nft".into(), nft_json(namespace, &["list", "ruleset"])?);
+    lab::write(
+        &dir.join("actual-daemon-kernel.json"),
+        &serde_json::to_vec(&records).map_err(|_| Error::InvalidSpec)?,
+    )
+}
+pub(super) fn actual_packet_controls(
+    g: &mut GuardTransport<'_>,
+    dir: &Path,
+    data_name: &str,
+) -> Result<()> {
+    let peer = format!("vr8p{}", std::process::id());
+    let peer_fd = ns_file(&peer)?;
+    let server = socket(&peer_fd, "10.64.0.1:40444")?;
+    let health = health_socket(g, 40100)?;
+    let app = socket(&g.lab_namespaces().0.data, "10.64.0.2:40101")?;
+    let positive = Capture::start(
+        Some(data_name),
+        g.lab_plan().wireguard_name(),
+        dir.join("actual-positive-data.pcap"),
+    )?;
+    roundtrip(&health, &server, b"VR8B2_POSITIVE_PRODUCER")?;
+    std::thread::sleep(Duration::from_millis(100));
+    if !has(&positive.finish()?, b"VR8B2_POSITIVE_PRODUCER") {
+        return Err(Error::NetworkOperation);
+    }
+    let negative = Capture::start(
+        Some(data_name),
+        g.lab_plan().wireguard_name(),
+        dir.join("actual-negative-data.pcap"),
+    )?;
+    for _ in 0..16 {
+        let _ = app.send_to(b"VR8B2_FORBIDDEN_UNAUTHORIZED", "10.64.0.1:40444");
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    if has(&negative.finish()?, b"VR8B2_FORBIDDEN_UNAUTHORIZED") {
+        return Err(Error::NetworkPolicy);
+    }
+    g.audit()?;
+    lab::case("actual_fixture_positive_producer_capture_and_same_namespace_unauthorized_denial");
     Ok(())
 }

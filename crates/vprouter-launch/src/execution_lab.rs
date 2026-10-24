@@ -107,6 +107,51 @@ pub(super) fn inspect(
     process::single_threaded()?;
     result
 }
+pub(super) fn inspect_actual(
+    id: &str,
+    allocation: &AllocationRecord,
+    image: &str,
+) -> Result<Admission> {
+    let bundle = super::programs::ReviewedBundle::current()?;
+    let (digest, size) = bundle.init()?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|_| Error::UnsupportedPlatform)?;
+    let result = rt.block_on(async {
+        let c = DockerClient::default()
+            .launch_container(id)
+            .await
+            .map_err(|_| Error::DockerUnavailable)?;
+        if c.image != image {
+            return Err(Error::ImageMismatch);
+        }
+        let (mut spec, mut stage) = tests::fixture();
+        spec.allocation = allocation.clone();
+        spec.exit = allocation.exits[0].clone();
+        spec.container_id = id.into();
+        spec.started_at = c.state.started_at;
+        spec.image_ref = format!("vprouter-v2-lab@{image}");
+        spec.worker_sha256 = digest.into();
+        spec.process_start_time = process::stat_start(
+            &fs::read_to_string(format!("/proc/{}/stat", c.state.pid))
+                .map_err(|_| Error::ProcessUnavailable)?,
+            c.state.pid,
+        )?;
+        stage.image_ref = spec.image_ref.clone();
+        stage.content_id = image.into();
+        stage.artifact_kind = "actual_gateway_lab_v1".into();
+        stage.artifact_path = "/var/lib/vprouter-v2-lab/task8b2-gateway-init".into();
+        stage.artifact_sha256 = digest.into();
+        stage.artifact_size = size;
+        stage.execution_policy_sha256 = None;
+        Admission::inspect_evidence(spec, stage).await
+    });
+    drop(rt);
+    process::single_threaded()?;
+    result
+}
 fn container_pids(id: &str) -> Result<Vec<u32>> {
     let path = format!("/sys/fs/cgroup/system.slice/docker-{id}.scope/cgroup.procs");
     fs::read_to_string(path)

@@ -15,6 +15,7 @@ use vprouter_worker::bootstrap::{MAX_PROGRAM, digest};
 pub(super) enum Role {
     WorkerObserver,
     Tailscaled,
+    GatewayInit,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -72,11 +73,11 @@ impl ReviewedBundle {
                 } else {
                     "sha256:472c549d2ef8cebc000de2c8a94061bbdc864d2454177b2ada713262475449ef"
                 }
-            || b.programs.len() != 2
+            || b.programs.len() != 3
         {
             return Err(Error::ExecutableMismatch);
         }
-        for role in [Role::WorkerObserver, Role::Tailscaled] {
+        for role in [Role::WorkerObserver, Role::Tailscaled, Role::GatewayInit] {
             let entries: Vec<_> = b.programs.iter().filter(|p| p.role == role).collect();
             if entries.len() != 1 {
                 return Err(Error::ExecutableMismatch);
@@ -85,11 +86,15 @@ impl ReviewedBundle {
             let (path, policy) = match role {
                 Role::WorkerObserver => (
                     "/usr/local/bin/vprouter-worker-observe",
-                    "observation-only-zero-caps-v1;confinement-unverified",
+                    "observation-only-zero-caps-private-root-v2",
+                ),
+                Role::GatewayInit => (
+                    "/usr/local/bin/vprouter-worker",
+                    "inert-image-pid1-caps0-v1",
                 ),
                 Role::Tailscaled => (
                     "/usr/local/bin/tailscaled",
-                    "tailscale-1.102.5;execution-unavailable-until-8b2",
+                    "tailscale-1.102.5;fixed-go-netadmin-private-root-v1",
                 ),
             };
             if p.path != path
@@ -138,6 +143,11 @@ impl ReviewedBundle {
     pub fn verify(&self, fd: impl AsFd, role: Role) -> Result<()> {
         let p = self.entry(role)?;
         verify(fd, p, &self.bundle.architecture)
+    }
+    #[cfg(test)]
+    pub fn init(&self) -> Result<(&str, u64)> {
+        let e = self.entry(Role::GatewayInit)?;
+        Ok((&e.sha256, e.bytes))
     }
     pub fn worker_digest(&self) -> Result<&str> {
         Ok(&self.entry(Role::WorkerObserver)?.sha256)
@@ -193,6 +203,9 @@ fn verify(fd: impl AsFd, p: &Entry, architecture: &str) -> Result<()> {
     Ok(())
 }
 impl Program {
+    pub fn fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        self.fd.as_fd()
+    }
     pub fn revalidate(&self, bundle: &ReviewedBundle) -> Result<()> {
         if self.sha256 != bundle.entry(self.role)?.sha256
             || self.bytes != bundle.entry(self.role)?.bytes

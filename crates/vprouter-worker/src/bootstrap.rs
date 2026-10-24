@@ -552,7 +552,65 @@ pub fn observe() -> Result<()> {
     admitted.check()?;
     let mut native = NativeNetwork::open(plan).map_err(|_| Error::Structural)?;
     admitted.check()?;
-    let _snapshot = native.observe_metadata().map_err(|_| Error::Structural)?;
+    let snapshot = native.observe_metadata().map_err(|_| Error::Structural)?;
+    admitted.check()?;
+    // Observation permission cannot write preferences, advertise, enroll or
+    // create a Placed token. The only LocalAPI operations are fixed GETs.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|_| Error::Bootstrap)?;
+    runtime.block_on(async {
+        tokio::time::timeout(crate::client::LOCAL, async {
+            admitted.check()?;
+            let socket = tokio::net::UnixStream::connect("/run/tailscale/tailscaled.sock")
+                .await
+                .map_err(|_| Error::Transport)?;
+            let mut http = crate::client::Http::connect(socket).await?;
+            let status = http
+                .request(
+                    "GET",
+                    "/localapi/v0/status?peers=false",
+                    "local-tailscaled.sock",
+                    b"",
+                    65536,
+                )
+                .await?;
+            let prefs = http
+                .request(
+                    "GET",
+                    "/localapi/v0/prefs",
+                    "local-tailscaled.sock",
+                    b"",
+                    65536,
+                )
+                .await?;
+            if !crate::localapi::parse_status(&status.body)?.unenrolled()
+                || !crate::localapi::parse_prefs(&prefs.body)?.unenrolled()
+            {
+                return Err(Error::Identity);
+            }
+            admitted.check()
+        })
+        .await
+        .map_err(|_| Error::Deadline)?
+    })?;
+    drop(runtime);
+    admitted.check()?;
+    // A completed observation record is evidence only. It contains counts and
+    // public placement binding; no daemon state, credential or LocalAPI body.
+    let bytes=serde_json::to_vec(&serde_json::json!({"schema":1,"observation_only":true,"readiness":false,"configuration_sha256":digest(&serde_json::to_vec(&admitted.config).map_err(|_|Error::Bootstrap)?),"namespace":admitted.config.namespace,"links":snapshot.links.len(),"addresses":snapshot.addresses.len(),"routes":snapshot.routes.len(),"rules":snapshot.rules.len(),"actual_localapi_unenrolled":true})).map_err(|_|Error::Bootstrap)?;
+    let file = fs::openat(
+        fs::CWD,
+        "/state/observation.json",
+        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::RUSR | Mode::WUSR,
+    )
+    .map_err(|_| Error::Bootstrap)?;
+    File::from(file)
+        .write_all(&bytes)
+        .map_err(|_| Error::Bootstrap)?;
     admitted.check()
 }
 #[cfg(test)]

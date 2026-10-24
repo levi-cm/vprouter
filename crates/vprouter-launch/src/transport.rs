@@ -17,6 +17,7 @@ static INTERRUPT_ACTIVATION: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 pub(super) struct GuardTransport<'a> {
+    _inventory: Vec<super::inventory::Registration>,
     producer: super::producer::ProducerGroup,
     transaction: Transaction<'a>,
     namespaces: OwnedNamespaces,
@@ -87,28 +88,38 @@ impl<'a> GuardTransport<'a> {
         transaction.begin_transport(spec, &namespaces)?;
         let producer =
             super::producer::ProducerGroup::create(admission, &namespaces, &mut transaction)?;
-        let mut host = NativeNetwork::open(plan.clone()).map_err(|_| Error::NetworkOperation)?;
-        let host_policy = Actuator::open(policy(spec, profile, Scope::Host, wan)?)
-            .map_err(|_| Error::NetworkPolicy)?;
-        let (mut transport, transport_policy) =
-            kernel::network_scope(&namespaces.transport, || {
+        let ((mut host, host_policy), host_inventory) =
+            super::inventory::Registration::control(|| {
                 Ok((
                     NativeNetwork::open(plan.clone()).map_err(|_| Error::NetworkOperation)?,
-                    Actuator::open(policy(spec, profile, Scope::Transport, wan)?)
+                    Actuator::open(policy(spec, profile, Scope::Host, wan)?)
                         .map_err(|_| Error::NetworkPolicy)?,
                 ))
             })?;
-        let (mut data, data_policy) = kernel::network_scope(&namespaces.data, || {
-            Ok((
-                NativeNetwork::open(plan.clone()).map_err(|_| Error::NetworkOperation)?,
-                Actuator::open(
-                    policy(spec, profile, Scope::Data, wan)?
-                        .with_producer(producer.authority())
+        let ((mut transport, transport_policy), transport_inventory) =
+            kernel::network_scope(&namespaces.transport, || {
+                super::inventory::Registration::control(|| {
+                    Ok((
+                        NativeNetwork::open(plan.clone()).map_err(|_| Error::NetworkOperation)?,
+                        Actuator::open(policy(spec, profile, Scope::Transport, wan)?)
+                            .map_err(|_| Error::NetworkPolicy)?,
+                    ))
+                })
+            })?;
+        let ((mut data, data_policy), data_inventory) =
+            kernel::network_scope(&namespaces.data, || {
+                super::inventory::Registration::control(|| {
+                    Ok((
+                        NativeNetwork::open(plan.clone()).map_err(|_| Error::NetworkOperation)?,
+                        Actuator::open(
+                            policy(spec, profile, Scope::Data, wan)?
+                                .with_producer(producer.authority())
+                                .map_err(|_| Error::NetworkPolicy)?,
+                        )
                         .map_err(|_| Error::NetworkPolicy)?,
-                )
-                .map_err(|_| Error::NetworkPolicy)?,
-            ))
-        })?;
+                    ))
+                })
+            })?;
         let mut enforcement = firewall(
             "initial_quarantine",
             Enforcement::quarantine(host_policy, transport_policy, data_policy),
@@ -181,6 +192,7 @@ impl<'a> GuardTransport<'a> {
             enforcement.offline().map_err(|_| Error::NetworkPolicy)?;
         }
         Ok(Self {
+            _inventory: vec![host_inventory, transport_inventory, data_inventory],
             producer,
             transaction,
             namespaces,

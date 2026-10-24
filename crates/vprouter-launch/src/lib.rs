@@ -1,6 +1,10 @@
 #![deny(unsafe_code)]
-//! Public descriptor-backed admission refuses activation. The private staged
-//! executor supports only the synthetic, manifest-bound test probe.
+//! Public descriptor-backed admission refuses activation. Private staged paths
+//! bind fixed probe and actual observation-only programs to retained authority.
+#[allow(dead_code)]
+mod actual;
+#[cfg(test)]
+pub mod actual_lab;
 mod evidence;
 #[allow(dead_code)]
 mod execution;
@@ -193,4 +197,10 @@ impl Admission {
 /// parser follows a profile/state path or performs a kernel/network mutation.
 pub fn load(spec: &Path, staging: &Path) -> Result<(LaunchSpec, StagingEvidence)> {
     Ok((LaunchSpec::load(spec)?, StagingEvidence::load(staging)?))
+}
+
+/// Fixed immutable-image PID1. This is only an inert namespace holder; it cannot
+/// place a worker, start Tailscale, remove quarantine or authorize production.
+pub fn gateway_init() -> Result<()> {
+    kernel::gateway_init()
 }

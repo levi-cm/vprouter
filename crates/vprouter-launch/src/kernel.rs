@@ -181,6 +181,21 @@ pub(super) struct ContainerFds<'a> {
     pub root: BorrowedFd<'a>,
     pub executable: BorrowedFd<'a>,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ActualRole {
+    Observer,
+    Daemon,
+}
+#[derive(Clone, Copy)]
+pub(super) struct Actual<'a> {
+    pub role: ActualRole,
+    pub executable: BorrowedFd<'a>,
+    pub ca: BorrowedFd<'a>,
+    pub placement: Option<BorrowedFd<'a>>,
+    pub localapi: Option<BorrowedFd<'a>>,
+    pub tun: Option<BorrowedFd<'a>>,
+    pub resolver: std::net::Ipv4Addr,
+}
 // ---- Gated child ownership, readiness and parent-death lifecycle ----
 fn pipe() -> Result<(OwnedFd, OwnedFd)> {
     let mut fds = [-1; 2]; // SAFETY: two initialized integers, ownership transferred once on successful pipe2.
@@ -396,6 +411,10 @@ impl Child {
         }
         Ok(())
     }
+    /// Setup completion is not daemon health or guard readiness.
+    pub fn setup_complete(&mut self) -> Result<()> {
+        self.ready()
+    }
     pub fn signal(&self, sig: i32) -> Result<()> {
         send(&self.pidfd, sig)
     }
@@ -473,6 +492,22 @@ pub(super) fn spawn(
     data: BorrowedFd<'_>,
     state: BorrowedFd<'_>,
 ) -> Result<Child> {
+    spawn_inner(container, data, state, None)
+}
+pub(super) fn spawn_actual(
+    container: ContainerFds<'_>,
+    data: BorrowedFd<'_>,
+    state: BorrowedFd<'_>,
+    actual: Actual<'_>,
+) -> Result<Child> {
+    spawn_inner(container, data, state, Some(actual))
+}
+fn spawn_inner(
+    container: ContainerFds<'_>,
+    data: BorrowedFd<'_>,
+    state: BorrowedFd<'_>,
+    actual: Option<Actual<'_>>,
+) -> Result<Child> {
     process::single_threaded()?;
     let state_tree = rustix::mount::open_tree(
         state,
@@ -504,7 +539,13 @@ pub(super) fn spawn(
             if !wait_ready(&release_r, Duration::from_secs(5))? || read_byte(&release_r)? != 1 {
                 return Err(Error::PlacementFailed);
             }
-            container_stage(container, data, state_tree.as_fd(), health_w.as_fd())
+            container_stage(
+                container,
+                data,
+                state_tree.as_fd(),
+                health_w.as_fd(),
+                actual,
+            )
         })();
         die(if result.is_ok() { 0 } else { 121 });
     }
@@ -590,6 +631,7 @@ fn container_stage(
     data: BorrowedFd<'_>,
     state: BorrowedFd<'_>,
     health: BorrowedFd<'_>,
+    actual: Option<Actual<'_>>,
 ) -> Result<()> {
     let signals = blocked_signals()?;
     // Pin the real parent before crossing the PID-for-children boundary.
@@ -606,7 +648,7 @@ fn container_stage(
     if inner == 0 {
         let r = (|| {
             parent_death(0)?;
-            setup(container, data, state, health, outer_parent.as_fd())
+            setup(container, data, state, health, outer_parent.as_fd(), actual)
         })();
         if let Err(e) = r {
             report_failure(health, e);
@@ -623,6 +665,7 @@ fn setup(
     state: BorrowedFd<'_>,
     health: BorrowedFd<'_>,
     parent: BorrowedFd<'_>,
+    actual: Option<Actual<'_>>,
 ) -> Result<()> {
     for (fd, kind) in [
         (container.ipc, libc::CLONE_NEWIPC),
@@ -633,14 +676,19 @@ fn setup(
     ] {
         enter(fd, kind)?;
     }
+    if actual.is_some() {
+        // Root-relative cgroup identity is minted only after host producer join.
+        unshare(libc::CLONE_NEWCGROUP)?;
+    }
     let executable_tree = rustix::mount::open_tree(
-        container.executable,
+        actual.map_or(container.executable, |a| a.executable),
         "",
         rustix::mount::OpenTreeFlags::OPEN_TREE_CLONE
             | rustix::mount::OpenTreeFlags::OPEN_TREE_CLOEXEC
             | rustix::mount::OpenTreeFlags::AT_EMPTY_PATH,
     )
     .map_err(|_| Error::MountExecutableClone)?;
+    let extra_trees = actual.map(ActualTrees::clone).transpose()?;
     // Bind root provenance after entering admitted container mount namespace.
     // SAFETY: pinned admitted root fd is a directory. chroot/fchdir affect this child only.
     cv(
@@ -692,11 +740,15 @@ fn setup(
     )
     .map_err(|_| Error::MountExecutableReadonly)?;
     attach_tree(state, "/tmp/root/state").map_err(|_| Error::MountState)?;
-    std::fs::write(
-        "/tmp/root/etc/resolv.conf",
-        b"nameserver 192.0.2.53\noptions attempts:1 timeout:1\n",
-    )
-    .map_err(|_| Error::MountPivot)?;
+    if let Some(a) = actual {
+        actual_root(a, extra_trees.as_ref().ok_or(Error::MountIsolation)?)?;
+    } else {
+        std::fs::write(
+            "/tmp/root/etc/resolv.conf",
+            b"nameserver 192.0.2.53\noptions attempts:1 timeout:1\n",
+        )
+        .map_err(|_| Error::MountPivot)?;
+    }
     let null = fs::open("/dev/null", OFlags::RDWR | OFlags::CLOEXEC, Mode::empty())
         .map_err(|_| Error::DescriptorNull)?;
     let null_identity = approved_null(null.as_fd())?;
@@ -721,7 +773,13 @@ fn setup(
             // pivot/detach so it cannot disconnect its intermediate parent's root.
             unshare(libc::CLONE_NEWNS).map_err(|_| Error::MountPrivate)?;
             init_root()?;
-            supervise(health, &signals, init_parent.as_fd(), null_identity)
+            supervise(
+                health,
+                &signals,
+                init_parent.as_fd(),
+                null_identity,
+                actual.map(|a| a.role),
+            )
         })();
         if let Err(e) = result {
             report_failure(health, e);
@@ -1010,6 +1068,7 @@ fn supervise(
     set: &libc::sigset_t,
     parent: BorrowedFd<'_>,
     null_identity: StdioIdentity,
+    actual: Option<ActualRole>,
 ) -> Result<()> {
     cv(
         unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) },
@@ -1028,7 +1087,11 @@ fn supervise(
         return Err(Error::ChildFailed);
     }
     if worker == 0 {
-        let result = worker_exec(executable.as_fd(), health, null_identity);
+        let result = if let Some(role) = actual {
+            actual_exec(executable.as_fd(), health, null_identity, role)
+        } else {
+            worker_exec(executable.as_fd(), health, null_identity)
+        };
         let _ = result;
         die(119);
     }
@@ -1042,7 +1105,11 @@ fn supervise(
     let confined: Result<()> = (|| {
         close_except(&[health.as_raw_fd()])?;
         supervisor_fds(health, null_identity)?;
-        seccomp()?;
+        if actual.is_some() {
+            apply_filter(&init_filter())?;
+        } else {
+            seccomp()?;
+        }
         supervisor_fds(health, null_identity)
     })();
     if let Err(e) = confined {
@@ -1057,10 +1124,10 @@ fn supervise(
     if checked_close(health.as_raw_fd()).is_err() {
         die(114);
     }
-    let result = supervisor_loop(set, worker);
+    let result = supervisor_loop(set, worker, actual.is_some());
     die(if result.is_ok() { 0 } else { 113 });
 }
-fn supervisor_loop(set: &libc::sigset_t, worker: i32) -> Result<()> {
+fn supervisor_loop(set: &libc::sigset_t, worker: i32, actual: bool) -> Result<()> {
     let mut deadline = None;
     let mut escalation = None;
     let mut main_exited = false;
@@ -1077,6 +1144,9 @@ fn supervisor_loop(set: &libc::sigset_t, worker: i32) -> Result<()> {
             let mut status = 0; // SAFETY: wait only any direct/adopted children in this private PID namespace.
             let p = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
             if p == worker {
+                if actual && (!libc::WIFEXITED(status) || libc::WEXITSTATUS(status) != 0) {
+                    return Err(Error::ChildFailed);
+                }
                 main_exited = true;
                 earliest_deadline(&mut deadline, Instant::now());
             } else if p > 0 {
@@ -2245,6 +2315,843 @@ pub(super) fn producer_socket_scope<T>(
     r
 }
 
+/// Immutable image's inert base PID1. Docker supplies capdropALL and NNP; unlike
+/// the host placement helper this role never needs namespace/cgroup authority.
+pub(super) fn gateway_init() -> Result<()> {
+    process::single_threaded()?;
+    if std::process::id() != 1 {
+        return Err(Error::ConfinementPolicy);
+    }
+    let status = read_fixed("/proc/self/status", 16384).map_err(|_| Error::CapabilityPolicy)?;
+    let status = std::str::from_utf8(&status).map_err(|_| Error::CapabilityPolicy)?;
+    for key in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"] {
+        if status
+            .lines()
+            .find_map(|l| l.strip_prefix(key))
+            .and_then(|s| u64::from_str_radix(s.trim(), 16).ok())
+            != Some(0)
+        {
+            return Err(Error::CapabilityPolicy);
+        }
+    }
+    if unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) } != 1 {
+        return Err(Error::CapabilityPolicy);
+    }
+    lsm_current()?;
+    let signals = blocked_signals()?;
+    let null = fs::open("/dev/null", OFlags::RDWR | OFlags::CLOEXEC, Mode::empty())
+        .map_err(|_| Error::DescriptorNull)?;
+    approved_null(null.as_fd())?;
+    for n in 0..3 {
+        dup_fixed(&null, n, false)?;
+    }
+    close_except(&[])?;
+    apply_filter(&wait_filter())?;
+    loop {
+        match pending(&signals)? {
+            Some(libc::SIGTERM | libc::SIGINT | libc::SIGHUP) => return Ok(()),
+            Some(libc::SIGCHLD) => {
+                loop {
+                    // SAFETY: PID1 reaps only its own adopted children, bounded nonblocking calls.
+                    let p = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
+                    if p <= 0 {
+                        break;
+                    }
+                }
+            }
+            _ => (),
+        }
+    }
+}
+
+// ---- Fixed actual Rust / Go private root and execution policy ----
+const DAEMON_CONFIG: &[u8] = br#"{"version":"alpha0","locked":true,"enabled":false,"acceptDNS":false,"acceptRoutes":false,"advertiseRoutes":[],"advertiseExitNode":false,"disableSNAT":true,"netfilterMode":"off","noStatefulFiltering":true,"runSSHServer":false,"runWebClient":false,"remoteConfig":false,"autoUpdate":{"Check":false,"Apply":false}}"#;
+struct ActualTrees {
+    ca: OwnedFd,
+    placement: Option<OwnedFd>,
+    localapi: Option<OwnedFd>,
+    tun: Option<OwnedFd>,
+    null: OwnedFd,
+}
+fn clone_tree(fd: impl AsFd) -> Result<OwnedFd> {
+    rustix::mount::open_tree(
+        fd,
+        "",
+        rustix::mount::OpenTreeFlags::OPEN_TREE_CLONE
+            | rustix::mount::OpenTreeFlags::OPEN_TREE_CLOEXEC
+            | rustix::mount::OpenTreeFlags::AT_EMPTY_PATH,
+    )
+    .map_err(|_| Error::MountIsolation)
+}
+impl ActualTrees {
+    fn clone(a: Actual<'_>) -> Result<Self> {
+        let null = fs::open("/dev/null", OFlags::PATH | OFlags::CLOEXEC, Mode::empty())
+            .map_err(|_| Error::DescriptorNull)?;
+        approved_null(null.as_fd())?;
+        Ok(Self {
+            ca: clone_tree(a.ca)?,
+            placement: a.placement.map(clone_tree).transpose()?,
+            localapi: a.localapi.map(clone_tree).transpose()?,
+            tun: a.tun.map(clone_tree).transpose()?,
+            null: clone_tree(null)?,
+        })
+    }
+}
+fn readonly_bind(path: &str, noexec: bool) -> Result<()> {
+    mount(
+        None,
+        &c(path)?,
+        None,
+        libc::MS_BIND
+            | libc::MS_REMOUNT
+            | libc::MS_RDONLY
+            | libc::MS_NOSUID
+            | if noexec { libc::MS_NOEXEC } else { 0 },
+        None,
+    )
+}
+fn actual_file(tree: &OwnedFd, path: &str) -> Result<()> {
+    std::fs::File::create(path).map_err(|_| Error::MountIsolation)?;
+    attach_tree(tree.as_fd(), path)?;
+    readonly_bind(path, true)
+}
+fn actual_root(a: Actual<'_>, trees: &ActualTrees) -> Result<()> {
+    for d in [
+        "dev",
+        "dev/net",
+        "run",
+        "run/vprouter",
+        "run/tailscale",
+        "etc/ssl",
+        "etc/ssl/certs",
+    ] {
+        std::fs::create_dir(format!("/tmp/root/{d}")).map_err(|_| Error::MountIsolation)?;
+    }
+    std::fs::write(
+        "/tmp/root/etc/resolv.conf",
+        format!("nameserver {}\noptions attempts:1 timeout:1\n", a.resolver),
+    )
+    .map_err(|_| Error::MountIsolation)?;
+    std::fs::write("/tmp/root/etc/tailscale.json", DAEMON_CONFIG)
+        .map_err(|_| Error::MountIsolation)?;
+    actual_file(&trees.ca, "/tmp/root/etc/ssl/certs/ca-certificates.crt")?;
+    actual_file(&trees.null, "/tmp/root/dev/null")?;
+    // Selected writable state cannot provide executable/setuid/device payloads.
+    mount(
+        None,
+        c"/tmp/root/state",
+        None,
+        libc::MS_BIND | libc::MS_REMOUNT | libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+        None,
+    )?;
+    match a.role {
+        ActualRole::Observer => {
+            let placement = trees.placement.as_ref().ok_or(Error::DescriptorPolicy)?;
+            attach_tree(placement.as_fd(), "/tmp/root/run/vprouter")?;
+            readonly_bind("/tmp/root/run/vprouter", true)?;
+            actual_file(
+                trees.localapi.as_ref().ok_or(Error::DescriptorPolicy)?,
+                "/tmp/root/run/tailscale/tailscaled.sock",
+            )?;
+            if trees.tun.is_some() {
+                return Err(Error::DescriptorPolicy);
+            }
+        }
+        ActualRole::Daemon => {
+            if trees.placement.is_some() || trees.localapi.is_some() {
+                return Err(Error::DescriptorPolicy);
+            }
+            actual_file(
+                trees.tun.as_ref().ok_or(Error::DescriptorPolicy)?,
+                "/tmp/root/dev/net/tun",
+            )?;
+            // These affect only the already joined owned data network namespace.
+            // They are set before Go and remain inaccessible through readonly proc.
+            for p in [
+                "/proc/sys/net/ipv6/conf/all/disable_ipv6",
+                "/proc/sys/net/ipv6/conf/default/disable_ipv6",
+            ] {
+                std::fs::write(p, b"1\n").map_err(|_| Error::NetworkOperation)?;
+                if std::fs::read(p).map_err(|_| Error::NetworkOperation)? != b"1\n" {
+                    return Err(Error::NetworkOperation);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+fn actual_capabilities(role: ActualRole, health: BorrowedFd<'_>) -> Result<()> {
+    if role == ActualRole::Observer {
+        return reduce_privileges(32, health);
+    }
+    // Keep only NET_ADMIN for TUN/link/route/mark; never SYS_ADMIN, NET_RAW,
+    // SETUID/SETGID/SETPCAP, DAC override, ptrace or a device capability.
+    cv(
+        unsafe { libc::prctl(libc::PR_SET_SECUREBITS, 0x2f, 0, 0, 0) },
+        Error::CapabilityPolicy,
+    )?;
+    for cap in 0..64 {
+        if unsafe { libc::prctl(libc::PR_CAPBSET_READ, cap, 0, 0, 0) } < 0 {
+            break;
+        }
+        if cap != 12 {
+            cv(
+                unsafe { libc::prctl(libc::PR_CAPBSET_DROP, cap, 0, 0, 0) },
+                Error::CapabilityPolicy,
+            )?;
+        }
+    }
+    cv(
+        unsafe {
+            libc::prctl(
+                libc::PR_CAP_AMBIENT,
+                libc::PR_CAP_AMBIENT_CLEAR_ALL,
+                0,
+                0,
+                0,
+            )
+        },
+        Error::CapabilityPolicy,
+    )?;
+    cv(
+        unsafe { libc::setgroups(0, std::ptr::null()) },
+        Error::CapabilityPolicy,
+    )?;
+    cv(
+        unsafe { libc::setresgid(65534, 65534, 65534) },
+        Error::CapabilityPolicy,
+    )?;
+    cv(
+        unsafe { libc::setresuid(65534, 65534, 65534) },
+        Error::CapabilityPolicy,
+    )?;
+    #[repr(C)]
+    struct Header {
+        version: u32,
+        pid: i32,
+    }
+    #[repr(C)]
+    struct Caps {
+        effective: u32,
+        permitted: u32,
+        inheritable: u32,
+    }
+    let h = Header {
+        version: 0x20080522,
+        pid: 0,
+    };
+    let caps = [
+        Caps {
+            effective: 1 << 12,
+            permitted: 1 << 12,
+            inheritable: 1 << 12,
+        },
+        Caps {
+            effective: 0,
+            permitted: 0,
+            inheritable: 0,
+        },
+    ];
+    // SAFETY: Linux v3 capset exact header and two initialized words, child only.
+    cv(
+        unsafe { libc::syscall(libc::SYS_capset, &h, caps.as_ptr()) as i32 },
+        Error::CapabilityPolicy,
+    )?;
+    cv(
+        unsafe { libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_RAISE, 12, 0, 0) },
+        Error::CapabilityPolicy,
+    )?;
+    // Ambient grant is fixed; lock further ambient raises and root/setuid paths.
+    // SETPCAP has been removed, so securebits cannot now change. 0x2f already
+    // locks NOROOT/NO_SETUID_FIXUP and KEEP_CAPS off; ambient bounding=NET_ADMIN.
+    cv(
+        unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) },
+        Error::CapabilityPolicy,
+    )?;
+    cv(
+        unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) },
+        Error::ChildFailed,
+    )?;
+    let status = read_fixed("/proc/self/status", 16384).map_err(|_| Error::CapabilityPolicy)?;
+    let status = std::str::from_utf8(&status).map_err(|_| Error::CapabilityPolicy)?;
+    for key in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"] {
+        if status
+            .lines()
+            .find_map(|s| s.strip_prefix(key))
+            .and_then(|s| u64::from_str_radix(s.trim(), 16).ok())
+            != Some(1 << 12)
+        {
+            return Err(Error::CapabilityPolicy);
+        }
+    }
+    if !status.lines().any(|s| s == "NoNewPrivs:\t1")
+        || unsafe { libc::getuid() } != 65534
+        || unsafe { libc::getgid() } != 65534
+        || unsafe { libc::getgroups(0, std::ptr::null_mut()) } != 0
+    {
+        return Err(Error::CapabilityPolicy);
+    }
+    Ok(())
+}
+fn allow_syscall(out: &mut Vec<libc::sock_filter>, nr: libc::c_long) {
+    out.extend([
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 1,
+            k: nr as u32,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x7fff0000,
+        },
+    ]);
+}
+fn runtime_filter(role: ActualRole) -> Vec<libc::sock_filter> {
+    let mut out = filter()[..4].to_vec();
+    // clone3 must report ENOSYS so libc may use the constrained clone fallback.
+    out.extend([
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 1,
+            k: libc::SYS_clone3 as u32,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x00050026,
+        },
+    ]);
+    // Go creates threads only. Fork/vfork and namespace-bearing clones refuse.
+    out.extend([
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 7,
+            k: libc::SYS_clone as u32,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 20,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 4,
+            k: 0,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 16,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 1,
+            jf: 0,
+            k: 0x50f00,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 1,
+            k: 0x3d0f00,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x7fff0000,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x00050001,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+    ]);
+    // Only pinned descriptor4 plus exact AT_EMPTY_PATH may be executed. Both
+    // the executable and health descriptors close atomically on that exec.
+    out.extend([
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 8,
+            k: libc::SYS_execveat as u32,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 16,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 5,
+            k: 4,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 48,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 3,
+            k: libc::AT_EMPTY_PATH as u32,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 52,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 1,
+            k: 0,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x7fff0000,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x00050001,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+    ]);
+    // IPv6 and AF_PACKET/raw WAN creation never receive a permit. Restrict
+    // socket families before the general syscall list.
+    out.extend([
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 6,
+            k: libc::SYS_socket as u32,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 16,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 3,
+            jf: 0,
+            k: libc::AF_UNIX as u32,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 2,
+            jf: 0,
+            k: libc::AF_NETLINK as u32,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 1,
+            jf: 0,
+            k: if role == ActualRole::Daemon {
+                libc::AF_INET as u32
+            } else {
+                u32::MAX
+            },
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x00050061,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x7fff0000,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 0,
+        },
+    ]);
+    // Neither fixed Rust nor Go needs JIT or executable writable mappings.
+    // Deny PROT_EXEC in mmap/mprotect, including anonymous/state-backed code.
+    for nr in [libc::SYS_mmap, libc::SYS_mprotect] {
+        out.extend([
+            libc::sock_filter {
+                code: 0x15,
+                jt: 0,
+                jf: 4,
+                k: nr as u32,
+            },
+            libc::sock_filter {
+                code: 0x20,
+                jt: 0,
+                jf: 0,
+                k: 32,
+            },
+            libc::sock_filter {
+                code: 0x45,
+                jt: 0,
+                jf: 1,
+                k: libc::PROT_EXEC as u32,
+            },
+            libc::sock_filter {
+                code: 0x06,
+                jt: 0,
+                jf: 0,
+                k: 0x00050001,
+            },
+            libc::sock_filter {
+                code: 0x06,
+                jt: 0,
+                jf: 0,
+                k: 0x7fff0000,
+            },
+            libc::sock_filter {
+                code: 0x20,
+                jt: 0,
+                jf: 0,
+                k: 0,
+            },
+        ]);
+    }
+    let calls = [
+        libc::SYS_read,
+        libc::SYS_write,
+        libc::SYS_readv,
+        libc::SYS_writev,
+        libc::SYS_close,
+        libc::SYS_openat,
+        libc::SYS_newfstatat,
+        libc::SYS_fstat,
+        libc::SYS_statx,
+        libc::SYS_lseek,
+        libc::SYS_pread64,
+        libc::SYS_getdents64,
+        libc::SYS_readlinkat,
+        libc::SYS_fcntl,
+        libc::SYS_brk,
+        libc::SYS_mmap,
+        libc::SYS_mprotect,
+        libc::SYS_munmap,
+        libc::SYS_madvise,
+        libc::SYS_rt_sigaction,
+        libc::SYS_rt_sigprocmask,
+        libc::SYS_rt_sigreturn,
+        libc::SYS_sigaltstack,
+        libc::SYS_set_tid_address,
+        libc::SYS_set_robust_list,
+        libc::SYS_futex,
+        libc::SYS_getrandom,
+        libc::SYS_clock_gettime,
+        libc::SYS_clock_nanosleep,
+        libc::SYS_nanosleep,
+        libc::SYS_getpid,
+        libc::SYS_getppid,
+        libc::SYS_gettid,
+        libc::SYS_getuid,
+        libc::SYS_geteuid,
+        libc::SYS_getgid,
+        libc::SYS_getegid,
+        libc::SYS_getgroups,
+        libc::SYS_prctl,
+        libc::SYS_exit,
+        libc::SYS_exit_group,
+        libc::SYS_sched_yield,
+        libc::SYS_sched_getaffinity,
+        libc::SYS_prlimit64,
+        libc::SYS_uname,
+        libc::SYS_fstatfs,
+        libc::SYS_epoll_create1,
+        libc::SYS_epoll_ctl,
+        libc::SYS_epoll_pwait,
+        libc::SYS_eventfd2,
+        libc::SYS_ppoll,
+        libc::SYS_bind,
+        libc::SYS_connect,
+        libc::SYS_getsockname,
+        libc::SYS_getpeername,
+        libc::SYS_getsockopt,
+        libc::SYS_setsockopt,
+        libc::SYS_sendmsg,
+        libc::SYS_recvmsg,
+        libc::SYS_sendto,
+        libc::SYS_recvfrom,
+    ];
+    for nr in calls {
+        allow_syscall(&mut out, nr);
+    }
+    if role == ActualRole::Daemon {
+        for nr in [
+            libc::SYS_ioctl,
+            libc::SYS_bind,
+            libc::SYS_listen,
+            libc::SYS_accept4,
+            libc::SYS_fsync,
+            libc::SYS_fdatasync,
+            libc::SYS_renameat,
+            libc::SYS_unlinkat,
+            libc::SYS_mkdirat,
+            libc::SYS_fchmod,
+            libc::SYS_fchmodat,
+            libc::SYS_tgkill,
+        ] {
+            allow_syscall(&mut out, nr);
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    for nr in [
+        libc::SYS_arch_prctl,
+        libc::SYS_poll,
+        libc::SYS_epoll_wait,
+        libc::SYS_readlink,
+        libc::SYS_access,
+        libc::SYS_stat,
+        libc::SYS_lstat,
+    ] {
+        allow_syscall(&mut out, nr);
+    }
+    out.push(libc::sock_filter {
+        code: 0x06,
+        jt: 0,
+        jf: 0,
+        k: 0x00050001,
+    });
+    out
+}
+fn actual_exec(
+    executable: BorrowedFd<'_>,
+    health: BorrowedFd<'_>,
+    null: StdioIdentity,
+    role: ActualRole,
+) -> Result<()> {
+    parent_death(1)?;
+    let ex =
+        rustix::io::fcntl_dupfd_cloexec(executable, 110).map_err(|_| Error::DescriptorDuplicate)?;
+    let he =
+        rustix::io::fcntl_dupfd_cloexec(health, 110).map_err(|_| Error::DescriptorDuplicate)?;
+    dup_fixed(&he, 3, true)?;
+    dup_fixed(&ex, 4, true)?;
+    let result: Result<()> = (|| {
+        close_except(&[3, 4])?;
+        lsm_exec()?;
+        // Entire actual proc is readonly, with no writable host/namespace view.
+        // This occurs while the dedicated helper still has setup authority.
+        mount(
+            None,
+            c"/proc",
+            None,
+            libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC,
+            None,
+        )?;
+        actual_capabilities(role, unsafe { BorrowedFd::borrow_raw(3) })?;
+        if unsafe { libc::getppid() } != 1 {
+            return Err(Error::ChildFailed);
+        }
+        for n in 0..3 {
+            if approved_null(unsafe { BorrowedFd::borrow_raw(n) })? != null {
+                return Err(Error::DescriptorStdio);
+            }
+        }
+        let mut empty = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::sigemptyset(&mut empty);
+        }
+        cv(
+            unsafe { libc::sigprocmask(libc::SIG_SETMASK, &empty, std::ptr::null_mut()) },
+            Error::ChildFailed,
+        )?;
+        if descriptor_inventory()? != [0, 1, 2, 3, 4].into_iter().collect() {
+            return Err(Error::DescriptorInventory);
+        }
+        for fd in [3, 4] {
+            if unsafe { libc::fcntl(fd, libc::F_GETFD) } != libc::FD_CLOEXEC {
+                return Err(Error::DescriptorFlags);
+            }
+        }
+        if fs::FileType::from_raw_mode(
+            fs::fstat(unsafe { BorrowedFd::borrow_raw(3) })
+                .map_err(|_| Error::DescriptorHealth)?
+                .st_mode,
+        ) != fs::FileType::Fifo
+            || fs::FileType::from_raw_mode(
+                fs::fstat(unsafe { BorrowedFd::borrow_raw(4) })
+                    .map_err(|_| Error::DescriptorExecutable)?
+                    .st_mode,
+            ) != fs::FileType::RegularFile
+        {
+            return Err(Error::DescriptorPolicy);
+        }
+        apply_filter(&runtime_filter(role))?;
+        // Setup acknowledgement ONLY. It is never daemon health, ObserveOnce or
+        // advertisement/readiness. Both control/executable FDs are CLOEXEC.
+        write_byte(unsafe { BorrowedFd::borrow_raw(3) }, 1)?;
+        let worker = [c"vprouter-worker-observe".as_ptr(), std::ptr::null()];
+        let daemon = [
+            c"tailscaled".as_ptr(),
+            c"--tun=tailscale0".as_ptr(),
+            c"--port=41641".as_ptr(),
+            c"--state=/state/tailscaled.state".as_ptr(),
+            c"--statedir=/state".as_ptr(),
+            c"--socket=/state/tailscaled.sock".as_ptr(),
+            c"--no-logs-no-support".as_ptr(),
+            c"--config=/etc/tailscale.json".as_ptr(),
+            std::ptr::null(),
+        ];
+        let env = [c"LANG=C".as_ptr(), c"PATH=/bin".as_ptr(), std::ptr::null()];
+        let args = if role == ActualRole::Observer {
+            worker.as_ptr()
+        } else {
+            daemon.as_ptr()
+        };
+        // SAFETY: fixed immutable bytes and constant argv/env; exact FD4 closes
+        // on exec along with health3. No namespace/root/control FD survives.
+        unsafe {
+            libc::syscall(
+                libc::SYS_execveat,
+                4,
+                c"".as_ptr(),
+                args,
+                env.as_ptr(),
+                libc::AT_EMPTY_PATH,
+            );
+        }
+        Err(Error::ChildFailed)
+    })();
+    if let Err(e) = result {
+        report_failure(unsafe { BorrowedFd::borrow_raw(3) }, e);
+    }
+    die(119)
+}
+
+/// Validate the exact socket observed immediately after a trusted synchronous
+/// constructor, including its actual construction network namespace cookie.
+pub(super) fn control_socket(number: i32) -> Result<i32> {
+    if number < 3 {
+        return Err(Error::DescriptorPolicy);
+    }
+    // SAFETY: inventory scanned a currently live descriptor on this sole thread;
+    // borrowed only synchronously, never transferred or closed here.
+    let fd = unsafe { BorrowedFd::borrow_raw(number) };
+    use rustix::net::{self, AddressFamily, SocketFlags, SocketType, netlink::SocketAddrNetlink};
+    if net::sockopt::socket_domain(fd).map_err(|_| Error::DescriptorPolicy)?
+        != AddressFamily::NETLINK
+        || net::sockopt::socket_type(fd).map_err(|_| Error::DescriptorPolicy)? != SocketType::RAW
+    {
+        return Err(Error::DescriptorPolicy);
+    }
+    let protocol = net::sockopt::socket_protocol(fd)
+        .map_err(|_| Error::DescriptorPolicy)?
+        .map_or(0, |p| p.as_raw().get());
+    let address =
+        SocketAddrNetlink::try_from(net::getsockname(fd).map_err(|_| Error::DescriptorPolicy)?)
+            .map_err(|_| Error::DescriptorPolicy)?;
+    if address.pid() == 0 || address.groups() != 0 {
+        return Err(Error::DescriptorPolicy);
+    }
+    fn net_cookie(fd: BorrowedFd<'_>) -> Result<u64> {
+        let mut cookie = 0u64;
+        let mut size = std::mem::size_of::<u64>() as libc::socklen_t;
+        // SAFETY: exact initialized u64 output and socklen storage; kernel only
+        // writes within the declared length. SO_NETNS_COOKIE is Linux option71.
+        cv(
+            unsafe {
+                libc::getsockopt(
+                    fd.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    71,
+                    (&mut cookie as *mut u64).cast(),
+                    &mut size,
+                )
+            },
+            Error::DescriptorPolicy,
+        )?;
+        if size as usize != std::mem::size_of::<u64>() || cookie == 0 {
+            return Err(Error::DescriptorPolicy);
+        }
+        Ok(cookie)
+    }
+    let local = net::socket_with(
+        AddressFamily::NETLINK,
+        SocketType::RAW,
+        SocketFlags::CLOEXEC,
+        None,
+    )
+    .map_err(|_| Error::DescriptorPolicy)?;
+    if net_cookie(fd)? != net_cookie(local.as_fd())? {
+        return Err(Error::NamespaceMismatch);
+    }
+    Ok(protocol as i32)
+}
+
+fn init_filter() -> Vec<libc::sock_filter> {
+    let mut out = wait_filter();
+    out.pop();
+    out.extend([
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 3,
+            k: libc::SYS_kill as u32,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 16,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 1,
+            k: u32::MAX,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x7fff0000,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x00050001,
+        },
+    ]);
+    out
+}
+
 #[cfg(test)]
 mod policy_tests {
     use super::*;
@@ -2332,6 +3239,9 @@ mod policy_tests {
         verdict_program(&filter(), arch, nr, arg)
     }
     fn verdict_program(instructions: &[libc::sock_filter], arch: u32, nr: u32, arg: u64) -> u32 {
+        verdict_args(instructions, arch, nr, [arg, 0, 0, 0, 0, 0])
+    }
+    fn verdict_args(instructions: &[libc::sock_filter], arch: u32, nr: u32, args: [u64; 6]) -> u32 {
         let mut pc = 0;
         let mut accumulator = 0;
         for _ in 0..2048 {
@@ -2341,8 +3251,14 @@ mod policy_tests {
                     accumulator = match i.k {
                         0 => nr,
                         4 => arch,
-                        16 => arg as u32,
-                        20 => (arg >> 32) as u32,
+                        offset if (16..64).contains(&offset) && offset % 4 == 0 => {
+                            let value = args[((offset - 16) / 8) as usize];
+                            if offset % 8 == 0 {
+                                value as u32
+                            } else {
+                                (value >> 32) as u32
+                            }
+                        }
                         _ => panic!("unexpected load"),
                     };
                     pc += 1;
@@ -2354,11 +3270,152 @@ mod policy_tests {
                         i.jf as usize
                     }
                 }
+                0x45 => {
+                    pc += 1 + if accumulator & i.k != 0 {
+                        i.jt as usize
+                    } else {
+                        i.jf as usize
+                    };
+                }
                 0x06 => return i.k,
                 _ => panic!("unexpected instruction"),
             }
         }
         panic!("unbounded filter")
+    }
+    #[test]
+    fn actual_profiles_bind_exec_thread_memory_and_network_authority() {
+        let arch = if cfg!(target_arch = "x86_64") {
+            0xc000003e
+        } else {
+            0xc00000b7
+        };
+        for role in [ActualRole::Observer, ActualRole::Daemon] {
+            let policy = runtime_filter(role);
+            for nr in [
+                libc::SYS_setns,
+                libc::SYS_unshare,
+                libc::SYS_mount,
+                libc::SYS_capset,
+                libc::SYS_ptrace,
+                libc::SYS_bpf,
+                libc::SYS_execve,
+                libc::SYS_memfd_create,
+                libc::SYS_open_by_handle_at,
+            ] {
+                assert_eq!(verdict_args(&policy, arch, nr as u32, [0; 6]), 0x00050001);
+            }
+            for (fd, flags, allowed) in [
+                (4, libc::AT_EMPTY_PATH as u64, true),
+                (3, libc::AT_EMPTY_PATH as u64, false),
+                (4, 0, false),
+                (4, (1u64 << 32) | libc::AT_EMPTY_PATH as u64, false),
+            ] {
+                assert_eq!(
+                    verdict_args(
+                        &policy,
+                        arch,
+                        libc::SYS_execveat as u32,
+                        [fd, 0, 0, 0, flags, 0]
+                    ) == 0x7fff0000,
+                    allowed
+                );
+            }
+            for nr in [libc::SYS_mmap, libc::SYS_mprotect] {
+                assert_eq!(
+                    verdict_args(
+                        &policy,
+                        arch,
+                        nr as u32,
+                        [0, 4096, libc::PROT_READ as u64, 0, 0, 0]
+                    ),
+                    0x7fff0000
+                );
+                assert_eq!(
+                    verdict_args(
+                        &policy,
+                        arch,
+                        nr as u32,
+                        [0, 4096, (libc::PROT_READ | libc::PROT_EXEC) as u64, 0, 0, 0]
+                    ),
+                    0x00050001
+                );
+            }
+            for family in [libc::AF_INET6, libc::AF_PACKET] {
+                assert_ne!(
+                    verdict_args(
+                        &policy,
+                        arch,
+                        libc::SYS_socket as u32,
+                        [family as u64, 0, 0, 0, 0, 0]
+                    ),
+                    0x7fff0000
+                );
+            }
+            for flags in [
+                libc::SIGCHLD,
+                libc::CLONE_NEWNET | libc::SIGCHLD,
+                libc::CLONE_NEWUSER | libc::SIGCHLD,
+            ] {
+                assert_eq!(
+                    verdict_args(
+                        &policy,
+                        arch,
+                        libc::SYS_clone as u32,
+                        [flags as u64, 0, 0, 0, 0, 0]
+                    ),
+                    0x00050001
+                );
+            }
+            assert_eq!(
+                verdict_args(
+                    &policy,
+                    arch,
+                    libc::SYS_clone as u32,
+                    [0x50f00, 0, 0, 0, 0, 0]
+                ),
+                0x7fff0000
+            );
+            assert_eq!(
+                verdict_args(
+                    &policy,
+                    arch,
+                    libc::SYS_socket as u32,
+                    [libc::AF_INET as u64, 0, 0, 0, 0, 0]
+                ) == 0x7fff0000,
+                role == ActualRole::Daemon
+            );
+        }
+        for nr in [
+            libc::SYS_socket,
+            libc::SYS_execveat,
+            libc::SYS_clone,
+            libc::SYS_openat,
+            libc::SYS_setns,
+        ] {
+            assert_eq!(
+                verdict_args(&init_filter(), arch, nr as u32, [0; 6]),
+                0x00050001
+            );
+        }
+        assert_eq!(
+            verdict_args(
+                &init_filter(),
+                arch,
+                libc::SYS_kill as u32,
+                [u32::MAX as u64, libc::SIGTERM as u64, 0, 0, 0, 0]
+            ),
+            0x7fff0000
+        );
+        assert_eq!(
+            verdict_args(
+                &init_filter(),
+                arch,
+                libc::SYS_kill as u32,
+                [1, libc::SIGTERM as u64, 0, 0, 0, 0]
+            ),
+            0x00050001
+        );
     }
     #[test]
     fn wait_role_has_no_path_network_exec_or_fork_authority() {

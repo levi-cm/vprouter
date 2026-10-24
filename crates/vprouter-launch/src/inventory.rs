@@ -61,6 +61,30 @@ impl Registration {
             Ok(Self { fds })
         })
     }
+    /// Exact descriptor delta around one trusted synchronous native constructor.
+    /// No runtime/thread/caller supplied descriptor exists during this scope.
+    /// Only the expected number of new CLOEXEC sockets may be registered.
+    pub fn control<T>(construct: impl FnOnce() -> Result<T>) -> Result<(T, Self)> {
+        super::process::single_threaded()?;
+        let before: std::collections::BTreeSet<_> = numbers()?.into_iter().collect();
+        let value = construct()?;
+        super::process::single_threaded()?;
+        let after: std::collections::BTreeSet<_> = numbers()?.into_iter().collect();
+        if !before.is_subset(&after) {
+            return Err(Error::DescriptorPolicy);
+        }
+        let added: Vec<_> = after.difference(&before).copied().collect();
+        let mut protocols = Vec::new();
+        for fd in &added {
+            let id = observed(*fd)?;
+            if id.mode != libc::S_IFSOCK || !id.cloexec {
+                return Err(Error::DescriptorPolicy);
+            }
+            protocols.push(super::kernel::control_socket(*fd)?);
+        }
+        control_protocols(&mut protocols)?;
+        Ok((value, Self::numbers(added)?))
+    }
     /// Producer owns one extra parent FD and exactly two matching subgroup FDs
     /// (local + private netfilter authority). Existing admitted descriptors are
     /// already registered. No raw authority FD getter or caller numeric list.
@@ -165,6 +189,14 @@ fn scan_numbers(fd: OwnedFd) -> Result<Vec<i32>> {
     }
     Ok(numbers)
 }
+fn control_protocols(protocols: &mut [i32]) -> Result<()> {
+    protocols.sort_unstable();
+    // Exactly route + generic + independent nft normal/emergency channels.
+    if protocols != [0, 12, 12, 16] {
+        return Err(Error::DescriptorPolicy);
+    }
+    Ok(())
+}
 pub(super) fn verify() -> Result<()> {
     let expected = OWNED.with(|o| o.borrow().clone());
     let mut seen = std::collections::BTreeSet::new();
@@ -195,6 +227,28 @@ pub(super) fn verify() -> Result<()> {
 mod tests {
     use super::*;
     use std::os::fd::AsFd;
+    #[test]
+    fn native_control_registration_rejects_wrong_protocol_kind_and_count() {
+        control_protocols(&mut [16, 12, 0, 12]).unwrap();
+        for mut values in [
+            vec![0, 12, 16],
+            vec![0, 12, 12, 16, 16],
+            vec![0, 0, 12, 16],
+            vec![0, 12, 12, 6],
+        ] {
+            assert_eq!(control_protocols(&mut values), Err(Error::DescriptorPolicy));
+        }
+        let (socket, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
+        assert_eq!(
+            super::super::kernel::control_socket(socket.as_raw_fd()),
+            Err(Error::DescriptorPolicy)
+        );
+        let file = std::fs::File::open("/dev/null").unwrap();
+        assert_eq!(
+            super::super::kernel::control_socket(file.as_raw_fd()),
+            Err(Error::DescriptorPolicy)
+        );
+    }
     #[test]
     fn exact_scan_fd_is_excluded_but_disappeared_real_fd_is_an_error() {
         let real = fs::openat(

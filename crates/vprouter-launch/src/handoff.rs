@@ -228,6 +228,34 @@ impl<'g, 'a> Handoff<'g, 'a> {
         }
         Ok(())
     }
+    /// Start only the fixed pinned daemon in the already admitted producer.
+    /// The locked identity-free config cannot advertise or enroll.
+    pub fn launch_daemon(&self, bundle: &ReviewedBundle) -> Result<super::kernel::Child> {
+        self.verify()?;
+        super::actual::launch(
+            self.admission,
+            self.transaction,
+            self.namespaces,
+            self.producer,
+            bundle,
+            super::kernel::ActualRole::Daemon,
+            self.config.resolver,
+            None,
+        )
+    }
+    pub fn launch_observer(&self, bundle: &ReviewedBundle) -> Result<super::kernel::Child> {
+        self.verify()?;
+        super::actual::launch(
+            self.admission,
+            self.transaction,
+            self.namespaces,
+            self.producer,
+            bundle,
+            super::kernel::ActualRole::Observer,
+            self.config.resolver,
+            Some(self.directory.as_fd()),
+        )
+    }
     /// Exact current accept peer is checked through host proc/pidfd and retained
     /// producer membership. Translation of worker-side PID0/cgroup'/' is irrelevant.
     pub fn serve_once(&mut self, bundle: &ReviewedBundle) -> Result<u32> {

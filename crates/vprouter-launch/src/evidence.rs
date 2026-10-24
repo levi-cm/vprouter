@@ -52,6 +52,20 @@ pub(super) fn daemon(d: &LaunchDaemon) -> Result<DaemonSecurity> {
     }
 }
 pub(super) fn image(spec: &LaunchSpec, stage: &StagingEvidence, i: &LaunchImage) -> Result<()> {
+    // Only the ignored exact-hash test payload can construct this private
+    // staging kind. It binds a root-approved locally built immutable image ID;
+    // no production parser accepts it and no upstream RepoDigest is invented.
+    #[cfg(test)]
+    if stage.artifact_kind == "actual_gateway_lab_v1" {
+        if i.id != stage.content_id
+            || i.os != stage.os
+            || i.architecture != stage.architecture
+            || spec.image_ref != format!("vprouter-v2-lab@{}", stage.content_id)
+        {
+            return Err(Error::ImageMismatch);
+        }
+        return Ok(());
+    }
     if i.id != stage.content_id
         || i.os != stage.os
         || i.architecture != stage.architecture
@@ -107,6 +121,14 @@ pub(super) fn container(
         return Err(Error::ContainerMismatch);
     }
     let h = &c.host_config;
+    #[cfg(test)]
+    let exact_tun = stage.artifact_kind == "actual_gateway_lab_v1"
+        && h.devices
+            == vec![
+                serde_json::json!({"PathOnHost":"/dev/net/tun","PathInContainer":"/dev/net/tun","CgroupPermissions":"rwm"}),
+            ];
+    #[cfg(not(test))]
+    let exact_tun = false;
     for (key, value) in &h.additional {
         use serde_json::json;
         let accepted = match key.as_str() {
@@ -168,7 +190,14 @@ pub(super) fn container(
             paths(&h.security_opt, &["no-new-privileges"]),
         ),
         ("extra_mounts", empty(&h.mounts)),
-        ("devices", h.devices.is_empty()),
+        (
+            "devices",
+            if exact_tun {
+                true
+            } else {
+                h.devices.is_empty()
+            },
+        ),
         ("device_requests", empty(&h.device_requests)),
         ("device_cgroup_rules", empty(&h.device_cgroup_rules)),
         ("volumes_from", empty(&h.volumes_from)),

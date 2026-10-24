@@ -49,3 +49,12 @@ x25519-dalek.workspace = true
 name = "producer_lab"
 path = "src/producer_lab_main.rs"
 harness = false
+
+[[bin]]
+name = "vprouter-gateway-init"
+path = "src/init_main.rs"
+
+[[test]]
+name = "actual_lab"
+path = "src/actual_lab_main.rs"
+harness = false

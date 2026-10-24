@@ -25,6 +25,15 @@ pub(crate) struct Node {
     ips: Vec<IpAddr>,
 }
 impl DaemonStatus {
+    pub(crate) fn unenrolled(&self) -> bool {
+        self.version_pinned()
+            && matches!(
+                self.backend_state.as_str(),
+                "NeedsLogin" | "Stopped" | "NoState"
+            )
+            && self.self_node.is_none()
+            && self.ips.is_empty()
+    }
     pub fn version_pinned(&self) -> bool {
         self.version == "1.102.5" || self.version == "1.102.5-1-t5fb2a81b0"
     }
@@ -93,6 +102,18 @@ fn same<T: Eq>(a: &[T], b: &[T]) -> bool {
             .all(|x| a.iter().filter(|y| *y == x).count() == b.iter().filter(|y| *y == x).count())
 }
 impl Prefs {
+    pub(crate) fn unenrolled(&self) -> bool {
+        !self.want_running
+            && !self.route_all
+            && !self.corp_dns
+            && self.netfilter_mode == 0
+            && !self.run_ssh
+            && self.no_snat
+            && self.exit_node_id.is_empty()
+            && self.exit_node_ip.is_empty()
+            && self.no_stateful_filtering
+            && self.advertise_routes.is_empty()
+    }
     fn safe(&self) -> bool {
         self.want_running
             && !self.logged_out

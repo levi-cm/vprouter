@@ -7,16 +7,23 @@
     {
       "role": "worker_observer",
       "path": "/usr/local/bin/vprouter-worker-observe",
-      "sha256": "edb80289a1bd0512fc62da6c395ba3812d8e170ca97097aea2ac6e73cd5ce6a0",
-      "bytes": 2390168,
-      "policy": "observation-only-zero-caps-v1;confinement-unverified"
+      "sha256": "7dc86c341da39dc4793c0bc23e6b3db00585f8db3f48618f05a80d4988dc62f2",
+      "bytes": 3185600,
+      "policy": "observation-only-zero-caps-private-root-v2"
     },
     {
       "role": "tailscaled",
       "path": "/usr/local/bin/tailscaled",
       "sha256": "3cf2640069ded59322dc2113be5fa90540937410be22bb40873a614773ab27cc",
       "bytes": 40133663,
-      "policy": "tailscale-1.102.5;execution-unavailable-until-8b2"
+      "policy": "tailscale-1.102.5;fixed-go-netadmin-private-root-v1"
+    },
+    {
+      "role": "gateway_init",
+      "path": "/usr/local/bin/vprouter-worker",
+      "sha256": "3d6a6476beabcde64e79c3d909e39271ca393bbd37a46244c0d045ee41a22196",
+      "bytes": 751624,
+      "policy": "inert-image-pid1-caps0-v1"
     }
   ]
 }

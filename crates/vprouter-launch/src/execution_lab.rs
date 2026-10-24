@@ -152,6 +152,31 @@ fn verify_worker(a: &Admission, pid: u32, data: &owned::OwnedNamespaces) -> Resu
     kernel::verify_pid_parent(pid, a.process.launch_fds().pid)?;
     let s =
         fs::read_to_string(format!("/proc/{pid}/status")).map_err(|_| Error::ProcessUnavailable)?;
+    let init = s
+        .lines()
+        .find_map(|l| l.strip_prefix("PPid:"))
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .ok_or(Error::NamespaceMismatch)?;
+    let init_status = fs::read_to_string(format!("/proc/{init}/status"))
+        .map_err(|_| Error::ProcessUnavailable)?;
+    let init_ids = init_status
+        .lines()
+        .find_map(|l| l.strip_prefix("NSpid:"))
+        .ok_or(Error::NamespaceMismatch)?
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    if init_ids.len() != 3 || init_ids[2] != "1" {
+        return Err(Error::NamespaceMismatch);
+    }
+    for component in ["root", "ns/mnt", "ns/pid"] {
+        let worker =
+            fs::metadata(format!("/proc/{pid}/{component}")).map_err(|_| Error::MountIsolation)?;
+        let supervisor =
+            fs::metadata(format!("/proc/{init}/{component}")).map_err(|_| Error::MountIsolation)?;
+        if (worker.dev(), worker.ino()) != (supervisor.dev(), supervisor.ino()) {
+            return Err(Error::MountIsolation);
+        }
+    }
     if !s
         .lines()
         .any(|l| l.starts_with("Uid:") && l.split_whitespace().skip(1).all(|s| s == "65534"))
@@ -179,6 +204,8 @@ fn verify_worker(a: &Admission, pid: u32, data: &owned::OwnedNamespaces) -> Resu
 fn verify_launch_tree(id: &str) -> Result<()> {
     let pids = container_pids(id)?;
     let mut wrappers = 0;
+    let mut mount_views = std::collections::BTreeSet::new();
+    let mut root_views = std::collections::BTreeSet::new();
     for pid in pids {
         let base = PathBuf::from(format!("/proc/{pid}"));
         let status =
@@ -192,6 +219,15 @@ fn verify_launch_tree(id: &str) -> Result<()> {
         if ids.len() == 2 && ids[1] == "1" {
             continue;
         } // admitted container init
+        if ids.len() < 3 || ids.len() == 3 && ids[2] == "1" {
+            let mount = fs::metadata(base.join("ns/mnt")).map_err(|_| Error::MountIsolation)?;
+            let root = fs::metadata(base.join("root")).map_err(|_| Error::MountIsolation)?;
+            if !mount_views.insert((mount.dev(), mount.ino()))
+                || !root_views.insert((root.dev(), root.ino()))
+            {
+                return Err(Error::MountIsolation);
+            }
+        }
         for key in ["Uid:", "Gid:"] {
             if !status
                 .lines()
@@ -295,7 +331,7 @@ fn verify_launch_tree(id: &str) -> Result<()> {
             return Err(Error::DescriptorPolicy);
         }
     }
-    if wrappers != 4 {
+    if wrappers != 4 || mount_views.len() != 6 || root_views.len() != 6 {
         return Err(Error::ChildFailed);
     }
     Ok(())

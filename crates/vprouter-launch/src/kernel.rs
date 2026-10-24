@@ -1559,7 +1559,8 @@ fn final_fds(before_exec: bool, expected_null: Option<StdioIdentity>) -> Result<
     }
     // Native openat+getdents avoids musl opendir's legacy SYS_open, which the
     // manifest-bound probe policy deliberately does not permit.
-    let directory = fs::open(
+    let directory = fs::openat(
+        fs::CWD,
         "/proc/self/fd",
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
@@ -1648,7 +1649,8 @@ pub(super) fn probe_verify() -> Result<()> {
     use std::os::unix::fs::MetadataExt;
     let own_root = std::fs::metadata("/").map_err(|_| Error::ProbeProcRoot)?;
     let mut visible = std::collections::BTreeSet::new();
-    let proc = fs::open(
+    let proc = fs::openat(
+        fs::CWD,
         "/proc",
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
@@ -1961,6 +1963,23 @@ mod policy_tests {
         } else {
             0xc00000b7
         };
+        // Actual post-filter FD/proc scan uses explicit openat + Dir::new
+        // getdents64, fstat/fcntl/readlink and close; legacy open is not admitted.
+        for nr in [
+            libc::SYS_openat,
+            libc::SYS_getdents64,
+            libc::SYS_fstat,
+            libc::SYS_fcntl,
+            libc::SYS_readlinkat,
+            libc::SYS_close,
+            libc::SYS_execveat,
+            libc::SYS_rt_sigprocmask,
+            libc::SYS_clock_nanosleep,
+        ] {
+            assert_eq!(verdict(arch, nr as u32, 0), 0x7fff0000);
+        }
+        #[cfg(target_arch = "x86_64")]
+        assert_eq!(verdict(arch, libc::SYS_open as u32, 0), 0x00050001);
         for nr in [
             libc::SYS_socket,
             libc::SYS_connect,

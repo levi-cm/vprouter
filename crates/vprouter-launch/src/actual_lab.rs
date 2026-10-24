@@ -285,7 +285,12 @@ pub(super) fn run(
         "actual_go_signal_forwarding_bounded_reaping_empty_group_parent_accounting_unchanged",
     );
     g.audit()?;
-    super::transport_lab::actual_packet_controls(g, dir, data_name)?;
+    super::transport_lab::actual_packet_controls(
+        g,
+        dir,
+        data_name,
+        &a.spec.exit.transport_namespace,
+    )?;
     lab::write(&dir.join("result.json"),br#"{"result":"actual_observer_and_go_observation_only","readiness":false,"production_changes":false,"quarantine_retained":true,"approved_identity_accessed":false,"real_client_acceptance":"NOT_RUN"}"#)?;
     Ok(())
 }

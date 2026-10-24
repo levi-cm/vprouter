@@ -142,7 +142,8 @@ pub(super) fn inspect_actual(
         stage.image_ref = spec.image_ref.clone();
         stage.content_id = image.into();
         stage.artifact_kind = "actual_gateway_lab_v1".into();
-        stage.artifact_path = "/var/lib/vprouter-v2-lab/task8b2-gateway-init".into();
+        stage.artifact_path =
+            format!("/var/lib/vprouter-v2-lab/task8b2-{digest}.gateway-init").into();
         stage.artifact_sha256 = digest.into();
         stage.artifact_size = size;
         stage.execution_policy_sha256 = None;

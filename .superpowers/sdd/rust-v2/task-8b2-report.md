@@ -42,3 +42,20 @@ positive and negative packet/drop accounting; full validation and independent
 spec/quality review. Actual image/runtime certification on ARM64 is NOT_RUN.
 Task8c autonomous protocol/readiness/provider/client/fault acceptance and all
 multi-exit, migration, production and release gates remain closed.
+
+## Candidate02 diagnostic correction
+
+Root-owned candidate01 attempts1/2 failed before exec; no actual Go success.
+Attempt2 metadata-only `strace -ff -e raw=all` records child33895: last successful
+readonly TUN bind-remount0x102b followed by `open`0x88241 returning EROFS and
+helper exit118. This exact source ordering binds the failure to first IPv6 sysctl
+write after entering Docker's readonly proc/sys view. Candidate02 enters and
+rechecks only the retained owned data netns, suppresses IPv6 there through host
+proc before container mount entry, then preserves the readonly private proc.
+No seccomp/capability/LSM relaxation was made. Early outer failures now report
+bounded error codes; NetworkOperation is distinguished from generic child failure.
+Init staging is content-addressed per immutable manifest digest. Packet witnesses
+now require independent data/transport/host positive controls, all three negative
+captures with zero kernel capture drops, sixteen unauthorized attempts, sixteen
+authorized roundtrips and explicit receive/send accounting. Candidate02 focused
+26-test suite and launch clippy passed. Runtime remains pending.

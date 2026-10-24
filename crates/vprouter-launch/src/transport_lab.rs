@@ -1345,35 +1345,102 @@ pub(super) fn actual_packet_controls(
     g: &mut GuardTransport<'_>,
     dir: &Path,
     data_name: &str,
+    transport_name: &str,
 ) -> Result<()> {
-    let peer = format!("vr8p{}", std::process::id());
+    let pid = std::process::id();
+    let peer = format!("vr8p{pid}");
+    let wan = format!("vr8w{pid}");
     let peer_fd = ns_file(&peer)?;
     let server = socket(&peer_fd, "10.64.0.1:40444")?;
     let health = health_socket(g, 40100)?;
     let app = socket(&g.lab_namespaces().0.data, "10.64.0.2:40101")?;
-    let positive = Capture::start(
-        Some(data_name),
-        g.lab_plan().wireguard_name(),
-        dir.join("actual-positive-data.pcap"),
-    )?;
+    let positive = [
+        Capture::start(
+            Some(data_name),
+            g.lab_plan().wireguard_name(),
+            dir.join("actual-positive-data.pcap"),
+        )?,
+        Capture::start(
+            Some(transport_name),
+            g.lab_plan().transport_name(),
+            dir.join("actual-positive-transport.pcap"),
+        )?,
+        Capture::start(None, &wan, dir.join("actual-positive-host.pcap"))?,
+    ];
     roundtrip(&health, &server, b"VR8B2_POSITIVE_PRODUCER")?;
-    std::thread::sleep(Duration::from_millis(100));
-    if !has(&positive.finish()?, b"VR8B2_POSITIVE_PRODUCER") {
+    let direct = socket(&g.lab_namespaces().0.transport, "0.0.0.0:0")?;
+    direct
+        .send_to(
+            b"VR8B2_POSITIVE_PLAINTEXT_CAPTURE",
+            format!("{ENDPOINT}:51820"),
+        )
+        .map_err(|_| Error::NetworkOperation)?;
+    std::thread::sleep(Duration::from_millis(150));
+    let [pd, pt, ph] = positive;
+    if !has(&pd.finish()?, b"VR8B2_POSITIVE_PRODUCER")
+        || !has(&pt.finish()?, b"VR8B2_POSITIVE_PLAINTEXT_CAPTURE")
+        || !has(&ph.finish()?, b"VR8B2_POSITIVE_PLAINTEXT_CAPTURE")
+    {
         return Err(Error::NetworkOperation);
     }
-    let negative = Capture::start(
-        Some(data_name),
-        g.lab_plan().wireguard_name(),
-        dir.join("actual-negative-data.pcap"),
-    )?;
+    let negative = [
+        Capture::start(
+            Some(data_name),
+            "any",
+            dir.join("actual-negative-data.pcap"),
+        )?,
+        Capture::start(
+            Some(transport_name),
+            "any",
+            dir.join("actual-negative-transport.pcap"),
+        )?,
+        Capture::start(None, &wan, dir.join("actual-negative-host.pcap"))?,
+    ];
+    let mut denied = 0u32;
+    let mut queued = 0u32;
     for _ in 0..16 {
-        let _ = app.send_to(b"VR8B2_FORBIDDEN_UNAUTHORIZED", "10.64.0.1:40444");
+        match app.send_to(b"VR8B2_FORBIDDEN_UNAUTHORIZED", "10.64.0.1:40444") {
+            Ok(_) => queued += 1,
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => denied += 1,
+            Err(_) => return Err(Error::NetworkOperation),
+        }
+        roundtrip(&health, &server, b"VR8B2_AUTHORIZED_DURING_DENIAL")?;
     }
-    std::thread::sleep(Duration::from_millis(100));
-    if has(&negative.finish()?, b"VR8B2_FORBIDDEN_UNAUTHORIZED") {
+    // A successful local send does not prove remote delivery. Independently
+    // inspect the synthetic peer and all three capture planes, with positive
+    // controls above and zero capture drops required by Capture::finish.
+    server
+        .set_nonblocking(true)
+        .map_err(|_| Error::NetworkOperation)?;
+    let mut received = 0;
+    let mut bytes = [0; 2048];
+    while let Ok((size, _)) = server.recv_from(&mut bytes) {
+        if has(&bytes[..size], b"VR8B2_FORBIDDEN_") {
+            received += 1;
+        }
+    }
+    std::thread::sleep(Duration::from_millis(150));
+    for capture in negative {
+        if has(&capture.finish()?, b"VR8B2_FORBIDDEN_") {
+            return Err(Error::NetworkPolicy);
+        }
+    }
+    if received != 0 || denied + queued != 16 {
         return Err(Error::NetworkPolicy);
     }
+    lab::write(
+        &dir.join("actual-packet-accounting.json"),
+        &serde_json::to_vec(&serde_json::json!({
+            "unauthorized_send_attempts":16,"kernel_permission_denials":denied,
+            "locally_queued_sends":queued,"unauthorized_peer_receives":received,
+            "authorized_roundtrips_during_denial":16,"capture_planes":["data","transport","host"],
+            "positive_controls":true,"capture_kernel_drops":0,"readiness":false
+        }))
+        .map_err(|_| Error::InvalidSpec)?,
+    )?;
     g.audit()?;
-    lab::case("actual_fixture_positive_producer_capture_and_same_namespace_unauthorized_denial");
+    lab::case(
+        "actual_fixture_three_plane_positive_controls_capture_accounting_and_same_namespace_unauthorized_denial",
+    );
     Ok(())
 }

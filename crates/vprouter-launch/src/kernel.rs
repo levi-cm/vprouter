@@ -66,6 +66,7 @@ fn stage_byte(e: Error) -> u8 {
         Error::ProbeForbiddenRoot => 252,
         Error::CapabilityPolicy => 204,
         Error::ConfinementPolicy => 205,
+        Error::NetworkOperation => 207,
         _ => 206,
     }
 }
@@ -394,6 +395,7 @@ impl Child {
                 252 => return Err(Error::ProbeForbiddenRoot),
                 204 => return Err(Error::CapabilityPolicy),
                 205 => return Err(Error::ConfinementPolicy),
+                207 => return Err(Error::NetworkOperation),
                 210 => return Err(Error::MountContainerRoot),
                 211 => return Err(Error::MountPrivate),
                 212 => return Err(Error::MountTmp),
@@ -547,7 +549,11 @@ fn spawn_inner(
                 actual,
             )
         })();
-        die(if result.is_ok() { 0 } else { 121 });
+        if let Err(error) = result {
+            report_failure(health_w.as_fd(), error);
+            die(121);
+        }
+        die(0);
     }
     drop(release_r);
     drop(health_w);
@@ -671,7 +677,6 @@ fn setup(
         (container.ipc, libc::CLONE_NEWIPC),
         (container.uts, libc::CLONE_NEWUTS),
         (container.cgroup_ns, libc::CLONE_NEWCGROUP),
-        (container.mount, libc::CLONE_NEWNS),
         (data, libc::CLONE_NEWNET),
     ] {
         enter(fd, kind)?;
@@ -679,7 +684,17 @@ fn setup(
     if actual.is_some() {
         // Root-relative cgroup identity is minted only after host producer join.
         unshare(libc::CLONE_NEWCGROUP)?;
+        if super::owned::Identity::network(network()?)? != super::owned::Identity::network(data)? {
+            return Err(Error::NamespaceMismatch);
+        }
+        // The retained producer joined before this helper was released. Apply
+        // only owned-data-netns sysctls through the host's writable proc view,
+        // BEFORE entering Docker's deliberately readonly /proc/sys mount.
+        if actual.is_some_and(|a| a.role == ActualRole::Daemon) {
+            disable_data_ipv6()?;
+        }
     }
+    enter(container.mount, libc::CLONE_NEWNS)?;
     let executable_tree = rustix::mount::open_tree(
         actual.map_or(container.executable, |a| a.executable),
         "",
@@ -2415,6 +2430,18 @@ fn actual_file(tree: &OwnedFd, path: &str) -> Result<()> {
     attach_tree(tree.as_fd(), path)?;
     readonly_bind(path, true)
 }
+fn disable_data_ipv6() -> Result<()> {
+    for path in [
+        "/proc/sys/net/ipv6/conf/all/disable_ipv6",
+        "/proc/sys/net/ipv6/conf/default/disable_ipv6",
+    ] {
+        std::fs::write(path, b"1\n").map_err(|_| Error::NetworkOperation)?;
+        if std::fs::read(path).map_err(|_| Error::NetworkOperation)? != b"1\n" {
+            return Err(Error::NetworkOperation);
+        }
+    }
+    Ok(())
+}
 fn actual_root(a: Actual<'_>, trees: &ActualTrees) -> Result<()> {
     for d in [
         "dev",
@@ -2465,17 +2492,6 @@ fn actual_root(a: Actual<'_>, trees: &ActualTrees) -> Result<()> {
                 trees.tun.as_ref().ok_or(Error::DescriptorPolicy)?,
                 "/tmp/root/dev/net/tun",
             )?;
-            // These affect only the already joined owned data network namespace.
-            // They are set before Go and remain inaccessible through readonly proc.
-            for p in [
-                "/proc/sys/net/ipv6/conf/all/disable_ipv6",
-                "/proc/sys/net/ipv6/conf/default/disable_ipv6",
-            ] {
-                std::fs::write(p, b"1\n").map_err(|_| Error::NetworkOperation)?;
-                if std::fs::read(p).map_err(|_| Error::NetworkOperation)? != b"1\n" {
-                    return Err(Error::NetworkOperation);
-                }
-            }
         }
     }
     Ok(())

@@ -324,3 +324,5 @@ actualbootstrap, requires failure+exactunchangedpolicy+nativeaudit+health. Exist
 task4 covers nativeactuator failurebatch; cite separately. No new Cargo test
 actuationfeature/API — avoids expanding production authority just for injection.
 Costifwrong: narrower component evidence; fullruntimefault acceptance staysclosed.
+
+Task8a attempt11 candidate13 source1abe8b3d/artifactf3ed27df FAILexit1/2.126s. Initial native bootstrap/socketbirth, threepoint capture sensitivity, unauthorizedsameNSproducer and establishedtuple producerdenial casesPASS. Fault0(WGdown/up) reaches fullquarantine but exactrestorationauditDrifted. Capturedefaultpromiscuity may interfere with retainedhostbaseline; nextcandidate uses -p and scopednativeauditdiagnostics, no policy/deadline relaxation. ExactWAN11 provenancecleanupPASS, allother resources retained; fullfault/realclient/releaseclaimunavailable. Candidate12 supersededUNRUN.

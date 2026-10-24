@@ -201,6 +201,57 @@
         "target/lab-state/guarded-transport-inspect-9.json",
         "target/lab-state/guarded-transport-wan-cleanup-9.json"
       ]
+    },
+    {
+      "attempt": 10,
+      "candidate": 11,
+      "observed_at_utc": "2026-10-24T15:51:33.427876+00:00",
+      "artifact_sha256": "e191214d5649b0e9c648dfb0fe9b67acc1d8a882be0b4e545022383cbe163c0c",
+      "source_archive_sha256": "28bb5a1d9ec6efa8edfd843c908b209d24d1675ca3a446b5900a820a607ce148",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "result": "FAIL_FIRST_BOOTSTRAP_HEALTH_ROUNDTRIP",
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\ntransport_lab: network_operation\n",
+      "quarantine_observation": "bootstrap phase recorded; exact native links/addresses/routes UP, both producer-restricted filters installed, application forwarding unavailable",
+      "docker_forward_preserved": "original chain/rules preserved; narrow owned cooperation additions present",
+      "capture_or_traffic": "first synthetic health attempted; PCAPs24bytes so no usable packet evidence",
+      "read_only_diagnostic": "actual WG handshake and encrypted byte counters observed; ARP resolved. Does not prove successful roundtrip or forbidden-marker absence",
+      "diagnosis": "first UDP roundtrip failed; next exact numeric per-stage error and immediate+failure-flushed capture required",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; native bootstrap resources and test ownership retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-10.json",
+        "target/lab-state/guarded-transport-inspect-10.json",
+        "target/lab-state/guarded-transport-packet-diagnostic-10.json",
+        "target/lab-state/guarded-transport-wan-cleanup-10.json"
+      ]
+    },
+    {
+      "observed_at_utc": "2026-10-24T15:55:34.335306+00:00",
+      "artifact_sha256": "f3ed27dfeb3c1e890bc466b6706d865b74731ff7f8d1d7ed50da6b481c990cfd",
+      "source_archive_sha256": "1abe8b3ddfc75156b23f953d7166d39040ca104291b69176e68b1dc5b56ab64e",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\nLAB_STAGE inject_network_fault_0\nLAB_NATIVE_FAILURE stage=lab_restore_audit reason=Drifted\ntransport_lab: network_operation\n",
+      "attempt": 11,
+      "candidate": 13,
+      "result": "FAIL_FIRST_FAULT_RESTORATION_AUDIT",
+      "wall_seconds": 2.126,
+      "partial_cases": [
+        "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+        "independent_data_transport_host_positive_capture_sensitivity",
+        "same_namespace_destination_port_other_socket_producer_denied",
+        "established_input_other_producer_denied"
+      ],
+      "quarantine_observation": "initial exact native bootstrap and producer-bound health tests passed; first fault triggered full offline; recovery audit refused",
+      "docker_forward_preserved": "original chain/rules retained; narrow owned cooperation additions present",
+      "capture_or_traffic": "synthetic initial roundtrip/capture sensitivity and unauthorized producer cases pass; complete fault/capture verdict unavailable",
+      "diagnosis": "restoration audit Drifted after WG down/up; capture promiscuity changes may independently affect whole-host snapshot and require nonpromiscuous instrumentation",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; other native/test ownership retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-11.json",
+        "target/lab-state/guarded-transport-inspect-11.json",
+        "target/lab-state/guarded-transport-wan-cleanup-11.json"
+      ]
     }
   ],
   "production_changes": false,
@@ -208,6 +259,10 @@
     {
       "candidate": 2,
       "status": "diagnostic build not dispatched or run"
+    },
+    {
+      "candidate": 12,
+      "status": "superseded before dispatch; immediate-mode flag absent"
     }
   ]
 }

@@ -342,6 +342,17 @@ fn program() -> Result<String> {
 /// Length framed, bounded protocol. One absolute two-second deadline spans
 /// prefix AND body; a trickling peer cannot renew a per-read timeout indefinitely.
 pub fn write_message<T: Serialize>(stream: &mut UnixStream, value: &T) -> Result<()> {
+    write_message_before(
+        stream,
+        value,
+        std::time::Instant::now() + Duration::from_secs(2),
+    )
+}
+fn write_message_before<T: Serialize>(
+    stream: &mut UnixStream,
+    value: &T,
+    end: std::time::Instant,
+) -> Result<()> {
     let bytes = serde_json::to_vec(value).map_err(|_| Error::Bootstrap)?;
     if bytes.is_empty() || bytes.len() > 4096 {
         return Err(Error::Bootstrap);
@@ -349,7 +360,6 @@ pub fn write_message<T: Serialize>(stream: &mut UnixStream, value: &T) -> Result
     let mut framed = (bytes.len() as u32).to_be_bytes().to_vec();
     framed.extend(bytes);
     stream.set_nonblocking(true).map_err(|_| Error::Bootstrap)?;
-    let end = std::time::Instant::now() + Duration::from_secs(2);
     let mut offset = 0;
     while offset < framed.len() {
         if std::time::Instant::now() >= end {
@@ -443,6 +453,51 @@ impl Observation {
         Ok(())
     }
 }
+fn connect_before(path: &std::path::Path, end: std::time::Instant) -> Result<UnixStream> {
+    use rustix::net::{self, AddressFamily, SocketAddrUnix, SocketFlags, SocketType};
+    if std::time::Instant::now() >= end {
+        return Err(Error::Bootstrap);
+    }
+    let address = SocketAddrUnix::new(path).map_err(|_| Error::Bootstrap)?;
+    let stream = UnixStream::from(
+        net::socket_with(
+            AddressFamily::UNIX,
+            SocketType::STREAM,
+            SocketFlags::NONBLOCK | SocketFlags::CLOEXEC,
+            None,
+        )
+        .map_err(|_| Error::Bootstrap)?,
+    );
+    match net::connect(&stream, &address) {
+        Ok(()) => (),
+        Err(rustix::io::Errno::INPROGRESS) => {
+            wait(&stream, end, rustix::event::PollFlags::OUT)?;
+            net::sockopt::socket_error(&stream)
+                .map_err(|_| Error::Bootstrap)?
+                .map_err(|_| Error::Bootstrap)?;
+        }
+        // Linux AF_UNIX uses EAGAIN for a full listener backlog. It does not
+        // mean connection-in-progress; refuse rather than block/retry it.
+        Err(rustix::io::Errno::AGAIN | rustix::io::Errno::CONNREFUSED) => {
+            return Err(Error::Bootstrap);
+        }
+        Err(_) => return Err(Error::Bootstrap),
+    }
+    if std::time::Instant::now() >= end || stream.peer_addr().is_err() {
+        return Err(Error::Bootstrap);
+    }
+    Ok(stream)
+}
+fn response_binding(response: &Response, hash: &str, nonce: &str) -> Result<()> {
+    if response.schema != 1
+        || response.config_sha256 != hash
+        || response.nonce != nonce
+        || response.permission != Permission::ObserveOnce
+    {
+        return Err(Error::Bootstrap);
+    }
+    Ok(())
+}
 fn admit() -> Result<Observation> {
     let (config, hash) = protected_configuration()?;
     credentials()?;
@@ -457,13 +512,8 @@ fn admit() -> Result<Observation> {
     // This is the FIRST socket construction, after all placement/config checks.
     // Host-side retained authority independently verifies actual peer host PID,
     // starttime/pidfd/cgroup/netns/executable before returning ObserveOnce.
-    let mut stream = UnixStream::connect(SOCKET).map_err(|_| Error::Bootstrap)?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .map_err(|_| Error::Bootstrap)?;
-    stream
-        .set_write_timeout(Some(Duration::from_secs(2)))
-        .map_err(|_| Error::Bootstrap)?;
+    let end = std::time::Instant::now() + Duration::from_secs(2);
+    let mut stream = connect_before(std::path::Path::new(SOCKET), end)?;
     let peer = rustix::net::sockopt::socket_peercred(&stream).map_err(|_| Error::Bootstrap)?;
     // PID may translate to zero in a private PID namespace. UID/GID root are
     // necessary here, not sufficient: the fixed protected socket+nonce+digest
@@ -471,22 +521,17 @@ fn admit() -> Result<Observation> {
     if peer.uid.as_raw() != 0 || peer.gid.as_raw() != 0 {
         return Err(Error::Bootstrap);
     }
-    write_message(
+    write_message_before(
         &mut stream,
         &Request {
             schema: 1,
             config_sha256: hash.clone(),
             nonce: config.nonce.clone(),
         },
+        end,
     )?;
-    let response: Response = read_message(&mut stream)?;
-    if response.schema != 1
-        || response.config_sha256 != hash
-        || response.nonce != config.nonce
-        || response.permission != Permission::ObserveOnce
-    {
-        return Err(Error::Bootstrap);
-    }
+    let response: Response = read_message_before(&mut stream, end)?;
+    response_binding(&response, &hash, &config.nonce)?;
     let result = Observation {
         config,
         _thread: PhantomData,
@@ -513,6 +558,93 @@ pub fn observe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stalled_listener_and_refusal_share_the_absolute_connection_exchange_deadline() {
+        let path =
+            std::env::temp_dir().join(format!("vprouter-bootstrap-stalled-{}", std::process::id()));
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let start = std::time::Instant::now();
+        let end = start + Duration::from_millis(40);
+        let mut stream = connect_before(&path, end).unwrap();
+        assert!(read_message_before::<Response>(&mut stream, end).is_err());
+        assert!(start.elapsed() < Duration::from_millis(200));
+        assert!(connect_before(&path, start).is_err());
+        drop(listener);
+        assert!(
+            connect_before(&path, std::time::Instant::now() + Duration::from_millis(40)).is_err()
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn fresh_configuration_rejects_stale_response_digest_nonce_and_schema() {
+        for (digest, nonce, schema) in [
+            ("current-digest", "current-nonce", 1),
+            ("stale-digest", "current-nonce", 1),
+            ("current-digest", "stale-nonce", 1),
+            ("stale-digest", "stale-nonce", 1),
+            ("current-digest", "current-nonce", 2),
+        ] {
+            // Exercise the actual framed decoder followed by the exact helper
+            // used by admit; a formerly valid reply cannot bind a new config.
+            let (mut a, mut b) = UnixStream::pair().unwrap();
+            write_message(
+                &mut a,
+                &Response {
+                    schema,
+                    config_sha256: digest.into(),
+                    nonce: nonce.into(),
+                    permission: Permission::ObserveOnce,
+                },
+            )
+            .unwrap();
+            let response = read_message::<Response>(&mut b).unwrap();
+            assert_eq!(
+                response_binding(&response, "current-digest", "current-nonce").is_ok(),
+                digest == "current-digest" && nonce == "current-nonce" && schema == 1
+            );
+        }
+    }
+    #[test]
+    fn full_unix_backlog_refuses_within_connection_deadline() {
+        use rustix::net::{self, AddressFamily, SocketAddrUnix, SocketFlags, SocketType};
+        let path =
+            std::env::temp_dir().join(format!("vprouter-bootstrap-backlog-{}", std::process::id()));
+        let listener = net::socket_with(
+            AddressFamily::UNIX,
+            SocketType::STREAM,
+            SocketFlags::CLOEXEC,
+            None,
+        )
+        .unwrap();
+        let address = SocketAddrUnix::new(&path).unwrap();
+        net::bind(&listener, &address).unwrap();
+        net::listen(&listener, 0).unwrap();
+        let queued = net::socket_with(
+            AddressFamily::UNIX,
+            SocketType::STREAM,
+            SocketFlags::NONBLOCK | SocketFlags::CLOEXEC,
+            None,
+        )
+        .unwrap();
+        net::connect(&queued, &address).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker_path = path.clone();
+        let worker = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            let result = connect_before(&worker_path, start + Duration::from_millis(40));
+            tx.send((result.is_err(), start.elapsed())).unwrap();
+        });
+        let result = rx.recv_timeout(Duration::from_millis(250));
+        // Closing the listener also releases a regressed blocking connector,
+        // so this regression test fails boundedly instead of hanging the suite.
+        drop(listener);
+        drop(queued);
+        worker.join().unwrap();
+        std::fs::remove_file(path).unwrap();
+        let (refused, elapsed) = result.expect("backlog connect exceeded absolute deadline");
+        assert!(refused);
+        assert!(elapsed < Duration::from_millis(200));
+    }
     fn configuration() -> Configuration {
         let profile = b"[Interface]\nPrivateKey=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\nAddress=10.64.0.2/32\nDNS=10.64.0.1\n[Peer]\nPublicKey=AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\nAllowedIPs=0.0.0.0/0\nEndpoint=185.65.134.88:51820\n";
         let raw = serde_json::json!({"schema_version":2,"deployment_id":"bootlab","site":"debdev","gateway_image":format!("sha256:{}","a".repeat(64)),"exits":[{"id":"one","enabled":true,"state_dir":"/synthetic/one","mode":{"kind":"mullvad","profile":"/synthetic/no-read","expected_server":"de-fra-wg-404"}}],"dependency_adapters":[],"client_policies":[]});

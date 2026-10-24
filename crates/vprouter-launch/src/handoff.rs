@@ -36,7 +36,27 @@ pub(super) struct Handoff<'g, 'a> {
     producer: &'g ProducerGroup,
     transaction: &'g Transaction<'a>,
     namespaces: &'g OwnedNamespaces,
+    attempt: OneUse,
+}
+#[derive(Default)]
+struct OneUse {
     consumed: bool,
+}
+impl OneUse {
+    fn begin(&mut self) -> Result<()> {
+        if self.consumed {
+            return Err(Error::DescriptorPolicy);
+        }
+        // Consumed before any accept, authority check or request validation.
+        self.consumed = true;
+        Ok(())
+    }
+}
+fn request_binding(request: &Request, digest: &str, nonce: &str) -> Result<()> {
+    if request.schema != 1 || request.config_sha256 != digest || request.nonce != nonce {
+        return Err(Error::DescriptorPolicy);
+    }
+    Ok(())
 }
 impl<'g, 'a> Handoff<'g, 'a> {
     /// Private constructor called only by a freshly audited GuardTransport.
@@ -158,7 +178,7 @@ impl<'g, 'a> Handoff<'g, 'a> {
             producer,
             transaction,
             namespaces,
-            consumed: false,
+            attempt: OneUse::default(),
         })
     }
     fn spec(&self) -> &LaunchSpec {
@@ -211,12 +231,9 @@ impl<'g, 'a> Handoff<'g, 'a> {
     /// Exact current accept peer is checked through host proc/pidfd and retained
     /// producer membership. Translation of worker-side PID0/cgroup'/' is irrelevant.
     pub fn serve_once(&mut self, bundle: &ReviewedBundle) -> Result<u32> {
-        if self.consumed {
-            return Err(Error::DescriptorPolicy);
-        }
         // Consume BEFORE accepting: malformed/unauthorized attempts never enable
         // another try with the same nonce/config. Failure stays quarantined.
-        self.consumed = true;
+        self.attempt.begin()?;
         self.verify()?;
         let end = Instant::now() + Duration::from_secs(2);
         let (mut stream, _) = loop {
@@ -265,12 +282,7 @@ impl<'g, 'a> Handoff<'g, 'a> {
         )?;
         let request: Request = bootstrap::read_message_before(&mut stream, end)
             .map_err(|_| Error::DescriptorPolicy)?;
-        if request.schema != 1
-            || request.config_sha256 != self.config_digest
-            || request.nonce != self.config.nonce
-        {
-            return Err(Error::DescriptorPolicy);
-        }
+        request_binding(&request, &self.config_digest, &self.config.nonce)?;
         self.verify()?;
         sender.verify(
             self.producer,
@@ -317,4 +329,47 @@ fn path_identity(dir: impl AsFd, name: &str) -> Result<Identity> {
         dev: s.st_dev,
         ino: s.st_ino,
     })
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn request(digest: &str, nonce: &str) -> Request {
+        Request {
+            schema: 1,
+            config_sha256: digest.into(),
+            nonce: nonce.into(),
+        }
+    }
+    fn submit(gate: &mut OneUse, request: &Request) -> Result<()> {
+        gate.begin()?;
+        request_binding(request, "current-digest", "current-nonce")
+    }
+    #[test]
+    fn one_use_consumes_success_and_authority_failure_before_validation() {
+        let valid = request("current-digest", "current-nonce");
+        let mut gate = OneUse::default();
+        submit(&mut gate, &valid).unwrap();
+        assert_eq!(submit(&mut gate, &valid), Err(Error::DescriptorPolicy));
+        let mut failed_authority = OneUse::default();
+        failed_authority.begin().unwrap();
+        // The production authority/accept path may fail before any request;
+        // nothing can restore Fresh or allow a second attempt afterward.
+        assert_eq!(failed_authority.begin(), Err(Error::DescriptorPolicy));
+    }
+    #[test]
+    fn wrong_digest_nonce_and_schema_consume_attempt_and_refuse_replay() {
+        let valid = request("current-digest", "current-nonce");
+        let mut wrong_schema = request("current-digest", "current-nonce");
+        wrong_schema.schema = 2;
+        for wrong in [
+            request("stale-digest", "current-nonce"),
+            request("current-digest", "stale-nonce"),
+            request("stale-digest", "stale-nonce"),
+            wrong_schema,
+        ] {
+            let mut gate = OneUse::default();
+            assert_eq!(submit(&mut gate, &wrong), Err(Error::DescriptorPolicy));
+            assert_eq!(submit(&mut gate, &valid), Err(Error::DescriptorPolicy));
+        }
+    }
 }

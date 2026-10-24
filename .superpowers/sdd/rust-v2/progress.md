@@ -216,3 +216,5 @@ Root public-source oracle: official annotated Tailscalev1.102.5 tag peeled5fb2a8
 Task6b attempt5source041806d FAILexit1/.981s executable open_tree clone before worker placement; first3cases pass ownership/wrong selected exit/unexpected directory+peer namespace+socket rejection. Exact payloads and ownership cleanup retained.
 
 Ruling amendment: descriptor-relative mount cloning must run while each source mount belongs to the current admitted mount context — host state before entry; container executable after entering admitted container mounts and before private unshare. Initial before-all-entry wording did not account for the executable FD foreign to host mount namespace. Cost if wrong: additional ordering/handle audit and another exact kernel run; no pathname fallback or provenance/readonly relaxation.
+
+Task6b attempt6source9785b7c: descriptor-relative executable transfer no longer fails; FAILexit1/.877s descriptor_policy after setup/readiness stage; first3ownership/negative cases pass. Need exact fixed FD substage before attributing failure. Exact artifacts/result and cleanup retained; no post-exec success/readiness claim.

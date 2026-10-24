@@ -73,6 +73,25 @@
       ],
       "guard_runtime": false,
       "activation": false
+    },
+    {
+      "implementation_commit": "338dcba280dbe0699640def7c63f9ed7f17e16c3",
+      "payload_sha256": "312d59da7caa0e3ea97bfecc1e97be234c69a32608283517efcfcc6b26790144",
+      "probe_sha256": "2c1068174b100fd21339c6a633a76f5318c0fa0ff02bd71dafcec0a6d22cc362",
+      "exit_code": 0,
+      "wall_seconds": 1.362,
+      "result": "PASS",
+      "completed_cases": [
+        "native_docker_proc_root_cgroup_namespaces_static_executable_admitted",
+        "real_wrong_namespace_and_cgroup_descriptors_refused",
+        "actual_artifact_bytes_hash_mismatch_refused",
+        "changed_starttime_container_manifest_hash_refused",
+        "real_foreign_deployment_container_refused",
+        "paused_and_dead_container_stale_handles_refused"
+      ],
+      "guard_runtime": false,
+      "activation": false,
+      "change": "fix1 explicitly enumerated daemon security profiles, retained+refreshed profile and coherent container AppArmor binding"
     }
   ],
   "diagnostics": [
@@ -128,6 +147,16 @@
         "file_bytes_read": false
       },
       "correction": "only exact known11 or hardened12 profile accepted, arbitrary subsets rejected"
+    },
+    {
+      "kind": "daemon_security_profile",
+      "security_options": [
+        "name=apparmor",
+        "name=seccomp,profile=builtin",
+        "name=cgroupns"
+      ],
+      "synthetic_container_apparmor": "docker-default",
+      "query": "selected fields only, no env/process/body output"
     }
   ],
   "component_acceptance": "PASS_ISOLATED_ADMISSION_ONLY_PENDING_REVIEW",
@@ -139,5 +168,6 @@
     "Admission descriptor ownership is not selected-exit placement or quarantine authority.",
     "Systemd cgroup2 profile only; Void/runit and cgroupfs support remain unimplemented.",
     "No real credentials, Tailscale routes, protected traffic or production changes."
-  ]
+  ],
+  "no_apparmor_profile_kernel_acceptance": "NOT_RUN"
 }

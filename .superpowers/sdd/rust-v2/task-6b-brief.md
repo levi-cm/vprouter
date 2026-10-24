@@ -45,7 +45,10 @@ Join admitted namespaces/root then create private per-exit PID+mount views and
 procfs for that PID namespace. Preserve primary gateway base network despite
 private PID/mount. Root read-only; writable state mapping includes only selected
 exit, never peer state or host /run/netns. No old-root mount or host root directory
-FD remains. Separate mount views alone fail same-UID /proc/PID/root isolation;
+FD remains. Provide a private read-only resolver view for future workers rather than inheriting
+Docker/host resolver forwarding; derive approved resolver addresses from validated
+mode/profile configuration. No host resolver sockets cross namespace entry.
+Separate mount views alone fail same-UID /proc/PID/root isolation;
 actual private PID/proc boundary is mandatory unless an equally strong mechanism
 is demonstrated. Worker cannot access host Docker socket, namespace handles,
 peer mount roots/state or unrelated daemons.
@@ -62,6 +65,11 @@ validate final FD inventory against explicit small config/health allowlist. Reje
 bad/inherited directories, namespace/socket FDs or ambiguous CLOEXEC policy.
 Executable FD may be CLOEXEC and consumed by fixed fd-based exec. Fail closed via
 bounded child exit, never unwind into code that assumes closed FDs remain owned.
+Host-launched processes do not automatically inherit Docker seccomp/AppArmor.
+Apply and verify the reviewed manifest-bound seccomp and LSM confinement after
+privileged setup; refuse if it cannot be established. Probe confinement may be
+restricted to test builds; production stays unavailable until actual worker/Go
+Tailscale syscall policy is reviewed. Do not infer it from container inspect alone.
 Apply and verify no_new_privs, UID/GID, supplementary groups, capability effective/
 permitted/inheritable/ambient/bounding masks and securebits as required. Drop
 SYS_ADMIN and all unrelated caps; retained NET_ADMIN/NET_RAW only if justified by

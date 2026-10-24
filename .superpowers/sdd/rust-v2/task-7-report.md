@@ -1,5 +1,9 @@
 # Task7 native monitoring worker implementer report
 
+Latest review-fix source: `59550207f81937024a6275e5472df60998fbfcae`.
+The appended round1 section binds current source and focused evidence; original
+implementation evidence/hashes below remain historical and are not overwritten.
+
 Status: **DONE_WITH_CONCERNS**. Final implementation source is
 `ad9b38d4e238c7e0418cbb7db822a7d23a66f97d`; implementation commit `3eb5dba`
 adds the engine, and `ad9b38d` moves clock injection to dev dependencies only.
@@ -265,3 +269,159 @@ below bind exact bytes; no controller docs/tools are part of this source set.
 | `crates/vprouter-worker/src/provider.rs` | `b349e54d36d2efed4e358c8d0eab996ec33bb5e68e86485cdee3c26d4fa51baa` |
 | `crates/vprouter-worker/src/publish.rs` | `92e651d9a36bdbd1b294620d05224252b069131773fd35ab175e41b8759b85dd` |
 | `crates/vprouter-worker/src/tests.rs` | `14851fa871fa4de86740577f5dcecea7906c653835ba5da679eee51ffa5d7b03` |
+
+## Independent review fix round1
+
+Status: DONE_WITH_CONCERNS. Review at base
+`04ecfc6bb80640fd1d5f17249a134319c6f7335e` found specification FAIL / quality
+Needs fixes, two Important findings, no Critical/Minor. Review source is
+`.superpowers/sdd/rust-v2/task-7-review.md`. This section records implementation
+and verification, not independent re-review acceptance. Exact fix source commit
+`59550207f81937024a6275e5472df60998fbfcae` (`fix: retry native transport failures
+and enforce health expiry`). Only eight explicit owned source/test/doc paths
+were committed. Controller progress/task8 brief/oracle changes remain unstaged.
+
+Important1: Hyper established I/O and TLS negotiation could collapse genuine
+transient errors to permanent Malformed/Tls and suppress the allowed retry.
+The shared transport classification now follows at most eight typed causes,
+using io::Error::get_ref for nested I/O wrappers and Error::source otherwise.
+Explicit allowlisted ConnectionReset/Aborted/Refused, NotConnected, BrokenPipe,
+UnexpectedEof, TimedOut, Interrupted, WouldBlock, HostUnreachable,
+NetworkUnreachable/Down may retry. Any Rustls protocol/certificate error,
+nonallowlisted I/O kind or overlong chain overrides transient wrappers and is
+nonretryable. Hyper parse/user errors remain permanent; its typed incomplete/
+closed/cancelled cases retain transport behavior only absent a known permanent
+cause. No error-string parsing/logging, TLS verification relaxation, changed
+deadline, extra retry or dependency change was introduced.
+
+Controlled loopback regressions exercise actual EOF and TCP RST at three stages:
+TLS negotiation, established HTTP before response, and partial response body.
+Each of six cases runs both a successful single retry and drift immediately
+after the1s delay. Tests assert connection and HTTP request counts, five fresh
+structural checks on success versus three on drift, and an immediate structural
+check before the second attempt. Handshake failure has zero first-attempt HTTP
+requests; established failure has one. Genuine unknown-CA and wrong-hostname
+engine tests assert one connection/zero HTTP requests, one structural check and
+permanent Tls without retry. Existing malformed protocol/status/body and injected
+permanent/repeated-failure tests remain passing. A focused cause test covers
+permanent I/O, nested Rustls overriding ConnectionReset and an overlong chain.
+
+Important2: expiry previously happened inside observe after recovery lifecycle
+writes; expiry could also yield successful BLOCKED observation while Runner
+heartbeated without withdrawing. Minimal shared API `HealthMachine::expire(now)`
+extracts exactly the existing cached-evidence check/block behavior and reports
+whether evidence was revoked. `observe` uses it without changing its own
+semantics. Worker invokes it before sampling, before recovery advertisement and
+before replacing evidence. Revocation returns Structural through the existing
+error path so Runner notifies guard FIRST, withdraws/readbacks or invokes init,
+and publishes blocked state. A defensive check also rejects any successful
+observe that changes previously READY into another state. No production
+constructor/authority was added.
+
+Paused-clock tests cover exact45s and46s gaps while RECOVERING/READY and expiry
+during a sample starting at44s with2s provider work. No expired-streak offer
+occurs; after expiry exactly three renewed successes are required to recover,
+then a later fresh sample may offer. A real Unix guard Runner regression checks
+that the first request is `/v1/worker/block`, records receipt before withdrawal,
+asserts no provider/recovery offer or success heartbeat after the gap, and then
+checks a separate cancellation block/withdraw on shutdown. Core tests exercise
+partial STARTING/RECOVERING/READY streaks, exact45/>45 boundaries, no-evidence
+startup, repeat expiry, nonfinite/backwards/future-relative clock checks and
+handshake aging to180s. All use private synthetic boundary/loopback transports;
+actual guard enforcement is still NOT_RUN.
+
+Red/green evidence preserved in command outputs from this turn:
+
+```text
+cargo test -p vprouter-worker --lib real_transport_eof_and_reset_retry_only_after_fresh_checks -- --nocapture
+BEFORE: FAILED HandshakeEof drift=false; left Err(Tls), right Ok(()).
+AFTER: 1 passed,0 failed,12.05s (all12 fault/drift cases).
+cargo test -p vprouter-worker --lib recovering_expiry_before_sample_or_offer_resets_three_success_gate -- --nocapture
+BEFORE: FAILED left Ok(()), right Err(Structural).
+AFTER: 1 passed,0 failed.
+cargo test -p vprouter-worker --lib expired_ready_runner_notifies_guard_before_withdrawing_without_success_heartbeat -- --nocapture
+TEMPORARILY RESTORED ORIGINAL engine.rs FROM04ecfc6: FAILED;
+left POST /v1/worker/heartbeat, right POST /v1/worker/block;
+withdrawal preceded guard notification. Fixed source restored in finally.
+FIXED: 1 passed,0 failed.
+```
+
+Final focused commands/output at exact fix source (no new full-workspace claim):
+
+```text
+cargo test -p vprouter-worker --lib
+31 passed,0 failed;12.07s.
+cargo test -p vprouter-core --test health
+10 passed,0 failed.
+cargo test -p vprouter-worker -p vprouter-core --all-targets
+core:9+4+16+1+10=40 passed; worker31 passed; total71 passed,0 failed.
+custom localapi_lab: SKIP requires controller-owned disposable guest and --ignored.
+cargo clippy -p vprouter-worker -p vprouter-core --all-targets -- -D warnings
+Finished dev profile,exit0.
+cargo fmt --all -- --check
+exit0.
+git diff --check
+exit0.
+CC_aarch64_unknown_linux_musl="$PWD/target/toolchains/aarch64-linux-musl-cc" cargo check -p vprouter-worker -p vprouter-core --all-targets --target aarch64-unknown-linux-musl
+Finished dev profile,exit0.
+CC_aarch64_unknown_linux_musl="$PWD/target/toolchains/aarch64-linux-musl-cc" cargo build -p vprouter-worker --lib --target aarch64-unknown-linux-musl
+Finished dev profile,exit0.
+CC_x86_64_unknown_linux_musl="$PWD/target/toolchains/x86_64-linux-musl-cc" cargo rustc -p vprouter-worker --release --target x86_64-unknown-linux-musl --test localapi_lab -- -C relocation-model=static
+Finished release profile,exit0.
+```
+
+Final x86 lab path unchanged:
+`target/x86_64-unknown-linux-musl/release/deps/localapi_lab-4312258affff21a6`,
+SHA256 `916a904b0aa4cc97e744576c8eec770ab0a79c12a955a7ae1e051a49f3549599`.
+file identifies static ELF64 x86-64 EXEC, readelf confirms no INTERP/DYNAMIC;
+normal unprivileged invocation explicitly skips. ARM64 worker rlib SHA256
+`d7ab1c87e48a93e71cc80e392818126ebac66dff4498eed0b55d392cbd35c665`.
+ARM64 kernel/runtime execution still NOT_RUN. Original ARM64 static lab above was
+not rebuilt in this focused fix and is not presented as a current-source artifact.
+Pinned dependencies/Cargo.lock unchanged; original Zig origin/hash still applies.
+
+Current source-set SHA256
+`ed1e1ec0266190d005f3d63a5cf0f62f4d9834c98078a98585896db66715a69e`.
+Algorithm is the original Python sorted(Path)/NUL algorithm above, adding
+`crates/vprouter-core/src/state.rs` and `crates/vprouter-core/tests/health.rs` to
+the set before sorting. Unchanged source bytes retain their prior individual
+hashes; changed/added source and documentation hashes:
+
+| Source | SHA256 |
+| --- | --- |
+| crates/vprouter-core/src/state.rs | 2e0329971ec8893fdfeff5f52b2444fe0c40ba8fe665f68aaad38282f4304ea8 |
+| crates/vprouter-core/tests/health.rs | ef3a6ba666d38e62b9e491da99eb8cb7afe92492515628491ee9f71433be0772 |
+| crates/vprouter-worker/src/client.rs | 07e63883b809f6c714e23503f399d9a1aa5ddccc7e1689a884a820f732ec22c9 |
+| crates/vprouter-worker/src/engine.rs | 96a722abc752ec5393967e09c403a8e269acec0d85b9afb6a84ba97c880c24a2 |
+| crates/vprouter-worker/src/engine/tests.rs | fbc3bc30984ed9286e40e98f97f300c72ba7296ef758b0c70e6cb1a0be00a2d5 |
+| crates/vprouter-worker/src/provider.rs | c6c4731a33c84de13da3f4d21464bd6e26644140d9eec77af66b5a529b2195e8 |
+| crates/vprouter-worker/src/tests.rs | ad0eb0f192232e6abe30424fd618b733b7bc44d71b56ffdd6a3235e6fde00de5 |
+| docs/rust-v2/worker.md | 51c525d3002faca48752e5c939fac2bf4da59ea78462139b964832193445b1ae |
+
+No runtime source edits follow the advertised `5955020` candidate. All original
+task8+ actual placement, resolver, routing witness, guard/watchdog/authentication,
+preference/approval transition, traffic/DNS/IPv6/platform/fault/soak/reboot gates
+remain explicit and unverified; parser smoke alone cannot establish activation.
+
+### Controller exact rebuilt-parser attempt3
+
+Controller alone ran the new exact artifact through tracked driver
+`tools/worker-localapi-parser-oracle.py` (SHA256
+`44c34419c1fceb4766351921e9be250dff03e4e60304000df2ddbfeedf44d51b`), which now
+propagates harness failure as a nonzero process exit after recording JSON.
+Guest setup/source remains unchanged at SHA256
+`85503f2e7896351782e0b1ccc4ba944d32677ff5bac28a09ae62e6ccbcbf8a75`.
+
+```text
+python3 tools/worker-localapi-parser-oracle.py target/x86_64-unknown-linux-musl/release/deps/localapi_lab-4312258affff21a6 916a904b0aa4cc97e744576c8eec770ab0a79c12a955a7ae1e051a49f3549599 59550207f81937024a6275e5472df60998fbfcae
+```
+
+`target/lab-state/worker-localapi-run-3.json` records PASS_NATIVE_LOCALAPI_PARSER_ONLY,
+exit0/.159s at2026-10-24T15:12:05.877625Z, exact source `5955020` and artifact
+`916a904b`. Actual pinned daemon Running/online, NetfilterMode2,0 advertisements,
+guard_runtime:false and activation_ready:false. Private no-WAN/mount setup and
+matching actual socket device/inode were checked. No preference/state/daemon
+writes; production_changes:false. Native worker placement, real provider TLS and
+real client traffic remain NOT_RUN. Prior attempts1/2 and original artifacts
+remain historical evidence; this read-only parser smoke does not exercise the
+fixed monitoring loop against actual traffic or supply guard authority.

@@ -1,0 +1,30 @@
+{
+  "observed_at_utc": "2026-10-24T12:11:48.862188+00:00",
+  "client_container": "vprouter-v2-debdev-acceptance-client-1",
+  "ownership_labels": {
+    "io.vprouter.deployment": "debdev-v2-acceptance",
+    "io.vprouter.role": "disposable-client"
+  },
+  "image": "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065",
+  "state_directory": "/var/lib/vprouter-v2/test-clients/client-1",
+  "state_directory_mode": "0700",
+  "new_identity": true,
+  "cloned_existing_state": false,
+  "networking": "userspace",
+  "privileged": false,
+  "all_capabilities_dropped": true,
+  "read_only_rootfs": true,
+  "logging": "none",
+  "host_ports_published": false,
+  "proxy_listeners_enabled": false,
+  "authentication": "interactive_login_link_approved",
+  "login_link_recorded": false,
+  "protected_workloads_started": false,
+  "client_guard_installed": false,
+  "traffic_acceptance": "NOT_RUN",
+  "note": "Staged daemon only. No Rust runtime, protected-client no-fallback or real egress claim.",
+  "backend_state": "Running",
+  "node_id": "nnhXNghWF621CNTRL",
+  "tailscale_ipv4": "100.120.226.13",
+  "online": true
+}

@@ -1,0 +1,23 @@
+{
+  "source_url": "https://cloud.debian.org/images/cloud/trixie/20261021-2638/debian-13-genericcloud-amd64-20261021-2638.qcow2",
+  "sha512": "16e0965312c56feb331049d45d2b1b5778f3f942a33d4300eedbb97527707f2bea87c0006f3e4cc7a25fadbff739c4e235a51fb9bcd1b66fd554f7f8e80ba45c",
+  "bytes": 342294528,
+  "tls_verified": true,
+  "digest_verified": true,
+  "detached_signature": "not published in directory",
+  "guest_started": true,
+  "observed_at_utc": "2026-10-24T12:14:08.306693+00:00",
+  "acceleration": "TCG",
+  "machine": "pc,smm=off",
+  "cpu": "max",
+  "vcpus": 2,
+  "memory_mib": 2048,
+  "host_networking": "user-mode NAT; SSH127.0.0.1:22032 only",
+  "guest_kernel": "6.12.113+deb13-cloud-amd64",
+  "guest_docker": "26.1.5+dfsg1",
+  "guest_nft": "1.1.3",
+  "guest_tun_present": true,
+  "guest_cgroup": "cgroup2fs",
+  "performance_acceptance_eligible": false,
+  "production_credentials_copied": false
+}

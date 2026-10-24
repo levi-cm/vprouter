@@ -1,0 +1,67 @@
+{
+  "observed_at_utc": "2026-10-24T11:50:14.155312+00:00",
+  "profiles": {
+    "archive": "/DATA/AppData/vprouter/mullvad_wireguard_linux_all_all.zip",
+    "mode": "0600",
+    "owner_uid": 1000,
+    "profile_count": 534,
+    "distinct_private_keys": 1,
+    "distinct_address_sets": 1,
+    "distinct_endpoints": 534,
+    "all_share_primary_exit_key": true,
+    "files_extracted": false,
+    "five_independent_device_profiles_available": false
+  },
+  "remote_installations": [
+    {
+      "host": "immo-collector-live",
+      "tailscale_ip": "100.71.233.88",
+      "tailscale_online": true,
+      "ssh_read_only_inventory": "CONNECTION_TIMEOUT",
+      "access_verified": false,
+      "tailscale_ping": "RESPONDED"
+    },
+    {
+      "host": "immo-collector-live",
+      "tailscale_ip": "100.118.100.79",
+      "tailscale_online": true,
+      "ssh_read_only_inventory": "CONNECTION_TIMEOUT",
+      "access_verified": false,
+      "tailscale_ping": "RESPONDED"
+    }
+  ],
+  "disposable_tailscale_client_credentials": "INTERACTIVE_APPROVAL_COMPLETE",
+  "isolated_test_host": "LOCAL_DISPOSABLE_DEBIAN13_QEMU_TCG",
+  "notes": [
+    "No key bytes or key digests recorded. No profiles extracted or modified.",
+    "Provisioning new Mullvad devices excluded by user handoff.",
+    "Distinct server choices sharing one device key do not satisfy duplicate-key rejection.",
+    "No remote operations succeeded and no service/config/identity changed.",
+    "Both peers answered one Tailscale ping; control-plane Online and ping do not establish SSH access or installation identity.",
+    "User supplied wiregurad-auth.zip after original archive inventory; five independent imported device profiles now available. Root-owned archive tightened0600 in place; contents unchanged."
+  ],
+  "imported_archive": {
+    "path": "/DATA/AppData/vprouter/wiregurad-auth.zip",
+    "owner_uid": 0,
+    "mode": "0600",
+    "original_mode": "0644",
+    "permission_change_only": true,
+    "profile_count": 5,
+    "distinct_private_keys": 5,
+    "distinct_address_sets": 5,
+    "profiles_sharing_primary_key": 0,
+    "all_filename_endpoint_catalog_mappings_match": true,
+    "servers": [
+      "de-fra-wg-402",
+      "de-dus-wg-102",
+      "de-fra-wg-003",
+      "de-ber-wg-102",
+      "de-ber-wg-002"
+    ],
+    "files_extracted": false,
+    "five_independent_device_profiles_available": true,
+    "observed_at_utc": "2026-10-24T11:53:52.123260+00:00",
+    "native_core_profile_parser": "PASS_5_OF_5",
+    "runtime_verification": "NOT_RUN"
+  }
+}

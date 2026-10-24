@@ -336,10 +336,179 @@
           "execveat(0x4, 0x6a2408, 0x7ffe7ddfc4b0, 0x7ffe7ddfc580, 0x1000) = 0"
         ]
       }
+    },
+    {
+      "attempt": 5,
+      "source_binding": {
+        "source_commit": "d87112f1ee5470324df63fcf7befceee3ae361da",
+        "source_archive_sha256": "2fd23e427b737aac0d2f498286bee92091a48dd4ddec5b22ad72c7377d4e7d6d",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "4811dc6ef8e0017afa47a75c3a6da63fa4a80fe0b12ce7fa947a363d05925df9"
+      },
+      "artifact_sha256": "16ffa9b3834f503e68613683c4f3ad819b1966d3607e2792fa32a22335ac55dc",
+      "context_sha256": "8801413ac8d7e5b5a7db2d03d6514a7c440bdf954acefb85c6b32b37f4412155",
+      "manifest_sha256": "d611e65e117a72caa6ec57ea19d36c6ad3e58d20d00b2856f9940ffcbb8b0f68",
+      "image_id": "sha256:3f84eb1d2425f3d2fd0b1c19ec631d574a7b8fec5807c5d38f7f1f1e3c272be1",
+      "image_layers": [
+        "sha256:6d2cad50e2aa3315fce2acce5731e988d3914db9242298f9329c8e039015b0a3"
+      ],
+      "runner_sha256": "fb2ffba4fd8ad252f0fed72131dadec00ca78d3fc871cb0a8a8aac0ec9b50aee",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 6.707,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "actual_lab: child_failed"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": true,
+      "file_path_metadata": false,
+      "actual_daemon_exec": "REACHED_NOT_HEALTHY",
+      "actual_observer_exec": "NOT_REACHED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-5.json",
+      "private_run_record_sha256": "fa6ea74fdf5c40c2a47d7e18a0474ed230ddd8713352eaaa860bc7be88d1ca70",
+      "private_inventory": "target/lab-state/actual-program-inspect-5.json",
+      "private_inventory_sha256": "6b0e39a08ddff7e9d7c20c3b5f9a0916f229c11abc2f354484d17be27e0ec11d",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-trace-5-summary.json",
+      "trace_summary_sha256": "b4b5a9b05f819072dc39e03c83cff78fe02f0a7a1cebfe9039969e372d453621",
+      "trace_files": 40
+    },
+    {
+      "attempt": 6,
+      "source_binding": {
+        "source_commit": "d87112f1ee5470324df63fcf7befceee3ae361da",
+        "source_archive_sha256": "2fd23e427b737aac0d2f498286bee92091a48dd4ddec5b22ad72c7377d4e7d6d",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "4811dc6ef8e0017afa47a75c3a6da63fa4a80fe0b12ce7fa947a363d05925df9"
+      },
+      "artifact_sha256": "16ffa9b3834f503e68613683c4f3ad819b1966d3607e2792fa32a22335ac55dc",
+      "context_sha256": "8801413ac8d7e5b5a7db2d03d6514a7c440bdf954acefb85c6b32b37f4412155",
+      "manifest_sha256": "d611e65e117a72caa6ec57ea19d36c6ad3e58d20d00b2856f9940ffcbb8b0f68",
+      "image_id": "sha256:3f84eb1d2425f3d2fd0b1c19ec631d574a7b8fec5807c5d38f7f1f1e3c272be1",
+      "image_layers": [
+        "sha256:6d2cad50e2aa3315fce2acce5731e988d3914db9242298f9329c8e039015b0a3"
+      ],
+      "runner_sha256": "5d71bd627abdeed0515e0f2ff07f52af9f54d60ace564155449c2bffd9ba8583",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 4.326,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "actual_lab: child_failed"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": false,
+      "file_path_metadata": true,
+      "actual_daemon_exec": "REACHED_NOT_HEALTHY",
+      "actual_observer_exec": "NOT_REACHED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-6.json",
+      "private_run_record_sha256": "e42588689908845c6ef53961e7d6981d3f5f8aaf509c970679e16d05f0478101",
+      "private_inventory": "target/lab-state/actual-program-inspect-6.json",
+      "private_inventory_sha256": "3b828017605b3ea4f72ed6faee97798779e929cef81985b6f4535dbee75b8862",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-path-trace-6-summary.json",
+      "trace_summary_sha256": "a1da4e1bf8130280453dee2656e0d09b172e067fd4ab4873437befbac6157f15",
+      "trace_files": 39,
+      "failure_witness": {
+        "file": "syscall.35392",
+        "sha256": "335127a9ecbde220f9fd6e608aa70f3472edc08abcb534e515aac9c90c63fa57",
+        "observation": "Pinned logpolicy ignores statedir for log directory. Fixed path trace witnesses mkdir .local EROFS, getcwd EPERM, and missing /tmp fallback. No decoded IO or environment traced."
+      }
+    },
+    {
+      "attempt": 7,
+      "source_binding": {
+        "source_commit": "3ff8431b4a64e9675afebcbab6635130a3856123",
+        "source_archive_sha256": "500c9acf00cfc98aa29d2c0b7372842dd224042a493686ba77ff06aff1ab6204",
+        "tracked_build_inputs_verified": 101,
+        "source_aggregate_sha256": "49f565aa7fbcc3dfb39941a6ec68ded08b0952090879a7877ba8381675d31eb0"
+      },
+      "artifact_sha256": "4886ae9cd61fbf10f8cfcca0b9a840e5c54a91c06c6e536ddc28e341691502d7",
+      "context_sha256": "12d17a5d716801b2d20be4719bdaa826bd453597b9be01b16bcbae909f8a9da4",
+      "manifest_sha256": "98ee95b13ebdd5db59d19c840fd90b964c74664a6b43c661728bf87ae2f07c62",
+      "image_id": "sha256:7083a2796823e4da925ca4ba9273e91c0d47f4fbcf09b9cb1ae0f5afc2d00d9b",
+      "image_layers": [
+        "sha256:1e4eec2b7f691a4f7a78aa4618549240a7d706ec76f4058f8697ef476b1ad780"
+      ],
+      "runner_sha256": "5d71bd627abdeed0515e0f2ff07f52af9f54d60ace564155449c2bffd9ba8583",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 6.812,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "actual_lab: process_unavailable"
+      ],
+      "result": "FAIL",
+      "raw_syscall_metadata": true,
+      "file_path_metadata": false,
+      "actual_daemon_exec": "REACHED_EVENT_LOOP_PROCESS_CHECK_FAILED",
+      "actual_observer_exec": "NOT_REACHED",
+      "capture_verdict": "NOT_RUN",
+      "forbidden_markers": null,
+      "private_run_record": "target/lab-state/actual-program-run-7.json",
+      "private_run_record_sha256": "dd23abdc18e5bfafe405e15d41363b15d578e7f7bb5300d20726364fc1d5a4ab",
+      "private_inventory": "target/lab-state/actual-program-inspect-7.json",
+      "private_inventory_sha256": "3f88f1d23da4e2a88cc7f6a6c9bedf3b39669989b3b891f6d40cbf100f65bf23",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "trace_summary": "target/lab-state/actual-program-trace-7-summary.json",
+      "trace_summary_sha256": "66a8544bd3fa0a8da35130de0be4e5e3124ee9361502684d9b476fd226d2d183",
+      "trace_files": 42,
+      "failure_witness": {
+        "file": "syscall.35765",
+        "sha256": "316981a0e198540132afad4a864c5b27333fbc9963dcaee6fc12b1c0bedfadab",
+        "observation": "Fixed daemon private logs/native firewall env passes startup panic. Exec reaches epoll loop; harness reports process_unavailable before durable process/metadata witness. Stable health not established."
+      }
     }
   ],
   "diagnosis": {
-    "status": "INIT_FIX_PASSED_EXACT_GO_THREAD_FLAG_ADMISSION_PENDING",
+    "status": "FIXED_LOG_STATE_REACHES_GO_EVENT_LOOP_PROCESS_CHECK_PENDING",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,

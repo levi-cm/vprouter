@@ -1,0 +1,151 @@
+{
+  "environment": {
+    "host": "owned disposable Debian 13 KVM guest",
+    "kernel": "6.12.113+deb13-cloud-amd64",
+    "nft_cli": "1.1.3",
+    "execution": "root unshare --net with checked lab marker",
+    "production_namespace_touched": false
+  },
+  "attempts": [
+    {
+      "implementation_commit": "f78e86d3dc40b2346793e94bf91554fa14b026f6",
+      "test": "isolated_kernel_integration::native_acceptance",
+      "result": "FAIL",
+      "exit_code": 101,
+      "completed_cases": [
+        {
+          "case": "quarantine_exact",
+          "scope": "Data",
+          "result": "pass"
+        }
+      ],
+      "failure": "Err(Drifted) before next case; requires diagnosis and correction",
+      "resources_after_exit": "disposable network namespace destroyed",
+      "traffic_generated": false
+    },
+    {
+      "implementation_commit": "f78e86d3dc40b2346793e94bf91554fa14b026f6 plus uncommitted diagnostics and ACK hardening",
+      "binary_sha256": "27a9a763ec9b52809700d835a20f3c0fe8bdf5fc4ac8821ea74e0787306c3e0d",
+      "test": "isolated_kernel_integration::native_acceptance",
+      "result": "FAIL",
+      "exit_code": 101,
+      "completed_cases": [
+        {
+          "case": "quarantine_exact",
+          "scope": "Data",
+          "result": "pass"
+        }
+      ],
+      "failure": "LAB_STAGE install_permit Data error=Drifted; native dump included both quarantine and permit chain metadata; diagnosis pending",
+      "resources_after_exit": "disposable network namespace destroyed",
+      "traffic_generated": false
+    },
+    {
+      "implementation_commit": "6f7255d508fb7ca59a80c3f1a8bce08693a91aac",
+      "binary_sha256": "08d58097b3e26bcb1b15f27f1043ac005a9db295ff42779cdddc3f8c8127ccf1",
+      "test": "isolated_kernel_integration::native_acceptance",
+      "result": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 0.44,
+      "completed_cases": [
+        {
+          "case": "quarantine_exact",
+          "scope": "Data",
+          "result": "pass"
+        },
+        {
+          "case": "atomic_replace_and_foreign_refusal",
+          "scope": "Data",
+          "result": "pass"
+        },
+        {
+          "case": "stale_generation_refused",
+          "scope": "Data",
+          "result": "pass"
+        },
+        {
+          "case": "failed_batch_retains_policy",
+          "scope": "Data",
+          "result": "pass"
+        },
+        {
+          "case": "actual_drift_extra_rule_refused",
+          "scope": "Data",
+          "result": "pass"
+        },
+        {
+          "case": "scope_cleanup_and_sentinel_preserved",
+          "scope": "Data",
+          "result": "pass"
+        },
+        {
+          "case": "quarantine_exact",
+          "scope": "Transport",
+          "result": "pass"
+        },
+        {
+          "case": "atomic_replace_and_foreign_refusal",
+          "scope": "Transport",
+          "result": "pass"
+        },
+        {
+          "case": "stale_generation_refused",
+          "scope": "Transport",
+          "result": "pass"
+        },
+        {
+          "case": "failed_batch_retains_policy",
+          "scope": "Transport",
+          "result": "pass"
+        },
+        {
+          "case": "actual_drift_extra_rule_refused",
+          "scope": "Transport",
+          "result": "pass"
+        },
+        {
+          "case": "scope_cleanup_and_sentinel_preserved",
+          "scope": "Transport",
+          "result": "pass"
+        },
+        {
+          "case": "quarantine_exact",
+          "scope": "Host",
+          "result": "pass"
+        },
+        {
+          "case": "atomic_replace_and_foreign_refusal",
+          "scope": "Host",
+          "result": "pass"
+        },
+        {
+          "case": "stale_generation_refused",
+          "scope": "Host",
+          "result": "pass"
+        },
+        {
+          "case": "failed_batch_retains_policy",
+          "scope": "Host",
+          "result": "pass"
+        },
+        {
+          "case": "actual_drift_extra_rule_refused",
+          "scope": "Host",
+          "result": "pass"
+        },
+        {
+          "case": "scope_cleanup_and_sentinel_preserved",
+          "scope": "Host",
+          "result": "pass"
+        }
+      ],
+      "regression_cause": "Linux GETCHAIN dump returned multiple tables despite the requested table; strict local table-identity filtering now precedes semantic reconciliation.",
+      "resources_after_exit": "disposable network namespace destroyed",
+      "traffic_generated": false
+    }
+  ],
+  "component_acceptance": "PASS_ISOLATED_KERNEL_ONLY",
+  "guard_runtime": false,
+  "real_client_leakage_acceptance": "NOT_RUN",
+  "release_acceptance": "NOT_RUN"
+}

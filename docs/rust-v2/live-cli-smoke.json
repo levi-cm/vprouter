@@ -1,0 +1,86 @@
+{
+  "observed_at_utc": "2026-10-24T12:24:36.203772+00:00",
+  "source_commit": "a107fa6",
+  "binary_sha256": "d816a5c13053005ea90b55e4d85c81eb9f442675140548c4ffe1345c65583f25",
+  "read_only": true,
+  "production_changes": false,
+  "inspect": {
+    "observed_at_utc": "2026-10-24T12:21:40.103490+00:00",
+    "exit_code": 2,
+    "reason": "inspection_incomplete",
+    "container_count": 2,
+    "container_inventory_reason": null,
+    "release_inventory_reason": null,
+    "node_identity": "NOT_TESTED_no_state_bytes_read",
+    "container_ownership": "NOT_TESTED_legacy_names_are_not_ownership_proof"
+  },
+  "plan": {
+    "exit_code": 2,
+    "reason": "plan_not_applicable",
+    "activation_ready": false,
+    "applicable": false,
+    "content_sha256": "a6d0a2c76076c2c5f3f55c3ecf93bafa4ae30f7a6eb0ba577034cbd3440e7685",
+    "existing_container": "max-vprouter",
+    "proposed_container": "max-vprouter",
+    "existing_service": "vprouter@max-vprouter.service",
+    "proposed_service": "vprouter@max-vprouter.service",
+    "old_hostname": "max-vprouter",
+    "new_hostname": "mullvad-debdev-exit-de-fra-wg-404",
+    "exit_id": "primary",
+    "candidate_exit_count": 1,
+    "profile_path": "/etc/vprouter/max-vprouter.conf",
+    "state_path": "/var/lib/vprouter/max-vprouter",
+    "blockers": [
+      "apply_runtime_unimplemented",
+      "guard_runtime_unimplemented",
+      "active_kernel_feature_probes_not_tested",
+      "node_identity_not_tested",
+      "adapters_missing_or_unreviewed",
+      "client_coverage_not_tested",
+      "hostname_dependencies_undeclared",
+      "rollback_compatibility_not_tested",
+      "migration_interruptions_not_tested",
+      "native_release_checksums_and_provenance_unavailable",
+      "container_and_namespace_ownership_unverified",
+      "release_inventory_incomplete"
+    ]
+  },
+  "regression": {
+    "initial_plan_failure": "invalid_configuration",
+    "cause": "legacy ConfigParser profile used lowercase standard option names",
+    "fix_commit": "32e9e5f0614f46faa2769742fbb4ab01ec5ed683",
+    "independent_review": "approved",
+    "existing_profile_rewritten": false
+  },
+  "limits": [
+    "Exit code 2 is expected for incomplete inspection and non-applicable review plans.",
+    "No migration, rename, backup, activation, quarantine or identity copy was performed.",
+    "No Tailscale state contents, private keys or opaque secret-file fingerprints were recorded.",
+    "This is a selected redacted observation, not a saved applicable migration plan or runtime acceptance."
+  ],
+  "saved_review_plan": {
+    "path": "/var/lib/vprouter-v2/evidence/debdev-migration-review-v1.json",
+    "uid": 0,
+    "mode": "0600",
+    "applicable": false
+  },
+  "review_only_configuration": {
+    "path": "/var/lib/vprouter-v2/evidence/debdev-review-only-candidate-v2.json",
+    "uid": 0,
+    "mode": "0600",
+    "schema_valid": true,
+    "observed_preflight_checks_passed": 10,
+    "not_tested": [
+      "nftables_active_usability",
+      "wireguard_active_usability",
+      "guard_liveness_and_owned_resources"
+    ],
+    "host_supported": false,
+    "activation_ready": false,
+    "status_reason": "guard_runtime_unimplemented",
+    "state": "NOT_TESTED",
+    "exposure": "unverified",
+    "dns": "NOT_TESTED",
+    "ipv6": "NOT_TESTED"
+  }
+}

@@ -6,10 +6,10 @@
   "digest_verified": true,
   "detached_signature": "not published in directory",
   "guest_started": true,
-  "observed_at_utc": "2026-10-24T12:14:08.306693+00:00",
-  "acceleration": "TCG",
+  "observed_at_utc": "2026-10-24T12:20:43.451627+00:00",
+  "acceleration": "KVM",
   "machine": "pc,smm=off",
-  "cpu": "max",
+  "cpu": "host",
   "vcpus": 2,
   "memory_mib": 2048,
   "host_networking": "user-mode NAT; SSH127.0.0.1:22032 only",
@@ -19,5 +19,9 @@
   "guest_tun_present": true,
   "guest_cgroup": "cgroup2fs",
   "performance_acceptance_eligible": false,
-  "production_credentials_copied": false
+  "production_credentials_copied": false,
+  "acceleration_verified_by": "owned QMP query-kvm enabled:true,present:true",
+  "bootstrap_complete": true,
+  "performance_acceptance": "NOT_RUN",
+  "performance_eligibility_reason": "No controlled equivalent old/new workloads or accounting have been measured. Earlier TCG samples cannot be used."
 }

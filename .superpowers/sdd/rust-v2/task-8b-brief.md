@@ -78,3 +78,10 @@ unperformed platform/runtime checks and self-review in
 obtains independent spec+quality review before8c. Autonomous guard/protocol/
 watchdog/lifecycle, actual provider/approved-client traffic and full single-exit
 fault acceptance still belong to8c; multi-exit/direct/migration gates stay closed.
+
+Carry-forward task8a Minor corrections (full task-8a-review.md): update
+crates/vprouter-network/src/lib.rs summary to reflect public guarded activation;
+correct task-8a-report.md bootstrap wording to distinguish IPv4 family/WG path/
+producer/established INPUT predicates from separately audited structural addresses.
+Preserve historical evidence and do not add an address predicate merely to match
+an overstated report. The next component review must include these corrections.

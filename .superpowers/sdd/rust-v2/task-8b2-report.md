@@ -59,3 +59,23 @@ now require independent data/transport/host positive controls, all three negativ
 captures with zero kernel capture drops, sixteen unauthorized attempts, sixteen
 authorized roundtrips and explicit receive/send accounting. Candidate02 focused
 26-test suite and launch clippy passed. Runtime remains pending.
+
+## Candidate03 init filter sequencing
+
+Root attempt3 reached exact Go `execveat`, but private PID1 then failed its
+post-filter descriptor rescan: raw child34321 shows successful seccomp install
+and scalar query followed by `openat` flags0x98000 returning EPERM. Candidate03
+preserves the exact pre-filter PID1 descriptor closure/inventory and installs the
+reduced filter immediately afterward. Installation creates no descriptor; only
+its read-only scalar PR_GET_SECCOMP verification and health acknowledgement/close
+follow before the fixed signal/reap loop. The actual wait filter still denies
+all path opens, sockets, namespace operations, fork and exec. The6b probe retains
+its existing before-and-after checks. Actual exec retains exact0..4 check, with
+CLOEXEC health3/executable4; both supervisor and program host controls close.
+
+Explicit clone3 ENOSYS and architecture-guard assertions were added. A temporary
+mutation broadening clone3 to ALLOW was rejected(exit101); restored policy test
+passed. The initial mutation exposed the missing explicit assertion and was not
+misreported as covered. Exact evidence is retained in controller-local
+/tmp/task8b2-clone3-{mutation,restored}-test.txt. Focused26tests and launch clippy
+pass. Fresh03 runtime, kernel-shape admission and container-death remain pending.

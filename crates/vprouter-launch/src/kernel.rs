@@ -1121,11 +1121,14 @@ fn supervise(
         close_except(&[health.as_raw_fd()])?;
         supervisor_fds(health, null_identity)?;
         if actual.is_some() {
-            apply_filter(&init_filter())?;
+            // Exact inventory was verified immediately above. Installing the
+            // reduced wait filter creates no descriptors, and that filter
+            // deliberately denies every path open; do not reopen proc after it.
+            apply_filter(&init_filter())
         } else {
             seccomp()?;
+            supervisor_fds(health, null_identity)
         }
-        supervisor_fds(health, null_identity)
     })();
     if let Err(e) = confined {
         report_failure(health, e);
@@ -3308,6 +3311,14 @@ mod policy_tests {
         };
         for role in [ActualRole::Observer, ActualRole::Daemon] {
             let policy = runtime_filter(role);
+            assert_eq!(
+                verdict_args(&policy, arch, libc::SYS_clone3 as u32, [0; 6]),
+                0x00050026
+            );
+            assert_eq!(
+                verdict_args(&policy, arch ^ 1, libc::SYS_read as u32, [0; 6]),
+                0x80000000
+            );
             for nr in [
                 libc::SYS_setns,
                 libc::SYS_unshare,

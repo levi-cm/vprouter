@@ -21,7 +21,7 @@
     {
       "role": "gateway_init",
       "path": "/usr/local/bin/vprouter-worker",
-      "sha256": "bda5dec5a55a0eef0db88b3782c575c0942c522fa723506a24be2cbddb8b9811",
+      "sha256": "cc971ee90be80fb439cf377200e859037c97596c3dbc97d1b578abb53d5c07e4",
       "bytes": 751624,
       "policy": "inert-image-pid1-caps0-v1"
     }

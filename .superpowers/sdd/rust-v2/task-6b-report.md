@@ -1,5 +1,8 @@
 # Task 6b implementation report
 
+The initial candidate 20 report is retained below. The appended round 1 review-fix
+report supersedes its source/test identities and signal-forwarding/reaping claim.
+
 Status: DONE_WITH_CONCERNS. Exact candidate 20 passed the controller's isolated
 kernel smoke test; the 19 earlier failed attempts remain preserved. Independent
 review of the final diff remains controller-owned and pending.
@@ -104,7 +107,7 @@ All final ordinary commands below passed against that exact source:
 | `target/x86_64-unknown-linux-musl/release/deps/execution_lab-4bd2e8f5005f802d` | `a49a89a3e5db007e20242615422fed039f06bdf7e9dd32a33e324b9285e38be8` |
 | `target/x86_64-unknown-linux-musl/release/deps/execution_probe-1a715b67f9c47d78` | `7c6a7d16c02a48963dfbe79babbc353d46d37c78c2202dd28f85cd82ab42ae1c` |
 
-Controller run20 at `2026-10-24T14:20:51.053726+00:00` bound that exact commit and
+Controller run 20 at `2026-10-24T14:20:51.053726+00:00` bound that exact commit and
 both hashes: exit code 0 in 2.187 seconds, all 11 cases PASS including terminal
 isolated acceptance.
 The controller independently verified zero launch-lab containers and zero owned
@@ -267,3 +270,154 @@ were read after final ordinary checks and match executable source commit bff7772
   operator/Docker daemon. Fresh identity checks cannot make inspect+kernel views
   atomic against privileged mutation after validation.
 - Independent review of this exact final diff remains controller-owned and pending.
+
+## Round 1 independent-review fixes (current implementation)
+
+Status: DONE_WITH_CONCERNS; all three Important and both Minor findings in
+`.superpowers/sdd/rust-v2/task-6b-review.md` have implementation changes and fresh
+kernel evidence. Controller-owned independent re-review is pending. Reviewed
+baseline was `6a2cbb30af1bf803aaf22a4bed80204b115b96e1`; current executable source is
+`b62cc5c81b40151f9d85c8191400436612c5f56e`.
+
+The historical 19 failures and candidate 20/run 20 output remain preserved. Run 20's
+signal case used forced cleanup before disappearance checks, so its output did
+not establish the claimed forwarding/PID1 reaping behavior. Run 21 replaces that
+claim with the stronger witness and natural-completion checks below. None of this
+is production, guard or release acceptance.
+
+### Changes mapped to findings
+
+1. **Strict close and PID1 final inventory.** `close_except` now uses explicit
+   native openat/getdents, propagates every enumeration/numeric-parsing failure,
+   rejects duplicate/missing scan entries and excludes only its exact owned scan
+   FD. It collects a complete inventory before closing inherited entries. Every
+   selected close is checked; Linux close errors are fatal without an unsafe
+   retry of an already-consumed descriptor. PID1 independently scans immediately
+   after closure and again after seccomp: exactly null stdio plus its retained
+   health descriptor are permitted. Each stdio's retained device identity and
+   non-CLOEXEC flags, and health FIFO type/CLOEXEC flags, are verified separately.
+   Failed closure/inventory/confinement exits directly without dropping inherited
+   FD owners; health close after readiness is checked too.
+2. **Monotonic lifecycle bound.** Shared earliest-deadline logic takes the minimum
+   of existing/new deadlines. Repeated TERM/INT/HUP cannot move it later, including
+   after the immediate deadline from main-worker exit. PID1 gets 500 ms before
+   escalation and 400 ms afterward; intermediate/outer wrappers get 1000/1500 ms
+   before escalation and 1000 ms afterward. Ordering lets inner escalation/reaping
+   finish before wrappers intervene. Synchronous wait errors, forwarding errors,
+   poll invalid/error flags, escalation failures and waitpid failures are explicit.
+   Only EAGAIN/EINTR for timed signal wait, ESRCH for no descendant targets, and an
+   ESRCH plus actually-ready pinned child during forwarding are benign. Successful
+   PID1 completion requires actual ECHILD after reaping the main worker; successful
+   wrappers require their own direct child to exit normally with status 0.
+3. **Unmasked guest signal proof.** Before signaling, the host polls actual
+   protected proc status and requires exactly each worker's namespace-PID3 child
+   to have State T (stopped). The fixed probe blocks shutdown signals before
+   readiness, synchronously observes forwarded TERM and writes only the fixed
+   `/state/forwarded-signal` marker. It remains alive alongside its frozen child,
+   so worker default signal exit cannot hide a moved escalation deadline. PID1
+   writes `/state/reaped-descendant` only after actual waitpid returns that extra
+   descendant. The harness repeatedly delivers TERM/INT/HUP every 25 ms and requires
+   both marker sets plus natural exit status 0 for both launch chains within a
+   fixed 2 second total bound. It performs no forced termination on the success
+   path; Child Drop/force cleanup is reserved for errors. Disappearance checks
+   follow successful natural completion, rather than making force-kill success
+   look like signal forwarding/reaping.
+4. **Minor findings.** The crate summary now states public admission refusal and
+   private synthetic staged execution accurately. Section boundaries identify
+   namespace/mount setup, lifecycle, descriptor closure, identity/LSM, BPF, fixed
+   exec, test-only helpers and offline regressions inside the sole unsafe module.
+   No module split or broad restructuring was performed.
+
+Changed owned files: `crates/vprouter-launch/src/{execution.rs,execution_lab.rs,
+kernel.rs,lib.rs,probe.rs}`, `docs/rust-v2/launch-helper.md`, and this report.
+`execution.rs` only adds a test-only safe natural-wait wrapper. Synthetic signal/
+reap witnesses use already allowed signal-mask/timed-wait/openat/write operations;
+no syscall list, BPF instruction policy, capability, UID/LSM policy, production
+constructor or public activation path was widened. All unsafe stays in kernel.rs.
+
+### Covering verification on exact source b62cc5c
+
+The three added offline regressions are:
+
+- `descriptor_scan_errors_and_malformed_names_are_fatal`: injects an iteration
+  failure after valid entries, invalid UTF8/numeric/negative/overflow names,
+  duplicate scan entries and missing actual scan FD; none can silently succeed.
+- `descriptor_close_failure_cannot_reach_success_and_final_inventory_is_exact`:
+  injects a selected-close error, checks immediate failure with no success path,
+  verifies a real invalid-close failure, and rejects unexpected/missing PID1 FDs.
+- `repeated_signals_never_extend_shutdown_or_worker_exit_deadline`: repeated later
+  deadlines preserve the first, and later signals preserve an earlier worker-exit
+  deadline. Fresh actual frozen-child execution is separately required below.
+
+Commands/results (final outputs clean):
+
+```text
+cargo test -p vprouter-launch --lib
+  18 passed; 0 failed; 0 ignored
+cargo clippy -p vprouter-launch --all-targets -- -D warnings
+  passed
+cargo fmt --all --check
+  passed
+cargo test --workspace --all-targets
+  112 passed; 0 failed; 2 ignored Rust kernel tests
+  3 standalone lab/probe entrypoints safely skipped
+cargo clippy --workspace --all-targets -- -D warnings
+  passed
+cargo check -p vprouter-launch --lib --target aarch64-unknown-linux-musl
+  passed (ARM64 kernel runtime NOT_RUN)
+cargo rustc -p vprouter-launch --release --target x86_64-unknown-linux-musl --test execution_lab -- -C relocation-model=static
+  passed
+cargo rustc -p vprouter-launch --release --target x86_64-unknown-linux-musl --test execution_probe -- -C relocation-model=static
+  passed
+```
+
+The focused tests/clippy and both static builds preceded the fresh controller
+run. After run 21 succeeded, full exact-source fmt/workspace tests/workspace
+clippy/ARM64 checks passed. The release payloads were preserved; `file` identifies
+both as statically linked ELF64 x86-64 executables, and final `sha256sum` checks
+match the controller's payloads:
+
+| Static payload | SHA256 |
+| --- | --- |
+| `target/x86_64-unknown-linux-musl/release/deps/execution_lab-4bd2e8f5005f802d` | `ccd0bcb8c75fc90d91b0bc7660e88828c36667d50a01d08fdc5eb520bc282fa9` |
+| `target/x86_64-unknown-linux-musl/release/deps/execution_probe-1a715b67f9c47d78` | `808789d0d5d59b673c7f6fd55b306c3ecfc05ef0bbdd65731cff2ae7695bd828` |
+
+Controller run 21 observed at `2026-10-24T14:32:50.384492+00:00` bound source
+b62cc5c and both hashes: all 11 cases PASS, exit code 0, overall 1.648 seconds, including:
+
+```text
+LAB_SIGNAL_PROOF stopped_forwarded_reaped_natural repeated_signals elapsed_ms=529
+```
+
+The controller independently verified zero residual launch-lab containers and
+zero owned namespace pins. Harness self-cleanup completed; the controller deleted
+nothing. Full output/identities are retained in `target/lab-state/launch-execution-run-21.json`
+and the committed controller evidence ledger. Result remains `PASS_PARTIAL_SMOKE`,
+release acceptance NOT_RUN, guard_runtime:false, activation:false, production
+changes:false. The implementer ran no privileged harness locally.
+
+### Current changed-source SHA256 identities
+
+These supersede the five corresponding candidate 20 source entries above; all
+other implementer source/lock entries are unchanged.
+
+| Source file | SHA256 |
+| --- | --- |
+| `crates/vprouter-launch/src/execution.rs` | `6c738894993c91342482aac45e485e244e26aed06dba64c46fb3eb34d897cfa1` |
+| `crates/vprouter-launch/src/execution_lab.rs` | `ac6bf948e466de909691c57eae43493a243ec69d8ea35c7a0c864e07cfb42d52` |
+| `crates/vprouter-launch/src/kernel.rs` | `3c0d3621f583d10ccce7e04cbde5c734d0d36852481fa4a354b3cca27350b833` |
+| `crates/vprouter-launch/src/lib.rs` | `46899ccb7268871d470c6f2250159932194d96a4fdaffc7459beae910888f38d` |
+| `crates/vprouter-launch/src/probe.rs` | `80e301163916f7e883de03f34ff5597852954273be67f3f0d36555c1271efcfc` |
+
+### Remaining concerns and unperformed gates
+
+The sole unsafe module is now 2439 lines including BPF/test helpers; sectioning
+improves navigation but its size remains an independent-review concern. The
+unsafe/syscall/subprocess inventory above still applies: no new privileged
+syscall class or production subprocess. Re-review of 6a2cbb3..finalfixHEAD belongs
+to the controller and is pending. ARM64 execution, final Debian/Arch/Void policy,
+actual Rust worker/Go Tailscale artifacts and policies, production resolver/state
+migration authority, independent guard/quarantine, usable networking/real-client
+leakage and release acceptance remain unavailable or NOT_RUN. Public production
+launch continues to refuse; ordinary tests and one successful synthetic kernel
+run do not accept these later gates.

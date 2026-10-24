@@ -209,8 +209,20 @@ is passed. Parent readiness requires both explicit confined-PID1 readiness and
 post-exec worker verification and both reduced wrapper readiness messages.
 Post-closure failures `_exit`, never unwind through inherited FD owners.
 
+PID1 closure uses strict native enumeration: any entry, numeric parsing or close
+failure refuses readiness. Only the exact temporary scan FD is excluded. An
+independent scan before and after seccomp requires precisely approved null
+stdio plus the retained CLOEXEC health pipe; identity/type and descriptor flags
+are checked separately. The health descriptor is closed with a checked operation
+after readiness, leaving no host authority.
+
 Synchronous blocked-signal handling forwards TERM/INT/HUP and PID1 reaps adopted
-descendants. Bounded escalation kills frozen descendants. pidfds avoid host PID
+descendants. Shutdown retains the earliest monotonic deadline across repeated
+signals and worker exit. PID1 escalates after 500 ms; intermediate and outer wait
+roles allow 1000ms and1500 ms respectively, so inner reaping precedes outer
+escalation. Post-escalation waits are also bounded. Signal, wait and close errors
+are fatal; only explicit no-target/observed pinned-child-exit races are benign.
+Bounded escalation kills frozen descendants. pidfds avoid host PID
 reuse, PDEATHSIG links the launch chain, and private PID1 death kills its PID
 namespace. Actual kernel behavior, not Docker GET/status, is the evidence gate.
 Independent host guard/quarantine remains a separate future failure boundary.
@@ -264,3 +276,12 @@ successful run unpins only its exact records after container/process death and
 verifying no live process uses each network identity. Historical failed attempts
 are not replaced by later successes. See controller evidence and task6b report for
 actual per-case PASS/FAIL/NOT_RUN; this document is not kernel acceptance proof.
+
+The strengthened signal case requires host-observed stopped state for each exact
+worker's descendant before signals, a fixed selected-state witness written by
+the worker after actually receiving forwarded TERM, and a separate test-only
+PID1 witness written after actual descendant waitpid. Repeated TERM/INT/HUP
+continue until both launch chains naturally exit successfully within 2 seconds.
+The harness cannot invoke force termination to establish that result; forced
+cleanup remains a failure path. These witnesses use existing admitted syscalls
+and selected synthetic state, with no policy or capability expansion.

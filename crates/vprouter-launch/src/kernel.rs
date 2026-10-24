@@ -1262,6 +1262,58 @@ fn filter() -> Vec<libc::sock_filter> {
 fn wait_filter() -> Vec<libc::sock_filter> {
     // Exact fixed wait role, no paths, sockets, namespaces, exec or fork.
     let mut out = filter()[..4].to_vec();
+    // The install routine verifies its post-install state. Permit only the
+    // scalar read-only PR_GET_SECCOMP query, never a state-changing prctl.
+    out.extend([
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 7,
+            k: libc::SYS_prctl as u32,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 20,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 1,
+            jf: 0,
+            k: 0,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x00050001,
+        },
+        libc::sock_filter {
+            code: 0x20,
+            jt: 0,
+            jf: 0,
+            k: 16,
+        },
+        libc::sock_filter {
+            code: 0x15,
+            jt: 0,
+            jf: 1,
+            k: libc::PR_GET_SECCOMP as u32,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x7fff0000,
+        },
+        libc::sock_filter {
+            code: 0x06,
+            jt: 0,
+            jf: 0,
+            k: 0x00050001,
+        },
+    ]);
     let calls = [
         libc::SYS_ppoll,
         libc::SYS_rt_sigtimedwait,
@@ -1743,6 +1795,49 @@ mod policy_tests {
             assert_eq!(
                 verdict_program(&wait_filter(), arch, nr as u32, 0),
                 0x00050001
+            );
+        }
+        // Actual post-install wait-role sequence: verify, announce readiness,
+        // close health, poll/reap/forward, then _exit.
+        assert_eq!(
+            verdict_program(
+                &wait_filter(),
+                arch,
+                libc::SYS_prctl as u32,
+                libc::PR_GET_SECCOMP as u64
+            ),
+            0x7fff0000
+        );
+        for option in [
+            libc::PR_SET_SECCOMP,
+            libc::PR_SET_NO_NEW_PRIVS,
+            libc::PR_SET_DUMPABLE,
+            libc::PR_SET_SECUREBITS,
+        ] {
+            assert_eq!(
+                verdict_program(&wait_filter(), arch, libc::SYS_prctl as u32, option as u64),
+                0x00050001
+            );
+        }
+        assert_eq!(
+            verdict_program(
+                &wait_filter(),
+                arch,
+                libc::SYS_prctl as u32,
+                (1u64 << 32) | libc::PR_GET_SECCOMP as u64
+            ),
+            0x00050001
+        );
+        for nr in [
+            libc::SYS_write,
+            libc::SYS_close,
+            libc::SYS_ppoll,
+            libc::SYS_clock_gettime,
+            libc::SYS_exit_group,
+        ] {
+            assert_eq!(
+                verdict_program(&wait_filter(), arch, nr as u32, 0),
+                0x7fff0000
             );
         }
         for nr in [

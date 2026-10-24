@@ -1,0 +1,63 @@
+{
+  "observed_at_utc": "2026-10-24T14:50:06.188447+00:00",
+  "environment": "owned isolated Debian13 KVM guest, enrollment-only daemon",
+  "script_sha256": "ee6d27872cabf1a7eaf6af9a3f0954fd095850c894b26d47cb38dde2a1bb9443",
+  "source_oracle": {
+    "path": "ipn/localapi/localapi.go:844-855",
+    "immutable_url": "https://raw.githubusercontent.com/tailscale/tailscale/5fb2a81b065b0a0bbbfc67ab20a0d9c6a1108115/ipn/localapi/localapi.go",
+    "sha256": "b13da90ef452b4e9ab01bc123a55cb11650e28d38207ef72359b63a225a1dc47"
+  },
+  "container_id": "b6ef3d7e8b772fce99595e35a35be0194ec12c18920183efeb3c9a0112934f0d",
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/localapi/v0/status?peers=false",
+      "http_status": 200,
+      "body_bytes": 3091,
+      "projection": {
+        "Version": "1.102.5-1-t5fb2a81b0",
+        "BackendState": "Running",
+        "TailscaleIPs": [
+          "100.101.230.31",
+          "fd7a:115c:a1e0::9438:e621"
+        ],
+        "self": {
+          "ID": "n8P8U86ryZ11CNTRL",
+          "Online": true,
+          "ExitNodeOption": false,
+          "TailscaleIPs": [
+            "100.101.230.31",
+            "fd7a:115c:a1e0::9438:e621"
+          ]
+        },
+        "peer_count": 0
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/localapi/v0/prefs",
+      "http_status": 200,
+      "body_bytes": 1374,
+      "projection": {
+        "WantRunning": true,
+        "AdvertiseRoutes": null,
+        "NetfilterMode": 2,
+        "CorpDNS": false,
+        "RouteAll": false,
+        "ExitNodeID": "",
+        "ExitNodeIP": "",
+        "NoStatefulFiltering": true,
+        "RunSSH": false,
+        "NoSNAT": false
+      }
+    }
+  ],
+  "writes": false,
+  "production_changes": false,
+  "native_worker_acceptance": "NOT_RUN",
+  "limits": [
+    "Diagnostic HTTP parser only, native Rust parser not yet exercised.",
+    "Omitted peer data cannot authorize active table52 routes or peers.",
+    "No advertised exit, selected exit, protected-client traffic or preference writes."
+  ]
+}

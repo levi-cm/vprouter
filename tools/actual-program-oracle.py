@@ -21,17 +21,24 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def context_check(context, source):
+def context_check(context, source, architecture='amd64'):
+    assert architecture in {'amd64', 'arm64'}
     with tarfile.open(source) as archive:
         manifests = {
             arch: archive.extractfile(f'docs/rust-v2/programs-{arch}.json').read()
             for arch in ('amd64', 'arm64')
         }
-    manifest_bytes = manifests['amd64']
+    manifest_bytes = manifests[architecture]
     manifest = json.loads(manifest_bytes)
-    assert manifest['architecture'] == 'amd64'
+    assert manifest['architecture'] == architecture
     assert manifest['base_index'] == 'tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065'
-    assert manifest['base_platform'] == 'sha256:08a1bc6c82fee62d1a135788fb67fefa9d22deea3830e8a45ebe1a3cb116e325'
+    platform, daemon_digest, daemon_bytes, machine = {
+        'amd64': ('sha256:08a1bc6c82fee62d1a135788fb67fefa9d22deea3830e8a45ebe1a3cb116e325',
+                  'b2ec98126c6ee19d7b3603b0cfee97c5dd646874065aed7016653d30ff92a9cd', 42902060, 62),
+        'arm64': ('sha256:472c549d2ef8cebc000de2c8a94061bbdc864d2454177b2ada713262475449ef',
+                  '3cf2640069ded59322dc2113be5fa90540937410be22bb40873a614773ab27cc', 40133663, 183),
+    }[architecture]
+    assert manifest['base_platform'] == platform
     entries = {entry['role']: entry for entry in manifest['programs']}
     assert len(entries) == len(manifest['programs']) == 3
     paths = {
@@ -40,8 +47,8 @@ def context_check(context, source):
         'tailscaled': 'rootfs/usr/local/bin/tailscaled',
     }
     assert set(entries) == set(paths)
-    assert entries['tailscaled']['sha256'] == 'b2ec98126c6ee19d7b3603b0cfee97c5dd646874065aed7016653d30ff92a9cd'
-    assert entries['tailscaled']['bytes'] == 42902060
+    assert entries['tailscaled']['sha256'] == daemon_digest
+    assert entries['tailscaled']['bytes'] == daemon_bytes
     manifest_digest = sha(manifest_bytes)
     dockerfile = (
         'FROM scratch\nCOPY rootfs /\nENV LANG=C PATH=/bin\n'
@@ -82,7 +89,7 @@ def context_check(context, source):
                 entry = entries[role]
                 assert item.name == 'rootfs' + entry['path'] and item.mode == 0o555
                 assert len(data) == entry['bytes'] and sha(data) == entry['sha256']
-                assert data[:7] == b'\x7fELF\x02\x01\x01' and struct.unpack_from('<H', data, 18)[0] == 62
+                assert data[:7] == b'\x7fELF\x02\x01\x01' and struct.unpack_from('<H', data, 18)[0] == machine
                 offset = struct.unpack_from('<Q', data, 32)[0]
                 size, count = struct.unpack_from('<HH', data, 54)
                 assert size == 56 and 1 <= count <= 256 and offset + size * count <= len(data)

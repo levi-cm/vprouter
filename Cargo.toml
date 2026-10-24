@@ -1,0 +1,13 @@
+[workspace]
+members = ["crates/vprouter-core"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.150"
+rustix = { version = "=1.1.4", features = ["fs", "process"] }

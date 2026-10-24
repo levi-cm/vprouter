@@ -1,0 +1,68 @@
+{
+  "schema_version": 2,
+  "deployment_id": "schema-example",
+  "site": "debdev",
+  "gateway_image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "exits": [
+    {
+      "id": "mullvad-1",
+      "enabled": true,
+      "state_dir": "/var/lib/vprouter/schema-example/exit-1",
+      "mode": {
+        "kind": "mullvad",
+        "profile": "/var/lib/vprouter/schema-example/profile-1.wg.example",
+        "expected_server": "de-fra-wg-404"
+      }
+    },
+    {
+      "id": "mullvad-2",
+      "enabled": true,
+      "state_dir": "/var/lib/vprouter/schema-example/exit-2",
+      "mode": {
+        "kind": "mullvad",
+        "profile": "/var/lib/vprouter/schema-example/profile-2.wg.example",
+        "expected_server": "de-fra-wg-003"
+      }
+    },
+    {
+      "id": "mullvad-3",
+      "enabled": true,
+      "state_dir": "/var/lib/vprouter/schema-example/exit-3",
+      "mode": {
+        "kind": "mullvad",
+        "profile": "/var/lib/vprouter/schema-example/profile-3.wg.example",
+        "expected_server": "de-dus-wg-102"
+      }
+    },
+    {
+      "id": "mullvad-4",
+      "enabled": true,
+      "state_dir": "/var/lib/vprouter/schema-example/exit-4",
+      "mode": {
+        "kind": "mullvad",
+        "profile": "/var/lib/vprouter/schema-example/profile-4.wg.example",
+        "expected_server": "de-ber-wg-102"
+      }
+    },
+    {
+      "id": "mullvad-5",
+      "enabled": true,
+      "state_dir": "/var/lib/vprouter/schema-example/exit-5",
+      "mode": {
+        "kind": "mullvad",
+        "profile": "/var/lib/vprouter/schema-example/profile-5.wg.example",
+        "expected_server": "de-ber-wg-002"
+      }
+    },
+    {
+      "id": "direct-public",
+      "enabled": true,
+      "state_dir": "/var/lib/vprouter/schema-example/direct",
+      "mode": {
+        "kind": "direct"
+      }
+    }
+  ],
+  "dependency_adapters": [],
+  "client_policies": []
+}

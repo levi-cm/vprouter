@@ -1,0 +1,10 @@
+# SYNTHETIC SCHEMA EXAMPLE - NOT DEPLOYABLE CREDENTIALS
+# Server: de-fra-wg-003
+[Interface]
+PrivateKey = AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=
+Address = 10.64.0.2/32, fd00::2/128
+DNS = 10.64.0.1
+[Peer]
+PublicKey = IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = 185.65.134.82:51820

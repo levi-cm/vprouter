@@ -1,0 +1,10 @@
+# SYNTHETIC SCHEMA EXAMPLE - NOT DEPLOYABLE CREDENTIALS
+# Server: de-dus-wg-102
+[Interface]
+PrivateKey = AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=
+Address = 10.64.0.3/32, fd00::3/128
+DNS = 10.64.0.1
+[Peer]
+PublicKey = IyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyM=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = 185.65.134.83:51820

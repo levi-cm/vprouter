@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "deployment_id": "schema-example",
+  "site": "debdev",
+  "gateway_image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "exits": [
+    {
+      "id": "mullvad-1",
+      "enabled": true,
+      "state_dir": "/var/lib/vprouter/schema-example/exit-1",
+      "mode": {
+        "kind": "mullvad",
+        "profile": "/var/lib/vprouter/schema-example/profile-1.wg.example",
+        "expected_server": "de-fra-wg-404"
+      }
+    }
+  ],
+  "dependency_adapters": [],
+  "client_policies": []
+}

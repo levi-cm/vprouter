@@ -101,7 +101,11 @@ pub(crate) fn run() -> Result<()> {
             return Err(Error::Foreign);
         }
         raw(&[(NFT | 2, 0, vec![string(1, &policy.permit_table_name())])])?; // test fault only
-        a.install_permit()?;
+        if let Err(e) = a.install_permit() {
+            eprintln!("LAB_STAGE install_permit {scope:?} error={e:?}");
+            a.diagnose();
+            return Err(e);
+        }
         if a.reconcile() != (R::Matching, R::Matching) {
             return Err(Error::Drifted);
         }
@@ -111,12 +115,34 @@ pub(crate) fn run() -> Result<()> {
                 .parse()
                 .map_err(|_| Error::InvalidInput)?,
         )?;
-        a.replace_permit(next.clone())?;
+        if let Err(e) = a.replace_permit(next.clone()) {
+            eprintln!("LAB_STAGE replace_permit {scope:?} error={e:?}");
+            a.diagnose();
+            return Err(e);
+        }
         if a.reconcile() != (R::Matching, R::Matching) {
             return Err(Error::Drifted);
         }
         println!(
             "{{\"case\":\"atomic_replace_and_foreign_refusal\",\"scope\":\"{scope:?}\",\"result\":\"pass\"}}"
+        );
+        // A stale global generation must reject a batch before any deletion.
+        let mut stale = Socket::open()?;
+        let old_generation = stale.generation(deadline())?;
+        let race_name = "vprouter_lab_generation_race";
+        raw(&[(NFT, CREATE | EXCL, vec![string(1, race_name)])])?;
+        if stale.batch(
+            &[(NFT | 2, 0, vec![string(1, &policy.permit_table_name())])],
+            old_generation,
+            deadline(),
+        ) != Err(Error::GenerationChanged)
+            || a.reconcile() != (R::Matching, R::Matching)
+        {
+            return Err(Error::GenerationChanged);
+        }
+        raw(&[(NFT | 2, 0, vec![string(1, race_name)])])?;
+        println!(
+            "{{\"case\":\"stale_generation_refused\",\"scope\":\"{scope:?}\",\"result\":\"pass\"}}"
         );
         // A late invalid operation rolls back the preceding valid table deletion.
         let failed = raw(&[

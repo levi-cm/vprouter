@@ -170,6 +170,7 @@ pub(crate) struct Replies {
     pub data: Vec<Message>,
     bytes: usize,
     dump: bool,
+    single_data: bool,
     done: bool,
 }
 impl Replies {
@@ -180,8 +181,12 @@ impl Replies {
             data: Vec::new(),
             bytes: 0,
             dump,
+            single_data: false,
             done: false,
         }
+    }
+    pub fn allow_single_data(&mut self) {
+        self.single_data = true;
     }
     pub fn control(&mut self, seqs: &[u32]) {
         self.control.extend(seqs);
@@ -248,6 +253,9 @@ impl Replies {
                 }
                 4 => return Err(Error::Oversized),
                 k if k & 0xff00 == NFT => {
+                    if !self.dump && !self.single_data {
+                        return Err(Error::Malformed);
+                    }
                     if self.dump && m.flags & 2 == 0 {
                         return Err(Error::Malformed);
                     }
@@ -395,5 +403,18 @@ mod tests {
                 .ingest(&raw_message(3, 2, 7, 42, &(-4i32).to_ne_bytes()), 0, 42)
                 .is_err()
         );
+    }
+    #[test]
+    fn mutation_requires_ack_while_getgen_admits_one_typed_data_response() {
+        let data = raw_message(NFT | 15, 0, 7, 42, &[0, 0, 0, 0]);
+        assert_eq!(
+            Replies::new([7], false).ingest(&data, 0, 42),
+            Err(Error::Malformed)
+        );
+        let mut gen_reply = Replies::new([7], false);
+        gen_reply.allow_single_data();
+        gen_reply.ingest(&data, 0, 42).unwrap();
+        assert!(gen_reply.complete());
+        assert_eq!(gen_reply.data.len(), 1);
     }
 }

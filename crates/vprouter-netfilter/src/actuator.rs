@@ -142,6 +142,69 @@ impl Actuator {
             _ => Err(Error::Drifted),
         }
     }
+    #[cfg(test)]
+    pub(crate) fn diagnose(&mut self) {
+        let deadline = Self::deadline();
+        let t = self.policy.table(false);
+        let result = (|| -> Result<()> {
+            let all = self.socket.dump(1, &[], deadline)?;
+            for m in &all {
+                let a = nfattrs(m)?;
+                if text(get(&a, 1)?)? == t.name {
+                    eprintln!("LAB_DIAG table {:?}", a);
+                }
+            }
+            let chains = self.socket.scoped_dump(4, &t.name, deadline)?;
+            for m in &chains {
+                eprintln!("LAB_DIAG chain {:?}", nfattrs(m)?);
+            }
+            let rules = self.socket.scoped_dump(7, &t.name, deadline)?;
+            let mut positions = BTreeMap::<String, usize>::new();
+            let mut budget = 16384usize;
+            for m in &rules {
+                let a = nfattrs(m)?;
+                let name = text(get(&a, 2)?)?;
+                let index = positions.entry(name.to_owned()).or_default();
+                let got = attrs(get(&a, 4)?)?;
+                let want = t
+                    .chains
+                    .iter()
+                    .find(|c| c.name == name)
+                    .and_then(|c| c.rules.get(*index));
+                if let Some(want) = want {
+                    for (ei, (g, w)) in got.iter().zip(want).enumerate() {
+                        if canonical_exprs(std::slice::from_ref(g))
+                            != canonical_exprs(std::slice::from_ref(w))
+                        {
+                            let ga = attrs(&g.value)?;
+                            let wa = attrs(&w.value)?;
+                            let line = format!(
+                                "LAB_DIAG chain={name} rule={} expr={ei} got={ga:?} want={wa:?}",
+                                *index
+                            );
+                            if line.len() <= budget {
+                                eprintln!("{line}");
+                                budget -= line.len();
+                            }
+                        }
+                    }
+                    if got.len() != want.len() {
+                        eprintln!(
+                            "LAB_DIAG chain={name} rule={} expr_count_got={} want={}",
+                            *index,
+                            got.len(),
+                            want.len()
+                        );
+                    }
+                }
+                *index += 1;
+            }
+            Ok(())
+        })();
+        if let Err(e) = result {
+            eprintln!("LAB_DIAG diagnostic_error={e:?}");
+        }
+    }
     fn snapshot(&mut self, deadline: Instant) -> Result<Snapshot> {
         let generation = self.socket.generation(deadline)?;
         let tables = self.socket.dump(1, &[], deadline)?;
@@ -164,19 +227,15 @@ impl Actuator {
                     if get(&a, 6).ok() != Some(expected.marker.as_slice()) {
                         Reconciliation::Foreign
                     } else {
-                        let chains = self
-                            .socket
-                            .dump(4, &[string(1, &expected.name)], deadline)?;
-                        let rules = self
-                            .socket
-                            .dump(7, &[string(1, &expected.name)], deadline)?;
+                        let chains = self.socket.scoped_dump(4, &expected.name, deadline)?;
+                        let rules = self.socket.scoped_dump(7, &expected.name, deadline)?;
                         // Owned tables never contain sets, stateful objects or flowtables.
                         // Their presence is functional drift even when no current rule uses them.
                         let mut extras = false;
                         for op in [10, 19, 23] {
                             if !self
                                 .socket
-                                .dump(op, &[string(1, &expected.name)], deadline)?
+                                .scoped_dump(op, &expected.name, deadline)?
                                 .is_empty()
                             {
                                 extras = true;

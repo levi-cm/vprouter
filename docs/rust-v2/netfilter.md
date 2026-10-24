@@ -71,7 +71,8 @@ namespace/link absence. Ordinary cleanup never removes quarantine.
 Each mutation uses one atomic nft batch with `NFNL_BATCH_GENID`. Snapshots read
 kernel generation before and after all relevant dumps. A generation change or
 CAS conflict fails; a stale snapshot cannot authorize deletion/replacement.
-All requested mutation ACKs must arrive. Sender/sequence/embedded ACK sequence,
+All requested mutation ACKs must arrive; a netfilter data message cannot
+substitute for a mutation ACK. Sender/sequence/embedded ACK sequence,
 positive success ACK (`error=0`), errors, interrupted multipart dumps, DONE status,
 truncation, overflow and framing are checked. An uncertain exchange poisons its
 socket to prevent reuse with unread ACKs. No raw kernel error content is logged.
@@ -89,6 +90,9 @@ owned is reserved for ownership-only reporting, not a readiness result. A failed
 or incomplete snapshot yields unknown. Table flags/userdata, exact chain hooks,
 priorities/type/policy, expression grammar/arguments and rule order are checked.
 Extra chains/rules/sets/objects/flowtables and unknown functional attributes fail.
+Kernel dump callbacks can ignore requested table filters; every dump is therefore
+also filtered locally by exact table attribute before selected-table verification.
+The complete underlying unfiltered exchange remains bounded and generation checked.
 Known kernel use counts, handles, alignment pads and base-chain flags are the only
 bookkeeping accepted; rule positions are represented by the verified dump order.
 Counters are not generated, and added counter expressions/chain attrs fail.
@@ -130,7 +134,7 @@ hypervisor boundary; the controller owns actual isolated-guest admission.
 
 The harness needs test-only `nft` in PATH. It creates an unrelated sentinel and,
 for each Data/Transport/Host scope, checks native quarantine exactness, foreign
-userdata refusal, native atomic permit install/replacement, failed atomic batch
+userdata refusal, native atomic permit install/replacement, stale-generation CAS refusal, failed atomic batch
 retention, external nft rendering, actual extra-rule drift/refusal, quarantine
 release, permit cleanup and sentinel preservation. It leaves quarantine tables
 and sentinel in the disposable netns; namespace destruction is the cleanup.

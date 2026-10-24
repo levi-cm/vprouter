@@ -76,7 +76,7 @@ impl Socket {
         if self.poisoned {
             return Err(Error::Io);
         }
-        let result = self.exchange_inner(packet, seqs, dump, deadline, &[]);
+        let result = self.exchange_inner(packet, seqs, dump, deadline, &[], !dump);
         // A timeout/truncated/error exchange may leave unread messages; never
         // reuse that socket and accidentally treat them as a later transaction.
         if result.is_err() {
@@ -91,6 +91,7 @@ impl Socket {
         dump: bool,
         deadline: Instant,
         control: &[u32],
+        single_data: bool,
     ) -> Result<Vec<Message>> {
         if packet.len() > MAX_PACKET || seqs.is_empty() {
             return Err(Error::Oversized);
@@ -110,6 +111,9 @@ impl Socket {
         }
         let mut replies = Replies::new(seqs.iter().copied(), dump);
         replies.control(control);
+        if single_data {
+            replies.allow_single_data();
+        }
         let mut buffer = vec![0u8; MAX_PACKET];
         while !replies.complete() {
             self.wait(PollFlags::IN, deadline)?;
@@ -164,6 +168,12 @@ impl Socket {
         }
         Ok(reply)
     }
+    pub fn scoped_dump(&mut self, op: u16, table: &str, deadline: Instant) -> Result<Vec<Message>> {
+        // Linux dump callbacks differ in whether they honor the table request
+        // attribute. Always select exact table identity locally as well. The
+        // entire unfiltered exchange remains bounded and generation checked.
+        select_table(self.dump(op, &[string(1, table)], deadline)?, table)
+    }
     pub fn batch(
         &mut self,
         ops: &[(u16, u16, Vec<Attr>)],
@@ -183,12 +193,22 @@ impl Socket {
         if self.poisoned {
             return Err(Error::Io);
         }
-        let result = self.exchange_inner(&packet, &seqs, false, deadline, &[begin, end]);
+        let result = self.exchange_inner(&packet, &seqs, false, deadline, &[begin, end], false);
         if result.is_err() {
             self.poisoned = true;
         }
         result.map(|_| ())
     }
+}
+
+fn select_table(messages: Vec<Message>, table: &str) -> Result<Vec<Message>> {
+    let mut selected = Vec::new();
+    for message in messages {
+        if text(get(&nfattrs(&message)?, 1)?)? == table {
+            selected.push(message);
+        }
+    }
+    Ok(selected)
 }
 
 #[cfg(test)]
@@ -217,5 +237,37 @@ mod tests {
         assert_eq!(socket.seq(), Err(Error::SequenceMismatch));
         socket.poisoned = true;
         assert!(socket.exchange(&[0], &[1], false, Instant::now()).is_err());
+    }
+    #[test]
+    fn dump_selects_exact_table_locally_when_kernel_callback_ignores_filter() {
+        let row = |name: &str| {
+            messages(&message(
+                NFT | 3,
+                2,
+                1,
+                INET,
+                0,
+                &[string(1, name), string(3, "input")],
+            ))
+            .unwrap()
+            .remove(0)
+        };
+        let selected = select_table(
+            vec![
+                row("own_q"),
+                row("own_p"),
+                row("own_p_suffix"),
+                row("unrelated"),
+            ],
+            "own_p",
+        )
+        .unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(
+            text(get(&nfattrs(&selected[0]).unwrap(), 1).unwrap()).unwrap(),
+            "own_p"
+        );
+        let invalid = messages(&message(NFT | 3, 2, 1, INET, 0, &[string(3, "input")])).unwrap();
+        assert!(select_table(invalid, "own_p").is_err());
     }
 }

@@ -6,7 +6,7 @@ use super::{
     programs::{ReviewedBundle, Role},
     transport::GuardTransport,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     os::unix::fs::MetadataExt,
@@ -74,6 +74,128 @@ fn field<'a>(status: &'a str, key: &str) -> Result<&'a str> {
         .find_map(|s| s.strip_prefix(key))
         .map(str::trim)
         .ok_or(Error::CapabilityPolicy)
+}
+#[derive(Clone, Serialize)]
+struct Descriptor {
+    number: u32,
+    target: String,
+    flags: u32,
+    dev: u64,
+    ino: u64,
+    mode: u32,
+    rdev: u64,
+}
+fn descriptor_grammar(
+    descriptors: &[Descriptor],
+    daemon: bool,
+    null: (u64, u64, u64),
+) -> Result<()> {
+    let mut numbers = std::collections::BTreeSet::new();
+    let mut stdio = 0;
+    let mut pipes = Vec::new();
+    for d in descriptors {
+        if !numbers.insert(d.number) {
+            return Err(Error::DescriptorPolicy);
+        }
+        if d.number < 3 {
+            if (d.dev, d.ino, d.rdev) != null
+                || rustix::fs::major(d.rdev) != 1
+                || rustix::fs::minor(d.rdev) != 3
+                || d.mode & libc::S_IFMT != libc::S_IFCHR
+                // O_LARGEFILE is reported by the kernel on musl x86_64.
+                || d.flags & !0x8000 != libc::O_RDWR as u32
+            {
+                return Err(Error::DescriptorStdio);
+            }
+            stdio += 1;
+        } else if d.target.starts_with("pipe:[") {
+            pipes.push(d);
+        } else if !(d.target == "/dev/net/tun"
+            || d.target.starts_with("socket:[")
+            || matches!(
+                d.target.as_str(),
+                "anon_inode:[eventpoll]" | "anon_inode:[eventfd]"
+            )
+            || d.target.starts_with("/state/"))
+        {
+            return Err(Error::DescriptorPolicy);
+        }
+    }
+    if stdio != 3 || pipes.len() != if daemon { 2 } else { 0 } {
+        return Err(Error::DescriptorPolicy);
+    }
+    if daemon {
+        let a = pipes[0];
+        let b = pipes[1];
+        if a.dev == 0
+            || a.ino == 0
+            || (a.dev, a.ino) != (b.dev, b.ino)
+            || a.mode != 0o10600
+            || b.mode != 0o10600
+            || a.rdev != 0
+            || b.rdev != 0
+            || a.target != format!("pipe:[{}]", a.ino)
+            || b.target != a.target
+            || !((a.flags == 0x80000 && b.flags == 0x80801)
+                || (b.flags == 0x80000 && a.flags == 0x80801))
+        {
+            return Err(Error::DescriptorPolicy);
+        }
+    }
+    Ok(())
+}
+#[test]
+fn descriptor_metadata_requires_exact_null_and_one_canonical_daemon_fifo_pair() {
+    let null = (7, 9, rustix::fs::makedev(1, 3));
+    let stdio: Vec<_> = (0..3)
+        .map(|number| Descriptor {
+            number,
+            target: "/null".into(),
+            flags: 0x8002,
+            dev: null.0,
+            ino: null.1,
+            mode: libc::S_IFCHR | 0o666,
+            rdev: null.2,
+        })
+        .collect();
+    assert!(descriptor_grammar(&stdio, false, null).is_ok());
+    let mut daemon = stdio.clone();
+    for (number, flags) in [(9, 0x80000), (10, 0x80801)] {
+        daemon.push(Descriptor {
+            number,
+            target: "pipe:[22]".into(),
+            flags,
+            dev: 15,
+            ino: 22,
+            mode: 0o10600,
+            rdev: 0,
+        });
+    }
+    assert!(descriptor_grammar(&daemon, true, null).is_ok());
+    assert!(descriptor_grammar(&daemon, false, null).is_err());
+    assert!(descriptor_grammar(&stdio, true, null).is_err());
+    for change in 0..9 {
+        let mut bad = daemon.clone();
+        match change {
+            0 => bad[3].ino += 1,
+            1 => bad[3].dev += 1,
+            2 => bad[3].flags = 0,
+            3 => bad[4].flags &= !0x80000,
+            4 => bad[4].flags |= 0x4000,
+            5 => bad[3].mode = libc::S_IFREG | 0o600,
+            6 => bad[3].target = "pipe:[23]".into(),
+            7 => bad[0].rdev = rustix::fs::makedev(1, 5),
+            8 => bad.push(Descriptor {
+                number: 11,
+                ..bad[3].clone()
+            }),
+            _ => unreachable!(),
+        }
+        assert!(
+            descriptor_grammar(&bad, true, null).is_err(),
+            "fault {change}"
+        );
+    }
 }
 fn inspect(a: &Admission, pid: u32, daemon: bool, dir: &Path) -> Result<()> {
     let status =
@@ -157,12 +279,17 @@ fn inspect(a: &Admission, pid: u32, daemon: bool, dir: &Path) -> Result<()> {
         let flags = u32::from_str_radix(field(&info, "flags:")?, 8)
             .map_err(|_| Error::DescriptorInventory)?;
         let metadata = fs::metadata(entry.path()).map_err(|_| Error::DescriptorInventory)?;
-        descriptors.push(serde_json::json!({
-            "number":number,"target":text,"flags":flags,
-            "dev":metadata.dev(),"ino":metadata.ino(),"mode":metadata.mode()
-        }));
+        descriptors.push(Descriptor {
+            number,
+            target: text.to_owned(),
+            flags,
+            dev: metadata.dev(),
+            ino: metadata.ino(),
+            mode: metadata.mode(),
+            rdev: metadata.rdev(),
+        });
     }
-    descriptors.sort_by_key(|value| value["number"].as_u64());
+    descriptors.sort_by_key(|value| value.number);
     // Retain a bounded kernel-metadata witness before applying the descriptor
     // grammar. A rejected shape stays rejected and is never learned/adopted.
     lab::write(
@@ -173,19 +300,9 @@ fn inspect(a: &Admission, pid: u32, daemon: bool, dir: &Path) -> Result<()> {
         }),
         &serde_json::to_vec(&descriptors).map_err(|_| Error::DescriptorInventory)?,
     )?;
-    for descriptor in &descriptors {
-        let text = descriptor["target"]
-            .as_str()
-            .ok_or(Error::DescriptorInventory)?;
-        if !(text == "/dev/null"
-            || text == "/dev/net/tun"
-            || text.starts_with("socket:[")
-            || text.starts_with("anon_inode:")
-            || text.starts_with("/state/"))
-        {
-            return Err(Error::DescriptorPolicy);
-        }
-    }
+    let null =
+        fs::metadata(format!("/proc/{pid}/root/dev/null")).map_err(|_| Error::DescriptorStdio)?;
+    descriptor_grammar(&descriptors, daemon, (null.dev(), null.ino(), null.rdev()))?;
     let cgroup =
         fs::read_to_string(format!("/proc/{pid}/cgroup")).map_err(|_| Error::CgroupMismatch)?;
     if cgroup

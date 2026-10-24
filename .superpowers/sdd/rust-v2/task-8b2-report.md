@@ -154,3 +154,21 @@ process inspection. Pipes remain rejected pending this fresh witness. No guessed
 pipe count, descriptor inheritance, runtime filter or kernel baseline is admitted.
 Launch all-target clippy and both static payload/context builds pass. Runtime
 remains pending and failure evidence/quarantine are retained by root.
+
+
+## Candidate08 exact observed descriptor grammar
+
+Root unchanged07 attempt11 retained daemon descriptor SHA256
+b0f373f2e78654c563c82b0040ffd73c7e7adfa49bed61fb171dd36ae8e4dfa8 and
+kernel metadata SHA2566fb58a2cdfa5c3549beeb5ee930b51c8906fe4310c5094b13b2f9c01214914f6.
+The first rejection was null stdio's backing target spelling /null, rather than
+its device identity. Inspector now requires exact selected private-root null
+(dev,inode,rdev), character type, major1/minor3 and RDWR flags for all0..2;
+backing-path spelling grants no authority. It also checks the ONE witnessed
+post-exec daemon FIFO pair: same positive dev/inode, canonical pipe:[inode],
+mode010600, rdev0, exact reader O_CLOEXEC and writer O_WRONLY|O_NONBLOCK|O_CLOEXEC.
+Observer allows no pipes. Nine distinct inode/device/flags/type/count/stdio faults
+are rejected by focused offline regression; launch28tests and clippy pass.
+The inherited-FD pre-exec0..4 closure remains unchanged. Metadata from11 is
+transitional (TUN down then UP across dumps), so it is not adopted as a stable
+kernel baseline or readiness. Live-daemon token/structural admission remains work.

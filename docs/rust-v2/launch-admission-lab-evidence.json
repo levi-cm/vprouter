@@ -159,7 +159,7 @@
       "query": "selected fields only, no env/process/body output"
     }
   ],
-  "component_acceptance": "PASS_ISOLATED_ADMISSION_ONLY_PENDING_REVIEW",
+  "component_acceptance": "PASS_ISOLATED_ADMISSION_ONLY",
   "real_worker_execution": "NOT_RUN",
   "release_acceptance": "NOT_RUN",
   "residual_synthetic_containers_after_final_run": 0,
@@ -169,5 +169,12 @@
     "Systemd cgroup2 profile only; Void/runit and cgroupfs support remain unimplemented.",
     "No real credentials, Tailscale routes, protected traffic or production changes."
   ],
-  "no_apparmor_profile_kernel_acceptance": "NOT_RUN"
+  "no_apparmor_profile_kernel_acceptance": "NOT_RUN",
+  "independent_review": {
+    "spec": "PASS",
+    "quality": "Approved",
+    "report": ".superpowers/sdd/rust-v2/task-6-review.md",
+    "final_fix_review_scope": "c071837..6a00433",
+    "runtime_acceptance": "NOT_RUN"
+  }
 }

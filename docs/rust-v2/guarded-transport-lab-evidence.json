@@ -391,6 +391,149 @@
         }
       ],
       "capture_oracle_sha256": "f9defc937ad2d0835c02e2621e50e7c342e1b1ec893047b8c2f2eec4cd4c275e"
+    },
+    {
+      "observed_at_utc": "2026-10-24T16:02:17.393442+00:00",
+      "artifact_sha256": "74c23da930055d427a604ea406d021b1a9ba6fc1bd96483a4bc837f9c9add665",
+      "source_archive_sha256": "f79dc1a948b4d8bdd3b2a5e77570a1c85102a7445e8500dc79f822956271d9b0",
+      "runner_sha256": "862ab6c43ceb7597fa102d6b6c7b6ceb6c0665a3c0154d3bd8c28aedd872985a",
+      "exit_code": 1,
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\nLAB_STAGE bootstrap_positive_capture_controls\nLAB_STAGE bootstrap_cgroup_owned_health_roundtrip\nLAB_STAGE inject_network_fault_0\nLAB_STAGE inject_network_fault_1\nLAB_STAGE inject_network_fault_2\nLAB_STAGE inject_network_fault_3\nLAB_STAGE inject_network_fault_4\nLAB_NATIVE_FAILURE stage=lab_restore_audit reason=HostDrift\ntransport_lab: network_operation\n",
+      "wall_seconds": 2.38,
+      "attempt": 13,
+      "candidate": 16,
+      "result": "FAIL_FAULT4_RECOVERY_HOST_DRIFT",
+      "partial_cases": [
+        "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+        "independent_data_transport_host_positive_capture_sensitivity",
+        "same_namespace_destination_port_other_socket_producer_denied",
+        "established_input_other_producer_denied",
+        "network_fault_0_full_quarantine_and_exact_recovery",
+        "network_fault_1_full_quarantine_and_exact_recovery",
+        "network_fault_2_full_quarantine_and_exact_recovery",
+        "network_fault_3_full_quarantine_and_exact_recovery"
+      ],
+      "quarantine_observation": "full offline quarantine retained after fault4 restore audit refused",
+      "capture_or_traffic": "initial4cases and networkfault0-3 recovery passed; continuous sender active, full fault verdict unavailable",
+      "diagnosis": "synthetic WAN IPv6 autoconfiguration DAD can change addressflags after exact hostbaseline; read-only inventory observes permanentlinklocal; fix test WAN beforeUP, retain strictaudit",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; other native/test ownership retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-13.json",
+        "target/lab-state/guarded-transport-inspect-13.json",
+        "target/lab-state/guarded-transport-captures-13.json",
+        "target/lab-state/guarded-transport-wan-cleanup-13.json"
+      ],
+      "independent_capture_metadata": [
+        {
+          "file": "positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 162,
+          "sha256": "782fee3c83243f1777c1fa778a7b636213fa7a1c7c9de9de27cc1b8364bab90b",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 2,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 893,
+          "sha256": "3504a45f3e3c85384b62ff85d6bfc22d5acfd5c4fc61070926cc88b0eb203f09",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 1349,
+          "sha256": "5bff31e8b039887f931b3bbe0d3756b721b068f74cd96bbad5795f62daa2e178",
+          "linktype": 1,
+          "records": 12,
+          "capture_counters": {
+            "captured": 12,
+            "received_by_filter": 12,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 1,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 3296,
+          "sha256": "3c6062622d5c17ef0c5d07d25bf94f640c6e4ae207cd941f10d874012274c2be",
+          "linktype": 276,
+          "records": 37,
+          "capture_counters": {
+            "captured": 37,
+            "received_by_filter": 37,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 6808,
+          "sha256": "4edc918d853aeab2909afc672f272396b395143334eadc5492aa0c00e5045e21",
+          "linktype": 276,
+          "records": 43,
+          "capture_counters": {
+            "captured": 43,
+            "received_by_filter": 43,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 6944,
+          "sha256": "180ec35f08ec26663ad5de6ab4c795a379ebe18d8958b9de9b008b53f6112c75",
+          "linktype": 1,
+          "records": 46,
+          "capture_counters": {
+            "captured": 46,
+            "received_by_filter": 46,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_data_health": 0,
+            "positive_plaintext_control": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "capture_oracle_sha256": "f9defc937ad2d0835c02e2621e50e7c342e1b1ec893047b8c2f2eec4cd4c275e"
     }
   ],
   "production_changes": false,
@@ -402,6 +545,12 @@
     {
       "candidate": 12,
       "status": "superseded before dispatch; immediate-mode flag absent"
+    },
+    {
+      "candidate": 15,
+      "status": "superseded UNRUN; expanded burst-only harness replaced with continuous sender",
+      "artifact_sha256_prefix": "e8c11d3c",
+      "source_archive_sha256_prefix": "fdb20f37"
     }
   ]
 }

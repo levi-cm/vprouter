@@ -72,3 +72,17 @@ explicit owned-file commits. Report .superpowers/sdd/rust-v2/task-8a-report.md w
 exact source/artifact hashes, commands/results, packet/ownership evidence, unsafe/
 capability/subprocess inventory and remaining gaps. Root runs exact ignored payload
 and independent review is mandatory before next implementation.
+
+Controller ruling after concrete shared-base-consumer review: bootstrap also
+constrains local OUTPUT/INPUT, not only Tailscale FORWARD. Use a separately owned
+health/control cgroupv2 subgroup and native nft socket-cgroup selector, retained
+root cgroup FD/ID/level bound to exact admitted container parent, exit/allocation/
+generation and namespace. No caller IDs, parent-prefix shortcut or all-WG OUTPUT
+permit. Do not enable controllers/restructure Docker parent; parent resource
+accounting remains. Exact owned empty-group cleanup only, ambiguity quarantines.
+Required kernel socket/cgroup capability is explicit preflight before existing
+installation changes; platform certification still requires actual evidence.
+Actual same-data-NS packet tests must show authorized producer succeeds while
+another producer targeting same destination/ports is denied, including existing
+connection traffic. Task8b real worker/tailscaled must enter the authorized group
+before socket/client creation while retaining6b confinement and accounting.

@@ -274,3 +274,23 @@ Usersteer2026-10-24:alltestinglocally. No furtherremoteSSH attempts/questions. C
 Rootread-only DockerFORWARDshape oracle at15:17:20Z:actualguest ip/filter/FORWARD typefilter/hookforward/prio0/drop/FLAGS1/USE6 and6Docker rules; exactrawchainmessage+nftJSON retained docker-forward-chain-oracle.json/source2130ddbc. No mutations orpacketclaim; sent nativecooperation implementer.
 
 Ruling: task8a bootstrap must constrain locally originated applicationtraffic aswell as TailscaleFORWARD because legacyconsumers shareprimarybaseNS. Add exactowned health/control cgroupv2 subgroup+native nft socket-cgroup selector with retainedID/level/parent/exit/generation/namespace authority and actualsameNSauthorized-vs-otherproducer packetproof;8b placesrealworkers before anysocketcreation. Do not restructureDockerparent/enablecontrollers; exactemptyownedcleanup, ambiguityquarantines. Costifwrong: additional kernelcapabilitypreflight/placementintegration and platformevidence; avoids mislabeled allWG-OUTPUT bootstrap. Userplatform/trafficgates remainunchanged and missingcapabilityfailsbeforeexistinginstallationchanges.
+
+Task8a candidate01 diagnostic: immutable source archive5acd43a2/artifact723a7336,
+root exact-hash host-netns admission in owned local VM at15:30:20Z. Failed
+network_operation before native veth/WG creation; phaseactivating and owned
+host/transport/data main+emergency quarantine tables observed. Docker FORWARD
+preserved ignoring counters; no captures/traffic started. Full private run and
+read-only inventories retained under target/lab-state; public redacted attempt
+ledger docs/rust-v2/guarded-transport-lab-evidence.json. Implementer identified
+strict host projector rejecting existing Docker bridge-slave metadata; next
+candidate must distinguish observable foreign host metadata from prohibited
+metadata on owned protected links. No identical-payload retry.
+Root removed only exact failed-attempt synthetic WAN veth after matching
+record/container labels, ifindex6/MAC/alias/kind/peer reverseindex, exact185.65.134.89
+address and185.65.134.88 endpoint route. Route removed with link; test container,
+namespace pins, producer group and quarantine retained. No guessed table cleanup.
+Exact-artifact admission marker removed after run. Controller runner retains
+source archives/payloads and all unsuccessful runs; no runtime acceptance claim.
+Task8b brief prepared but undispatched pending8a approval. Current8a cgroup profile
+is exactsystem.slice/Docker level3; derive from verified hierarchy or explicitly
+retain runit/nonmatchingprofile certification as an unperformed release gate.

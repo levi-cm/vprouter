@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "component": "task8a_guarded_native_transport",
+  "guard_runtime": false,
+  "activation_ready": false,
+  "real_client_acceptance": "NOT_RUN",
+  "release_ready": false,
+  "attempts": [
+    {
+      "attempt": 1,
+      "observed_at_utc": "2026-10-24T15:30:20.902805+00:00",
+      "artifact_sha256": "723a7336080903962b28e9c71efff322d6f46cf77e1d94abdf969dd31cfe8096",
+      "source_archive_sha256": "5acd43a24ef6c69191c6cae25552c389b99dc8c4c3c99d6413e2e3283af49dcf",
+      "runner_sha256": "b4b3a4749e542074dcf12228dc3ddc3bfe2a7cd2f0750e03174b9fd67a18093c",
+      "exit_code": 1,
+      "result": "FAIL_BEFORE_NATIVE_LINK_CREATION",
+      "stderr": "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace\nLAB_STAGE native_guard_down_provision_then_quarantined_activation\ntransport_lab: network_operation\n",
+      "quarantine_observation": "host/transport/data main+emergency quarantine tables observed; no owned veth/WG created",
+      "docker_forward_preserved": "same chain/rules ignoring counters",
+      "capture_or_traffic": "NOT_RUN",
+      "diagnosis": "strict host link projection rejects preexisting Docker bridge slave metadata",
+      "resource_disposition": "only exact synthetic WAN veth removed after provenance verification; namespace pins, empty producer, test container and quarantine retained",
+      "private_evidence": [
+        "target/lab-state/guarded-transport-run-1.json",
+        "target/lab-state/guarded-transport-inspect-1.json",
+        "target/lab-state/guarded-transport-wan-cleanup-1.json"
+      ]
+    }
+  ],
+  "production_changes": false
+}

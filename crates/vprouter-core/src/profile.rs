@@ -204,6 +204,13 @@ impl Profile {
     pub fn peer_public_key(&self) -> &[u8; 32] {
         &self.public_key
     }
+    /// Borrow the secret for trusted native WireGuard provisioning only.
+    /// Do not log, serialize, persist, or place this key in subprocess arguments.
+    /// The closure API avoids an owned secret accessor; it is not a security
+    /// sandbox against a caller that deliberately copies the borrowed bytes.
+    pub fn with_private_key<T>(&self, provision: impl FnOnce(&[u8; 32]) -> T) -> T {
+        provision(&self.private_key.0)
+    }
     pub(crate) fn private_key_identity(&self) -> [u8; 32] {
         // WireGuard uses X25519, which ignores these scalar bits. Compare the
         // effective scalar so alternative encodings cannot create another exit

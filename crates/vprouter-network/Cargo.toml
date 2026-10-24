@@ -1,0 +1,20 @@
+[package]
+name = "vprouter-network"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+vprouter-core = { path = "../vprouter-core" }
+rustix.workspace = true
+netlink-packet-core.workspace = true
+netlink-packet-route.workspace = true
+netlink-packet-generic.workspace = true
+netlink-packet-wireguard.workspace = true
+x25519-dalek.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+rustix = { workspace = true, features = ["thread"] }

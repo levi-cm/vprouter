@@ -358,10 +358,15 @@ fn verify_launch_tree(id: &str) -> Result<()> {
 fn wait_absent(pids: &[u32]) -> Result<()> {
     let end = Instant::now() + Duration::from_secs(4);
     loop {
-        if pids
-            .iter()
-            .all(|p| !Path::new(&format!("/proc/{p}")).exists())
-        {
+        let mut absent = true;
+        for pid in pids {
+            match fs::metadata(format!("/proc/{pid}")) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Ok(_) => absent = false,
+                Err(_) => return Err(Error::ChildFailed),
+            }
+        }
+        if absent {
             return Ok(());
         }
         if Instant::now() > end {

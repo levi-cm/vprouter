@@ -1754,8 +1754,9 @@ pub(super) fn probe_verify() -> Result<()> {
     {
         return Err(Error::ProbeReadonly);
     }
-    // Before creating any descendant the private procfs must expose exactly
-    // the confined init and this worker, never host/container/peer processes.
+    // Before creating descendants private procfs may expose only self, or init
+    // and self. hidepid=2 deliberately hides nondumpable PID1 even at the same
+    // UID; the host oracle separately proves its exact root/mount/PID identity.
     use std::os::unix::fs::MetadataExt;
     let own_root = std::fs::metadata("/").map_err(|_| Error::ProbeProcRoot)?;
     let mut visible = std::collections::BTreeSet::new();
@@ -1783,10 +1784,7 @@ pub(super) fn probe_verify() -> Result<()> {
             }
         }
     }
-    if visible == [2].into() && std::process::id() == 2 {
-        return Err(Error::ProbeProcHiddenInit);
-    }
-    if visible != [1, 2].into() || std::process::id() != 2 {
+    if (visible != [2].into() && visible != [1, 2].into()) || std::process::id() != 2 {
         return Err(Error::ProbeProcSet);
     }
     Ok(())

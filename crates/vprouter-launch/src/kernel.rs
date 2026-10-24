@@ -40,6 +40,14 @@ fn stage_byte(e: Error) -> u8 {
         Error::MountProc => 216,
         Error::MountReadonly => 217,
         Error::DescriptorPolicy => 203,
+        Error::DescriptorNull => 230,
+        Error::DescriptorDuplicate => 231,
+        Error::DescriptorClose => 232,
+        Error::DescriptorFlags => 233,
+        Error::DescriptorStdio => 234,
+        Error::DescriptorHealth => 235,
+        Error::DescriptorExecutable => 236,
+        Error::DescriptorInventory => 237,
         Error::CapabilityPolicy => 204,
         Error::ConfinementPolicy => 205,
         _ => 206,
@@ -224,6 +232,14 @@ impl Child {
                 201 => return Err(Error::NamespaceOperation),
                 202 => return Err(Error::MountIsolation),
                 203 => return Err(Error::DescriptorPolicy),
+                230 => return Err(Error::DescriptorNull),
+                231 => return Err(Error::DescriptorDuplicate),
+                232 => return Err(Error::DescriptorClose),
+                233 => return Err(Error::DescriptorFlags),
+                234 => return Err(Error::DescriptorStdio),
+                235 => return Err(Error::DescriptorHealth),
+                236 => return Err(Error::DescriptorExecutable),
+                237 => return Err(Error::DescriptorInventory),
                 204 => return Err(Error::CapabilityPolicy),
                 205 => return Err(Error::ConfinementPolicy),
                 210 => return Err(Error::MountContainerRoot),
@@ -506,7 +522,7 @@ fn setup(
     )
     .map_err(|_| Error::MountPivot)?;
     let null = fs::open("/dev/null", OFlags::RDWR | OFlags::CLOEXEC, Mode::empty())
-        .map_err(|_| Error::DescriptorPolicy)?;
+        .map_err(|_| Error::DescriptorNull)?;
     for fd in 0..3 {
         dup_fixed(&null, fd, false)?;
     }
@@ -704,11 +720,11 @@ fn dup_fixed(fd: impl AsFd, to: i32, cloexec: bool) -> Result<()> {
     // SAFETY: fixed child-only targets, duplicate first to avoid source/target collisions.
     let saved = unsafe { libc::fcntl(fd.as_fd().as_raw_fd(), libc::F_DUPFD_CLOEXEC, 100) };
     if saved < 0 {
-        return Err(Error::DescriptorPolicy);
+        return Err(Error::DescriptorDuplicate);
     }
     let result = cv(
         unsafe { libc::dup3(saved, to, if cloexec { libc::O_CLOEXEC } else { 0 }) },
-        Error::DescriptorPolicy,
+        Error::DescriptorDuplicate,
     );
     unsafe {
         libc::close(saved);
@@ -720,7 +736,7 @@ fn close_except(keep: &[i32]) -> Result<()> {
     // before untrusted code. Enumeration closes only numeric descriptors; owners
     // remain inert until this child execs/_exits, never Rust unwinding.
     let fds: Vec<_> = std::fs::read_dir("/proc/self/fd")
-        .map_err(|_| Error::DescriptorPolicy)?
+        .map_err(|_| Error::DescriptorClose)?
         .filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok())
         .collect();
     for fd in fds {
@@ -1146,24 +1162,27 @@ fn final_fds(before_exec: bool) -> Result<()> {
         // SAFETY: scalar descriptor flags queries.
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
         if flags < 0 || flags & libc::FD_CLOEXEC != if fd == 4 { libc::FD_CLOEXEC } else { 0 } {
-            return Err(Error::DescriptorPolicy);
+            return Err(Error::DescriptorFlags);
         }
         let target = std::fs::read_link(format!("/proc/self/fd/{fd}"))
-            .map_err(|_| Error::DescriptorPolicy)?;
+            .map_err(|_| Error::DescriptorInventory)?;
         let name = target.as_os_str().as_encoded_bytes();
-        if fd <= 2 && name != b"/dev/null"
-            || fd == 3 && !name.starts_with(b"pipe:[")
-            || fd == 4 && name != b"/bin/vprouter-worker"
-        {
-            return Err(Error::DescriptorPolicy);
+        if fd <= 2 && name != b"/dev/null" {
+            return Err(Error::DescriptorStdio);
+        }
+        if fd == 3 && !name.starts_with(b"pipe:[") {
+            return Err(Error::DescriptorHealth);
+        }
+        if fd == 4 && name != b"/bin/vprouter-worker" {
+            return Err(Error::DescriptorExecutable);
         }
     }
     let entries: Vec<_> = std::fs::read_dir("/proc/self/fd")
-        .map_err(|_| Error::DescriptorPolicy)?
+        .map_err(|_| Error::DescriptorInventory)?
         .collect();
     // read_dir temporarily opens one extra fd; no gap/external fd is permitted.
     if entries.len() != expected as usize + 1 {
-        return Err(Error::DescriptorPolicy);
+        return Err(Error::DescriptorInventory);
     }
     Ok(())
 }

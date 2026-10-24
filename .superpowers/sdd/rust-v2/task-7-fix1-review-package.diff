@@ -1,0 +1,1309 @@
+# Review package: 04ecfc6..HEAD
+
+## Commits
+0522fa1 test: bind worker expiry and retry fixes to lab evidence
+115e626 docs: record worker review fixes and exact parser evidence
+5955020 fix: retry native transport failures and enforce health expiry
+
+## Files changed
+ .superpowers/sdd/rust-v2/progress.md           |   4 +
+ .superpowers/sdd/rust-v2/task-7-report.md      | 160 ++++++++++++++++++
+ .superpowers/sdd/rust-v2/task-7-review.md      |  44 +++++
+ .superpowers/sdd/rust-v2/task-8-brief.md       |   8 +
+ crates/vprouter-core/src/state.rs              |  22 ++-
+ crates/vprouter-core/tests/health.rs           |  42 +++++
+ crates/vprouter-worker/src/client.rs           |  51 +++++-
+ crates/vprouter-worker/src/engine.rs           |  17 +-
+ crates/vprouter-worker/src/engine/tests.rs     | 223 +++++++++++++++++++++++++
+ crates/vprouter-worker/src/provider.rs         |  12 +-
+ crates/vprouter-worker/src/tests.rs            | 112 +++++++++++++
+ docs/rust-v2/worker-localapi-lab-evidence.json |  42 ++++-
+ docs/rust-v2/worker.md                         |  10 ++
+ tools/worker-localapi-parser-oracle.py         |   1 +
+ 14 files changed, 727 insertions(+), 21 deletions(-)
+
+## Diff
+diff --git a/.superpowers/sdd/rust-v2/progress.md b/.superpowers/sdd/rust-v2/progress.md
+index ed9a1b8..77d89d2 100644
+--- a/.superpowers/sdd/rust-v2/progress.md
++++ b/.superpowers/sdd/rust-v2/progress.md
+@@ -252,10 +252,14 @@ Task6b independent review /root/review_launch_execution specFAIL/qualityNeedsfix
+ 
+ Task6b fix1 candidate b62cc5c kernel attempt21 PASS exit0/1.648s/all11cases. Actual stopped/forwarded/reaped/natural repeated-signal witness completed529ms; exact labccd0bcb8/probe808789d0 hashes verified locally+guest. Collector proves0residualpins/containers, harnessselfcleanup/controllerremovednothing. Original19failedattempts and run20 retained; run20 signalclaim explicitly invalidated by review. Fix report/fresh covering checks and scoped independent rereview pending. No production or release acceptance. Prepared tasks11client and12migration briefs only, commits41a5dc9/b08d299; no future implementation bypass.
+ 
+ Task6b fix round1/5:3Important+2Minor addressed/0open; commits6a2cbb3..427a124, independent scoped /root/review_launch_execution specPASS/qualityApproved/newbreakagenone. Root independently checked5amendedsourcehashes, exactstaticbytes/guestresult/absence. Task6b complete bounded synthetic execution (c4b2236..427a124, reviewclean); actual worker/Go policy, guard/transport/client/platform/release gates remainNOT_RUN. Sole unsafe2439lines concern retained for wholebranchreview. Task7 nativeworker begins after this approval, base recorded next dispatch.
+ 
+ Task7 /root/native_worker implementing nativeclients/decisionengine atbase7bf59fc. Production bridge to actual placement/guard/protocol is unavailable and remains task8; no forged bool/readiness constructor. Root independent pinned1.102.5 kernel oracle in NEWmemstate/no-login/netnone/NET_ADMIN+TUN container proves7IPv4/6IPv6rules and exact rawrule attrs; explicitmode0prefs leavespolicy rules unchanged. Defaulttailscale0 fe80/64/kernel_ll routes observed, must suppress/clean before protectedreadiness rather than loosen IPv6policy. Bothoraclecontainers exactremoved; no enrolledstate/WAN/advertisement/productionchange. Evidence711b450 storesbothobservations/sourceSHA256/rootmarker. Preparedfuturetasks13release/14performance/15realclientcanary briefs5ea0d78/327f61b only. Reasked missingsecond-install SSHhost/user/port asynchronously; ZIPandapprovals alreadyavailable, no reenrollment.
+ 
+ Ruling: worker withdrawn recovery may observe stableonlineidentity/safeprefs with ExitNodeOptionfalse, but neverREADY; after3freshprovider/structural samples explicitly advertise under retainedguard protection and require fresh offered+approvedtrue beforeREADY. Official1.102.5 ipnstate.go277 definesbit asoffered&&approved/local.go1637 derivesnetmapAllowedIPs, so requiringitbeforeadvertising coulddeadlock. Costifwrong:extra recoverytransition/approvalwaiting tests; nevergrantunapprovedREADY. Independent sourceoraclerecorded, actualcontroltransitionNOT_RUN.
+ 
+ Task7 final source ad9b38d/report e0cc64e:139workspace/26worker tests,fmt/clippy/check/static x86+ARM64 reportedPASS. Root independently verified24sourcehashes+aggregate050ad3d and exact static artifact hashes. Actual native parser attempt1 setupFAIL beforeexec (foreign mount canonicalization), retained; corrected readonly private tmpfs/proc-root exactsocket attempt2 PASSexit0/.150s, pinned1.102.5Running/online/mode2/noadvertisements, guard_runtime:false activation_ready:false. Evidence worker-localapi-lab-evidence.json/tools retained; no daemon/state/preferences/production changes. Independent review pending; task8 remainsgated.
++
++Task7 independent /root/review_native_worker specFAIL/qualityNeedsfixes:2Important (realHyper/TLS underlying transient transport classification bypassesretry; staleRECOVERING offer and staleREADY OkBlocked bypasses guard/withdraw enforcement),0Critical/Minor. Fullfindings task-7-review.md. Original /root/native_worker resumesfixround1/5, base04ecfc6. Cannotverifyactualruntime items confirmed task8+gates; task8 remainsclosed.
++
++Task7 fix1 source5955020/report115e626:2Important addressed reported; actual controlledEOF/reset retry+postdelaydrift/certnoRetry, pausedexpiry guardFIRST/withdraw redgreen;71focusedtests/fmt/clippy/ARM64check+rlib/staticx86 PASSreported. Root verified8amendedsource/doc hashes+26fileaggregateed1e1ec andARM64rlib; rebuiltx86artifact916a904b guestattempt3 PASSexit0/.159s with unchangedactualsocket/noWAN/noadvertisement. Originalattempts1/2 retained; sourcecorrectness re-reviewpending, production/realtraffic/guardgatesremainclosed. Controllerdriver now propagatesfailureexit; py_compilePASS.
+diff --git a/.superpowers/sdd/rust-v2/task-7-report.md b/.superpowers/sdd/rust-v2/task-7-report.md
+index 2185c27..d4ee8a5 100644
+--- a/.superpowers/sdd/rust-v2/task-7-report.md
++++ b/.superpowers/sdd/rust-v2/task-7-report.md
+@@ -1,12 +1,16 @@
+ # Task7 native monitoring worker implementer report
+ 
++Latest review-fix source: `59550207f81937024a6275e5472df60998fbfcae`.
++The appended round1 section binds current source and focused evidence; original
++implementation evidence/hashes below remain historical and are not overwritten.
++
+ Status: **DONE_WITH_CONCERNS**. Final implementation source is
+ `ad9b38d4e238c7e0418cbb7db822a7d23a66f97d`; implementation commit `3eb5dba`
+ adds the engine, and `ad9b38d` moves clock injection to dev dependencies only.
+ Worktree `/DATA/AppData/vprouter-rust-v2`, branch `rust/v2`. This report is a
+ separate report-only commit. Controller-owned task8/evidence/tools files were
+ left unstaged. No subagents, production reads/mutations, credential/state reads,
+ privileged mutations or external network tests were performed by this worker.
+ 
+ Production `start()` returns `StructuralGap` before runtime/client/socket/thread
+ creation. There is no production placement token constructor, activation flag,
+@@ -258,10 +262,166 @@ below bind exact bytes; no controller docs/tools are part of this source set.
+ | `crates/vprouter-worker/src/engine/tests.rs` | `90a7ea2c502b93161f56ceff0da8f32050493ded8038c16dcab7b9fea3fb5ccd` |
+ | `crates/vprouter-worker/src/engine.rs` | `8bc7a9d1cb86bcfe3ef4bf42add1f9187cd308dc68b9d5efe23358c83c60da43` |
+ | `crates/vprouter-worker/src/json.rs` | `4bb9f8db62feb8fb25507a43722e9943c0ea5c560d342253c3a2f49cd8cb92f1` |
+ | `crates/vprouter-worker/src/lab_main.rs` | `9844bf774b110660eb6f8d17fcbade6c7b3d532607bc6b93cc0ee681127ee20c` |
+ | `crates/vprouter-worker/src/lib.rs` | `f25cc3efc62b34f8d766e2367145cd9711ce1d5d8688b45219034e2a8f9ba971` |
+ | `crates/vprouter-worker/src/localapi.rs` | `9bcacc09656313f1657c4bdab754fad1d89e014502a54a9ffd0725374530e53c` |
+ | `crates/vprouter-worker/src/placement.rs` | `51c3d4da956934ae2966de4d6f5ad66ba1944f9ecbd0b4a58ab1aa41f56447bd` |
+ | `crates/vprouter-worker/src/provider.rs` | `b349e54d36d2efed4e358c8d0eab996ec33bb5e68e86485cdee3c26d4fa51baa` |
+ | `crates/vprouter-worker/src/publish.rs` | `92e651d9a36bdbd1b294620d05224252b069131773fd35ab175e41b8759b85dd` |
+ | `crates/vprouter-worker/src/tests.rs` | `14851fa871fa4de86740577f5dcecea7906c653835ba5da679eee51ffa5d7b03` |
++
++## Independent review fix round1
++
++Status: DONE_WITH_CONCERNS. Review at base
++`04ecfc6bb80640fd1d5f17249a134319c6f7335e` found specification FAIL / quality
++Needs fixes, two Important findings, no Critical/Minor. Review source is
++`.superpowers/sdd/rust-v2/task-7-review.md`. This section records implementation
++and verification, not independent re-review acceptance. Exact fix source commit
++`59550207f81937024a6275e5472df60998fbfcae` (`fix: retry native transport failures
++and enforce health expiry`). Only eight explicit owned source/test/doc paths
++were committed. Controller progress/task8 brief/oracle changes remain unstaged.
++
++Important1: Hyper established I/O and TLS negotiation could collapse genuine
++transient errors to permanent Malformed/Tls and suppress the allowed retry.
++The shared transport classification now follows at most eight typed causes,
++using io::Error::get_ref for nested I/O wrappers and Error::source otherwise.
++Explicit allowlisted ConnectionReset/Aborted/Refused, NotConnected, BrokenPipe,
++UnexpectedEof, TimedOut, Interrupted, WouldBlock, HostUnreachable,
++NetworkUnreachable/Down may retry. Any Rustls protocol/certificate error,
++nonallowlisted I/O kind or overlong chain overrides transient wrappers and is
++nonretryable. Hyper parse/user errors remain permanent; its typed incomplete/
++closed/cancelled cases retain transport behavior only absent a known permanent
++cause. No error-string parsing/logging, TLS verification relaxation, changed
++deadline, extra retry or dependency change was introduced.
++
++Controlled loopback regressions exercise actual EOF and TCP RST at three stages:
++TLS negotiation, established HTTP before response, and partial response body.
++Each of six cases runs both a successful single retry and drift immediately
++after the1s delay. Tests assert connection and HTTP request counts, five fresh
++structural checks on success versus three on drift, and an immediate structural
++check before the second attempt. Handshake failure has zero first-attempt HTTP
++requests; established failure has one. Genuine unknown-CA and wrong-hostname
++engine tests assert one connection/zero HTTP requests, one structural check and
++permanent Tls without retry. Existing malformed protocol/status/body and injected
++permanent/repeated-failure tests remain passing. A focused cause test covers
++permanent I/O, nested Rustls overriding ConnectionReset and an overlong chain.
++
++Important2: expiry previously happened inside observe after recovery lifecycle
++writes; expiry could also yield successful BLOCKED observation while Runner
++heartbeated without withdrawing. Minimal shared API `HealthMachine::expire(now)`
++extracts exactly the existing cached-evidence check/block behavior and reports
++whether evidence was revoked. `observe` uses it without changing its own
++semantics. Worker invokes it before sampling, before recovery advertisement and
++before replacing evidence. Revocation returns Structural through the existing
++error path so Runner notifies guard FIRST, withdraws/readbacks or invokes init,
++and publishes blocked state. A defensive check also rejects any successful
++observe that changes previously READY into another state. No production
++constructor/authority was added.
++
++Paused-clock tests cover exact45s and46s gaps while RECOVERING/READY and expiry
++during a sample starting at44s with2s provider work. No expired-streak offer
++occurs; after expiry exactly three renewed successes are required to recover,
++then a later fresh sample may offer. A real Unix guard Runner regression checks
++that the first request is `/v1/worker/block`, records receipt before withdrawal,
++asserts no provider/recovery offer or success heartbeat after the gap, and then
++checks a separate cancellation block/withdraw on shutdown. Core tests exercise
++partial STARTING/RECOVERING/READY streaks, exact45/>45 boundaries, no-evidence
++startup, repeat expiry, nonfinite/backwards/future-relative clock checks and
++handshake aging to180s. All use private synthetic boundary/loopback transports;
++actual guard enforcement is still NOT_RUN.
++
++Red/green evidence preserved in command outputs from this turn:
++
++```text
++cargo test -p vprouter-worker --lib real_transport_eof_and_reset_retry_only_after_fresh_checks -- --nocapture
++BEFORE: FAILED HandshakeEof drift=false; left Err(Tls), right Ok(()).
++AFTER: 1 passed,0 failed,12.05s (all12 fault/drift cases).
++cargo test -p vprouter-worker --lib recovering_expiry_before_sample_or_offer_resets_three_success_gate -- --nocapture
++BEFORE: FAILED left Ok(()), right Err(Structural).
++AFTER: 1 passed,0 failed.
++cargo test -p vprouter-worker --lib expired_ready_runner_notifies_guard_before_withdrawing_without_success_heartbeat -- --nocapture
++TEMPORARILY RESTORED ORIGINAL engine.rs FROM04ecfc6: FAILED;
++left POST /v1/worker/heartbeat, right POST /v1/worker/block;
++withdrawal preceded guard notification. Fixed source restored in finally.
++FIXED: 1 passed,0 failed.
++```
++
++Final focused commands/output at exact fix source (no new full-workspace claim):
++
++```text
++cargo test -p vprouter-worker --lib
++31 passed,0 failed;12.07s.
++cargo test -p vprouter-core --test health
++10 passed,0 failed.
++cargo test -p vprouter-worker -p vprouter-core --all-targets
++core:9+4+16+1+10=40 passed; worker31 passed; total71 passed,0 failed.
++custom localapi_lab: SKIP requires controller-owned disposable guest and --ignored.
++cargo clippy -p vprouter-worker -p vprouter-core --all-targets -- -D warnings
++Finished dev profile,exit0.
++cargo fmt --all -- --check
++exit0.
++git diff --check
++exit0.
++CC_aarch64_unknown_linux_musl="$PWD/target/toolchains/aarch64-linux-musl-cc" cargo check -p vprouter-worker -p vprouter-core --all-targets --target aarch64-unknown-linux-musl
++Finished dev profile,exit0.
++CC_aarch64_unknown_linux_musl="$PWD/target/toolchains/aarch64-linux-musl-cc" cargo build -p vprouter-worker --lib --target aarch64-unknown-linux-musl
++Finished dev profile,exit0.
++CC_x86_64_unknown_linux_musl="$PWD/target/toolchains/x86_64-linux-musl-cc" cargo rustc -p vprouter-worker --release --target x86_64-unknown-linux-musl --test localapi_lab -- -C relocation-model=static
++Finished release profile,exit0.
++```
++
++Final x86 lab path unchanged:
++`target/x86_64-unknown-linux-musl/release/deps/localapi_lab-4312258affff21a6`,
++SHA256 `916a904b0aa4cc97e744576c8eec770ab0a79c12a955a7ae1e051a49f3549599`.
++file identifies static ELF64 x86-64 EXEC, readelf confirms no INTERP/DYNAMIC;
++normal unprivileged invocation explicitly skips. ARM64 worker rlib SHA256
++`d7ab1c87e48a93e71cc80e392818126ebac66dff4498eed0b55d392cbd35c665`.
++ARM64 kernel/runtime execution still NOT_RUN. Original ARM64 static lab above was
++not rebuilt in this focused fix and is not presented as a current-source artifact.
++Pinned dependencies/Cargo.lock unchanged; original Zig origin/hash still applies.
++
++Current source-set SHA256
++`ed1e1ec0266190d005f3d63a5cf0f62f4d9834c98078a98585896db66715a69e`.
++Algorithm is the original Python sorted(Path)/NUL algorithm above, adding
++`crates/vprouter-core/src/state.rs` and `crates/vprouter-core/tests/health.rs` to
++the set before sorting. Unchanged source bytes retain their prior individual
++hashes; changed/added source and documentation hashes:
++
++| Source | SHA256 |
++| --- | --- |
++| crates/vprouter-core/src/state.rs | 2e0329971ec8893fdfeff5f52b2444fe0c40ba8fe665f68aaad38282f4304ea8 |
++| crates/vprouter-core/tests/health.rs | ef3a6ba666d38e62b9e491da99eb8cb7afe92492515628491ee9f71433be0772 |
++| crates/vprouter-worker/src/client.rs | 07e63883b809f6c714e23503f399d9a1aa5ddccc7e1689a884a820f732ec22c9 |
++| crates/vprouter-worker/src/engine.rs | 96a722abc752ec5393967e09c403a8e269acec0d85b9afb6a84ba97c880c24a2 |
++| crates/vprouter-worker/src/engine/tests.rs | fbc3bc30984ed9286e40e98f97f300c72ba7296ef758b0c70e6cb1a0be00a2d5 |
++| crates/vprouter-worker/src/provider.rs | c6c4731a33c84de13da3f4d21464bd6e26644140d9eec77af66b5a529b2195e8 |
++| crates/vprouter-worker/src/tests.rs | ad0eb0f192232e6abe30424fd618b733b7bc44d71b56ffdd6a3235e6fde00de5 |
++| docs/rust-v2/worker.md | 51c525d3002faca48752e5c939fac2bf4da59ea78462139b964832193445b1ae |
++
++No runtime source edits follow the advertised `5955020` candidate. All original
++task8+ actual placement, resolver, routing witness, guard/watchdog/authentication,
++preference/approval transition, traffic/DNS/IPv6/platform/fault/soak/reboot gates
++remain explicit and unverified; parser smoke alone cannot establish activation.
++
++### Controller exact rebuilt-parser attempt3
++
++Controller alone ran the new exact artifact through tracked driver
++`tools/worker-localapi-parser-oracle.py` (SHA256
++`44c34419c1fceb4766351921e9be250dff03e4e60304000df2ddbfeedf44d51b`), which now
++propagates harness failure as a nonzero process exit after recording JSON.
++Guest setup/source remains unchanged at SHA256
++`85503f2e7896351782e0b1ccc4ba944d32677ff5bac28a09ae62e6ccbcbf8a75`.
++
++```text
++python3 tools/worker-localapi-parser-oracle.py target/x86_64-unknown-linux-musl/release/deps/localapi_lab-4312258affff21a6 916a904b0aa4cc97e744576c8eec770ab0a79c12a955a7ae1e051a49f3549599 59550207f81937024a6275e5472df60998fbfcae
++```
++
++`target/lab-state/worker-localapi-run-3.json` records PASS_NATIVE_LOCALAPI_PARSER_ONLY,
++exit0/.159s at2026-10-24T15:12:05.877625Z, exact source `5955020` and artifact
++`916a904b`. Actual pinned daemon Running/online, NetfilterMode2,0 advertisements,
++guard_runtime:false and activation_ready:false. Private no-WAN/mount setup and
++matching actual socket device/inode were checked. No preference/state/daemon
++writes; production_changes:false. Native worker placement, real provider TLS and
++real client traffic remain NOT_RUN. Prior attempts1/2 and original artifacts
++remain historical evidence; this read-only parser smoke does not exercise the
++fixed monitoring loop against actual traffic or supply guard authority.
+diff --git a/.superpowers/sdd/rust-v2/task-7-review.md b/.superpowers/sdd/rust-v2/task-7-review.md
+new file mode 100644
+index 0000000..ad4ef4d
+--- /dev/null
++++ b/.superpowers/sdd/rust-v2/task-7-review.md
+@@ -0,0 +1,44 @@
++# Independent task7 review
++
++Reviewer /root/review_native_worker; range7bf59fc..04ecfc6.
++Spec compliance FAIL; Task quality Needs fixes. No Critical or Minor findings.
++
++## Strengths
++Production refuses before runtime creation; placement test-only; fixed provider,
++TLS verification, namespace binding, bounded strict parsing and redaction; retry
++rechecks before/after delay and after success; real controlled TLS/Unix tests;
++functional rule attributes retained without authorizing arbitrary layout.
++
++## Important1 — Real transient transport failures misclassified
++
++crates/vprouter-worker/src/client.rs:119 classifies Hyper I/O/body errors as
++Malformed unless incomplete-message/channel/cancellation. Genuine connection
++resets can skip retry. provider.rs:129 maps every TLS handshake error to permanent
++Tls, including underlying transport failures. Engine retries only HttpTransient,
++Transport, Deadline (engine.rs:207). Preserve bounded underlying I/O classification:
++eligible transient failures get one retry; certificate/hostname, malformed protocol
++and permanent failures remain nonretryable. Controlled transport regressions for
++reset/EOF during TLS negotiation and established HTTP I/O, checking request counts
++and fresh structural rechecks; retain certificate-refusal no-retry tests.
++
++## Important2 — Expiry after lifecycle decision / missing enforcement
++
++engine.rs:167 advertises based on cached Recovering before HealthMachine::observe
++expiry at180. Three successes then pause>=45s then one healthy sample can advertise
++using expired streak. READY expiry can enter Blocked then accept fresh sample and
++return Ok(Blocked); Engine discards returned state. Runner takes success branch
++at350, heartbeats and publishes BLOCKED without guard block or withdrawal. Apply
++freshness invalidation before lifecycle writes; revoked readiness must invoke
++fail-closed enforcement. Paused-clock regressions for RECOVERING and READY then
++>=45s gap: no premature advertisement; guard notification and withdrawal when
++readiness expires; renewed three-success gate before offering.
++
++## Cannot verify / cross-task disposition
++Actual placed worker/provider, actual prefs/approval transitions, independent guard
++enforcement/watchdog, real client traffic and platform acceptance remain NOT_RUN.
++Controller confirms these are explicit task8+ integration gates, not authority
++to enable production. Parser evidence retains the narrower claim.
++
++Reviewer read packaged diff in passes; focused outside-diff checks: HealthMachine
++expiry, native observation deadline and pinned Hyper variants. No changed source
++reopening, suite reruns, live/privileged/network actions or mutations.
+diff --git a/.superpowers/sdd/rust-v2/task-8-brief.md b/.superpowers/sdd/rust-v2/task-8-brief.md
+index 38a4ada..3c5d682 100644
+--- a/.superpowers/sdd/rust-v2/task-8-brief.md
++++ b/.superpowers/sdd/rust-v2/task-8-brief.md
+@@ -81,10 +81,18 @@ Integration gaps carried from task7: core Profile currently validates DNS string
+ but discards them. Retain approved resolver addresses in protected parsed profile
+ authority and bind provider DNS to that source; no host resolver/environment or
+ synthetic fallback. Current worker Plan intentionally rejects real Tailscale
+ rule/table52/link-local metadata: accept only independently observed pinned shapes
+ plus actual identity/control authority, remove/suppress unexpected IPv6 metadata
+ rather than weaken IPv6 containment. Worker draft ACK recorded:true is merely
+ observational; replace it with the independently enforced protocol stages above,
+ never interpret successful recording as quarantine. The bounded health publisher
+ can leave one blocking fsync thread; worker runtime shutdown must remain bounded
+ without waiting forever for that filesystem operation.
++
++Control-plane freshness must distinguish last heartbeat receipt from last complete
++verified provider/structure/identity sample. Ongoing heartbeats during bounded
++provider work cannot refresh stale readiness evidence or extend the45s verification
++window. Bind monotonic samples and sequences to exit/generation, and quarantine
++on stale verification even while the worker is responsive. Include real freeze/
++resume and delayed-provider tests; task7 expiry fix is necessary but does not
++replace independent guard enforcement.
+diff --git a/crates/vprouter-core/src/state.rs b/crates/vprouter-core/src/state.rs
+index 849d3c0..157dda6 100644
+--- a/crates/vprouter-core/src/state.rs
++++ b/crates/vprouter-core/src/state.rs
+@@ -101,27 +101,21 @@ impl HealthMachine {
+     }
+     pub fn state(&self) -> HealthState {
+         self.state
+     }
+     pub fn observe(&mut self, now: f64, evidence: Evidence) -> Result<HealthState> {
+         if matches!(self.state, HealthState::Stopping | HealthState::Failed) {
+             return Err(err(Reason::InvalidTransition));
+         }
+         // Status is observational. Revoke expired cached success here before a
+         // new healthy sample can extend an old streak or preserve READY.
+-        let expired = self
+-            .evidence
+-            .as_ref()
+-            .and_then(|previous| self.check(now, previous, false).err());
+-        if let Some(error) = expired {
+-            self.block(error.reason());
+-        }
++        self.expire(now);
+         if let Err(error) = self.check(now, &evidence, true) {
+             self.block(error.reason());
+             return Err(error);
+         }
+         self.last_now = Some(now);
+         self.last_provider_at = Some(evidence.provider_at);
+         self.last_structural_at = Some(evidence.structural_at);
+         self.successes = self.successes.saturating_add(1).min(3);
+         let ready_evidence = self.ready_evidence(now, &evidence);
+         if self.state == HealthState::Ready && !ready_evidence {
+@@ -135,20 +129,34 @@ impl HealthMachine {
+             self.state = HealthState::Ready;
+         }
+         self.reason = if self.state == HealthState::Recovering && !evidence.policy_approved {
+             Some(Reason::PolicyUnapproved)
+         } else {
+             None
+         };
+         self.evidence = Some(evidence);
+         Ok(self.state)
+     }
++    /// Revoke expired cached evidence before external lifecycle decisions.
++    /// Returns true only when evidence was present and has just been revoked;
++    /// callers must enforce withdrawal even if a new sample could be healthy.
++    pub fn expire(&mut self, now: f64) -> bool {
++        let expired = self
++            .evidence
++            .as_ref()
++            .and_then(|previous| self.check(now, previous, false).err());
++        if let Some(error) = expired {
++            self.block(error.reason());
++            return true;
++        }
++        false
++    }
+     fn check(&self, now: f64, e: &Evidence, fresh_sample: bool) -> Result<()> {
+         if !valid_time(now)
+             || self.last_now.is_some_and(|last| now < last)
+             || !fresh(now, e.provider_at)
+             || !fresh(now, e.structural_at)
+             || !fresh(now, e.heartbeat_at)
+             || e.verified_at.is_some_and(|t| !fresh(now, t))
+             || e.handshake_age_seconds.is_some_and(|age| !valid_time(age))
+         {
+             return Err(err(Reason::StaleEvidence));
+diff --git a/crates/vprouter-core/tests/health.rs b/crates/vprouter-core/tests/health.rs
+index 7f914c5..bd1cb74 100644
+--- a/crates/vprouter-core/tests/health.rs
++++ b/crates/vprouter-core/tests/health.rs
+@@ -17,20 +17,62 @@ fn healthy(at: f64) -> Evidence {
+         egress: Some("185.65.134.88".parse().unwrap()),
+         verified_at: Some(at),
+         dns: VerificationResult::NotTested,
+         ipv6: VerificationResult::NotTested,
+     }
+ }
+ fn machine() -> HealthMachine {
+     HealthMachine::new(ExitMode::Mullvad, Some("de-fra-wg-404"), "node123").unwrap()
+ }
+ #[test]
++fn explicit_expiry_preserves_empty_startup_and_checks_cached_boundaries() {
++    let mut empty = machine();
++    assert!(!empty.expire(0.0));
++    assert!(!empty.expire(100.0));
++    assert_eq!(empty.state(), HealthState::Starting);
++    for count in 1..=4 {
++        for gap in [45.0, 46.0] {
++            let mut m = machine();
++            for n in 0..count {
++                let at = 100.0 + n as f64 * 5.0;
++                m.observe(at, healthy(at)).unwrap();
++            }
++            let at = 100.0 + (count - 1) as f64 * 5.0;
++            assert!(!m.expire(at + 44.999));
++            assert!(m.expire(at + gap));
++            assert_eq!(m.state(), HealthState::Blocked);
++            assert!(!m.expire(at + gap)); // already revoked
++            for n in 0..2 {
++                let now = at + gap + n as f64 * 5.0;
++                assert_eq!(m.observe(now, healthy(now)).unwrap(), HealthState::Blocked);
++            }
++            let now = at + gap + 10.0;
++            assert_eq!(
++                m.observe(now, healthy(now)).unwrap(),
++                HealthState::Recovering
++            );
++        }
++    }
++    for now in [99.0, -1.0, f64::NAN, f64::INFINITY] {
++        let mut m = machine();
++        m.observe(100.0, healthy(100.0)).unwrap();
++        assert!(m.expire(now));
++        assert_eq!(m.state(), HealthState::Blocked);
++    }
++    let mut m = machine();
++    let mut e = healthy(100.0);
++    e.handshake_age_seconds = Some(179.0);
++    m.observe(100.0, e).unwrap();
++    assert!(!m.expire(100.999));
++    assert!(m.expire(101.0));
++}
++#[test]
+ fn startup_requires_three_fresh_checks_then_online_approval() {
+     let mut m = machine();
+     assert_eq!(
+         m.observe(100.0, healthy(100.0)).unwrap(),
+         HealthState::Starting
+     );
+     assert_eq!(
+         m.observe(105.0, healthy(105.0)).unwrap(),
+         HealthState::Starting
+     );
+diff --git a/crates/vprouter-worker/src/client.rs b/crates/vprouter-worker/src/client.rs
+index 1755b7e..5858472 100644
+--- a/crates/vprouter-worker/src/client.rs
++++ b/crates/vprouter-worker/src/client.rs
+@@ -112,25 +112,70 @@ impl Http {
+                 }
+                 body.extend_from_slice(&data);
+             }
+         }
+         Ok(Reply { body })
+     }
+ }
+ fn http_error(e: hyper::Error) -> Error {
+     if e.is_parse() || e.is_user() {
+         Error::Malformed
+-    } else if e.is_incomplete_message() || e.is_closed() || e.is_canceled() {
+-        Error::Transport
+     } else {
+-        Error::Malformed
++        match transient_io(&e) {
++            Some(true) => Error::Transport,
++            Some(false) => Error::Malformed,
++            None if e.is_incomplete_message() || e.is_closed() || e.is_canceled() => {
++                Error::Transport
++            }
++            None => Error::Malformed,
++        }
++    }
++}
++/// Inspect at most eight typed causes, never error strings. A rustls protocol/
++/// certificate error or non-allowlisted I/O kind overrides transient wrappers.
++/// Unknown/overlong chains do not authorize a retry.
++pub(crate) fn transient_io(error: &(dyn std::error::Error + 'static)) -> Option<bool> {
++    use std::io::ErrorKind;
++    let mut cause = Some(error);
++    let mut io = None;
++    for _ in 0..8 {
++        let Some(error) = cause else {
++            return io;
++        };
++        if error.is::<rustls::Error>() {
++            return Some(false);
++        }
++        cause = if let Some(error) = error.downcast_ref::<std::io::Error>() {
++            let eligible = matches!(
++                error.kind(),
++                ErrorKind::ConnectionReset
++                    | ErrorKind::ConnectionAborted
++                    | ErrorKind::ConnectionRefused
++                    | ErrorKind::NotConnected
++                    | ErrorKind::BrokenPipe
++                    | ErrorKind::UnexpectedEof
++                    | ErrorKind::TimedOut
++                    | ErrorKind::Interrupted
++                    | ErrorKind::WouldBlock
++                    | ErrorKind::HostUnreachable
++                    | ErrorKind::NetworkUnreachable
++                    | ErrorKind::NetworkDown
++            );
++            io = Some(io.unwrap_or(true) && eligible);
++            error
++                .get_ref()
++                .map(|e| e as &(dyn std::error::Error + 'static))
++        } else {
++            error.source()
++        };
+     }
++    if cause.is_some() { Some(false) } else { io }
+ }
+ pub(crate) async fn unix_request(
+     socket: &Path,
+     method: &str,
+     path: &str,
+     body: &[u8],
+     limit: usize,
+ ) -> Result<Reply> {
+     timeout(LOCAL, async {
+         let stream = UnixStream::connect(socket)
+diff --git a/crates/vprouter-worker/src/engine.rs b/crates/vprouter-worker/src/engine.rs
+index 99a90c0..5de3303 100644
+--- a/crates/vprouter-worker/src/engine.rs
++++ b/crates/vprouter-worker/src/engine.rs
+@@ -132,81 +132,96 @@ impl<I: Inputs> Engine<I> {
+             .await
+             .map_err(|_| Error::Deadline)
+             .and_then(|r| r);
+         if let Err(error) = result {
+             self.inputs.cancel();
+             self.machine.block(reason(error));
+         }
+         result
+     }
+     async fn sample_inner(&mut self) -> Result<()> {
++        self.cached_fresh()?;
+         if !self.initialized {
+             self.inputs.initialize().await?;
+             self.initialized = true;
+         }
+         self.inputs.structure().await?;
+         let provider = match self.inputs.provider().await {
+             Ok(p) => p,
+             Err(e) if eligible(e) => {
+                 // Recheck once immediately after failure and once AFTER delay;
+                 // neither a cached handshake nor pre-delay audit authorizes retry.
+                 self.inputs.structure().await?;
+                 time::sleep(Duration::from_secs(1)).await;
+                 self.inputs.structure().await?;
+                 self.inputs.provider().await?
+             }
+             Err(e) => return Err(e),
+         };
+         let provider_at = self.origin.elapsed().as_secs_f64();
+         let structural = self.inputs.structure().await?;
+         let mut local = self.inputs.local().await?;
++        self.cached_fresh()?;
+         // This private engine has no production constructor. Task8 must bind
+         // retained health-only bootstrap enforcement before this recovery write.
+         // It is possible only after three independent prior provider+structure samples
+         // and a fresh online stable identity observation in THIS sample.
+         // ExitNodeOption is offered&&approved: false while withdrawn is normal.
+         if self.machine.state() == HealthState::Recovering && !local.advertised {
+             self.inputs.advertise().await?;
+             local = self.inputs.local().await?;
+             if !local.advertised {
+                 return Err(Error::Preferences);
+             }
+         }
+         // LocalAPI may have changed routes. Audit the ENTIRE structure again.
+         let final_structure = self.inputs.structure().await?;
+         let now = self.origin.elapsed().as_secs_f64();
+         if now - structural.at >= 45.0 {
+             return Err(Error::Structural);
+         }
+-        self.machine
++        self.cached_fresh()?;
++        let previous = self.machine.state();
++        let state = self
++            .machine
+             .observe(
+                 now,
+                 Evidence {
+                     provider_ok: true,
+                     structural_ok: true,
+                     provider_at,
+                     structural_at: final_structure.at,
+                     heartbeat_at: now,
+                     handshake_age_seconds: Some(final_structure.handshake_age),
+                     online: true,
+                     policy_approved: local.advertised && local.approved,
+                     server: Some(provider.server),
+                     node_id: Some(self.node.clone()),
+                     egress: Some(provider.ip),
+                     verified_at: Some(provider_at),
+                     dns: VerificationResult::NotTested,
+                     ipv6: VerificationResult::NotTested,
+                 },
+             )
+             .map_err(|_| Error::Structural)?;
++        if previous == HealthState::Ready && state != HealthState::Ready {
++            return Err(Error::Structural);
++        }
+         Ok(())
+     }
++    fn cached_fresh(&mut self) -> Result<()> {
++        if self.machine.expire(self.origin.elapsed().as_secs_f64()) {
++            Err(Error::Structural)
++        } else {
++            Ok(())
++        }
++    }
+ }
+ fn eligible(e: Error) -> bool {
+     matches!(e, Error::HttpTransient | Error::Transport | Error::Deadline)
+ }
+ /// Draft private task8 wire boundary: explicit ACK, no quarantine removal
+ /// request exists. ACK means recorded ONLY, never enforcement or quarantine.
+ // Task8 must bind peer, exit/generation and retained health-only bootstrap
+ // authority outside this observational notification transport.
+ struct Control {
+     placed: Rc<Placed>,
+diff --git a/crates/vprouter-worker/src/engine/tests.rs b/crates/vprouter-worker/src/engine/tests.rs
+index 7e36a9c..422b0b2 100644
+--- a/crates/vprouter-worker/src/engine/tests.rs
++++ b/crates/vprouter-worker/src/engine/tests.rs
+@@ -3,20 +3,22 @@ use std::{cell::RefCell, collections::VecDeque};
+ #[derive(Default)]
+ struct Faults {
+     provider: VecDeque<Result<Confirmation>>,
+     structure_at: Option<usize>,
+     structures: usize,
+     advertised: bool,
+     approved: bool,
+     age: f64,
+     withdraw_fail: bool,
+     delay: Duration,
++    guard_seen: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
++    stop_after_withdraw: Option<watch::Sender<bool>>,
+ }
+ struct Script {
+     origin: Instant,
+     faults: Rc<RefCell<Faults>>,
+     events: Rc<RefCell<Vec<(&'static str, Duration)>>>,
+ }
+ impl Script {
+     fn event(&self, event: &'static str) {
+         self.events
+             .borrow_mut()
+@@ -62,20 +64,29 @@ impl Inputs for Script {
+         })
+     }
+     async fn advertise(&mut self) -> Result<()> {
+         self.event("advertise");
+         self.faults.borrow_mut().advertised = true;
+         Ok(())
+     }
+     async fn withdraw(&mut self) -> Result<()> {
+         self.event("withdraw");
+         let mut f = self.faults.borrow_mut();
++        if let Some(seen) = &f.guard_seen {
++            assert!(
++                seen.load(std::sync::atomic::Ordering::SeqCst),
++                "withdrawal preceded guard notification"
++            );
++        }
++        if let Some(stop) = f.stop_after_withdraw.take() {
++            stop.send(true).unwrap();
++        }
+         f.advertised = false;
+         if f.withdraw_fail {
+             Err(Error::Transport)
+         } else {
+             Ok(())
+         }
+     }
+     fn cancel(&mut self) {
+         self.event("cancel");
+     }
+@@ -349,35 +360,247 @@ struct TlsInputs {
+     provider: Provider,
+ }
+ impl Inputs for TlsInputs {
+     async fn initialize(&mut self) -> Result<()> {
+         self.script.initialize().await
+     }
+     async fn structure(&mut self) -> Result<Structural> {
+         self.script.structure().await
+     }
+     async fn provider(&mut self) -> Result<Confirmation> {
++        self.script.event("provider");
+         self.provider.confirm().await
+     }
+     async fn local(&mut self) -> Result<Observation> {
+         self.script.local().await
+     }
+     async fn advertise(&mut self) -> Result<()> {
+         self.script.advertise().await
+     }
+     async fn withdraw(&mut self) -> Result<()> {
+         self.script.withdraw().await
+     }
+     fn cancel(&mut self) {
+         self.provider.cancel();
+     }
+ }
++
++#[tokio::test]
++async fn real_transport_eof_and_reset_retry_only_after_fresh_checks() {
++    use crate::tests::{TlsMock, TransportFault};
++    use std::sync::atomic::Ordering;
++    for fault in [
++        TransportFault::HandshakeEof,
++        TransportFault::HandshakeReset,
++        TransportFault::HttpEof,
++        TransportFault::HttpReset,
++        TransportFault::BodyEof,
++        TransportFault::BodyReset,
++    ] {
++        for drift in [false, true] {
++            let server = TlsMock::fault_then_success(fault).await;
++            let fixture = engine();
++            if drift {
++                fixture.inputs.faults.borrow_mut().structure_at = Some(3);
++            }
++            let mut e = Engine::new(
++                TlsInputs {
++                    script: fixture.inputs,
++                    provider: server.provider(),
++                },
++                ExitMode::Mullvad,
++                "de-fra-wg-404",
++                "n123",
++                fixture.origin,
++            )
++            .unwrap();
++            let start = Instant::now();
++            assert_eq!(
++                e.sample().await,
++                if drift {
++                    Err(Error::Structural)
++                } else {
++                    Ok(())
++                },
++                "{fault:?}, drift={drift}"
++            );
++            assert!(start.elapsed() >= Duration::from_secs(1));
++            assert_eq!(
++                server.connections.load(Ordering::Relaxed),
++                if drift { 1 } else { 2 },
++                "{fault:?}"
++            );
++            let handshake = matches!(
++                fault,
++                TransportFault::HandshakeEof | TransportFault::HandshakeReset
++            );
++            assert_eq!(
++                server.requests.load(Ordering::Relaxed),
++                usize::from(!handshake) + usize::from(!drift)
++            );
++            let events = e.inputs.script.events.borrow();
++            assert_eq!(
++                events.iter().filter(|(s, _)| *s == "structure").count(),
++                if drift { 3 } else { 5 }
++            );
++            let providers: Vec<_> = events
++                .iter()
++                .enumerate()
++                .filter(|(_, (s, _))| *s == "provider")
++                .collect();
++            assert_eq!(providers.len(), if drift { 1 } else { 2 });
++            if !drift {
++                let (second, (_, at)) = providers[1];
++                assert_eq!(events[second - 1].0, "structure");
++                assert!(at.saturating_sub(providers[0].1.1) >= Duration::from_secs(1));
++            }
++        }
++    }
++}
++
++#[tokio::test]
++async fn real_certificate_refusal_is_not_retried_by_engine() {
++    use crate::tests::{PROVIDER, TlsMock, response};
++    use std::sync::atomic::Ordering;
++    for name in ["wrong.invalid", "am.i.mullvad.net"] {
++        let server = TlsMock::new(name, vec![response(200, PROVIDER)], 1).await;
++        let fixture = engine();
++        let mut provider = server.provider();
++        if name == "am.i.mullvad.net" {
++            provider = Provider::synthetic(
++                Rc::new(Placed::synthetic()),
++                rustls::RootCertStore::empty(),
++                server.address(),
++            );
++        }
++        let mut e = Engine::new(
++            TlsInputs {
++                script: fixture.inputs,
++                provider,
++            },
++            ExitMode::Mullvad,
++            "de-fra-wg-404",
++            "n123",
++            fixture.origin,
++        )
++        .unwrap();
++        assert_eq!(e.sample().await, Err(Error::Tls));
++        assert_eq!(server.connections.load(Ordering::Relaxed), 1);
++        assert_eq!(server.requests.load(Ordering::Relaxed), 0);
++        assert_eq!(e.inputs.script.faults.borrow().structures, 1);
++    }
++}
++
++#[tokio::test(start_paused = true)]
++async fn recovering_expiry_before_sample_or_offer_resets_three_success_gate() {
++    for (gap, delay) in [(45, 0), (46, 0), (44, 2)] {
++        let mut e = engine();
++        for n in 0..3 {
++            if n > 0 {
++                time::advance(CADENCE).await;
++            }
++            e.sample().await.unwrap();
++        }
++        assert_eq!(e.machine.state(), HealthState::Recovering);
++        time::advance(Duration::from_secs(gap)).await;
++        e.inputs.faults.borrow_mut().delay = Duration::from_secs(delay);
++        assert_eq!(e.sample().await, Err(Error::Structural));
++        e.inputs.faults.borrow_mut().delay = Duration::ZERO;
++        assert_eq!(count(&e, "advertise"), 0);
++        assert_eq!(e.machine.state(), HealthState::Blocked);
++        for _ in 0..3 {
++            e.sample().await.unwrap();
++            assert_eq!(count(&e, "advertise"), 0);
++            time::advance(CADENCE).await;
++        }
++        assert_eq!(e.machine.state(), HealthState::Recovering);
++        e.sample().await.unwrap();
++        assert_eq!(count(&e, "advertise"), 1);
++    }
++}
++
++#[tokio::test]
++async fn expired_ready_runner_notifies_guard_before_withdrawing_without_success_heartbeat() {
++    use crate::tests::{json_response, read_request};
++    use std::sync::{
++        Arc,
++        atomic::{AtomicBool, Ordering},
++    };
++    use tokio::{io::AsyncWriteExt, net::UnixListener};
++    for gap in [45, 46] {
++        time::pause();
++        let mut engine = engine();
++        engine.inputs.faults.borrow_mut().approved = true;
++        for n in 0..4 {
++            if n > 0 {
++                time::advance(CADENCE).await;
++            }
++            engine.sample().await.unwrap();
++        }
++        assert_eq!(engine.machine.state(), HealthState::Ready);
++        assert_eq!(count(&engine, "advertise"), 1);
++        let providers_before = count(&engine, "provider");
++        time::advance(Duration::from_secs(gap)).await;
++        time::resume();
++        let (publisher, path) = publisher();
++        let guard = path.join("guard.sock");
++        let listener = UnixListener::bind(&guard).unwrap();
++        let seen = Arc::new(AtomicBool::new(false));
++        let guard_seen = seen.clone();
++        let server = tokio::spawn(async move {
++            for (sequence, reason) in [(1, "structural"), (2, "cancelled")] {
++                let (mut socket, _) = listener.accept().await.unwrap();
++                let request = read_request(&mut socket).await;
++                assert_eq!((&*request.0, &*request.1), ("POST", "/v1/worker/block"));
++                assert_eq!(
++                    serde_json::from_slice::<serde_json::Value>(&request.2).unwrap(),
++                    serde_json::json!({"version":1,"sequence":sequence,"reason":reason})
++                );
++                guard_seen.store(true, Ordering::SeqCst);
++                socket
++                    .write_all(&json_response(
++                        serde_json::json!({"version":1,"sequence":sequence,"recorded":true}),
++                    ))
++                    .await
++                    .unwrap();
++                socket.shutdown().await.unwrap();
++            }
++        });
++        let (stop, rx) = watch::channel(false);
++        engine.inputs.faults.borrow_mut().guard_seen = Some(seen);
++        engine.inputs.faults.borrow_mut().stop_after_withdraw = Some(stop);
++        let mut runner = Runner {
++            engine,
++            publisher,
++            control: Control {
++                placed: Rc::new(Placed::synthetic()),
++                guard,
++                init: path.join("unused"),
++                sequence: 0,
++            },
++        };
++        time::timeout(
++            Duration::from_secs(4),
++            runner.run(rx, "deployment", "exit", 1),
++        )
++        .await
++        .unwrap()
++        .unwrap();
++        server.await.unwrap();
++        assert_eq!(count(&runner.engine, "provider"), providers_before);
++        assert_eq!(count(&runner.engine, "advertise"), 1);
++        assert_eq!(count(&runner.engine, "withdraw"), 2); // expiry, then shutdown
++        assert!(!runner.engine.inputs.faults.borrow().advertised);
++        assert_eq!(runner.control.sequence, 2); // both blocks, no success heartbeat
++        std::fs::remove_dir_all(path).unwrap();
++    }
++}
+ #[tokio::test]
+ async fn real_controlled_tls_retry_and_post_delay_drift_use_the_same_engine() {
+     use crate::tests::{PROVIDER, TlsMock, response};
+     for drift in [false, true] {
+         let replies = if drift {
+             vec![response(503, b"SYNTHETIC_SECRET")]
+         } else {
+             vec![response(503, b"SYNTHETIC_SECRET"), response(200, PROVIDER)]
+         };
+         let server = TlsMock::new("am.i.mullvad.net", replies, if drift { 1 } else { 2 }).await;
+diff --git a/crates/vprouter-worker/src/provider.rs b/crates/vprouter-worker/src/provider.rs
+index 5018d70..7498b44 100644
+--- a/crates/vprouter-worker/src/provider.rs
++++ b/crates/vprouter-worker/src/provider.rs
+@@ -119,25 +119,27 @@ impl Provider {
+                 )),
+             };
+             #[cfg(not(test))]
+             let address = SocketAddrV4::new(dns::resolve(self.dns).await?, 443);
+             self.placed.check()?;
+             let tcp = TcpStream::connect(address)
+                 .await
+                 .map_err(|_| Error::Transport)?;
+             let name =
+                 rustls::pki_types::ServerName::try_from(dns::PROVIDER).map_err(|_| Error::Tls)?;
+-            let tls = self
+-                .connector
+-                .connect(name, tcp)
+-                .await
+-                .map_err(|_| Error::Tls)?;
++            let tls = self.connector.connect(name, tcp).await.map_err(|e| {
++                if crate::client::transient_io(&e) == Some(true) {
++                    Error::Transport
++                } else {
++                    Error::Tls
++                }
++            })?;
+             self.http = Some(Http::connect(tls).await?);
+         }
+         let reply = self
+             .http
+             .as_mut()
+             .ok_or(Error::Transport)?
+             .request("GET", "/json", dns::PROVIDER, b"", LIMIT)
+             .await?;
+         parse(&reply.body, &self.expected)
+     }
+diff --git a/crates/vprouter-worker/src/tests.rs b/crates/vprouter-worker/src/tests.rs
+index 56c1c37..07cb02c 100644
+--- a/crates/vprouter-worker/src/tests.rs
++++ b/crates/vprouter-worker/src/tests.rs
+@@ -143,75 +143,187 @@ fn certificates(name: &str) -> (rustls::RootCertStore, rustls::ServerConfig) {
+         PrivatePkcs8KeyDer::from(key.serialize_der()).into(),
+     )
+     .unwrap();
+     (roots, server)
+ }
+ pub(crate) struct TlsMock {
+     address: SocketAddr,
+     roots: rustls::RootCertStore,
+     task: JoinHandle<()>,
+     pub(crate) connections: Arc<AtomicUsize>,
++    pub(crate) requests: Arc<AtomicUsize>,
++}
++#[derive(Clone, Copy, Debug)]
++pub(crate) enum TransportFault {
++    HandshakeEof,
++    HandshakeReset,
++    HttpEof,
++    HttpReset,
++    BodyEof,
++    BodyReset,
+ }
+ impl Drop for TlsMock {
+     fn drop(&mut self) {
+         self.task.abort();
+     }
+ }
+ impl TlsMock {
++    pub(crate) fn address(&self) -> SocketAddr {
++        self.address
++    }
+     pub(crate) async fn new(name: &str, replies: Vec<Vec<u8>>, connections: usize) -> Self {
+         let (roots, config) = certificates(name);
+         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+             .await
+             .unwrap();
+         let address = listener.local_addr().unwrap();
+         let accept = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+         let counter = Arc::new(AtomicUsize::new(0));
+         let c = counter.clone();
++        let requests = Arc::new(AtomicUsize::new(0));
++        let rcount = requests.clone();
+         let task = tokio::spawn(async move {
+             let per_connection = replies.len() / connections;
+             let mut replies = replies.into_iter();
+             for _ in 0..connections {
+                 let (stream, _) = listener.accept().await.unwrap();
+                 c.fetch_add(1, Ordering::Relaxed);
+                 let Ok(mut stream) = accept.accept(stream).await else {
+                     return;
+                 };
+                 for _ in 0..per_connection {
+                     let r = read_request(&mut stream).await;
++                    rcount.fetch_add(1, Ordering::Relaxed);
+                     assert_eq!((&*r.0, &*r.1, r.2.is_empty()), ("GET", "/json", true));
+                     stream.write_all(&replies.next().unwrap()).await.unwrap();
+                     stream.flush().await.unwrap();
+                 }
+                 // Graceful TLS close_notify avoids an accidental EOF oracle.
+                 let _ = stream.shutdown().await;
+             }
+         });
+         Self {
+             address,
+             roots,
+             task,
+             connections: counter,
++            requests,
++        }
++    }
++    pub(crate) async fn fault_then_success(fault: TransportFault) -> Self {
++        let (roots, config) = certificates("am.i.mullvad.net");
++        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
++            .await
++            .unwrap();
++        let address = listener.local_addr().unwrap();
++        let accept = tokio_rustls::TlsAcceptor::from(Arc::new(config));
++        let connections = Arc::new(AtomicUsize::new(0));
++        let requests = Arc::new(AtomicUsize::new(0));
++        let c = connections.clone();
++        let r = requests.clone();
++        let task = tokio::spawn(async move {
++            for attempt in 0..2 {
++                let (mut tcp, _) = listener.accept().await.unwrap();
++                c.fetch_add(1, Ordering::Relaxed);
++                if attempt == 0
++                    && matches!(
++                        fault,
++                        TransportFault::HandshakeEof | TransportFault::HandshakeReset
++                    )
++                {
++                    // Consume ClientHello before FIN so EOF is not accidentally RST.
++                    assert!(tcp.read(&mut [0; 4096]).await.unwrap() > 0);
++                    if matches!(fault, TransportFault::HandshakeReset) {
++                        rustix::net::sockopt::set_socket_linger(&tcp, Some(Duration::ZERO))
++                            .unwrap();
++                    } else {
++                        tcp.shutdown().await.unwrap();
++                    }
++                    drop(tcp);
++                    continue;
++                }
++                let mut tls = accept.accept(tcp).await.unwrap();
++                let request = read_request(&mut tls).await;
++                assert_eq!((&*request.0, &*request.1), ("GET", "/json"));
++                r.fetch_add(1, Ordering::Relaxed);
++                if attempt == 0 {
++                    if matches!(fault, TransportFault::BodyEof | TransportFault::BodyReset) {
++                        tls.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 200\r\n\r\n{")
++                            .await
++                            .unwrap();
++                        tls.flush().await.unwrap();
++                    }
++                    if matches!(fault, TransportFault::HttpReset | TransportFault::BodyReset) {
++                        rustix::net::sockopt::set_socket_linger(
++                            tls.get_ref().0,
++                            Some(Duration::ZERO),
++                        )
++                        .unwrap();
++                    }
++                    // Deliberately omit close_notify: exercise actual truncated TLS I/O.
++                    drop(tls);
++                } else {
++                    tls.write_all(&response(200, PROVIDER)).await.unwrap();
++                    tls.flush().await.unwrap();
++                    let _ = tls.shutdown().await;
++                }
++            }
++        });
++        Self {
++            address,
++            roots,
++            task,
++            connections,
++            requests,
+         }
+     }
+     pub(crate) fn provider(&self) -> provider::Provider {
+         provider::Provider::synthetic(
+             Rc::new(Placed::synthetic()),
+             self.roots.clone(),
+             self.address,
+         )
+     }
+ }
+ #[test]
+ fn production_has_no_authority_bypass() {
+     assert_eq!(crate::start(), Err(Error::StructuralGap));
+ }
+ #[test]
++fn transport_cause_inspection_is_bounded_and_protocol_errors_override_io() {
++    use std::io::{Error as Io, ErrorKind};
++    for kind in [
++        ErrorKind::ConnectionReset,
++        ErrorKind::UnexpectedEof,
++        ErrorKind::TimedOut,
++    ] {
++        assert_eq!(client::transient_io(&Io::from(kind)), Some(true));
++    }
++    for kind in [
++        ErrorKind::InvalidData,
++        ErrorKind::PermissionDenied,
++        ErrorKind::InvalidInput,
++    ] {
++        assert_eq!(client::transient_io(&Io::from(kind)), Some(false));
++    }
++    let wrapped_protocol = Io::new(
++        ErrorKind::ConnectionReset,
++        rustls::Error::InvalidMessage(rustls::InvalidMessage::InvalidContentType),
++    );
++    assert_eq!(client::transient_io(&wrapped_protocol), Some(false));
++    let mut nested = Io::from(ErrorKind::ConnectionReset);
++    for _ in 0..8 {
++        nested = Io::new(ErrorKind::ConnectionReset, nested);
++    }
++    assert_eq!(client::transient_io(&nested), Some(false));
++}
++#[test]
+ fn provider_strict_shape_negative_server_duplicate_types_and_ip() {
+     assert!(provider::parse(PROVIDER, "de-fra-wg-404").is_ok());
+     for bytes in [
+         br#"{"mullvad_exit_ip":true,"mullvad_exit_ip":false,"ip":"1.2.3.4","mullvad_exit_ip_hostname":"de-fra-wg-404"}"#.as_slice(),
+         br#"{"mullvad_exit_ip":"true","ip":"1.2.3.4","mullvad_exit_ip_hostname":"de-fra-wg-404"}"#,
+         br#"{"mullvad_exit_ip":true,"ip":123,"mullvad_exit_ip_hostname":"de-fra-wg-404"}"#,
+         br#"{"mullvad_exit_ip":true,"ip":"1.2.3.4","mullvad_exit_ip_hostname":null}"#,
+         br#"{"mullvad_exit_ip":true,"ip":"1.2.3.4","mullvad_exit_ip_hostname":"de-fra-wg-404","other":{"k":1,"k":2}}"#,
+     ] {assert_eq!(provider::parse(bytes,"de-fra-wg-404"),Err(Error::Malformed));}
+     for ip in [
+diff --git a/docs/rust-v2/worker-localapi-lab-evidence.json b/docs/rust-v2/worker-localapi-lab-evidence.json
+index deebeb0..dee0749 100644
+--- a/docs/rust-v2/worker-localapi-lab-evidence.json
++++ b/docs/rust-v2/worker-localapi-lab-evidence.json
+@@ -1,16 +1,16 @@
+ {
+   "schema_version": 1,
+   "authority": "controller_owned_disposable_guest_read_only_parser_only",
+-  "source_commit": "ad9b38d4e238c7e0418cbb7db822a7d23a66f97d",
+-  "source_set_sha256": "050ad3d3a39820e203414f1c0ad4b4e018cb61c7c9000defee7a4f1b1cc6cd84",
+-  "controller_verified_source_files": 24,
++  "source_commit": "59550207f81937024a6275e5472df60998fbfcae",
++  "source_set_sha256": "ed1e1ec0266190d005f3d63a5cf0f62f4d9834c98078a98585896db66715a69e",
++  "controller_verified_source_files": 26,
+   "attempts": [
+     {
+       "observed_at_utc": "2026-10-24T14:57:47.292741+00:00",
+       "source_commit": "ad9b38d4e238c7e0418cbb7db822a7d23a66f97d",
+       "artifact_sha256": "b00029b8b140c473212e3f90fd7a4d3ffcb6b7d243263121812f787d006fc1f2",
+       "setup_sha256": "b7313ebc93dc0f82625f5b2fa77b62728e922cf699556889bba79d2e46dd2ae0",
+       "exit_code": 1,
+       "wall_seconds": 0.191,
+       "stdout": "",
+       "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 19, in <module>\n  File \"/usr/lib/python3.13/pathlib/_local.py\", line 517, in stat\n    return os.stat(self, follow_symlinks=follow_symlinks)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: '/run/tailscale/tailscaled.sock'\n",
+@@ -27,28 +27,60 @@
+       "setup_sha256": "85503f2e7896351782e0b1ccc4ba944d32677ff5bac28a09ae62e6ccbcbf8a75",
+       "exit_code": 0,
+       "wall_seconds": 0.15,
+       "stdout": "{\"container_id\": \"b6ef3d7e8b772fce99595e35a35be0194ec12c18920183efeb3c9a0112934f0d\", \"source_pid\": 1269, \"private_mount_and_no_wan_namespace\": true, \"same_actual_socket_inode\": true, \"exit_code\": 0, \"stdout\": \"{\\\"activation_ready\\\":false,\\\"advertised_route_count\\\":0,\\\"guard_runtime\\\":false,\\\"netfilter_mode\\\":2,\\\"online\\\":true,\\\"running\\\":true,\\\"version_pinned\\\":true}\\n\", \"stderr\": \"\", \"production_changes\": false, \"native_worker_placement\": \"NOT_RUN\", \"native_tls_provider\": \"NOT_RUN\", \"real_client_traffic\": \"NOT_RUN\"}\n",
+       "stderr": "",
+       "result": "PASS_NATIVE_LOCALAPI_PARSER_ONLY",
+       "native_worker_placement": "NOT_RUN",
+       "native_tls_provider": "NOT_RUN",
+       "real_client_traffic": "NOT_RUN",
+       "production_changes": false
++    },
++    {
++      "observed_at_utc": "2026-10-24T15:12:05.877625+00:00",
++      "source_commit": "59550207f81937024a6275e5472df60998fbfcae",
++      "artifact_sha256": "916a904b0aa4cc97e744576c8eec770ab0a79c12a955a7ae1e051a49f3549599",
++      "setup_sha256": "85503f2e7896351782e0b1ccc4ba944d32677ff5bac28a09ae62e6ccbcbf8a75",
++      "exit_code": 0,
++      "wall_seconds": 0.159,
++      "stdout": "{\"container_id\": \"b6ef3d7e8b772fce99595e35a35be0194ec12c18920183efeb3c9a0112934f0d\", \"source_pid\": 1269, \"private_mount_and_no_wan_namespace\": true, \"same_actual_socket_inode\": true, \"exit_code\": 0, \"stdout\": \"{\\\"activation_ready\\\":false,\\\"advertised_route_count\\\":0,\\\"guard_runtime\\\":false,\\\"netfilter_mode\\\":2,\\\"online\\\":true,\\\"running\\\":true,\\\"version_pinned\\\":true}\\n\", \"stderr\": \"\", \"production_changes\": false, \"native_worker_placement\": \"NOT_RUN\", \"native_tls_provider\": \"NOT_RUN\", \"real_client_traffic\": \"NOT_RUN\"}\n",
++      "stderr": "",
++      "result": "PASS_NATIVE_LOCALAPI_PARSER_ONLY",
++      "native_worker_placement": "NOT_RUN",
++      "native_tls_provider": "NOT_RUN",
++      "real_client_traffic": "NOT_RUN",
++      "production_changes": false
+     }
+   ],
+   "controller_tools": {
+-    "tools/worker-localapi-parser-oracle.py": "d9cd4b6e2af6d8fa660ab997b150d30af98b559f15825129dc71800cbc8053f8",
++    "tools/worker-localapi-parser-oracle.py": "44c34419c1fceb4766351921e9be250dff03e4e60304000df2ddbfeedf44d51b",
+     "tools/worker-localapi-parser-guest.py": "85503f2e7896351782e0b1ccc4ba944d32677ff5bac28a09ae62e6ccbcbf8a75"
+   },
+   "failed_setup_source": "target/lab-state/run-worker-localapi-guest-attempt1.py",
+   "failed_setup_sha256": "b7313ebc93dc0f82625f5b2fa77b62728e922cf699556889bba79d2e46dd2ae0",
+   "limits": [
+     "No actual worker placement or production manifest tested",
+     "No preference writes, advertisement, approval transition or guard enforcement",
+     "No provider TLS through native placed worker",
+     "No real client traffic, leak, platform or release acceptance",
+     "Private network namespace has no WAN; fixed GET parser accesses actual Unix socket via validated proc-root symlink in private readonly tmpfs"
+   ],
+   "production_changes": false,
+-  "release_ready": false
++  "release_ready": false,
++  "source_history": [
++    {
++      "source_commit": "ad9b38d4e238c7e0418cbb7db822a7d23a66f97d",
++      "source_set_sha256": "050ad3d3a39820e203414f1c0ad4b4e018cb61c7c9000defee7a4f1b1cc6cd84",
++      "controller_verified_source_files": 24
++    }
++  ],
++  "controller_tool_history": [
++    {
++      "source_commit": "04ecfc6bb80640fd1d5f17249a134319c6f7335e",
++      "controller_tools": {
++        "tools/worker-localapi-parser-oracle.py": "d9cd4b6e2af6d8fa660ab997b150d30af98b559f15825129dc71800cbc8053f8",
++        "tools/worker-localapi-parser-guest.py": "85503f2e7896351782e0b1ccc4ba944d32677ff5bac28a09ae62e6ccbcbf8a75"
++      }
++    }
++  ],
++  "controller_driver_failure_exit": "Nonzero harness exit is preserved in JSON and propagated as nonzero controller exit."
+ }
+diff --git a/docs/rust-v2/worker.md b/docs/rust-v2/worker.md
+index 5004c9a..acf914e 100644
+--- a/docs/rust-v2/worker.md
++++ b/docs/rust-v2/worker.md
+@@ -77,37 +77,47 @@ exact active route metadata remain a task8 integration gate.
+ 
+ One eligible408/429/5xx, transport failure or attempt timeout retries once after
+ 1s. A full fresh audit occurs immediately after failure, again after the delay,
+ after successful provider response and after LocalAPI observations/writes.
+ Permanent HTTP/TLS/malformed/oversize/negative/wrong-server/repeated failures and
+ any drift fail closed. Sample timeout34s leaves margin for the existing native
+ 5s synchronous dump finishing after cancellation readiness: nominal sample bound
+ is below39s, strictly below45s. Native dump blocking can delay cancellation by up
+ to5s; this is not a hard realtime scheduler guarantee.
+ 
++TLS negotiation and established HTTP I/O retain a bounded typed error-cause
++classification: explicit reset/EOF/timeout and other allowlisted transient I/O
++kinds may receive that single retry. Certificate/hostname/protocol failures,
++non-allowlisted I/O and overlong cause chains remain permanent. No error-string
++matching or external error logging is used.
++
+ Reviewed HealthMachine requires three independent fresh successes before
+ RECOVERING and actual advertised, online, approved stable identity before READY.
+ `ExitNodeOption` means offered AND approved in pinned Tailscale. False while
+ withdrawn is normal: three fresh samples may reach RECOVERING, then a narrow
+ advertisement request is permitted only behind task8's retained health-only
+ bootstrap capability. The next status/prefs observation must show exact offered
+ routes; initial admin approval can remain pending in RECOVERING. Revocation from
+ READY blocks and withdraws. Provider success alone never establishes readiness.
+ DNS/client IPv6 verification remains `not_tested` in health, never constant true.
+ Direct mode is explicitly unsupported.
+ 
+ One monotonic5s cadence drives sample starts and heartbeats while a slow provider
+ operation is polled concurrently. Core's deterministic bounded multi-exit offset
+ is used; one exit has zero offset and no extra exit timers. Overruns skip missed
+ cadence starts rather than create overlapping samples or retry bursts. Freshness
+ is strict45s; handshake ages must be nonfuture/known and strictly below180s.
+ The independent90s guard watchdog remains a task8 implementation requirement.
++Cached evidence is explicitly expired before sampling, before any recovery
++advertisement and before accepting replacement evidence. Expiry resets every
++partial/recovery streak and returns through guard-first withdrawal, including
++expired READY; a healthy replacement cannot hide that enforcement event.
+ 
+ ## Failure, cancellation and protected status
+ 
+ Runner cancels clients, blocks the machine, notifies the independent guard FIRST,
+ then withdraws local advertisements and reads back emptiness. If LocalAPI cannot
+ confirm withdrawal within4s, a bounded fixed stop-tailscaled request goes to the
+ separate init role; this worker never becomes a reaper or selects arbitrary PIDs.
+ Guard and init requests have2s deadlines. Watch-channel shutdown cancels an
+ in-progress sample, then follows the same withdrawal/termination path and writes
+ STOPPING. Failed guard/init ACKs still attempt withdrawal and blocked status.
+diff --git a/tools/worker-localapi-parser-oracle.py b/tools/worker-localapi-parser-oracle.py
+index 73c4e8d..643acca 100644
+--- a/tools/worker-localapi-parser-oracle.py
++++ b/tools/worker-localapi-parser-oracle.py
+@@ -10,10 +10,11 @@ temp='/home/vprouterlab/worker-localapi-lab-'+digest;dest='/var/lib/vprouter-v2-
+ subprocess.run(['scp','-q',*opts,'-P22032',str(artifact),'vprouterlab@127.0.0.1:'+temp],check=True,timeout=15)
+ subprocess.run([*ssh,'sudo install -o root -g root -m 0555 '+temp+' '+dest],check=True,timeout=5)
+ r=subprocess.run([*ssh,'sudo sha256sum '+dest],check=True,capture_output=True,text=True,timeout=5);assert r.stdout.split()[0]==digest
+ subprocess.run([*ssh,'rm -- '+temp],check=True,timeout=5)
+ setup=pathlib.Path(__file__).with_name('worker-localapi-parser-guest.py');start=time.monotonic()
+ r=subprocess.run([*ssh,'sudo timeout --kill-after=3s 14s unshare --net --mount --propagation private python3 -'],input=setup.read_text(),capture_output=True,text=True,timeout=20)
+ e={'observed_at_utc':datetime.now(timezone.utc).isoformat(),'source_commit':source,'artifact_sha256':digest,'setup_sha256':hashlib.sha256(setup.read_bytes()).hexdigest(),'exit_code':r.returncode,'wall_seconds':round(time.monotonic()-start,3),'stdout':r.stdout,'stderr':r.stderr,'result':'PASS_NATIVE_LOCALAPI_PARSER_ONLY' if r.returncode==0 else 'FAIL','native_worker_placement':'NOT_RUN','native_tls_provider':'NOT_RUN','real_client_traffic':'NOT_RUN','production_changes':False}
+ attempt=1
+ while (b/f'worker-localapi-run-{attempt}.json').exists():attempt+=1
+ path=b/f'worker-localapi-run-{attempt}.json';assert not path.exists();path.write_text(json.dumps(e,indent=2)+'\n');print(json.dumps(e,indent=2))
++sys.exit(0 if r.returncode == 0 else 1)

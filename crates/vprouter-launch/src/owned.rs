@@ -131,6 +131,42 @@ impl Record {
 pub(super) struct OwnedNamespaces {
     pub data: OwnedFd,
     pub transport: OwnedFd,
+    exit_id: String,
+    allocation_digest: String,
+    data_identity: Identity,
+    transport_identity: Identity,
+    _inventory: super::inventory::Registration,
+}
+impl OwnedNamespaces {
+    fn new(s: &LaunchSpec, data: OwnedFd, transport: OwnedFd) -> Result<Self> {
+        let data_identity = Identity::network(&data)?;
+        let transport_identity = Identity::network(&transport)?;
+        let inventory = super::inventory::Registration::owned(&[data.as_fd(), transport.as_fd()])?;
+        Ok(Self {
+            data,
+            transport,
+            exit_id: s.exit.exit_id.clone(),
+            allocation_digest: vprouter_linux::sha256(
+                &serde_json::to_vec(&s.allocation).map_err(|_| Error::AllocationMismatch)?,
+            ),
+            data_identity,
+            transport_identity,
+            _inventory: inventory,
+        })
+    }
+    pub fn bind(&self, s: &LaunchSpec) -> Result<()> {
+        if self.exit_id != s.exit.exit_id
+            || self.allocation_digest
+                != vprouter_linux::sha256(
+                    &serde_json::to_vec(&s.allocation).map_err(|_| Error::AllocationMismatch)?,
+                )
+            || Identity::network(&self.data)? != self.data_identity
+            || Identity::network(&self.transport)? != self.transport_identity
+        {
+            return Err(Error::NamespaceMismatch);
+        }
+        Ok(())
+    }
 }
 /// Allocation lock is shared with AllocationStore; it remains held through
 /// namespace acquisition and execution admission. No caller evidence booleans.
@@ -138,6 +174,7 @@ pub(super) struct Transaction<'a> {
     dir: OwnedFd,
     allocation: AllocationTransaction<'a>,
     record: Record,
+    _inventory: super::inventory::Registration,
 }
 fn file_check(fd: impl AsFd) -> Result<()> {
     let s = fs::fstat(fd).map_err(|_| Error::OwnershipMismatch)?;
@@ -189,17 +226,10 @@ impl<'a> Transaction<'a> {
             return Err(Error::AllocationMismatch);
         }
         let dir = directory(path)?;
-        // Ensure this directory is the locked allocation store, not an unrelated
-        // directory with a lookalike record. Compare lock acquired independently:
-        let lock = fs::openat(&dir, ".allocations.lock", RD, Mode::empty())
+        allocation
+            .verify_directory(dir.as_fd())
             .map_err(|_| Error::OwnershipMismatch)?;
-        file_check(&lock)?;
-        // flock is open-description scoped: a second independent exclusive lock
-        // MUST be busy while the AllocationTransaction holds this exact inode.
-        match fs::flock(&lock, fs::FlockOperation::NonBlockingLockExclusive) {
-            Err(rustix::io::Errno::WOULDBLOCK) => {}
-            _ => return Err(Error::OwnershipMismatch),
-        }
+        let inventory = super::inventory::Registration::allocation(dir.as_fd())?;
         let base = Identity::network(base)?;
         let record = match fs::openat(&dir, "namespaces.json", RD, Mode::empty()) {
             Ok(fd) => {
@@ -222,6 +252,7 @@ impl<'a> Transaction<'a> {
             dir,
             allocation,
             record,
+            _inventory: inventory,
         };
         tx.persist()?;
         Ok(tx)
@@ -274,11 +305,11 @@ impl<'a> Transaction<'a> {
             if e.phase != Phase::Offline {
                 return Err(Error::Interrupted);
             }
-            return Ok(OwnedNamespaces {
-                data: self.reopen(&e.data_name, e.data.ok_or(Error::Interrupted)?)?,
-                transport: self
-                    .reopen(&e.transport_name, e.transport.ok_or(Error::Interrupted)?)?,
-            });
+            return OwnedNamespaces::new(
+                s,
+                self.reopen(&e.data_name, e.data.ok_or(Error::Interrupted)?)?,
+                self.reopen(&e.transport_name, e.transport.ok_or(Error::Interrupted)?)?,
+            );
         }
         // Exclusivity checked before durable intent, but O_EXCL below remains
         // decisive. Foreign paths and ambiguous partial entries are never adopted.
@@ -320,7 +351,7 @@ impl<'a> Transaction<'a> {
         self.record
             .bind(s, &self.record.primary_exit_id, self.record.base_network)?;
         self.persist()?;
-        Ok(OwnedNamespaces { data, transport })
+        OwnedNamespaces::new(s, data, transport)
     }
     fn create(&self, name: &str, source: Option<std::os::fd::BorrowedFd<'_>>) -> Result<OwnedFd> {
         let placeholder = fs::openat(

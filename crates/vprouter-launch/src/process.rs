@@ -241,6 +241,7 @@ fn namespace(dir: impl AsFd, name: &str) -> Result<OwnedFd> {
 }
 const NAMES: [&str; 8] = ["mnt", "net", "pid", "user", "uts", "ipc", "cgroup", "time"];
 pub(super) struct PinnedProcess {
+    _inventory: Option<super::inventory::Registration>,
     proc: OwnedFd,
     pidfd: OwnedFd,
     namespaces: Vec<OwnedFd>,
@@ -356,7 +357,8 @@ impl PinnedProcess {
         )
         .map_err(|_| Error::ExecutableMismatch)?;
         let executable_identity = verify_executable(&executable, stage)?;
-        let pinned = Self {
+        let mut pinned = Self {
+            _inventory: None,
             proc,
             pidfd,
             namespaces,
@@ -372,6 +374,17 @@ impl PinnedProcess {
             pid: c.state.pid,
             started_at: c.state.started_at.clone(),
         };
+        let mut fds = vec![
+            pinned.proc.as_fd(),
+            pinned.pidfd.as_fd(),
+            pinned.root.as_fd(),
+            pinned.cgroup_root.as_fd(),
+            pinned.cgroup.as_fd(),
+            pinned.executable.as_fd(),
+            pinned.artifact.as_fd(),
+        ];
+        fds.extend(pinned.namespaces.iter().map(AsFd::as_fd));
+        pinned._inventory = Some(super::inventory::Registration::owned(&fds)?);
         pinned.revalidate(spec, stage)?;
         Ok(pinned)
     }

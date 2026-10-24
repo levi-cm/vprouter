@@ -272,6 +272,36 @@ pub fn run() -> Result<()> {
         return Err(Error::NamespaceMismatch);
     }
     lab::case("owned_generation_locked_primary_base_and_independent_extra_namespaces");
+    if execution::launch(&one, &tx, &second, execution::VerifiedProgram::probe(&one)?).err()
+        != Some(Error::NamespaceMismatch)
+    {
+        return Err(Error::NamespaceMismatch);
+    }
+    lab::case("wrong_selected_exit_namespace_token_executes_nothing");
+    for kind in 0..3 {
+        let directory = if kind == 0 {
+            Some(fs::File::open("/").map_err(|_| Error::DescriptorPolicy)?)
+        } else {
+            None
+        };
+        let peer = if kind == 1 {
+            Some(rustix::io::dup(&second.data).map_err(|_| Error::DescriptorPolicy)?)
+        } else {
+            None
+        };
+        let socket = if kind == 2 {
+            Some(std::os::unix::net::UnixStream::pair().map_err(|_| Error::DescriptorPolicy)?)
+        } else {
+            None
+        };
+        if execution::launch(&one, &tx, &first, execution::VerifiedProgram::probe(&one)?).err()
+            != Some(Error::DescriptorPolicy)
+        {
+            return Err(Error::DescriptorPolicy);
+        }
+        drop((directory, peer, socket));
+    }
+    lab::case("unexpected_host_directory_peer_namespace_socket_execute_nothing");
     lab::stage("launch_first_private_probe");
     let running_one =
         execution::launch(&one, &tx, &first, execution::VerifiedProgram::probe(&one)?)?;

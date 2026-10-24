@@ -362,6 +362,22 @@ impl AllocationStore {
     }
 }
 impl AllocationTransaction<'_> {
+    /// Verify a retained directory is exactly this locked allocation authority.
+    /// Exposes no store/lock descriptor or caller-provided evidence flag.
+    pub fn verify_directory(&self, directory: std::os::fd::BorrowedFd<'_>) -> Result<()> {
+        self.store.check_directory()?;
+        let actual = fstat(directory).map_err(|_| err(Reason::StorageUnsafe))?;
+        let expected = fstat(&self.store.dir).map_err(|_| err(Reason::StorageUnsafe))?;
+        if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino)
+            || actual.st_uid != self.store.owner
+            || actual.st_gid != expected.st_gid
+            || actual.st_mode & 0o7777 != 0o700
+            || FileType::from_raw_mode(actual.st_mode) != FileType::Directory
+        {
+            return Err(err(Reason::StorageUnsafe));
+        }
+        Ok(())
+    }
     pub fn read(&self) -> Result<Option<AllocationRecord>> {
         self.store.check_directory()?;
         let fd = match openat(
@@ -500,6 +516,19 @@ mod storage_tests {
             .open(path)
             .unwrap();
         f.write_all(bytes).unwrap();
+    }
+    #[test]
+    fn retained_transaction_directory_is_exact_and_mode_checked() {
+        let first = TempRoot::new();
+        let foreign = TempRoot::new();
+        let store = first.store();
+        let tx = store.lock().unwrap();
+        let actual = open_directory(&first.0).unwrap();
+        let wrong = open_directory(&foreign.0).unwrap();
+        assert!(tx.verify_directory(actual.as_fd()).is_ok());
+        assert!(tx.verify_directory(wrong.as_fd()).is_err());
+        fs::set_permissions(&first.0, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(tx.verify_directory(actual.as_fd()).is_err());
     }
     #[test]
     fn flock_excludes_an_independent_concurrent_open() {

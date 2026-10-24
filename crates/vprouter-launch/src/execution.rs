@@ -58,37 +58,7 @@ impl Running {
 /// (including dormant async reactors) are forbidden. Child final inventory is
 /// independently closed and verified before exec; stderr is /dev/null too.
 fn inherited_descriptors() -> Result<()> {
-    for entry in std::fs::read_dir("/proc/self/fd").map_err(|_| Error::DescriptorPolicy)? {
-        let entry = entry.map_err(|_| Error::DescriptorPolicy)?;
-        let name = entry.file_name();
-        let Some(n) = name.to_str().and_then(|s| s.parse::<i32>().ok()) else {
-            return Err(Error::DescriptorPolicy);
-        };
-        if n <= 2 {
-            continue;
-        }
-        // read_dir's own CLOEXEC descriptor can disappear by the time queried.
-        let target = match std::fs::read_link(entry.path()) {
-            Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(_) => return Err(Error::DescriptorPolicy),
-        };
-        if target
-            .as_os_str()
-            .as_encoded_bytes()
-            .starts_with(b"socket:")
-        {
-            return Err(Error::DescriptorPolicy);
-        }
-        let fd = fs::open(
-            format!("/proc/self/fd/{n}"),
-            OFlags::PATH | OFlags::CLOEXEC,
-            Mode::empty(),
-        )
-        .map_err(|_| Error::DescriptorPolicy)?;
-        let _ = fd;
-    }
-    Ok(())
+    super::inventory::verify()
 }
 fn state(a: &Admission) -> Result<OwnedFd> {
     // Allocation validation proves non-overlap with every peer path. Strict
@@ -141,12 +111,14 @@ pub(super) fn launch(
     process::single_threaded()?;
     program.bind(a)?;
     tx.revalidate(&a.spec)?;
+    ns.bind(&a.spec)?;
     // All Docker revalidation runtimes are created and dropped in this function;
     // none exists across fork or namespace entry. No caller-controlled runtime.
     revalidate(a)?;
     #[cfg(test)]
     eprintln!("LAB_EXEC_STAGE selected_state_admission");
     let state = state(a)?;
+    let _state_inventory = super::inventory::Registration::owned(&[state.as_fd()])?;
     #[cfg(test)]
     eprintln!("LAB_EXEC_STAGE descriptor_admission");
     inherited_descriptors()?;

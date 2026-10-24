@@ -5,6 +5,8 @@ mod evidence;
 mod execution;
 #[cfg(test)]
 pub mod execution_lab;
+#[allow(dead_code)]
+mod inventory;
 #[allow(unsafe_code, dead_code)]
 mod kernel;
 #[cfg(test)]
@@ -55,6 +57,8 @@ pub enum Error {
     MountPrivate,
     MountTmp,
     MountExecutable,
+    MountExecutableClone,
+    MountStateClone,
     MountExecutableBind,
     MountExecutableReadonly,
     MountState,

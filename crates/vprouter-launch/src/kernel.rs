@@ -31,6 +31,8 @@ fn stage_byte(e: Error) -> u8 {
         Error::MountPrivate => 211,
         Error::MountTmp => 212,
         Error::MountExecutable => 213,
+        Error::MountExecutableClone => 220,
+        Error::MountStateClone => 221,
         Error::MountExecutableBind => 218,
         Error::MountExecutableReadonly => 219,
         Error::MountState => 214,
@@ -51,11 +53,18 @@ fn die(code: i32) -> ! {
     unsafe { libc::_exit(code) }
 }
 fn enter(fd: BorrowedFd<'_>, kind: i32) -> Result<()> {
-    process::single_threaded()?; // SAFETY: namespace FDs validated by private admission; one task, no runtime.
-    cv(
-        unsafe { libc::setns(fd.as_fd().as_raw_fd(), kind) },
-        Error::NamespaceOperation,
-    )
+    process::single_threaded()?;
+    use rustix::thread::LinkNameSpaceType as T;
+    let t = match kind {
+        libc::CLONE_NEWNET => T::Network,
+        libc::CLONE_NEWNS => T::Mount,
+        libc::CLONE_NEWPID => T::ProcessID,
+        libc::CLONE_NEWIPC => T::InterProcessCommunication,
+        libc::CLONE_NEWUTS => T::HostNameAndNISDomainName,
+        libc::CLONE_NEWCGROUP => T::ControlGroup,
+        _ => return Err(Error::NamespaceOperation),
+    };
+    rustix::thread::move_into_link_name_space(fd, Some(t)).map_err(|_| Error::NamespaceOperation)
 }
 fn unshare(flags: i32) -> Result<()> {
     process::single_threaded()?; // SAFETY: dedicated one-task helper, no async runtime or shared descriptor owners in another thread.
@@ -187,6 +196,8 @@ pub(super) struct Child {
     pidfd: OwnedFd,
     release: Option<OwnedFd>,
     health: OwnedFd,
+    _inventory: super::inventory::Registration,
+    release_inventory: Option<super::inventory::Registration>,
     reaped: bool,
 }
 impl Child {
@@ -195,6 +206,7 @@ impl Child {
     }
     pub fn release(&mut self) -> Result<()> {
         let f = self.release.take().ok_or(Error::ChildFailed)?;
+        drop(self.release_inventory.take());
         write_byte(&f, 1)
     }
     pub fn ready(&mut self) -> Result<()> {
@@ -209,6 +221,8 @@ impl Child {
             211 => Err(Error::MountPrivate),
             212 => Err(Error::MountTmp),
             213 => Err(Error::MountExecutable),
+            220 => Err(Error::MountExecutableClone),
+            221 => Err(Error::MountStateClone),
             218 => Err(Error::MountExecutableBind),
             219 => Err(Error::MountExecutableReadonly),
             214 => Err(Error::MountState),
@@ -268,6 +282,22 @@ pub(super) fn spawn(
     state: BorrowedFd<'_>,
 ) -> Result<Child> {
     process::single_threaded()?;
+    let executable_tree = rustix::mount::open_tree(
+        container.executable,
+        "",
+        rustix::mount::OpenTreeFlags::OPEN_TREE_CLONE
+            | rustix::mount::OpenTreeFlags::OPEN_TREE_CLOEXEC
+            | rustix::mount::OpenTreeFlags::AT_EMPTY_PATH,
+    )
+    .map_err(|_| Error::MountExecutableClone)?;
+    let state_tree = rustix::mount::open_tree(
+        state,
+        "",
+        rustix::mount::OpenTreeFlags::OPEN_TREE_CLONE
+            | rustix::mount::OpenTreeFlags::OPEN_TREE_CLOEXEC
+            | rustix::mount::OpenTreeFlags::AT_EMPTY_PATH,
+    )
+    .map_err(|_| Error::MountStateClone)?;
     let (release_r, release_w) = pipe()?;
     let (health_r, health_w) = pipe()?;
     let parent = std::process::id() as i32;
@@ -288,7 +318,13 @@ pub(super) fn spawn(
             if !wait_ready(&release_r, Duration::from_secs(5))? || read_byte(&release_r)? != 1 {
                 return Err(Error::PlacementFailed);
             }
-            container_stage(container, data, state, health_w.as_fd())
+            container_stage(
+                container,
+                data,
+                executable_tree.as_fd(),
+                state_tree.as_fd(),
+                health_w.as_fd(),
+            )
         })();
         die(if result.is_ok() { 0 } else { 121 });
     }
@@ -305,7 +341,11 @@ pub(super) fn spawn(
             return Err(e);
         }
     };
+    let inventory = super::inventory::Registration::owned(&[pinned.as_fd(), health_r.as_fd()])?;
+    let release_inventory = super::inventory::Registration::owned(&[release_w.as_fd()])?;
     Ok(Child {
+        _inventory: inventory,
+        release_inventory: Some(release_inventory),
         pid: pid as u32,
         pidfd: pinned,
         release: Some(release_w),
@@ -347,23 +387,27 @@ fn mount(
     }
     result
 }
-fn bind(source: &CStr, target: &str, readonly: bool) -> Result<()> {
-    let t = c(target)?;
-    mount(Some(source), &t, None, libc::MS_BIND, None)?;
-    if readonly {
-        mount(
-            None,
-            &t,
-            None,
-            libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV,
-            None,
-        )?;
-    }
-    Ok(())
+fn attach_tree(tree: BorrowedFd<'_>, target: &str) -> Result<()> {
+    let destination = fs::open(
+        target,
+        OFlags::PATH | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(|_| Error::MountIsolation)?;
+    rustix::mount::move_mount(
+        tree,
+        "",
+        &destination,
+        "",
+        rustix::mount::MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH
+            | rustix::mount::MoveMountFlags::MOVE_MOUNT_T_EMPTY_PATH,
+    )
+    .map_err(|_| Error::MountIsolation)
 }
 fn container_stage(
     container: ContainerFds<'_>,
     data: BorrowedFd<'_>,
+    executable_tree: BorrowedFd<'_>,
     state: BorrowedFd<'_>,
     health: BorrowedFd<'_>,
 ) -> Result<()> {
@@ -378,7 +422,7 @@ fn container_stage(
     if inner == 0 {
         let r = (|| {
             parent_death(0)?;
-            setup(container, data, state, health)
+            setup(container, data, executable_tree, state, health)
         })();
         if let Err(e) = r {
             report_failure(health, e);
@@ -392,6 +436,7 @@ fn container_stage(
 fn setup(
     container: ContainerFds<'_>,
     data: BorrowedFd<'_>,
+    executable_tree: BorrowedFd<'_>,
     state: BorrowedFd<'_>,
     health: BorrowedFd<'_>,
 ) -> Result<()> {
@@ -444,14 +489,8 @@ fn setup(
         std::fs::create_dir(format!("/tmp/root/{d}")).map_err(|_| Error::MountPivot)?;
     }
     std::fs::File::create("/tmp/root/bin/vprouter-worker").map_err(|_| Error::MountPivot)?;
-    mount(
-        Some(&fdpath(container.executable)?),
-        c"/tmp/root/bin/vprouter-worker",
-        None,
-        libc::MS_BIND,
-        None,
-    )
-    .map_err(|_| Error::MountExecutableBind)?;
+    attach_tree(executable_tree, "/tmp/root/bin/vprouter-worker")
+        .map_err(|_| Error::MountExecutableBind)?;
     mount(
         None,
         c"/tmp/root/bin/vprouter-worker",
@@ -460,7 +499,7 @@ fn setup(
         None,
     )
     .map_err(|_| Error::MountExecutableReadonly)?;
-    bind(&fdpath(state)?, "/tmp/root/state", false).map_err(|_| Error::MountState)?;
+    attach_tree(state, "/tmp/root/state").map_err(|_| Error::MountState)?;
     std::fs::write(
         "/tmp/root/etc/resolv.conf",
         b"nameserver 192.0.2.53\noptions attempts:1 timeout:1\n",
@@ -1270,6 +1309,7 @@ pub(super) fn lab_parent_loss(
         unsafe {
             libc::close(r.as_raw_fd());
         }
+        let _control_inventory = super::inventory::Registration::owned(&[w.as_fd()]);
         let result = super::execution::VerifiedProgram::probe(a)
             .and_then(|p| super::execution::launch(a, tx, ns, p));
         match result {
@@ -1287,7 +1327,10 @@ pub(super) fn lab_parent_loss(
     }
     drop(w);
     let pinned = pidfd(pid)?;
+    let inventory = super::inventory::Registration::owned(&[pinned.as_fd(), r.as_fd()])?;
     let mut child = Child {
+        _inventory: inventory,
+        release_inventory: None,
         pid: pid as u32,
         pidfd: pinned,
         release: None,
@@ -1305,5 +1348,92 @@ pub(super) fn probe_container_reap() {
         if p <= 0 {
             break;
         }
+    }
+}
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+    fn verdict(arch: u32, nr: u32, arg: u64) -> u32 {
+        let instructions = filter();
+        let mut pc = 0;
+        let mut accumulator = 0;
+        for _ in 0..2048 {
+            let i = &instructions[pc];
+            match i.code {
+                0x20 => {
+                    accumulator = match i.k {
+                        0 => nr,
+                        4 => arch,
+                        16 => arg as u32,
+                        20 => (arg >> 32) as u32,
+                        _ => panic!("unexpected load"),
+                    };
+                    pc += 1;
+                }
+                0x15 => {
+                    pc += 1 + if accumulator == i.k {
+                        i.jt as usize
+                    } else {
+                        i.jf as usize
+                    }
+                }
+                0x06 => return i.k,
+                _ => panic!("unexpected instruction"),
+            }
+        }
+        panic!("unbounded filter")
+    }
+    #[test]
+    fn profile_denies_network_namespaces_privilege_and_exec_path_syscalls() {
+        let arch = if cfg!(target_arch = "x86_64") {
+            0xc000003e
+        } else {
+            0xc00000b7
+        };
+        for nr in [
+            libc::SYS_socket,
+            libc::SYS_connect,
+            libc::SYS_mount,
+            libc::SYS_setns,
+            libc::SYS_unshare,
+            libc::SYS_capset,
+            libc::SYS_ptrace,
+            libc::SYS_bpf,
+            libc::SYS_open_by_handle_at,
+            libc::SYS_execve,
+            libc::SYS_io_uring_setup,
+            libc::SYS_userfaultfd,
+        ] {
+            assert_eq!(verdict(arch, nr as u32, 0), 0x00050001);
+        }
+        assert_eq!(verdict(arch, libc::SYS_execveat as u32, 0), 0x7fff0000);
+        assert_eq!(
+            verdict(arch, libc::SYS_clone as u32, libc::SIGCHLD as u64),
+            0x7fff0000
+        );
+        for flags in [
+            libc::CLONE_NEWUSER | libc::SIGCHLD,
+            libc::CLONE_NEWNET | libc::SIGCHLD,
+            libc::CLONE_VM | libc::SIGCHLD,
+            libc::CLONE_PTRACE | libc::SIGCHLD,
+        ] {
+            assert_eq!(
+                verdict(arch, libc::SYS_clone as u32, flags as u64),
+                0x00050001
+            );
+        }
+        assert_eq!(
+            verdict(
+                arch,
+                libc::SYS_clone as u32,
+                (1u64 << 32) | libc::SIGCHLD as u64
+            ),
+            0x00050001
+        );
+        assert_eq!(verdict(arch ^ 1, libc::SYS_read as u32, 0), 0x80000000);
+        assert_eq!(
+            verdict(arch, 0x40000000 | libc::SYS_read as u32, 0),
+            0x00050001
+        );
     }
 }

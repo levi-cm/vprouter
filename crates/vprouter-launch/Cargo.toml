@@ -10,7 +10,7 @@ vprouter-core = { path = "../vprouter-core" }
 vprouter-linux = { path = "../vprouter-linux" }
 serde.workspace = true
 serde_json.workspace = true
-rustix.workspace = true
+rustix = { workspace=true, features=["mount", "thread"] }
 sha2.workspace = true
 tokio.workspace = true
 libc = "=0.2.189"

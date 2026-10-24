@@ -266,3 +266,150 @@ fn uidmap_cgroup_paths_and_static_elf_are_exact() {
     b[32] = 200;
     assert!(process::elf(&b, "amd64").is_err());
 }
+
+#[test]
+fn inherited_daemon_security_profiles_are_exact_and_bind_container_apparmor() {
+    use evidence::DaemonSecurity;
+    use vprouter_linux::docker::LaunchDaemon;
+    let make = |options: Vec<&str>| LaunchDaemon {
+        security_options: options.into_iter().map(str::to_owned).collect(),
+        cgroup_driver: "systemd".into(),
+        cgroup_version: "2".into(),
+        os_type: "linux".into(),
+    };
+    // Two exact supported sets, independent of native daemon serialization order.
+    for options in [
+        vec!["name=seccomp,profile=builtin", "name=cgroupns"],
+        vec!["name=cgroupns", "name=seccomp,profile=builtin"],
+    ] {
+        assert_eq!(
+            evidence::daemon(&make(options)),
+            Ok(DaemonSecurity::BuiltinSeccomp)
+        );
+    }
+    for options in [
+        vec![
+            "name=apparmor",
+            "name=seccomp,profile=builtin",
+            "name=cgroupns",
+        ],
+        vec![
+            "name=cgroupns",
+            "name=apparmor",
+            "name=seccomp,profile=builtin",
+        ],
+        vec![
+            "name=seccomp,profile=builtin",
+            "name=cgroupns",
+            "name=apparmor",
+        ],
+    ] {
+        assert_eq!(
+            evidence::daemon(&make(options)),
+            Ok(DaemonSecurity::AppArmorBuiltinSeccomp)
+        );
+    }
+    for options in [
+        vec![],
+        vec!["name=cgroupns"],
+        vec!["name=seccomp,profile=builtin"],
+        vec!["name=apparmor", "name=cgroupns"],
+        vec!["name=cgroupns", "name=cgroupns"],
+        vec![
+            "name=cgroupns",
+            "name=seccomp,profile=builtin",
+            "name=cgroupns",
+        ],
+        vec![
+            "name=cgroupns",
+            "name=seccomp,profile=builtin",
+            "name=seccomp,profile=builtin",
+        ],
+        vec![
+            "name=apparmor",
+            "name=apparmor",
+            "name=cgroupns",
+            "name=seccomp,profile=builtin",
+        ],
+        vec!["name=cgroupns", "name=seccomp,profile=unconfined"],
+        vec![
+            "name=cgroupns",
+            "name=seccomp,profile=/DO_NOT_PRINT_SECRET/custom.json",
+        ],
+        vec![
+            "name=cgroupns",
+            "name=seccomp,profile=builtin,extra=unknown",
+        ],
+        vec![
+            "name=cgroupns",
+            "name=seccomp,profile=builtin",
+            "name=seccomp,profile=unconfined",
+        ],
+        vec![
+            "name=cgroupns",
+            "name=seccomp,profile=builtin",
+            "name=rootless",
+        ],
+        vec![
+            "name=cgroupns",
+            "name=seccomp,profile=builtin",
+            "name=userns",
+        ],
+        vec![
+            "name=cgroupns",
+            "name=seccomp,profile=builtin",
+            "name=selinux",
+        ],
+        vec![
+            "name=cgroupns",
+            "name=seccomp,profile=builtin",
+            "name=unknown",
+        ],
+    ] {
+        let error = evidence::daemon(&make(options)).unwrap_err();
+        assert_eq!(error, Error::UnsupportedConfiguration);
+        assert!(!format!("{error:?} {error}").contains("SECRET"));
+    }
+    // Native /info projection never silently defaults a missing/malformed list.
+    for value in [
+        json!({}),
+        json!({"SecurityOptions":null}),
+        json!({"SecurityOptions":"name=cgroupns"}),
+    ] {
+        let mut v = json!({"CgroupDriver":"systemd","CgroupVersion":"2","OSType":"linux"});
+        v.as_object_mut()
+            .unwrap()
+            .extend(value.as_object().unwrap().clone());
+        assert!(serde_json::from_value::<LaunchDaemon>(v).is_err());
+    }
+    let (s, stage) = fixture();
+    let mut c: LaunchContainer = serde_json::from_value(container_value(&s, &stage)).unwrap();
+    let absent =
+        evidence::daemon(&make(vec!["name=cgroupns", "name=seccomp,profile=builtin"])).unwrap();
+    let apparmor = evidence::daemon(&make(vec![
+        "name=cgroupns",
+        "name=seccomp,profile=builtin",
+        "name=apparmor",
+    ]))
+    .unwrap();
+    assert!(absent.bind_container(&c).is_ok());
+    assert_eq!(
+        apparmor.bind_container(&c),
+        Err(Error::UnsupportedConfiguration)
+    );
+    c.app_armor_profile = "docker-default".into();
+    assert!(apparmor.bind_container(&c).is_ok());
+    assert_eq!(
+        absent.bind_container(&c),
+        Err(Error::UnsupportedConfiguration)
+    );
+    c.app_armor_profile = "unconfined".into();
+    assert_eq!(
+        apparmor.bind_container(&c),
+        Err(Error::UnsupportedConfiguration)
+    );
+    assert_eq!(
+        absent.bind_container(&c),
+        Err(Error::UnsupportedConfiguration)
+    );
+}

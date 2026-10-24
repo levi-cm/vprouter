@@ -43,7 +43,15 @@ Docker mount/net/PID/UTS/IPC/cgroup namespaces, one of two exact masked-path pro
 capdropALL and no-new-privileges. Privileged, host modes, remapping/rootless,
 extra capabilities/devices/options/mounts and unknown functional HostConfig keys
 are refused. Known inactive resource fields accept only enumerated default
-values. Docker26 omits inactive `Mounts`, `Init`, `Tmpfs`, `Sysctls`; absence means
+values. Daemon SecurityOptions must be exactly one of two unordered sets:
+`name=seccomp,profile=builtin` + `name=cgroupns`, or those two plus `name=apparmor`.
+Missing, duplicate, unknown, rootless/userns, custom or unconfined seccomp options
+fail closed. The first profile requires an empty container AppArmorProfile; the
+AppArmor profile requires exactly `docker-default`. Admission retains this private
+profile evidence, refreshes native daemon inspection on every revalidation and
+refuses profile drift before rebinding the container. The AppArmor profile was
+observed in the disposable guest; no-AppArmor profile has offline fixture coverage
+only and remains kernel-unverified here. Docker26 omits inactive `Mounts`, `Init`, `Tmpfs`, `Sysctls`; absence means
 inactive only for those fields. Required security flags and capability arrays
 must be present. A gateway is deployment-owned with role `gateway` and serves all
 exits; its exit label is not an authorization constraint. The lab alone allows

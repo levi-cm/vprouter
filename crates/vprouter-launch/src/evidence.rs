@@ -4,17 +4,51 @@ use super::{
 };
 use vprouter_linux::docker::{LaunchContainer, LaunchDaemon, LaunchImage};
 
-pub(super) fn daemon(d: &LaunchDaemon) -> Result<()> {
-    if d.cgroup_driver != "systemd"
-        || d.cgroup_version != "2"
-        || d.os_type != "linux"
-        || d.security_options
-            .iter()
-            .any(|s| s == "name=rootless" || s.starts_with("name=userns"))
-    {
+/// Produced only by an exact native daemon-profile match. No caller boolean or
+/// arbitrary security-option string can assert an accepted inherited profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum DaemonSecurity {
+    BuiltinSeccomp,
+    AppArmorBuiltinSeccomp,
+}
+impl DaemonSecurity {
+    pub(super) fn bind_container(self, c: &LaunchContainer) -> Result<()> {
+        configuration(
+            match self {
+                Self::BuiltinSeccomp => c.app_armor_profile.is_empty(),
+                Self::AppArmorBuiltinSeccomp => c.app_armor_profile == "docker-default",
+            },
+            "daemon_container_apparmor",
+        )
+    }
+}
+pub(super) fn daemon(d: &LaunchDaemon) -> Result<DaemonSecurity> {
+    if d.cgroup_driver != "systemd" || d.cgroup_version != "2" || d.os_type != "linux" {
         return Err(Error::UnsupportedPlatform);
     }
-    Ok(())
+    // Exact unordered sets: both builtin seccomp and cgroupns are mandatory.
+    // Unknown/missing/duplicate markers and custom/unconfined seccomp fail closed.
+    let matches = |expected: &[&str]| {
+        d.security_options.len() == expected.len()
+            && expected.iter().all(|s| {
+                d.security_options
+                    .iter()
+                    .filter(|option| *option == s)
+                    .count()
+                    == 1
+            })
+    };
+    if matches(&["name=seccomp,profile=builtin", "name=cgroupns"]) {
+        Ok(DaemonSecurity::BuiltinSeccomp)
+    } else if matches(&[
+        "name=apparmor",
+        "name=seccomp,profile=builtin",
+        "name=cgroupns",
+    ]) {
+        Ok(DaemonSecurity::AppArmorBuiltinSeccomp)
+    } else {
+        Err(Error::UnsupportedConfiguration)
+    }
 }
 pub(super) fn image(spec: &LaunchSpec, stage: &StagingEvidence, i: &LaunchImage) -> Result<()> {
     if i.id != stage.content_id

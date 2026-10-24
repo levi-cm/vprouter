@@ -53,6 +53,7 @@ pub struct Admission {
     process: process::PinnedProcess,
     spec: LaunchSpec,
     staging: StagingEvidence,
+    daemon_security: evidence::DaemonSecurity,
 }
 impl Admission {
     pub async fn inspect(spec_path: &Path, staging_path: &Path) -> Result<Self> {
@@ -67,7 +68,7 @@ impl Admission {
             .launch_daemon()
             .await
             .map_err(|_| Error::DockerUnavailable)?;
-        evidence::daemon(&daemon)?;
+        let daemon_security = evidence::daemon(&daemon)?;
         let image = docker
             .launch_image(&staging.content_id)
             .await
@@ -78,11 +79,13 @@ impl Admission {
             .await
             .map_err(|_| Error::DockerUnavailable)?;
         evidence::container(&spec, &staging, &container)?;
+        daemon_security.bind_container(&container)?;
         let process = process::PinnedProcess::open(&spec, &staging, &container)?;
         let admitted = Self {
             process,
             spec,
             staging,
+            daemon_security,
         };
         admitted.revalidate().await?;
         Ok(admitted)
@@ -93,11 +96,20 @@ impl Admission {
         process::single_threaded()?;
         self.process.revalidate(&self.spec, &self.staging)?;
         let docker = DockerClient::default();
+        let daemon = docker
+            .launch_daemon()
+            .await
+            .map_err(|_| Error::DockerUnavailable)?;
+        if evidence::daemon(&daemon)? != self.daemon_security {
+            return Err(Error::UnsupportedConfiguration);
+        }
+
         let container = docker
             .launch_container(&self.spec.container_id)
             .await
             .map_err(|_| Error::DockerUnavailable)?;
         evidence::container(&self.spec, &self.staging, &container)?;
+        self.daemon_security.bind_container(&container)?;
         self.process.bind_container(&container)?;
         self.process.revalidate(&self.spec, &self.staging)
     }

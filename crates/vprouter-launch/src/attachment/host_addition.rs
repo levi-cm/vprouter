@@ -342,6 +342,14 @@ impl HostAddedPrimary {
     pub(super) fn operational_context(&self) -> Result<super::operational::Context<'_>> {
         self.original.operational_context()
     }
+    pub(super) fn operational_custody(&self) -> Result<super::operational::Custody<'_>> {
+        self.original.operational_custody()
+    }
+    pub(super) fn operational_custody_service_mut(
+        &mut self,
+    ) -> Result<&mut super::super::owned::preparation::Server> {
+        self.original.operational_custody_service_mut()
+    }
     pub(super) fn operational_service_mut(
         &mut self,
     ) -> Result<&mut super::super::owned::preparation::Server> {

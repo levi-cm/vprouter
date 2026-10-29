@@ -370,6 +370,150 @@ impl BirthReceipt {
 pub(crate) struct Server {
     native: Option<Native>,
 }
+/// Borrowed proof of one original typed writer. Only preparation's closed
+/// Bootstrap policy verifier constructs it after checking the exact proposal.
+/// It is neither a historical receipt nor authority for a new operation.
+pub(crate) struct OriginalWrite<'a> {
+    server: &'a Server,
+    expected: Record,
+    phase: &'static str,
+    started: f64,
+}
+/// Observations borrowed from the original continuation and actual writer.
+/// This check does not create an OriginalWrite or grant historical authority.
+struct PendingWriter<'a> {
+    child: &'a kernel::JournalChild,
+    jobs: &'a Rc<RefCell<NativeJobs>>,
+    member: &'a str,
+    phase: &'static str,
+    started: f64,
+    deadline: f64,
+    mutation: bool,
+    failed: bool,
+    fenced: bool,
+}
+impl PendingWriter<'_> {
+    fn verify(
+        &self,
+        phase: &'static str,
+        started: f64,
+        before: [u8; 32],
+        after: [u8; 32],
+    ) -> Result<()> {
+        if self.phase != phase
+            || self.started != started
+            || !self.mutation
+            || self.failed
+            || self.fenced
+            || self.deadline != started + 2.
+            || !self.child.matches_owned_mutation_io(
+                self.jobs,
+                self.member,
+                before,
+                after,
+                self.deadline,
+            )?
+        {
+            return Err(Error::OwnershipMismatch);
+        }
+        original_frame(started, vprouter_core::health::boot_seconds())
+    }
+}
+#[cfg(test)]
+pub(super) fn lab_pending_write_core(
+    child: &kernel::JournalChild,
+    jobs: &Rc<RefCell<NativeJobs>>,
+    before: [u8; 32],
+    after: [u8; 32],
+    deadline: f64,
+) -> Result<()> {
+    let original = PendingWriter {
+        child,
+        jobs,
+        member: "one",
+        phase: "bootstrap_query_intent",
+        started: deadline - 2.,
+        deadline,
+        mutation: true,
+        failed: false,
+        fenced: false,
+    };
+    original.verify(original.phase, original.started, before, after)?;
+    let refused = |value| matches!(value, Err(Error::OwnershipMismatch));
+    let foreign = Rc::new(RefCell::new(NativeJobs::new()));
+    for candidate in [
+        PendingWriter {
+            jobs: &foreign,
+            ..original
+        },
+        PendingWriter {
+            member: "other",
+            ..original
+        },
+        PendingWriter {
+            phase: "bootstrap_query_birth",
+            ..original
+        },
+        PendingWriter {
+            started: original.started - 0.001,
+            ..original
+        },
+        PendingWriter {
+            deadline: deadline + 1.,
+            ..original
+        },
+        PendingWriter {
+            mutation: false,
+            ..original
+        },
+        PendingWriter {
+            failed: true,
+            ..original
+        },
+        PendingWriter {
+            fenced: true,
+            ..original
+        },
+    ] {
+        if !refused(candidate.verify(original.phase, original.started, before, after)) {
+            return Err(Error::OwnershipMismatch);
+        }
+    }
+    if !refused(original.verify(original.phase, original.started, [0; 32], after))
+        || !refused(original.verify(original.phase, original.started, before, [0; 32]))
+        || child.drained()
+    {
+        return Err(Error::OwnershipMismatch);
+    }
+    original.verify(original.phase, original.started, before, after)?;
+    eprintln!(
+        "LAB_PENDING_WRITE_CORE original_writer=true foreign_owner_phase_start_io_deadline_fence_refused=true child_held=true"
+    );
+    Ok(())
+}
+impl OriginalWrite<'_> {
+    fn verify_origin(&self, shared: &Rc<SharedJournal>, member: &str) -> Result<()> {
+        let n = self.server.native.as_ref().ok_or(Error::Interrupted)?;
+        if !Rc::ptr_eq(shared, &n.transaction.shared) || member != n.history.member {
+            return Err(Error::OwnershipMismatch);
+        }
+        n.verify_owned_progress(&self.expected, self.phase, self.started)
+    }
+    pub(crate) fn require_bootstrap(
+        &self,
+        request: &super::super::attachment::operational::bootstrap::Request,
+    ) -> Result<()> {
+        let n = self.server.native.as_ref().ok_or(Error::Interrupted)?;
+        if !matches!(
+            n.continuation.as_ref().and_then(|c| c.quarantine_origin.as_ref()),
+            Some(quarantine::ProgressOrigin::Bootstrap(original))
+                if std::ptr::eq(original.as_ref(), request)
+        ) {
+            return Err(Error::OwnershipMismatch);
+        }
+        self.verify_origin(&n.transaction.shared, &n.history.member)
+    }
+}
 struct Native {
     creator: u32,
     transaction: Transaction,
@@ -1664,6 +1808,40 @@ impl Server {
 
 #[cfg(test)]
 impl Server {
+    pub(crate) fn lab_hold_bootstrap_query_intent(&mut self) -> Result<()> {
+        let n = self.native.as_mut().ok_or(Error::Interrupted)?;
+        n.require_creator()?;
+        if n.pending.is_some()
+            || n.lab_hold.is_some()
+            || n.lab_writers.len() != 87
+            || n.continuation
+                .as_ref()
+                .is_none_or(|c| c.phase != "bootstrap_host_query_intent")
+        {
+            return Err(Error::OwnershipMismatch);
+        }
+        n.lab_hold = Some("bootstrap_host_query_intent");
+        Ok(())
+    }
+    pub(crate) fn lab_release_bootstrap_query_intent(&mut self) -> Result<()> {
+        let n = self.native.as_mut().ok_or(Error::Interrupted)?;
+        n.require_creator()?;
+        if n.lab_hold != Some("bootstrap_host_query_intent")
+            || n.lab_writers.len() != 88
+            || n.continuation
+                .as_ref()
+                .is_none_or(|c| c.phase != "bootstrap_host_query_intent")
+        {
+            return Err(Error::OwnershipMismatch);
+        }
+        n.pending
+            .as_mut()
+            .ok_or(Error::Interrupted)?
+            .child
+            .lab_release_checkpoint()?;
+        n.lab_hold = None;
+        Ok(())
+    }
     pub(crate) fn lab_hold_bootstrap_intent(&mut self) -> Result<()> {
         let n = self.native.as_mut().ok_or(Error::Interrupted)?;
         n.require_creator()?;

@@ -256,15 +256,27 @@ impl HostLinkedAssembly {
             .verify_completed_host_links(&n.previous)
     }
     pub(super) fn operational_context(&self) -> Result<super::super::operational::Context<'_>> {
+        let custody = self.operational_custody()?;
+        let n = self.retained()?;
+        Ok(super::super::operational::Context {
+            binding: custody.binding,
+            source: n.input()?.input.operational_source()?,
+            service: custody.service,
+        })
+    }
+    pub(super) fn operational_custody(&self) -> Result<super::super::operational::Custody<'_>> {
         let n = self.retained()?;
         let input = &n.input()?.input;
         let (binding, service) = input.host_custody()?;
         service.verify_completed_host_custody(&n.previous)?;
-        Ok(super::super::operational::Context {
+        Ok(super::super::operational::Custody {
             binding: binding.clone(),
-            source: input.operational_source()?,
             service,
         })
+    }
+    pub(super) fn operational_custody_service_mut(&mut self) -> Result<&mut Server> {
+        self.operational_custody()?;
+        self.native.as_mut().ok_or(Error::Interrupted)?.service()
     }
     pub(super) fn operational_service_mut(&mut self) -> Result<&mut Server> {
         self.operational_context()?;

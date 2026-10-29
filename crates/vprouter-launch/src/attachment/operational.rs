@@ -14,6 +14,10 @@ pub(super) struct Context<'a> {
     pub(super) source: std::rc::Rc<super::super::kernel::producer_creation::Source>,
     pub(super) service: &'a super::super::owned::preparation::Server,
 }
+pub(super) struct Custody<'a> {
+    pub(super) binding: std::rc::Rc<super::super::owned::preparation::quarantine::Binding>,
+    pub(super) service: &'a super::super::owned::preparation::Server,
+}
 struct Native {
     creator: u32,
     original: HostAddedPrimary,
@@ -45,6 +49,122 @@ impl Native {
     }
 }
 impl OperationalOwner {
+    #[cfg(test)]
+    pub(super) fn lab_policy_result_checkpoint(
+        &mut self,
+        request: &std::rc::Rc<bootstrap::Request>,
+        result: &super::super::kernel::bootstrap::Verified,
+    ) -> Result<bool> {
+        self.verify_policy_progress(
+            request,
+            super::super::owned::preparation::bootstrap::Progress::Result(result),
+        )?;
+        self.custody_service_mut()?.lab_checkpoint()
+    }
+    fn custody(&self) -> Result<Custody<'_>> {
+        let n = self.native.as_ref().ok_or(Error::Interrupted)?;
+        if n.creator != std::process::id() || n.failure.is_some() || !n.complete || n.retired != 5 {
+            return Err(Error::OwnershipMismatch);
+        }
+        n.reservation
+            .as_ref()
+            .ok_or(Error::OwnershipMismatch)?
+            .require_resources(&n.plan)?;
+        n.original.operational_custody()
+    }
+    fn custody_service_mut(&mut self) -> Result<&mut super::super::owned::preparation::Server> {
+        self.custody()?;
+        self.native
+            .as_mut()
+            .ok_or(Error::Interrupted)?
+            .original
+            .operational_custody_service_mut()
+    }
+    pub(super) fn verify_query_progress(
+        &self,
+        request: &std::rc::Rc<super::InspectionRequest>,
+        stage: super::super::owned::preparation::inspection::QuarantineProgress<'_>,
+    ) -> Result<()> {
+        let custody = self.custody()?;
+        custody.binding.verify_progress(
+            custody.service,
+            super::super::owned::preparation::quarantine::Progress::Query(request, stage),
+        )
+    }
+    pub(super) fn verify_policy_progress(
+        &self,
+        request: &std::rc::Rc<bootstrap::Request>,
+        stage: super::super::owned::preparation::bootstrap::Progress<'_>,
+    ) -> Result<()> {
+        let custody = self.custody()?;
+        custody
+            .binding
+            .verify_bootstrap_progress(custody.service, request, stage)
+    }
+    pub(super) fn poll_query_intent(
+        &mut self,
+        request: &std::rc::Rc<super::InspectionRequest>,
+    ) -> Result<Option<super::super::owned::preparation::inspection::Intent>> {
+        self.verify_query_progress(
+            request,
+            super::super::owned::preparation::inspection::QuarantineProgress::Intent,
+        )?;
+        self.custody_service_mut()?.poll_inspection_intent(request)
+    }
+    pub(super) fn poll_query_birth(
+        &mut self,
+        request: &std::rc::Rc<super::InspectionRequest>,
+        child: &super::super::kernel::docker_query::Child,
+    ) -> Result<Option<super::super::owned::preparation::inspection::Gate>> {
+        self.verify_query_progress(
+            request,
+            super::super::owned::preparation::inspection::QuarantineProgress::Birth(child),
+        )?;
+        self.custody_service_mut()?.poll_inspection_birth(child)
+    }
+    pub(super) fn poll_query_result(
+        &mut self,
+        request: &std::rc::Rc<super::InspectionRequest>,
+        result: &super::super::kernel::docker_query::Verified,
+    ) -> Result<Option<super::super::owned::preparation::inspection::Receipt>> {
+        self.verify_query_progress(
+            request,
+            super::super::owned::preparation::inspection::QuarantineProgress::Result(result),
+        )?;
+        self.custody_service_mut()?.poll_inspection_result(result)
+    }
+    pub(super) fn poll_policy_intent(
+        &mut self,
+        request: &std::rc::Rc<bootstrap::Request>,
+    ) -> Result<Option<super::super::owned::preparation::bootstrap::Intent>> {
+        self.verify_policy_progress(
+            request,
+            super::super::owned::preparation::bootstrap::Progress::Intent,
+        )?;
+        self.custody_service_mut()?.poll_bootstrap_intent(request)
+    }
+    pub(super) fn poll_policy_birth(
+        &mut self,
+        request: &std::rc::Rc<bootstrap::Request>,
+        child: &super::super::kernel::bootstrap::Child,
+    ) -> Result<Option<super::super::owned::preparation::bootstrap::Gate>> {
+        self.verify_policy_progress(
+            request,
+            super::super::owned::preparation::bootstrap::Progress::Birth(child),
+        )?;
+        self.custody_service_mut()?.poll_bootstrap_birth(child)
+    }
+    pub(super) fn poll_policy_result(
+        &mut self,
+        request: &std::rc::Rc<bootstrap::Request>,
+        result: &super::super::kernel::bootstrap::Verified,
+    ) -> Result<Option<super::super::owned::preparation::bootstrap::Receipt>> {
+        self.verify_policy_progress(
+            request,
+            super::super::owned::preparation::bootstrap::Progress::Result(result),
+        )?;
+        self.custody_service_mut()?.poll_bootstrap_source(result)
+    }
     pub(super) fn bootstrap_previous(
         &mut self,
         scope: super::quarantine::Scope,
@@ -201,6 +321,108 @@ pub(super) fn children_reaped() -> bool {
 
 #[cfg(test)]
 impl OperationalOwner {
+    pub(super) fn lab_hold_query_intent(
+        &mut self,
+        request: &std::rc::Rc<super::InspectionRequest>,
+    ) -> Result<()> {
+        self.verify_query_progress(
+            request,
+            super::super::owned::preparation::inspection::QuarantineProgress::Intent,
+        )?;
+        self.custody_service_mut()?
+            .lab_hold_bootstrap_query_intent()
+    }
+    pub(super) fn lab_query_intent_checkpoint(
+        &mut self,
+        request: &std::rc::Rc<super::InspectionRequest>,
+    ) -> Result<bool> {
+        self.verify_query_progress(
+            request,
+            super::super::owned::preparation::inspection::QuarantineProgress::Intent,
+        )?;
+        self.custody_service_mut()?.lab_checkpoint()
+    }
+    pub(super) fn lab_query_intent_writer(
+        &self,
+        request: &std::rc::Rc<super::InspectionRequest>,
+    ) -> Result<Option<(usize, u32, u64)>> {
+        self.verify_query_progress(
+            request,
+            super::super::owned::preparation::inspection::QuarantineProgress::Intent,
+        )?;
+        self.custody()?.service.lab_pending_writer_identity()
+    }
+    pub(super) fn lab_release_query_intent(
+        &mut self,
+        request: &std::rc::Rc<super::InspectionRequest>,
+    ) -> Result<()> {
+        self.verify_query_progress(
+            request,
+            super::super::owned::preparation::inspection::QuarantineProgress::Intent,
+        )?;
+        self.custody_service_mut()?
+            .lab_release_bootstrap_query_intent()
+    }
+    pub(super) fn lab_hold_policy_intent(
+        &mut self,
+        request: &std::rc::Rc<bootstrap::Request>,
+    ) -> Result<()> {
+        self.verify_policy_progress(
+            request,
+            super::super::owned::preparation::bootstrap::Progress::Intent,
+        )?;
+        self.custody_service_mut()?.lab_hold_bootstrap_intent()
+    }
+    pub(super) fn lab_policy_intent_negatives(
+        &self,
+        request: &std::rc::Rc<bootstrap::Request>,
+    ) -> Result<usize> {
+        self.verify_policy_progress(
+            request,
+            super::super::owned::preparation::bootstrap::Progress::Intent,
+        )?;
+        let custody = self.custody()?;
+        let mut checks = custody
+            .binding
+            .lab_bootstrap_intent_negatives(custody.service, request)?;
+        if custody.service.lab_pending_writer_identity()?.is_some() {
+            if !matches!(self.context(), Err(Error::OwnershipMismatch)) {
+                return Err(Error::OwnershipMismatch);
+            }
+            checks += 1 + request.lab_pending_history_refusals()?;
+        }
+        Ok(checks)
+    }
+    pub(super) fn lab_policy_intent_checkpoint(
+        &mut self,
+        request: &std::rc::Rc<bootstrap::Request>,
+    ) -> Result<bool> {
+        self.verify_policy_progress(
+            request,
+            super::super::owned::preparation::bootstrap::Progress::Intent,
+        )?;
+        self.custody_service_mut()?.lab_checkpoint()
+    }
+    pub(super) fn lab_policy_intent_writer(
+        &self,
+        request: &std::rc::Rc<bootstrap::Request>,
+    ) -> Result<Option<(usize, u32, u64)>> {
+        self.verify_policy_progress(
+            request,
+            super::super::owned::preparation::bootstrap::Progress::Intent,
+        )?;
+        self.custody()?.service.lab_pending_writer_identity()
+    }
+    pub(super) fn lab_release_policy_intent(
+        &mut self,
+        request: &std::rc::Rc<bootstrap::Request>,
+    ) -> Result<()> {
+        self.verify_policy_progress(
+            request,
+            super::super::owned::preparation::bootstrap::Progress::Intent,
+        )?;
+        self.custody_service_mut()?.lab_release_bootstrap_intent()
+    }
     pub(super) fn lab_preparation(&mut self) -> Result<serde_json::Value> {
         let n = self.native.as_mut().ok_or(Error::Interrupted)?;
         if n.creator != std::process::id() {

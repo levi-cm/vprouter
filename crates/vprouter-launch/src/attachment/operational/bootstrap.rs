@@ -27,6 +27,18 @@ pub(crate) struct Request {
 }
 impl Request {
     #[cfg(test)]
+    pub(super) fn lab_pending_history_refusals(&self) -> Result<usize> {
+        if !matches!(
+            self.source.verify_acknowledged_history(),
+            Err(Error::OwnershipMismatch)
+        ) || !matches!(self.verify(), Err(Error::OwnershipMismatch))
+            || !matches!(self.pins.verify_retained(), Err(Error::OwnershipMismatch))
+        {
+            return Err(Error::OwnershipMismatch);
+        }
+        Ok(3)
+    }
+    #[cfg(test)]
     pub(crate) fn lab_registered_slots(&self) -> Result<usize> {
         self.pins.lab_registered_slots()
     }
@@ -147,6 +159,25 @@ impl Request {
         self.verify_retained()?;
         self.check()
     }
+    pub(crate) fn verify_write(
+        &self,
+        proof: &super::super::super::owned::preparation::OriginalWrite<'_>,
+    ) -> Result<()> {
+        proof.require_bootstrap(self)?;
+        self.check()?;
+        if self.creator != std::process::id()
+            || !Rc::ptr_eq(self.source.request().binding(), &self.binding)
+            || !self.pins.matches_source(&self.source)
+        {
+            return Err(Error::OwnershipMismatch);
+        }
+        self.source.verify_acknowledged_write(proof)?;
+        self.pins.verify_write(proof)?;
+        if self.source.identity()? != self.group {
+            return Err(Error::OwnershipMismatch);
+        }
+        self.check()
+    }
     pub(crate) fn verify_service(&self, s: &Server) -> Result<()> {
         self.verify()?;
         self.source.bind_service(s)?;
@@ -202,7 +233,7 @@ impl Request {
 }
 
 use super::super::super::owned::preparation::{
-    bootstrap::Progress, inspection::QuarantineProgress, quarantine::Progress as QueryProgress,
+    bootstrap::Progress, inspection::QuarantineProgress,
 };
 use super::super::{InspectionRequest, QueryKind};
 use std::cell::RefCell;
@@ -319,52 +350,35 @@ impl Native {
             self.step = Step::QueryIntent;
         }
         self.query.check_deadline()?;
-        let service = self.input.context()?.service;
         match self.step {
-            Step::QueryIntent => self.binding.verify_progress(
-                service,
-                QueryProgress::Query(&self.query, QuarantineProgress::Intent),
+            Step::QueryIntent => self
+                .input
+                .verify_query_progress(&self.query, QuarantineProgress::Intent)?,
+            Step::QueryBirth => self.input.verify_query_progress(
+                &self.query,
+                QuarantineProgress::Birth(self.query_child.as_ref().ok_or(Error::Interrupted)?),
             )?,
-            Step::QueryBirth => self.binding.verify_progress(
-                service,
-                QueryProgress::Query(
-                    &self.query,
-                    QuarantineProgress::Birth(self.query_child.as_ref().ok_or(Error::Interrupted)?),
-                ),
+            Step::QueryResult => self.input.verify_query_progress(
+                &self.query,
+                QuarantineProgress::Result(self.query_verified.as_ref().ok_or(Error::Interrupted)?),
             )?,
-            Step::QueryResult => self.binding.verify_progress(
-                service,
-                QueryProgress::Query(
-                    &self.query,
-                    QuarantineProgress::Result(
-                        self.query_verified.as_ref().ok_or(Error::Interrupted)?,
-                    ),
-                ),
-            )?,
-            Step::Intent => self.binding.verify_bootstrap_progress(
-                service,
+            Step::Intent => self.input.verify_policy_progress(
                 self.request.as_ref().ok_or(Error::Interrupted)?,
                 Progress::Intent,
             )?,
-            Step::Birth => self.binding.verify_bootstrap_progress(
-                service,
+            Step::Birth => self.input.verify_policy_progress(
                 self.request.as_ref().ok_or(Error::Interrupted)?,
                 Progress::Birth(self.child.as_ref().ok_or(Error::Interrupted)?),
             )?,
-            Step::Result => self.binding.verify_bootstrap_progress(
-                service,
+            Step::Result => self.input.verify_policy_progress(
                 self.request.as_ref().ok_or(Error::Interrupted)?,
                 Progress::Result(self.verified.as_ref().ok_or(Error::Interrupted)?),
             )?,
-            _ => self.binding.verify(service)?,
+            _ => self.binding.verify(self.input.context()?.service)?,
         }
         match self.step {
             Step::QueryIntent => {
-                if let Some(i) = self
-                    .input
-                    .service_mut()?
-                    .poll_inspection_intent(&self.query)?
-                {
+                if let Some(i) = self.input.poll_query_intent(&self.query)? {
                     #[cfg(test)]
                     lab_phase("bootstrap.query_intent", true);
                     #[cfg(test)]
@@ -384,7 +398,7 @@ impl Native {
             }
             Step::QueryBirth => {
                 let c = self.query_child.as_mut().ok_or(Error::Interrupted)?;
-                if let Some(g) = self.input.service_mut()?.poll_inspection_birth(c)? {
+                if let Some(g) = self.input.poll_query_birth(&self.query, c)? {
                     c.release(g)?;
                     self.step = Step::QueryReading;
                 }
@@ -404,7 +418,8 @@ impl Native {
                 }
             }
             Step::QueryResult => {
-                if let Some(r) = self.input.service_mut()?.poll_inspection_result(
+                if let Some(r) = self.input.poll_query_result(
+                    &self.query,
                     self.query_verified.as_ref().ok_or(Error::Interrupted)?,
                 )? {
                     self.query_accepted = Some(Rc::new(kernel::docker_query::Verified::accept(
@@ -426,7 +441,7 @@ impl Native {
             }
             Step::Intent => {
                 let r = self.request.as_ref().ok_or(Error::Interrupted)?;
-                if let Some(i) = self.input.service_mut()?.poll_bootstrap_intent(r)? {
+                if let Some(i) = self.input.poll_policy_intent(r)? {
                     self.child = Some(kernel::bootstrap::spawn(
                         r.clone(),
                         i,
@@ -440,7 +455,10 @@ impl Native {
             }
             Step::Birth => {
                 let c = self.child.as_mut().ok_or(Error::Interrupted)?;
-                if let Some(g) = self.input.service_mut()?.poll_bootstrap_birth(c)? {
+                if let Some(g) = self
+                    .input
+                    .poll_policy_birth(self.request.as_ref().ok_or(Error::Interrupted)?, c)?
+                {
                     c.release(g)?;
                     self.step = Step::Reading;
                 }
@@ -456,7 +474,10 @@ impl Native {
             }
             Step::Result => {
                 let v = self.verified.as_mut().ok_or(Error::Interrupted)?;
-                if let Some(r) = self.input.service_mut()?.poll_bootstrap_source(v)? {
+                if let Some(r) = self
+                    .input
+                    .poll_policy_result(self.request.as_ref().ok_or(Error::Interrupted)?, v)?
+                {
                     v.accept(r)?;
                     self.request.as_ref().ok_or(Error::Interrupted)?.verify()?;
                     self.query.revalidate_quarantine_process_pins()?;
@@ -626,6 +647,12 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
     let mut failed_constructor = None;
     let mut retry = None;
     let mut own_intent = None;
+    let mut own_query_intent = None;
+    let mut query_source = None;
+    let mut query_held = 0usize;
+    let mut query_negatives = 0usize;
+    let mut query_released = false;
+    let mut query_writer = None;
     let mut own_queued = false;
     let mut own_held = 0usize;
     let mut own_negatives = 0usize;
@@ -648,29 +675,58 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
                 .native
                 .as_mut()
                 .ok_or(Error::Interrupted)?;
+            if n.completed.is_empty() && matches!(n.step, Step::QueryIntent) && !query_released {
+                if query_source.is_none() {
+                    query_source = Some(n.input.context()?.source.clone());
+                    n.input.lab_hold_query_intent(&n.query)?;
+                }
+                if n.input.lab_query_intent_checkpoint(&n.query)? {
+                    let writer = n
+                        .input
+                        .lab_query_intent_writer(&n.query)?
+                        .ok_or(Error::OwnershipMismatch)?;
+                    if query_writer.is_some_and(|original| original != writer)
+                        || !matches!(n.input.context(), Err(Error::OwnershipMismatch))
+                        || !matches!(
+                            query_source
+                                .as_ref()
+                                .ok_or(Error::Interrupted)?
+                                .verify_acknowledged_history(),
+                            Err(Error::OwnershipMismatch)
+                        )
+                    {
+                        return Err(Error::OwnershipMismatch);
+                    }
+                    query_writer = Some(writer);
+                    query_negatives += 2;
+                    if query_held >= 2 {
+                        n.input.lab_release_query_intent(&n.query)?;
+                        query_released = true;
+                        own_query_intent = Some(
+                            serde_json::json!({"index":writer.0,"pid":writer.1,"start":writer.2,"queued_polls":1,"held_pending_polls":query_held,"negative_checks":query_negatives,"released":true}),
+                        );
+                    } else {
+                        query_held += 1;
+                    }
+                }
+            }
             if n.completed.is_empty() && matches!(n.step, Step::Intent) && !own_released {
                 let r = n.request.as_ref().ok_or(Error::Interrupted)?.clone();
                 if !own_queued {
-                    n.input.service_mut()?.lab_hold_bootstrap_intent()?;
-                    own_negatives += n
-                        .binding
-                        .lab_bootstrap_intent_negatives(n.input.context()?.service, &r)?;
+                    n.input.lab_hold_policy_intent(&r)?;
+                    own_negatives += n.input.lab_policy_intent_negatives(&r)?;
                     own_queued = true;
                 }
-                if n.input.service_mut()?.lab_checkpoint()? {
+                if n.input.lab_policy_intent_checkpoint(&r)? {
                     if own_held == 0 {
-                        own_negatives += n
-                            .binding
-                            .lab_bootstrap_intent_negatives(n.input.context()?.service, &r)?;
+                        own_negatives += n.input.lab_policy_intent_negatives(&r)?;
                     }
                     let writer = n
                         .input
-                        .context()?
-                        .service
-                        .lab_pending_writer_identity()?
+                        .lab_policy_intent_writer(&r)?
                         .ok_or(Error::OwnershipMismatch)?;
                     if own_held >= 2 {
-                        n.input.service_mut()?.lab_release_bootstrap_intent()?;
+                        n.input.lab_release_policy_intent(&r)?;
                         own_released = true;
                         own_intent = Some(
                             serde_json::json!({"index":writer.0,"pid":writer.1,"start":writer.2,"queued_polls":1,"held_pending_polls":own_held,"negative_checks":own_negatives,"released":true}),
@@ -692,10 +748,12 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
             if fault == 2
                 && n.completed.len() == 2
                 && matches!(n.step, Step::Result)
-                && n.input.service_mut()?.lab_checkpoint()?
+                && n.input.lab_policy_result_checkpoint(
+                    n.request.as_ref().ok_or(Error::Interrupted)?,
+                    n.verified.as_ref().ok_or(Error::Interrupted)?,
+                )?
             {
-                original_charge =
-                    Some(n.input.service_mut()?.lab_bootstrap_result_charge(false)?.0);
+                original_charge = Some(n.input.lab_bootstrap_result_charge(false)?.0);
                 result_held = true;
                 n.fail(Error::ChildFailed);
             }
@@ -904,6 +962,15 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
     }
     if !matches!(fault, 4 | 5) {
         let own = own_intent.as_ref().ok_or(Error::OwnershipMismatch)?;
+        let query = own_query_intent.as_ref().ok_or(Error::OwnershipMismatch)?;
+        if query["index"] != 87
+            || writers[87]["pid"] != query["pid"]
+            || writers[87]["start"] != query["start"]
+            || writers[87]["actual_wait_status"] != 0
+            || writers[87]["verified_at"].is_null()
+        {
+            return Err(Error::OwnershipMismatch);
+        }
         if own["index"] != 90
             || writers[90]["pid"] != own["pid"]
             || writers[90]["start"] != own["start"]
@@ -1060,10 +1127,17 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
     } else {
         0
     };
-    if !matches!(fault, 4 | 5) && (!own_released || own_held != 2 || own_negatives != 8) {
+    if !matches!(fault, 4 | 5)
+        && (!own_released
+            || own_held != 2
+            || own_negatives != 12
+            || !query_released
+            || query_held != 2
+            || query_negatives != 6)
+    {
         return Err(Error::OwnershipMismatch);
     }
-    let mut witness = serde_json::json!({"schema":1,"fault":fault,"own_intent_polling":own_intent,"canonical_negative_checks":canonical_negative_checks,"host_addition":handoff.host,"handoff":handoff.evidence,"preparation":preparation,
+    let mut witness = serde_json::json!({"schema":1,"fault":fault,"own_intent_polling":own_intent,"own_query_intent_polling":own_query_intent,"canonical_negative_checks":canonical_negative_checks,"host_addition":handoff.host,"handoff":handoff.evidence,"preparation":preparation,
         "operations":operations,"queries":queries,"failed_constructor":failed_constructor,"failure_retry":retry,"retained_result_writer":retained_result_writer,
         "charges_before_drop":before_drop,"charges_after_drop":serde_json::Value::Null,"final_process_verified_at":final_process_at,"scope_process_verified_at":process_verified_at,
         "result_writer_held":result_held,"whole_chain_retained_after_drop":false,"original_nine_contexts_retained_after_drop":false,

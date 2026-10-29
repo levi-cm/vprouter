@@ -1,0 +1,61 @@
+{
+  "binding": {
+    "source_commit": "cc0081baeb14caaa15fd4577258f6d01cc6de8bc",
+    "source_archive_sha256": "1c2ece5f0707a41d7de8a28ac9d59c4dbe20a3cd5c32af8c3c767f45502a5d67",
+    "tracked_build_inputs_verified": 202,
+    "source_aggregate_sha256": "ac3db8ba5dc32abaf8bef7d63a0736cef4319f2b81212329f020bc813b848fad"
+  },
+  "current_source_matches": true,
+  "platforms": {
+    "amd64": {
+      "manifest_sha256": "7b2e35435b3c21e6de8aeee53bdd54001d23cafae29fa77af99600deb9a49f6a",
+      "context_sha256": "18cc5dedb0104215b397414e35b0fe8282cb6bf27c40853671f9daafa1bbeea2",
+      "payload_sha256": "f8e6c9b1fc0669b1fe937ff543a7773d3d072bf65ffebb7d2c0c33404b1f83c1",
+      "verified_context_files": 7,
+      "static_elf": true
+    },
+    "arm64": {
+      "manifest_sha256": "03c9ebbdf9c3bfd203df329ac90bd2ae406b4672842230c5dba9fa8f49f90bf9",
+      "context_sha256": "09e3e0bafa975c4998fc3da9d1d9fe5e54c82a0d75b6e23b2f4a55d4b7219d07",
+      "payload_sha256": "1a856fa4d4572e036075a4219f06c6fec7d2303cb98b02174a148154ea987d2f",
+      "verified_context_files": 7,
+      "static_elf": true
+    }
+  },
+  "native_bootstrap": "NOT_RUN",
+  "arm64_runtime": "NOT_RUN",
+  "release_ready": false,
+  "scope": "bounded original-owner query/policy pending-progress repair; no new runtime or forwarding authority",
+  "source_review": {
+    "spec": "PASS",
+    "quality": "PASS",
+    "blocking_findings": 0
+  },
+  "checks": {
+    "workspace_passed": 396,
+    "workspace_failed": 0,
+    "workspace_ignored": 2,
+    "fmt": "PASS",
+    "strict_workspace_clippy": "PASS",
+    "both_architecture_static_builds": "PASS",
+    "amd64_static_filter_and_pending_core_preflight": "PASS",
+    "read_only_debian_projection": "PASS"
+  },
+  "evidence_hashes": {
+    "target/continuation-20261029T134857Z/root-verification.json": "aa98ce1b3e5e591bee53b93b868271457f80a2c6a2fd7c52cf6cb12fd22e0995",
+    "target/task8c-pending-20261029T133358Z/root-coherent-build.log": "f372cef676762612127167be8d817ec34255a69de8b378aca6b8281e295c4085",
+    ".superpowers/sdd/rust-v2/task-8c-bootstrap-pending-progress-report.md": "07707dec7450dd754ff9fdde1724e997154ae2bd82b74fbf3eaa5b0fdc99b435",
+    ".superpowers/sdd/rust-v2/task-8c-bootstrap-pending-progress-review.md": "2687169c5a6e9ada1b93bc06c18ec4f8848291d3b8cdb5c22f90e46c966a771f"
+  },
+  "candidate_provenance_review": "PASS",
+  "preservation_baseline_review": "PASS",
+  "baseline": {
+    "links": 53,
+    "addresses": 51,
+    "routes": 154,
+    "rules": 5,
+    "template_sha256": "c119742f8b7c5e7e92daa5811cf24ba7b62cbd5a5b01afa9ac437c888bf506ef",
+    "reconciliation_sha256": "4f9a872340085072de5457aa0ec36c1c6ea96afd64f11dfe178e3d6859221e05",
+    "host_authority_granted": false
+  }
+}

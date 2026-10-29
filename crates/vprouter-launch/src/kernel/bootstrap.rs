@@ -390,6 +390,13 @@ impl Verified {
         let n = self.native.as_ref().ok_or(Error::Interrupted)?;
         n.creator()?;
         n.request.verify_retained()?;
+        self.verify_completion_custody()
+    }
+    // Original constructor completion only. Its read-only fields form the
+    // expected typed proposal; they do not admit work or acknowledge a writer.
+    fn verify_completion_custody(&self) -> Result<()> {
+        let n = self.native.as_ref().ok_or(Error::Interrupted)?;
+        n.creator()?;
         n.gate_token.retained_slots()?;
         n.stable
             .as_ref()
@@ -415,6 +422,22 @@ impl Verified {
             return Err(Error::OwnershipMismatch);
         }
         Ok(())
+    }
+    pub(crate) fn write_evidence(&self) -> Result<(ValidationBirth, PublicResult, f64)> {
+        self.verify_completion_custody()?;
+        let n = self.native.as_ref().ok_or(Error::Interrupted)?;
+        Ok((
+            n.birth.clone().ok_or(Error::OwnershipMismatch)?,
+            n.result.clone().ok_or(Error::OwnershipMismatch)?,
+            n.accepted_at.ok_or(Error::OwnershipMismatch)?,
+        ))
+    }
+    pub(crate) fn verify_write(
+        &self,
+        proof: &super::super::owned::preparation::OriginalWrite<'_>,
+    ) -> Result<()> {
+        self.request().verify_write(proof)?;
+        self.verify_completion_custody()
     }
     pub(crate) fn verify(&self) -> Result<()> {
         self.verify_retained()?;

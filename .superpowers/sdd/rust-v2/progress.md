@@ -640,3 +640,12 @@ Independent402preservationgatePASS; unchangedarchiverfreshgatesPASS andexact6
 selectorsarchived/allotherfixturesretained/no signals/unmounts. Root finalpost-
 manifest workspace399/0/2ignored+strictalltargetClippyPASS. Full8cACTIVE,402andall
 priorfailuresretained; noBootstrap/native/releaseacceptance promotion.
+
+402failure milestone50cf9c4 remote-confirmed. Readonlydiagnosis3e96878e distinguishes
+outerlabhelper reporting from underlying originalproductiondeadline;91stwriter
+source/counter inference points firstpolicyIntent, no exacthelper/cost/failedclock
+captured. Authorized soleimplementer ONEFILE cfg(test) fixedhelper/error/Step/
+originalclock/counter diagnostic plus bounded measuredwrappercosts, no fallible
+logverification/error masking/perpolloutput or semantic/deadline/testweakening.
+Brief task-8c-bootstrap-helper-diagnostic-brief.md at50cf9c4; allother21protected
+sourcepaths stayunchanged. Full8cACTIVE; nextnativeonlyafterreview/artifactgate.

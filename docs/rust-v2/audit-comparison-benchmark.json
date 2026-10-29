@@ -1,0 +1,59 @@
+{
+  "scope": "standalone u64 comparison microbenchmark; not router CPU/throughput acceptance",
+  "iterations_per_sample": 20000,
+  "samples": 5,
+  "source_function_sha256": "c19ff98e358922f311dbb27830e4f05415b68087170266671ecc10a1187fc7f0",
+  "unchanged_128_entries_comparison_counts": {
+    "baseline": 32768,
+    "optimized": 128
+  },
+  "results": [
+    {
+      "entries": 8,
+      "order": "ordered",
+      "baseline_median_ns": 17.64,
+      "optimized_median_ns": 2.02,
+      "speedup": 8.73
+    },
+    {
+      "entries": 8,
+      "order": "reversed",
+      "baseline_median_ns": 17.86,
+      "optimized_median_ns": 17.68,
+      "speedup": 1.01
+    },
+    {
+      "entries": 32,
+      "order": "ordered",
+      "baseline_median_ns": 227.86,
+      "optimized_median_ns": 2.94,
+      "speedup": 77.5
+    },
+    {
+      "entries": 32,
+      "order": "reversed",
+      "baseline_median_ns": 228.89,
+      "optimized_median_ns": 228.49,
+      "speedup": 1.0
+    },
+    {
+      "entries": 128,
+      "order": "ordered",
+      "baseline_median_ns": 3285.72,
+      "optimized_median_ns": 8.09,
+      "speedup": 406.15
+    },
+    {
+      "entries": 128,
+      "order": "reversed",
+      "baseline_median_ns": 3259.01,
+      "optimized_median_ns": 3243.19,
+      "speedup": 1.0
+    }
+  ],
+  "source_commit": "1b0d7e723f51c54e0c2d624f2fb15a8d32b6fdaa",
+  "regression_evidence": {
+    "red_log_sha256": "b294b35875fdf87208e34e0124df0e9d1187ed343f3abc81461cfc856286c0a3",
+    "final_workspace_test_log_sha256": "8e4525f9d52fef2f8026b1b05d61daf2a0f1127708783144b3fe19d513b61599"
+  }
+}

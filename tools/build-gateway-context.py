@@ -54,11 +54,11 @@ def build(architecture):
     source = json.loads((ROOT/'docs/rust-v2/pinned-program-inventory.json').read_bytes())
     public = next(p for p in source['platforms'] if p['platform']['architecture']==architecture)
     entries = {p['role']:p for p in manifest['programs']}
-    if set(entries) != {'gateway_init','worker_observer','tailscaled'} or manifest['architecture'] != architecture or manifest['base_index'] != source['source_index'] or public['platform']['platform_manifest'] != 'tailscale/tailscale@'+manifest['base_platform']:
+    if set(entries) != {'gateway_init','worker_observer','worker_monitor','tailscaled'} or manifest['architecture'] != architecture or manifest['base_index'] != source['source_index'] or public['platform']['platform_manifest'] != 'tailscale/tailscale@'+manifest['base_platform']:
         raise ValueError('fixed source/manifest/platform mismatch')
     files = {}
     inputs = []
-    for role, name in [('gateway_init','vprouter-gateway-init'),('worker_observer','vprouter-worker-observe'),('tailscaled','tailscaled')]:
+    for role, name in [('gateway_init','vprouter-gateway-init'),('worker_observer','vprouter-worker-observe'),('worker_monitor','vprouter-worker-monitor'),('tailscaled','tailscaled')]:
         entry = entries[role]
         path = ROOT / (f'target/program-inventory/tailscale-1.102.5-{architecture}/tailscaled' if role=='tailscaled' else f'target/{target}-unknown-linux-musl/release/{name}')
         data = checked(path,entry,True,machine)

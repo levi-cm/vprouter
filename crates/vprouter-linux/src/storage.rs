@@ -112,8 +112,29 @@ fn checked_open(path: &Path, kind: Kind) -> Result<OwnedFd> {
 pub fn metadata(path: &Path, kind: Kind) -> Result<Metadata> {
     check(&checked_open(path, kind)?, kind, 0)
 }
+/// Pin a protected regular file without reading its contents. Operational
+/// callers retain this descriptor privately and select it only into the fixed
+/// no-fork secret role. Permissions/metadata do not attest its contents.
+pub fn pin_secret(path: &Path) -> Result<OwnedFd> {
+    checked_open(path, Kind::SecretFile)
+}
 pub fn read(path: &Path, kind: Kind, limit: usize) -> Result<Vec<u8>> {
     read_fd(checked_open(path, kind)?, limit)
+}
+/// Secret input never enters an ordinary growing Vec; read errors erase too.
+pub fn read_secret(path: &Path, limit: usize) -> Result<zeroize::Zeroizing<Vec<u8>>> {
+    vprouter_core::secret_boundary::mark_ingress();
+    let fd = checked_open(path, Kind::SecretFile)?;
+    let capacity = limit.checked_add(1).ok_or(Error::TooLarge)?;
+    let mut bytes = zeroize::Zeroizing::new(Vec::with_capacity(capacity));
+    File::from(fd)
+        .take(capacity as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Error::Unavailable)?;
+    if bytes.len() > limit {
+        return Err(Error::TooLarge);
+    }
+    Ok(bytes)
 }
 fn read_fd(fd: OwnedFd, limit: usize) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();

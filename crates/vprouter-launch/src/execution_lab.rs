@@ -71,7 +71,7 @@ pub(super) fn inspect(
         .map_err(|_| Error::InvalidSpec)?;
         spec.exit = allocation.exits[exit].clone();
         spec.container_id = id.into();
-        spec.started_at = c.state.started_at;
+        spec.started_at = lab::public_started_at(&c.state.started_at)?;
         spec.image_ref = lab::IMAGE.into();
         spec.worker_sha256 = digest.into();
         spec.process_start_time = process::stat_start(
@@ -80,7 +80,7 @@ pub(super) fn inspect(
             c.state.pid,
         )?;
         stage.image_ref = spec.image_ref.clone();
-        stage.content_id = i.id;
+        stage.content_id = lab::public_content_id(&i.id, &c.image)?;
         stage.artifact_path = PROBE.into();
         stage.artifact_sha256 = digest.into();
         stage.artifact_size = size;
@@ -112,6 +112,14 @@ pub(super) fn inspect_actual(
     allocation: &AllocationRecord,
     image: &str,
 ) -> Result<Admission> {
+    inspect_actual_member(id, allocation, image, 0)
+}
+pub(super) fn inspect_actual_member(
+    id: &str,
+    allocation: &AllocationRecord,
+    image: &str,
+    member: usize,
+) -> Result<Admission> {
     let bundle = super::programs::ReviewedBundle::current()?;
     let (digest, size) = bundle.init()?;
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -129,9 +137,13 @@ pub(super) fn inspect_actual(
         }
         let (mut spec, mut stage) = tests::fixture();
         spec.allocation = allocation.clone();
-        spec.exit = allocation.exits[0].clone();
+        spec.exit = allocation
+            .exits
+            .get(member)
+            .ok_or(Error::AllocationMismatch)?
+            .clone();
         spec.container_id = id.into();
-        spec.started_at = c.state.started_at;
+        spec.started_at = lab::public_started_at(&c.state.started_at)?;
         spec.image_ref = format!("vprouter-v2-lab@{image}");
         spec.worker_sha256 = digest.into();
         spec.process_start_time = process::stat_start(
@@ -614,7 +626,20 @@ pub fn run() -> Result<()> {
         one.process.base_network(),
     )?;
     let first = tx.acquire(&one.spec, one.process.base_network())?;
-    let second = tx.acquire(&two.spec, two.process.base_network())?;
+    if tx.for_exit(&one.spec).err() != Some(Error::LockBusy) {
+        return Err(Error::OwnershipMismatch);
+    }
+    let mut second_tx = tx.for_exit(&two.spec)?;
+    let second = second_tx.acquire(&two.spec, two.process.base_network())?;
+    // A live second exit shares the same journal and does not reacquire flock.
+    // The external allocation store must remain excluded while either lives.
+    if store.lock().is_ok() {
+        return Err(Error::LockBusy);
+    }
+    if tx.acquire(&two.spec, two.process.base_network()).err() != Some(Error::OwnershipMismatch) {
+        return Err(Error::OwnershipMismatch);
+    }
+    lab::case("shared_deployment_journal_unique_exit_leases_external_flock_retained");
     if owned::Identity::network(&first.data)?
         != owned::Identity::network(one.process.base_network())?
         || owned::Identity::network(&first.data)? == owned::Identity::network(&second.data)?
@@ -668,8 +693,12 @@ pub fn run() -> Result<()> {
     let mut running_one =
         execution::launch(&one, &tx, &first, execution::VerifiedProgram::probe(&one)?)?;
     lab::stage("launch_second_private_probe");
-    let mut running_two =
-        execution::launch(&two, &tx, &second, execution::VerifiedProgram::probe(&two)?)?;
+    let mut running_two = execution::launch(
+        &two,
+        &second_tx,
+        &second,
+        execution::VerifiedProgram::probe(&two)?,
+    )?;
     let pids = workers(&id)?;
     if pids.len() != 2 {
         return Err(Error::NamespaceMismatch);
@@ -747,6 +776,7 @@ pub fn run() -> Result<()> {
     drop(second);
     drop(one);
     drop(two);
+    drop(second_tx);
     // Test-only exact-record cleanup, only after the cgroup's processes are gone.
     lab::stage("cleanup_exact_namespace_pins");
     tx.lab_unpin()?;
@@ -866,7 +896,8 @@ pub fn run_producer() -> Result<()> {
         owned::Transaction::open(&store, &records, &a.spec, "one", a.process.base_network())?;
     let ns = tx.acquire(&a.spec, a.process.base_network())?;
     let other = inspect(&id, &record, 1, &digest, bytes.len() as u64)?;
-    let other_ns = tx.acquire(&other.spec, other.process.base_network())?;
+    let mut other_tx = tx.for_exit(&other.spec)?;
+    let other_ns = other_tx.acquire(&other.spec, other.process.base_network())?;
     tx.begin_transport(&a.spec, &ns)?;
     let producer = super::producer::ProducerGroup::create(&a, &ns, &mut tx)?;
     let parent_path = format!("/sys/fs/cgroup/system.slice/docker-{id}.scope");
@@ -995,6 +1026,7 @@ pub fn run_producer() -> Result<()> {
         }
     }
     lab::case("producer_container_death_all_confined_roles_gone_bounded_reap");
+    drop(other_tx);
     let retained = if producer.cleanup(&tx, &a.spec).is_ok() {
         tx.transport_cleaned(&a.spec)?;
         drop(ns);

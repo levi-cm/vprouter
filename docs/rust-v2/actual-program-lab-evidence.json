@@ -1569,10 +1569,764 @@
       "observation": "Five cases pass including exact empty disabled Self, readonly observation, TERM forwarding/reaping/empty producer and unchanged parent controls. Guard post-daemon audit fails network_operation. Post-TERM data metadata has no TUN/residual daemon rules and no IPv6 routes; pre-activation baseline captured before later IPv6 suppression needs ordering repair, not learned-state adoption.",
       "daemon_process_proof_sha256": "ff25c68c1cefcc4e11d12ff7e25024d96a15ef6a3744b989a6c6f0f2d17d373a",
       "observer_process_proof_sha256": "67038cc1d1b11eb21516736511798554e98babefc79a1111969a5818a3e0ab41"
+    },
+    {
+      "attempt": 19,
+      "observed_at_utc": "2026-10-26T10:37:22.409363+00:00",
+      "source_binding": {
+        "source_commit": "5391d4925a51a49f2b5161d1dc54839fc0617f05",
+        "source_archive_sha256": "bfe2941e94d8c67009b72cd859ca0694bcd66b1c83357cc6cea2999f4ff29a5e",
+        "tracked_build_inputs_verified": 102,
+        "source_aggregate_sha256": "cc59253ba432afcf031b4fe976eed81dbc262a4991fcde2510ccf7e03e4b302f"
+      },
+      "artifact_sha256": "1ebd0f66b76cd54473b578d4f3c6286a6e814b8575bf00be63f45ea9544e8786",
+      "context_sha256": "d4abd245746a2c70a7f09caa1af18afce193812ce16ba01fb082c25b286df787",
+      "manifest_sha256": "d5646c5984782409aa98ca3333102c0e9d710d4f00e3516db518d1a1cd38ed39",
+      "runner_sha256": "65dc3e0055bb61094a3e447d37f3a26b7fda5a81c8423513da14ca5fff215513",
+      "exit_code": 1,
+      "wall_seconds_including_staging_build": 4.448,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_NATIVE_FAILURE stage=activate_quarantined reason=Drifted",
+        "actual_lab: network_operation"
+      ],
+      "result": "FAIL",
+      "release_ready": false,
+      "real_client_acceptance": "NOT_RUN",
+      "private_run_record": "target/lab-state/actual-program-run-19.json",
+      "private_run_record_sha256": "94c213118c4c5045cb91e814c2ec1b8285617712a1e26bad80e0dd9c1676b033",
+      "private_inventory": "target/lab-state/actual-program-inspect-19.json",
+      "private_inventory_sha256": "4a2c8f43b6a8017eec28ebdc8ca40e47a0035cb6dcb8e631bf67c53ab29cb8a5",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "observation": "FAIL retained: IPv4-suppressed bootstrap still required an IPv6 WG multicast route. Added failing regression; exact IPv4-only bootstrap audit corrected. No policy relaxation."
+    },
+    {
+      "attempt": 20,
+      "observed_at_utc": "2026-10-26T10:42:17.959822+00:00",
+      "source_binding": {
+        "source_commit": "0ec213f5bd5b3802d48a6554dfad809b6d0d69be",
+        "source_archive_sha256": "67f829eb9766bfc9322fe0c357b03dcc2cb40a1cb53f0993ce684adb113b5c7b",
+        "tracked_build_inputs_verified": 102,
+        "source_aggregate_sha256": "e87b93e198736f8b71b0bd121585a28ee49ef326e22729c689eedad1b77ee00a"
+      },
+      "artifact_sha256": "754d2bbe699dc7ef70549c020a8da06a38ddccab13b8c6d5c33a21f0acffca08",
+      "context_sha256": "5b776cda7b516b6d2b5830a74a30ad3b0d36615ecc6d7fad2fe1c1ed1bcbfb99",
+      "manifest_sha256": "6b1073ca494f4db6c9bdfb58a676721dbe8444c10b78989a6300517fa8a0a8d3",
+      "runner_sha256": "65dc3e0055bb61094a3e447d37f3a26b7fda5a81c8423513da14ca5fff215513",
+      "exit_code": 0,
+      "wall_seconds_including_staging_build": 9.668,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "actual_live_daemon_fixed_native_tun_rules_bound_and_revalidated",
+          "result": "pass"
+        },
+        {
+          "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+          "result": "pass"
+        },
+        {
+          "case": "actual_both_preexec_role_profiles_state_mount_exec_and_syscall_exec_init_proc_denials",
+          "result": "pass"
+        },
+        {
+          "case": "actual_rust_protected_readonly_configuration_authenticated_one_use_peer_metadata_localapi",
+          "result": "pass"
+        },
+        {
+          "case": "actual_go_signal_forwarding_bounded_reaping_empty_group_parent_accounting_unchanged",
+          "result": "pass"
+        },
+        {
+          "case": "actual_daemon_dead_revoked_baseline_and_full_offline_quarantine",
+          "result": "pass"
+        },
+        {
+          "case": "actual_fixture_three_plane_positive_controls_capture_accounting_and_same_namespace_unauthorized_denial",
+          "result": "pass"
+        },
+        {
+          "case": "actual_go_rust_container_death_natural_reap_revocation_empty_group_retained_offline_quarantine",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "LAB_STAGE actual_daemon_identity_pinned",
+        "LAB_STAGE actual_observer_authenticated_launch",
+        "LAB_STAGE actual_daemon_pre_termination_full_offline_quarantine",
+        "LAB_STAGE actual_go_and_rust_container_death_before_observe_reply"
+      ],
+      "result": "PASS_PARTIAL_ACTUAL_PROGRAMS",
+      "release_ready": false,
+      "real_client_acceptance": "NOT_RUN",
+      "private_run_record": "target/lab-state/actual-program-run-20.json",
+      "private_run_record_sha256": "304c69558637f42d39f991888b7eab88387a9e1d468dfd366f4fb55a941aa2d0",
+      "private_inventory": "target/lab-state/actual-program-inspect-20.json",
+      "private_inventory_sha256": "935542c81f68de2e2e2e71094d0193d53e62408d43ae33bbf7498d49e62ccb14",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "capture_verdict": "PASS_SYNTHETIC_COMPONENT_ONLY",
+      "forbidden_markers": 0,
+      "capture_kernel_drops": 0,
+      "independent_captures": [
+        {
+          "file": "actual-positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 158,
+          "sha256": "1b18c08e1215cd8a57d60f6c501512909f4745aab3368926a9c2ebc7424e75ab",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 2,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 894,
+          "sha256": "2dd8c2cb192be0274a3a7f3df7ef15ba99b52de27a232c3672bf7ea387b9dce7",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 1,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 894,
+          "sha256": "fef6ad4de55de0a6b190c9d7bc3b6dce40ec80b8dd54e72373ffb5d3d1401722",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 1,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 3032,
+          "sha256": "1de73b45ec90b624ea1d3430fc3de7e84050ef6e6cd2663233d9157a89191656",
+          "linktype": 276,
+          "records": 32,
+          "capture_counters": {
+            "captured": 32,
+            "received_by_filter": 32,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 32,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 5144,
+          "sha256": "c96f6c64780e6bca5851b16a8955e73b6347fc927c99549c5fa9ed3183fea1ba",
+          "linktype": 276,
+          "records": 32,
+          "capture_counters": {
+            "captured": 32,
+            "received_by_filter": 32,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4952,
+          "sha256": "5d119113d34f10889d86c5982582f71f22856f9919c8cd44dbcf00da2a526edc",
+          "linktype": 1,
+          "records": 32,
+          "capture_counters": {
+            "captured": 32,
+            "received_by_filter": 32,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "private_capture_record": "target/lab-state/actual-program-captures-20.json",
+      "private_capture_record_sha256": "d57a91f828b9054cb157a26169371479d60de990847c809660c35d22f965acf1",
+      "terminal_component_observations": {
+        "directory": "/var/lib/vprouter-v2-lab/task8b2-42937",
+        "result": {
+          "result": "actual_observer_and_go_observation_only",
+          "readiness": false,
+          "production_changes": false,
+          "quarantine_retained": true,
+          "approved_identity_accessed": false,
+          "real_client_acceptance": "NOT_RUN"
+        },
+        "packet_accounting": {
+          "authorized_roundtrips_during_denial": 16,
+          "capture_kernel_drops": 0,
+          "capture_planes": [
+            "data",
+            "transport",
+            "host"
+          ],
+          "kernel_permission_denials": 16,
+          "locally_queued_sends": 0,
+          "positive_controls": true,
+          "readiness": false,
+          "unauthorized_peer_receives": 0,
+          "unauthorized_send_attempts": 16
+        },
+        "death_result": {
+          "actual_go_and_rust_terminal": true,
+          "fallback_signal_used": false,
+          "all_captured_producer_pids_absent": true,
+          "producer_empty_or_removed": true,
+          "dead_authority_revoked": true,
+          "full_offline_quarantine_verified": true,
+          "resources_retained": true,
+          "readiness": false
+        }
+      },
+      "observation": "10 actual-program component cases pass; independent captures pass. Review subsequently found host TUN compatibility regression, fixed and retested in attempt21."
+    },
+    {
+      "attempt": 21,
+      "observed_at_utc": "2026-10-26T10:47:01.819387+00:00",
+      "source_binding": {
+        "source_commit": "1dd46e34ca7135e08221ca07c037c5b38066ce26",
+        "source_archive_sha256": "1c41c3631e5aa474d6770d7692d779840129a4d5eec9d2a285f84dccf61f6a71",
+        "tracked_build_inputs_verified": 102,
+        "source_aggregate_sha256": "cd73df9aacfc92152b12eea0213b26b32898a620717cc24386ddca8b75da5929"
+      },
+      "artifact_sha256": "9850af9e48edcba78af8e20025ebd39ae937d81351efcfd46dbedf3b16658e93",
+      "context_sha256": "efcd7c4f944dec3b18cb95262649189073b83291a1298b18b1acba930a649ac3",
+      "manifest_sha256": "b60dcf9ef3ede3c1f2f4847ee83b125f24702ca09312485fb641ae931e3571ea",
+      "runner_sha256": "65dc3e0055bb61094a3e447d37f3a26b7fda5a81c8423513da14ca5fff215513",
+      "exit_code": 0,
+      "wall_seconds_including_staging_build": 9.008,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "actual_live_daemon_fixed_native_tun_rules_bound_and_revalidated",
+          "result": "pass"
+        },
+        {
+          "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+          "result": "pass"
+        },
+        {
+          "case": "actual_both_preexec_role_profiles_state_mount_exec_and_syscall_exec_init_proc_denials",
+          "result": "pass"
+        },
+        {
+          "case": "actual_rust_protected_readonly_configuration_authenticated_one_use_peer_metadata_localapi",
+          "result": "pass"
+        },
+        {
+          "case": "actual_go_signal_forwarding_bounded_reaping_empty_group_parent_accounting_unchanged",
+          "result": "pass"
+        },
+        {
+          "case": "actual_daemon_dead_revoked_baseline_and_full_offline_quarantine",
+          "result": "pass"
+        },
+        {
+          "case": "actual_fixture_three_plane_positive_controls_capture_accounting_and_same_namespace_unauthorized_denial",
+          "result": "pass"
+        },
+        {
+          "case": "actual_go_rust_container_death_natural_reap_revocation_empty_group_retained_offline_quarantine",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "LAB_STAGE actual_daemon_identity_pinned",
+        "LAB_STAGE actual_observer_authenticated_launch",
+        "LAB_STAGE actual_daemon_pre_termination_full_offline_quarantine",
+        "LAB_STAGE actual_go_and_rust_container_death_before_observe_reply"
+      ],
+      "result": "PASS_PARTIAL_ACTUAL_PROGRAMS",
+      "release_ready": false,
+      "real_client_acceptance": "NOT_RUN",
+      "private_run_record": "target/lab-state/actual-program-run-21.json",
+      "private_run_record_sha256": "d9b25effad026f79bdd90cddf7e27b35f55bb99b0afad14936b65d2b919a9146",
+      "private_inventory": "target/lab-state/actual-program-inspect-21.json",
+      "private_inventory_sha256": "a4e62e52df2b9507ac7b2730312cb6e3b881cdd316da04fc272710c252fbc15d",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "capture_verdict": "PASS_SYNTHETIC_COMPONENT_ONLY",
+      "forbidden_markers": 0,
+      "capture_kernel_drops": 0,
+      "independent_captures": [
+        {
+          "file": "actual-positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 158,
+          "sha256": "98b17d219350745dd5f2bc2625fe84e57e1a7972d1dd7ddb69883182e69dbfc6",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 2,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 894,
+          "sha256": "90dcc3f91e7cd77425c5ab60086875dc7db579572c4db9e379ef3cadc6c405b2",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 1,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 894,
+          "sha256": "b9f790b0b106245703ea2e6e8e93500454fcd0461b2093aedc587db455404c77",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 1,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 3032,
+          "sha256": "d812923ea80445574cd1b07448dce1547944396538d546bc9cb32e8f2cf9d562",
+          "linktype": 276,
+          "records": 32,
+          "capture_counters": {
+            "captured": 32,
+            "received_by_filter": 32,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 32,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 5144,
+          "sha256": "043382d2a13fac3ea709ca105cc50f76246ca6e50ae9f2b1128e394e891613e7",
+          "linktype": 276,
+          "records": 32,
+          "capture_counters": {
+            "captured": 32,
+            "received_by_filter": 32,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4952,
+          "sha256": "b9bd4ea481a5e4fe00a250724e5539c9a88a56cffc73b9ae58f1352941681e16",
+          "linktype": 1,
+          "records": 32,
+          "capture_counters": {
+            "captured": 32,
+            "received_by_filter": 32,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "private_capture_record": "target/lab-state/actual-program-captures-21.json",
+      "private_capture_record_sha256": "6cddb50c74bf97e8ecad2be1ac6d74829521c800193d39308a09d05c80c3aaaa",
+      "terminal_component_observations": {
+        "directory": "/var/lib/vprouter-v2-lab/task8b2-43447",
+        "result": {
+          "result": "actual_observer_and_go_observation_only",
+          "readiness": false,
+          "production_changes": false,
+          "quarantine_retained": true,
+          "approved_identity_accessed": false,
+          "real_client_acceptance": "NOT_RUN"
+        },
+        "packet_accounting": {
+          "authorized_roundtrips_during_denial": 16,
+          "capture_kernel_drops": 0,
+          "capture_planes": [
+            "data",
+            "transport",
+            "host"
+          ],
+          "kernel_permission_denials": 16,
+          "locally_queued_sends": 0,
+          "positive_controls": true,
+          "readiness": false,
+          "unauthorized_peer_receives": 0,
+          "unauthorized_send_attempts": 16
+        },
+        "death_result": {
+          "actual_go_and_rust_terminal": true,
+          "fallback_signal_used": false,
+          "all_captured_producer_pids_absent": true,
+          "producer_empty_or_removed": true,
+          "dead_authority_revoked": true,
+          "full_offline_quarantine_verified": true,
+          "resources_retained": true,
+          "readiness": false
+        }
+      },
+      "observation": "Reviewed host TUN projection fix passes actual-program suite. Unrelated host metadata retained; exact owned Go TUN profile enforced only in data namespace."
+    },
+    {
+      "attempt": 22,
+      "observed_at_utc": "2026-10-26T10:49:19.015141+00:00",
+      "source_binding": {
+        "source_commit": "1b0d7e723f51c54e0c2d624f2fb15a8d32b6fdaa",
+        "source_archive_sha256": "66594c50fe63b2115e6c7f4274c00014ad55427e02f9613072ba58dbbd2468c1",
+        "tracked_build_inputs_verified": 102,
+        "source_aggregate_sha256": "b8d335c583f7bcf0494b52092fc5f1ea6121625280e7190eac2352bb071fe2e8"
+      },
+      "artifact_sha256": "e7b4b8820f39d3b55724f90b0223e6b1c9e3d1dd8a8b5a0e4d81463685b060c1",
+      "context_sha256": "efcd7c4f944dec3b18cb95262649189073b83291a1298b18b1acba930a649ac3",
+      "manifest_sha256": "b60dcf9ef3ede3c1f2f4847ee83b125f24702ca09312485fb641ae931e3571ea",
+      "runner_sha256": "65dc3e0055bb61094a3e447d37f3a26b7fda5a81c8423513da14ca5fff215513",
+      "exit_code": 0,
+      "wall_seconds_including_staging_build": 5.382,
+      "completed_case_objects": [
+        {
+          "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+          "result": "pass"
+        },
+        {
+          "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+          "result": "pass"
+        },
+        {
+          "case": "actual_live_daemon_fixed_native_tun_rules_bound_and_revalidated",
+          "result": "pass"
+        },
+        {
+          "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+          "result": "pass"
+        },
+        {
+          "case": "actual_both_preexec_role_profiles_state_mount_exec_and_syscall_exec_init_proc_denials",
+          "result": "pass"
+        },
+        {
+          "case": "actual_rust_protected_readonly_configuration_authenticated_one_use_peer_metadata_localapi",
+          "result": "pass"
+        },
+        {
+          "case": "actual_go_signal_forwarding_bounded_reaping_empty_group_parent_accounting_unchanged",
+          "result": "pass"
+        },
+        {
+          "case": "actual_daemon_dead_revoked_baseline_and_full_offline_quarantine",
+          "result": "pass"
+        },
+        {
+          "case": "actual_fixture_three_plane_positive_controls_capture_accounting_and_same_namespace_unauthorized_denial",
+          "result": "pass"
+        },
+        {
+          "case": "actual_go_rust_container_death_natural_reap_revocation_empty_group_retained_offline_quarantine",
+          "result": "pass"
+        }
+      ],
+      "stderr_stage_diagnostics": [
+        "LAB_STAGE transport_admitted_exact_hash_guest_host_namespace",
+        "LAB_STAGE native_guard_down_provision_then_quarantined_activation",
+        "LAB_STAGE actual_daemon_fixed_program_launch",
+        "LAB_STAGE actual_daemon_setup_acknowledged",
+        "LAB_STAGE actual_daemon_live_socket_program_identified",
+        "LAB_STAGE actual_daemon_identity_pinned",
+        "LAB_STAGE actual_observer_authenticated_launch",
+        "LAB_STAGE actual_daemon_pre_termination_full_offline_quarantine",
+        "LAB_STAGE actual_go_and_rust_container_death_before_observe_reply"
+      ],
+      "result": "PASS_PARTIAL_ACTUAL_PROGRAMS",
+      "release_ready": false,
+      "real_client_acceptance": "NOT_RUN",
+      "private_run_record": "target/lab-state/actual-program-run-22.json",
+      "private_run_record_sha256": "1d12c94122ca1d670f13e27e678ab882bd44084c0afc6bd4e6d0cb384ed53098",
+      "private_inventory": "target/lab-state/actual-program-inspect-22.json",
+      "private_inventory_sha256": "85602b4136c7f5f3b1ff285d3b53b6c0e8108a3592c8d2229f63b8656805eb89",
+      "admission_markers_present_after_run": {
+        "task8b2-image": false,
+        "task8b2-host-acceptance": false
+      },
+      "capture_verdict": "PASS_SYNTHETIC_COMPONENT_ONLY",
+      "forbidden_markers": 0,
+      "capture_kernel_drops": 0,
+      "independent_captures": [
+        {
+          "file": "actual-positive-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 158,
+          "sha256": "42f48fbafc98cd66275090d91bf97edc389ad17c71b9b386ad2f28dbf9d82111",
+          "linktype": 101,
+          "records": 2,
+          "capture_counters": {
+            "captured": 2,
+            "received_by_filter": 2,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 2,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-positive-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 894,
+          "sha256": "82431ad6c6101bc90dbb34105ae46df95289d880ed835ca76255ad8ebf06126b",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 1,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-positive-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 894,
+          "sha256": "8ed1172710e6abf74d049c6d1d39993138c00f8bb0fff841f0eddcf373a08d0d",
+          "linktype": 1,
+          "records": 7,
+          "capture_counters": {
+            "captured": 7,
+            "received_by_filter": 7,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 1,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-negative-data.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 3032,
+          "sha256": "6ef15ddec3c52429e4b2e2671e9a1d9f0dddf4bb9a9aea5f07e37c095370b725",
+          "linktype": 276,
+          "records": 32,
+          "capture_counters": {
+            "captured": 32,
+            "received_by_filter": 32,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 32,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-negative-transport.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 5144,
+          "sha256": "e0815c1167f0ee7b9ca59a18a4216a829792117d9a6a8b422585a206ece4a052",
+          "linktype": 276,
+          "records": 32,
+          "capture_counters": {
+            "captured": 32,
+            "received_by_filter": 32,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        },
+        {
+          "file": "actual-negative-host.pcap",
+          "status": "FRAMING_VERIFIED",
+          "bytes": 4952,
+          "sha256": "a9ad500b2de2a8edaadc35108f633256456aed9dc47de149dea584d3238dcdd4",
+          "linktype": 1,
+          "records": 32,
+          "capture_counters": {
+            "captured": 32,
+            "received_by_filter": 32,
+            "dropped_by_kernel": 0
+          },
+          "marker_occurrences": {
+            "positive_producer": 0,
+            "positive_plaintext_control": 0,
+            "authorized_during_denial": 0,
+            "forbidden_prefix": 0
+          }
+        }
+      ],
+      "private_capture_record": "target/lab-state/actual-program-captures-22.json",
+      "private_capture_record_sha256": "6c5de64efe958a5f7135441e848c25e6770ded945ca4af8893dbadfd6092f40f",
+      "terminal_component_observations": {
+        "directory": "/var/lib/vprouter-v2-lab/task8b2-44191",
+        "result": {
+          "result": "actual_observer_and_go_observation_only",
+          "readiness": false,
+          "production_changes": false,
+          "quarantine_retained": true,
+          "approved_identity_accessed": false,
+          "real_client_acceptance": "NOT_RUN"
+        },
+        "packet_accounting": {
+          "authorized_roundtrips_during_denial": 16,
+          "capture_kernel_drops": 0,
+          "capture_planes": [
+            "data",
+            "transport",
+            "host"
+          ],
+          "kernel_permission_denials": 16,
+          "locally_queued_sends": 0,
+          "positive_controls": true,
+          "readiness": false,
+          "unauthorized_peer_receives": 0,
+          "unauthorized_send_attempts": 16
+        },
+        "death_result": {
+          "actual_go_and_rust_terminal": true,
+          "fallback_signal_used": false,
+          "all_captured_producer_pids_absent": true,
+          "producer_empty_or_removed": true,
+          "dead_authority_revoked": true,
+          "full_offline_quarantine_verified": true,
+          "resources_retained": true,
+          "readiness": false
+        }
+      },
+      "observation": "Final source snapshot passes all10 actual-program cases; test-only IPv6 transport fault injection updated to explicitly undo and restore owned-interface suppression."
     }
   ],
   "diagnosis": {
-    "status": "ACTUAL_OBSERVATION_AND_SIGNAL_REAP_PASS_POSTDAEMON_NETWORK_AUDIT_PENDING",
+    "status": "RESOLVED_COMPONENT_SUITE_PASS_ATTEMPT_22_REAL_CLIENT_NOT_RUN",
     "trace_kind": "raw syscall arguments only, no decoded strings, buffers or environments",
     "raw_trace_files": 34,
     "quoted_decoded_strings_present": false,
@@ -1580,7 +2334,8 @@
     "failing_child_sha256": "a7754e7d727fe0510177745045ae215c509b9af2b87174f917314aeaa82aa7e0",
     "observation": "EROFS on open immediately after final private TUN file bind/remount; no execveat reached. Source actual_root attempts IPv6 sysctl writes through inherited readonly container proc after mount entry.",
     "private_summary": "target/lab-state/actual-program-trace-2-summary.json",
-    "private_summary_sha256": "fbdc30501f13d035d1cd9f94b0ed5919fac9c6516f2c4dec36271014e04392dd"
+    "private_summary_sha256": "fbdc30501f13d035d1cd9f94b0ed5919fac9c6516f2c4dec36271014e04392dd",
+    "historical_diagnostic_attempt": 2
   },
   "postfailure_attempt1": {
     "verified_live_base_namespace": {
@@ -1602,13 +2357,21 @@
     "private_live_inventory": "target/lab-state/actual-program-live-data-1.json"
   },
   "remaining_gates": [
-    "actual_go_and_observer_execution",
-    "actual_daemon_metadata_admission",
-    "three_scope_capture_controls",
-    "signal_reaping_and_container_death",
-    "independent_spec_quality_review",
+    "live_post_pin_tun_rule_drift_injection_and_quarantine",
+    "full_integrated_runtime_security_review",
     "autonomous_guard_protocol_and_readiness",
     "real_tailscale_client_failure_matrix",
     "all_platforms_migration_performance_release_gates"
-  ]
+  ],
+  "current_component_status": {
+    "updated_at_utc": "2026-10-26T10:50:57.659652+00:00",
+    "final_passing_attempt": 22,
+    "source_commit": "1b0d7e723f51c54e0c2d624f2fb15a8d32b6fdaa",
+    "source_is_local_test_snapshot": true,
+    "branch_head_unchanged": true,
+    "actual_program_component_cases_passed": 10,
+    "real_client_acceptance": "NOT_RUN",
+    "release_ready": false,
+    "report": "testing-2026-10-26.md"
+  }
 }

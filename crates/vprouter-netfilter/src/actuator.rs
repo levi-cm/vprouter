@@ -27,6 +27,7 @@ pub struct Actuator {
     pub(crate) socket: Socket,
     policy: Policy,
     quarantine_stage: Stage,
+    released: bool,
     permit_stage: Stage,
     namespace: (u64, u64),
     emergency: Socket,
@@ -37,7 +38,297 @@ struct Snapshot {
     quarantine: Reconciliation,
     permit: Reconciliation,
 }
+fn original_bootstrap_permit_operations(
+    policy: &Policy,
+    stage: Stage,
+    observed: &Snapshot,
+    emergency: Reconciliation,
+) -> Result<Vec<(u16, u16, Vec<Attr>)>> {
+    if stage != Stage::Offline {
+        return Err(Error::QuarantineRequired);
+    }
+    require(observed.quarantine, Reconciliation::Matching)?;
+    require(observed.permit, Reconciliation::Absent)?;
+    require(emergency, Reconciliation::Matching)?;
+    Ok(policy.permit_stage_table(Stage::Bootstrap).operations())
+}
 impl Actuator {
+    pub(crate) fn bind_cleanup_deadline(
+        &mut self,
+        deadline: crate::BootDeadline,
+        timer: std::sync::Arc<std::os::fd::OwnedFd>,
+    ) -> Result<()> {
+        self.socket.bind_cleanup_deadline(deadline, timer.clone())?;
+        self.emergency.bind_cleanup_deadline(deadline, timer)
+    }
+    pub(crate) fn descriptors(&self) -> [std::os::fd::BorrowedFd<'_>; 2] {
+        [self.socket.descriptor(), self.emergency.descriptor()]
+    }
+
+    // Only our exact pending socket operation can invoke this after storing its
+    // original completion. No arbitrary descriptor/parsed report entry point.
+    pub(crate) fn from_fixed_creator(
+        policy: Policy,
+        original: &vprouter_native_role::SocketCompletion,
+    ) -> Result<Self> {
+        let namespace = original.namespace_identity().map_err(|_| Error::Foreign)?;
+        let [(main, main_port), (emergency, emergency_port)] =
+            original.netfilter_sockets().map_err(|_| Error::Foreign)?;
+        if std::sync::Arc::ptr_eq(&main, &emergency) || main_port == emergency_port {
+            return Err(Error::Foreign);
+        }
+        if let Some(producer) = &policy.producer {
+            if policy.scope() != crate::Scope::Data
+                || !producer.matches(&policy.binding(), namespace)
+            {
+                return Err(Error::InvalidAllocation);
+            }
+            producer.verify()?;
+        }
+        Ok(Self {
+            socket: Socket::from_original_creator(main, main_port)?,
+            emergency: Socket::from_original_creator(emergency, emergency_port)?,
+            policy,
+            quarantine_stage: Stage::Offline,
+            released: false,
+            permit_stage: Stage::Ready,
+            namespace,
+            cooperation: None,
+        })
+    }
+    pub(crate) fn matches_original_pair(
+        &self,
+        pair: &[(std::sync::Arc<std::os::fd::OwnedFd>, u32); 2],
+    ) -> bool {
+        self.socket.matches_original(&pair[0].0, pair[0].1)
+            && self.emergency.matches_original(&pair[1].0, pair[1].1)
+    }
+    pub(crate) fn confined_initial(
+        &self,
+        role: &vprouter_native_role::ConfinedNetfilter,
+    ) -> Result<Self> {
+        if self.policy.producer.is_some()
+            || self.cooperation.is_some()
+            || self.released
+            || self.quarantine_stage != Stage::Offline
+            || self.namespace != role.namespace_identity().map_err(|_| Error::Foreign)?
+        {
+            return Err(Error::Foreign);
+        }
+        Ok(Self {
+            socket: self.socket.confined(role, 0)?,
+            emergency: self.emergency.confined(role, 1)?,
+            policy: self.policy.clone(),
+            quarantine_stage: Stage::Offline,
+            released: false,
+            permit_stage: Stage::Ready,
+            namespace: self.namespace,
+            cooperation: None,
+        })
+    }
+    pub(crate) fn confined_producer_observation(
+        &self,
+        role: &vprouter_native_role::ConfinedProducerNetfilter,
+    ) -> Result<Self> {
+        if self.policy.producer.is_some()
+            || self.cooperation.is_some()
+            || self.released
+            || self.quarantine_stage != Stage::Offline
+            || self.policy.scope() != crate::Scope::Data
+            || self.namespace != role.namespace_identity().map_err(|_| Error::Foreign)?
+        {
+            return Err(Error::Foreign);
+        }
+        Ok(Self {
+            socket: self.socket.confined_producer(role, 0)?,
+            emergency: self.emergency.confined_producer(role, 1)?,
+            policy: self.policy.clone(),
+            quarantine_stage: Stage::Offline,
+            released: false,
+            permit_stage: Stage::Ready,
+            namespace: self.namespace,
+            cooperation: None,
+        })
+    }
+    pub(crate) fn confined_bootstrap(
+        &self,
+        role: &vprouter_native_role::ConfinedProducerBootstrap,
+    ) -> Result<Self> {
+        if self.policy.producer.is_some()
+            || self.cooperation.is_some()
+            || self.released
+            || self.quarantine_stage != Stage::Offline
+            || self.namespace != role.namespace_identity().map_err(|_| Error::Foreign)?
+        {
+            return Err(Error::Foreign);
+        }
+        let mut policy = self.policy.clone();
+        if policy.scope() == crate::Scope::Data {
+            policy.producer = Some(crate::SocketProducer::from_confined_bootstrap(
+                role,
+                policy.binding(),
+            )?);
+        }
+        Ok(Self {
+            socket: self.socket.confined_bootstrap(role, 0)?,
+            emergency: self.emergency.confined_bootstrap(role, 1)?,
+            policy,
+            quarantine_stage: Stage::Offline,
+            released: false,
+            permit_stage: Stage::Ready,
+            namespace: self.namespace,
+            cooperation: None,
+        })
+    }
+    pub(crate) fn rebind_initial_bootstrap(
+        &mut self,
+        original: &vprouter_native_role::NetfilterCompleted,
+        seq: [u32; 2],
+        end: crate::BootDeadline,
+        timer: std::sync::Arc<std::os::fd::OwnedFd>,
+    ) -> Result<()> {
+        if self.policy.scope() == crate::Scope::Data
+            || self.policy.producer.is_some()
+            || self.released
+            || self.cooperation.is_some()
+            || self.quarantine_stage != Stage::Offline
+        {
+            return Err(Error::Foreign);
+        }
+        self.socket
+            .rebind_accepted_initial(original, seq[0], end, timer.clone())?;
+        self.emergency
+            .rebind_accepted_initial(original, seq[1], end, timer)
+    }
+    pub(crate) fn rebind_observed_bootstrap(
+        &mut self,
+        original: &vprouter_native_role::ProducerNetfilterCompleted,
+        seq: [u32; 2],
+        end: crate::BootDeadline,
+        timer: std::sync::Arc<std::os::fd::OwnedFd>,
+    ) -> Result<()> {
+        if self.policy.scope() != crate::Scope::Data
+            || self.policy.producer.is_some()
+            || self.released
+            || self.cooperation.is_some()
+            || self.quarantine_stage != Stage::Offline
+        {
+            return Err(Error::Foreign);
+        }
+        self.socket
+            .rebind_accepted_producer(original, seq[0], end, timer.clone())?;
+        self.emergency
+            .rebind_accepted_producer(original, seq[1], end, timer)
+    }
+    pub(crate) fn accept_bootstrap_sequences(
+        &mut self,
+        original: &vprouter_native_role::ProducerBootstrapCompleted,
+        seq: [u32; 2],
+    ) -> Result<()> {
+        self.socket.accept_bootstrap_sequence(original, seq[0])?;
+        self.emergency.accept_bootstrap_sequence(original, seq[1])
+    }
+    pub(crate) fn verify_bootstrap_observation(&mut self) -> Result<()> {
+        self.socket.require_paired_deadline(&self.emergency)?;
+        if self.released
+            || self.cooperation.is_some()
+            || self.quarantine_stage != Stage::Bootstrap
+            || self.permit_stage != Stage::Bootstrap
+        {
+            return Err(Error::Foreign);
+        }
+        self.verify_producer()?;
+        let end = Self::deadline();
+        let snapshot = self.snapshot(end)?;
+        require(snapshot.quarantine, Reconciliation::Matching)?;
+        require(snapshot.permit, Reconciliation::Matching)?;
+        require(
+            self.inspect_table(&self.policy.emergency_table(), end)?,
+            Reconciliation::Absent,
+        )?;
+        if self.socket.generation(end)? != snapshot.generation {
+            return Err(Error::GenerationChanged);
+        }
+        Ok(())
+    }
+    pub(crate) fn rebind_initial_observation(
+        &mut self,
+        original: &vprouter_native_role::NetfilterCompleted,
+        seq: [u32; 2],
+        end: crate::BootDeadline,
+        timer: std::sync::Arc<std::os::fd::OwnedFd>,
+    ) -> Result<()> {
+        if self.policy.producer.is_some()
+            || self.cooperation.is_some()
+            || self.released
+            || self.quarantine_stage != Stage::Offline
+            || self.policy.scope() != crate::Scope::Data
+        {
+            return Err(Error::Foreign);
+        }
+        self.socket
+            .rebind_accepted_initial(original, seq[0], end, timer.clone())?;
+        self.emergency
+            .rebind_accepted_initial(original, seq[1], end, timer)
+    }
+    pub(crate) fn accept_producer_observation(
+        &mut self,
+        original: &vprouter_native_role::ProducerNetfilterCompleted,
+        seq: [u32; 2],
+    ) -> Result<()> {
+        self.socket.accept_producer_sequence(original, seq[0])?;
+        self.emergency.accept_producer_sequence(original, seq[1])
+    }
+    pub(crate) fn initial_sequences(&self) -> Result<[u32; 2]> {
+        Ok([
+            self.socket.original_sequence()?,
+            self.emergency.original_sequence()?,
+        ])
+    }
+    pub(crate) fn accept_initial_sequences(
+        &mut self,
+        c: &vprouter_native_role::NetfilterCompleted,
+        seq: [u32; 2],
+    ) -> Result<()> {
+        self.socket.accept_original_sequence(c, seq[0])?;
+        self.emergency.accept_original_sequence(c, seq[1])
+    }
+    /// Fresh initial creation only: matching existing tables never count as our
+    /// original creation. The durable owner retains all ambiguity on error.
+    pub(crate) fn install_initial_quarantine(&mut self) -> Result<()> {
+        self.socket.require_paired_deadline(&self.emergency)?;
+        if self.policy.producer.is_some() || self.released || self.cooperation.is_some() {
+            return Err(Error::Foreign);
+        }
+        let end = Self::deadline();
+        let before = self.snapshot(end)?;
+        require(before.quarantine, Reconciliation::Absent)?;
+        require(before.permit, Reconciliation::Absent)?;
+        let emergency = self.policy.emergency_table();
+        require(self.inspect_table(&emergency, end)?, Reconciliation::Absent)?;
+        if self.socket.generation(end)? != before.generation {
+            return Err(Error::GenerationChanged);
+        }
+        let mut ops = emergency.operations();
+        ops.extend(self.policy.table(true).operations());
+        self.socket.batch(&ops, before.generation, end)?;
+        self.verify_initial_quarantine()
+    }
+    pub(crate) fn verify_initial_quarantine(&mut self) -> Result<()> {
+        self.socket.require_paired_deadline(&self.emergency)?;
+        let end = Self::deadline();
+        let observed = self.snapshot(end)?;
+        require(observed.quarantine, Reconciliation::Matching)?;
+        require(observed.permit, Reconciliation::Absent)?;
+        require(
+            self.inspect_table(&self.policy.emergency_table(), end)?,
+            Reconciliation::Matching,
+        )?;
+        if self.socket.generation(end)? != observed.generation {
+            return Err(Error::GenerationChanged);
+        }
+        Ok(())
+    }
     pub fn open(policy: Policy) -> Result<Self> {
         use std::os::unix::fs::MetadataExt;
         let before =
@@ -61,6 +352,7 @@ impl Actuator {
             socket,
             policy,
             quarantine_stage: Stage::Offline,
+            released: false,
             permit_stage: Stage::Ready,
             namespace: (before.dev(), before.ino()),
             emergency,
@@ -97,6 +389,7 @@ impl Actuator {
         }
     }
     pub fn install_quarantine(&mut self) -> Result<()> {
+        self.released = false;
         // A failed exchange must not disable independent quarantine restoration.
         // Both descriptors were opened in this exact namespace before activation.
         if self.socket.poisoned() && !self.emergency.poisoned() {
@@ -161,7 +454,32 @@ impl Actuator {
         &self.policy
     }
     pub(crate) fn stage(&self) -> Stage {
-        self.quarantine_stage
+        if self.released {
+            Stage::Ready
+        } else {
+            self.quarantine_stage
+        }
+    }
+    pub(crate) fn verify_staged_ready(&mut self) -> Result<()> {
+        if self.stage() != Stage::Offline || self.permit_stage != Stage::Ready {
+            return Err(Error::QuarantineRequired);
+        }
+        let end = Self::deadline();
+        let snapshot = self.snapshot(end)?;
+        require(snapshot.quarantine, Reconciliation::Matching)?;
+        require(snapshot.permit, Reconciliation::Matching)?;
+        self.verify_emergency()
+    }
+    pub(crate) fn verify_ready(&mut self) -> Result<()> {
+        let end = Self::deadline();
+        let snapshot = self.snapshot(end)?;
+        let emergency = self.inspect_table(&self.policy.emergency_table(), end)?;
+        ready_projection(
+            self.stage(),
+            snapshot.quarantine,
+            snapshot.permit,
+            emergency,
+        )
     }
     pub(crate) fn verify_emergency(&mut self) -> Result<()> {
         require(
@@ -199,6 +517,7 @@ impl Actuator {
         require(s.permit, Reconciliation::Matching)
     }
     fn quarantine(&mut self, deadline: Instant) -> Result<()> {
+        self.released = false;
         let s = self.snapshot(deadline)?;
         match s.quarantine {
             Reconciliation::Matching if self.quarantine_stage == Stage::Offline => Ok(()),
@@ -223,6 +542,28 @@ impl Actuator {
     /// Replacing drifted or foreign state is refused; it needs operator investigation.
     pub fn install_permit(&mut self) -> Result<()> {
         self.install_permit_stage(Stage::Ready)
+    }
+    /// First Bootstrap permit for the retained exclusive initial owner. A
+    /// matching table created by another actor is not our creation receipt.
+    pub(crate) fn install_original_bootstrap_permit(&mut self) -> Result<()> {
+        self.socket.require_paired_deadline(&self.emergency)?;
+        let end = Self::deadline();
+        let observed = self.snapshot(end)?;
+        let emergency = self.inspect_table(&self.policy.emergency_table(), end)?;
+        let ops = original_bootstrap_permit_operations(
+            &self.policy,
+            self.quarantine_stage,
+            &observed,
+            emergency,
+        )?;
+        if self.socket.generation(end)? != observed.generation {
+            return Err(Error::GenerationChanged);
+        }
+        self.socket.batch(&ops, observed.generation, end)?;
+        self.permit_stage = Stage::Bootstrap;
+        let after = self.snapshot(end)?;
+        require(after.quarantine, Reconciliation::Matching)?;
+        require(after.permit, Reconciliation::Matching)
     }
     pub(crate) fn install_bootstrap_permit(&mut self) -> Result<()> {
         self.install_permit_stage(Stage::Bootstrap)
@@ -278,7 +619,10 @@ impl Actuator {
         if s.quarantine != Reconciliation::Matching {
             return Err(Error::QuarantineRequired);
         }
-        if self.quarantine_stage != Stage::Offline {
+        if self.quarantine_stage != Stage::Offline
+            || self.permit_stage != Stage::Ready
+            || self.released
+        {
             return Err(Error::QuarantineRequired);
         }
         self.verify_emergency()?;
@@ -289,7 +633,16 @@ impl Actuator {
             ],
             s.generation,
             deadline,
-        )
+        )?;
+        // The desired phase changes only after the actual generation-CAS ACK.
+        // Verification checks absence of BOTH independent quarantine tables and
+        // exact Ready permit bytes; failure immediately restores quarantine.
+        self.released = true;
+        if let Err(error) = self.verify_ready() {
+            self.install_quarantine()?;
+            return Err(error);
+        }
+        Ok(())
     }
     /// Ordinary shutdown removes only the verified permit table, leaving quarantine.
     /// Final quarantine cleanup intentionally has no API until namespace/link
@@ -382,41 +735,7 @@ impl Actuator {
         tables: &[Message],
         deadline: Instant,
     ) -> Result<Reconciliation> {
-        let mut found = None;
-        for m in tables {
-            let a = nfattrs(m)?;
-            if text(get(&a, 1)?)? == expected.name {
-                if found.is_some() {
-                    return Err(Error::Foreign);
-                }
-                found = Some(a);
-            }
-        }
-        let Some(a) = found else {
-            return Ok(Reconciliation::Absent);
-        };
-        if get(&a, 6).ok() != Some(expected.marker.as_slice()) {
-            return Ok(Reconciliation::Foreign);
-        }
-        let chains = self.socket.scoped_dump(4, &expected.name, deadline)?;
-        let rules = self.socket.scoped_dump(7, &expected.name, deadline)?;
-        let mut extras = false;
-        for op in [10, 19, 23] {
-            if !self
-                .socket
-                .scoped_dump(op, &expected.name, deadline)?
-                .is_empty()
-            {
-                extras = true;
-            }
-        }
-        Ok(
-            if !extras && verify(expected, &a, &chains, &rules).is_ok() {
-                Reconciliation::Matching
-            } else {
-                Reconciliation::Drifted
-            },
-        )
+        inspect_table_from(&mut self.socket, expected, tables, deadline)
     }
     fn snapshot(&mut self, deadline: Instant) -> Result<Snapshot> {
         let generation = self.socket.generation(deadline)?;
@@ -441,6 +760,58 @@ impl Actuator {
         })
     }
 }
+pub(crate) fn inspect_table_from(
+    socket: &mut Socket,
+    expected: &Table,
+    tables: &[Message],
+    deadline: Instant,
+) -> Result<Reconciliation> {
+    let mut found = None;
+    for m in tables {
+        let a = nfattrs(m)?;
+        if text(get(&a, 1)?)? == expected.name {
+            if found.is_some() {
+                return Err(Error::Foreign);
+            }
+            found = Some(a);
+        }
+    }
+    let Some(a) = found else {
+        return Ok(Reconciliation::Absent);
+    };
+    if get(&a, 6).ok() != Some(expected.marker.as_slice()) {
+        return Ok(Reconciliation::Foreign);
+    }
+    let chains = socket.scoped_dump(4, &expected.name, deadline)?;
+    let rules = socket.scoped_dump(7, &expected.name, deadline)?;
+    let mut extras = false;
+    for op in [10, 19, 23] {
+        if !socket.scoped_dump(op, &expected.name, deadline)?.is_empty() {
+            extras = true;
+        }
+    }
+    Ok(
+        if !extras && verify(expected, &a, &chains, &rules).is_ok() {
+            Reconciliation::Matching
+        } else {
+            Reconciliation::Drifted
+        },
+    )
+}
+
+fn ready_projection(
+    stage: Stage,
+    quarantine: Reconciliation,
+    permit: Reconciliation,
+    emergency: Reconciliation,
+) -> Result<()> {
+    if stage != Stage::Ready {
+        return Err(Error::QuarantineRequired);
+    }
+    require(quarantine, Reconciliation::Absent)?;
+    require(permit, Reconciliation::Matching)?;
+    require(emergency, Reconciliation::Absent)
+}
 fn require(actual: Reconciliation, wanted: Reconciliation) -> Result<()> {
     if actual == wanted {
         Ok(())
@@ -452,7 +823,7 @@ fn require(actual: Reconciliation, wanted: Reconciliation) -> Result<()> {
         })
     }
 }
-fn delete(t: &Table) -> (u16, u16, Vec<Attr>) {
+pub(crate) fn delete(t: &Table) -> (u16, u16, Vec<Attr>) {
     (NFT | 2, 0, vec![string(1, &t.name)])
 }
 fn allowed(a: &[Attr], kinds: &[u16]) -> Result<()> {
@@ -598,6 +969,96 @@ fn canonical_data(data: &[Attr], schema: &[(u16, u8)]) -> Result<Vec<Attr>> {
 mod tests {
     use super::*;
     use crate::policy::{Scope, fixture};
+    #[test]
+    fn first_bootstrap_permit_requires_absence_and_uses_exclusive_creation() {
+        use Reconciliation::*;
+        for scope in [Scope::Host, Scope::Transport, Scope::Data] {
+            let policy = fixture(scope);
+            for permit in [Absent, Owned, Matching, Drifted, Foreign, Unknown] {
+                let observed = Snapshot {
+                    generation: 7,
+                    quarantine: Matching,
+                    permit,
+                };
+                let result = original_bootstrap_permit_operations(
+                    &policy,
+                    Stage::Offline,
+                    &observed,
+                    Matching,
+                );
+                if permit == Absent {
+                    let operations = result.unwrap();
+                    assert_eq!(
+                        operations,
+                        policy.permit_stage_table(Stage::Bootstrap).operations()
+                    );
+                    assert_eq!(operations[0].0, NFT);
+                    assert_eq!(operations[0].1, CREATE | EXCL);
+                } else {
+                    assert!(result.is_err());
+                }
+            }
+            for q in [Absent, Owned, Drifted, Foreign, Unknown] {
+                let observed = Snapshot {
+                    generation: 7,
+                    quarantine: q,
+                    permit: Absent,
+                };
+                assert!(
+                    original_bootstrap_permit_operations(
+                        &policy,
+                        Stage::Offline,
+                        &observed,
+                        Matching
+                    )
+                    .is_err()
+                );
+                let observed = Snapshot {
+                    generation: 7,
+                    quarantine: Matching,
+                    permit: Absent,
+                };
+                assert!(
+                    original_bootstrap_permit_operations(&policy, Stage::Offline, &observed, q)
+                        .is_err()
+                );
+            }
+            let observed = Snapshot {
+                generation: 7,
+                quarantine: Matching,
+                permit: Absent,
+            };
+            assert!(
+                original_bootstrap_permit_operations(
+                    &policy,
+                    Stage::Bootstrap,
+                    &observed,
+                    Matching
+                )
+                .is_err()
+            );
+        }
+    }
+    #[test]
+    fn ready_projection_requires_permit_and_both_quarantines_absent() {
+        use Reconciliation::*;
+        assert_eq!(
+            ready_projection(Stage::Ready, Absent, Matching, Absent),
+            Ok(())
+        );
+        for (stage, q, permit, emergency) in [
+            (Stage::Bootstrap, Absent, Matching, Absent),
+            (Stage::Ready, Matching, Matching, Absent),
+            (Stage::Ready, Absent, Absent, Absent),
+            (Stage::Ready, Absent, Matching, Matching),
+            (Stage::Ready, Unknown, Matching, Absent),
+            (Stage::Ready, Absent, Drifted, Absent),
+            (Stage::Ready, Absent, Matching, Foreign),
+        ] {
+            assert!(ready_projection(stage, q, permit, emergency).is_err());
+        }
+    }
+
     fn fixture_dump(t: &Table) -> (Vec<Attr>, Vec<Message>, Vec<Message>) {
         let mut chains = Vec::new();
         let mut rules = Vec::new();

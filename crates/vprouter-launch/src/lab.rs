@@ -10,6 +10,47 @@ use std::{
     process::Command,
 };
 use vprouter_linux::docker::DockerClient;
+// Only explicitly validated public metadata may leave wiping Docker DTOs.
+pub(super) fn public_started_at(value: &str) -> Result<String> {
+    if !super::spec::valid_start(value) {
+        return Err(Error::ContainerMismatch);
+    }
+    Ok(value.to_owned())
+}
+pub(super) fn public_content_id(value: &str, expected: &str) -> Result<String> {
+    if value != expected
+        || !value
+            .strip_prefix("sha256:")
+            .is_some_and(super::spec::digest)
+    {
+        return Err(Error::ImageMismatch);
+    }
+    Ok(value.to_owned())
+}
+#[test]
+fn docker_public_metadata_projection_refuses_unvalidated_fields() {
+    for value in [
+        "DOCKER_PRIVATE_PAYLOAD_9bc7a1fd",
+        "",
+        "2026-10-28T06:00:00Z-private",
+        "2026-10-28T06:00:00\n",
+    ] {
+        assert!(public_started_at(value).is_err());
+    }
+    assert_eq!(
+        public_started_at("2026-10-28T06:00:00.123456789Z").unwrap(),
+        "2026-10-28T06:00:00.123456789Z"
+    );
+    let expected = format!("sha256:{}", "a".repeat(64));
+    for value in [
+        "DOCKER_PRIVATE_PAYLOAD_9bc7a1fd".to_owned(),
+        format!("sha256:{}", "b".repeat(64)),
+        "sha256:short".to_owned(),
+    ] {
+        assert!(public_content_id(&value, &expected).is_err());
+    }
+    assert_eq!(public_content_id(&expected, &expected).unwrap(), expected);
+}
 pub(super) const IMAGE: &str =
     "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065";
 const PROBE: &str = "/var/lib/vprouter-v2-lab/launch-probe";
@@ -179,9 +220,9 @@ pub fn run() -> Result<()> {
         stage("native_image_inspect");
         let i=docker_client.launch_image(&c.image).await.map_err(|e| { eprintln!("LAB_NATIVE_REASON image {e:?}"); Error::DockerUnavailable })?;
         let (mut spec,mut staging)=tests::fixture();
-        spec.container_id=id.clone();spec.started_at=c.state.started_at.clone();spec.image_ref=IMAGE.into();spec.worker_sha256=digest.clone();
+        spec.container_id=id.clone();spec.started_at=public_started_at(&c.state.started_at)?;spec.image_ref=IMAGE.into();spec.worker_sha256=digest.clone();
         spec.process_start_time=process::stat_start(&fs::read_to_string(format!("/proc/{}/stat",c.state.pid)).map_err(|_|Error::ProcessUnavailable)?,c.state.pid)?;
-        staging.image_ref=IMAGE.into();staging.content_id=i.id;staging.artifact_path=PROBE.into();staging.artifact_sha256=digest;staging.artifact_size=bytes.len() as u64;
+        staging.image_ref=IMAGE.into();staging.content_id=public_content_id(&i.id,&c.image)?;staging.artifact_path=PROBE.into();staging.artifact_sha256=digest;staging.artifact_size=bytes.len() as u64;
         let spec_path=disposable.dir.join("spec.json");let staging_path=disposable.dir.join("staging.json");
         write(&spec_path,&serde_json::to_vec(&spec).map_err(|_|Error::InvalidSpec)?)?;write(&staging_path,&serde_json::to_vec(&staging).map_err(|_|Error::InvalidSpec)?)?;
         stage("positive_native_docker_proc_fd_admission");
@@ -213,7 +254,7 @@ pub fn run() -> Result<()> {
         if !super::spec::digest(&foreign){return Err(Error::DockerUnavailable);}
         let foreign_guard=Disposable{id:foreign.clone(),dir:disposable.dir.join("unused")};
         let mut foreign_spec=LaunchSpec::parse(&serde_json::to_vec(&spec).map_err(|_|Error::InvalidSpec)?)?;foreign_spec.container_id=foreign;
-        let foreign_c=docker_client.launch_container(&foreign_spec.container_id).await.map_err(|_|Error::DockerUnavailable)?;foreign_spec.started_at=foreign_c.state.started_at;
+        let foreign_c=docker_client.launch_container(&foreign_spec.container_id).await.map_err(|_|Error::DockerUnavailable)?;foreign_spec.started_at=public_started_at(&foreign_c.state.started_at)?;
         if Admission::inspect_evidence(foreign_spec,StagingEvidence::load_probe(&staging_path)?).await.err()!=Some(Error::ContainerMismatch){return Err(Error::ContainerMismatch);}
         drop(foreign_guard);case("real_foreign_deployment_container_refused");
         stage("test_owned_container_pause_then_stop_stale_handles");

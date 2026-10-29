@@ -20,6 +20,11 @@ pub enum Audit {
     StructurallyValid,
     Rejected(Error),
 }
+#[derive(PartialEq, Eq)]
+enum Check {
+    Live,
+    BootstrapIpv4,
+}
 impl Plan {
     /// `expected_index` comes from the namespace manager's independently bound
     /// ownership record. A caller may not substitute the observed index for it.
@@ -31,7 +36,7 @@ impl Plan {
         if !s.links.iter().any(|l| l.name == self.wireguard_name()) {
             return Audit::Absent;
         }
-        match self.check(s, expected_index, now_unix, true) {
+        match self.check(s, expected_index, now_unix, Check::Live) {
             Ok(()) => Audit::StructurallyValid,
             Err(e) => Audit::Rejected(e),
         }
@@ -41,18 +46,15 @@ impl Plan {
         s: &Snapshot,
         expected_index: u32,
     ) -> Result<(), Error> {
-        if s.links.iter().any(|l| l.name == "tailscale0") {
+        if s.links.iter().any(|l| l.name == "tailscale0")
+            || s.addresses.iter().any(|a| a.address.is_ipv6())
+            || s.routes.iter().any(|r| r.destination.is_ipv6())
+        {
             return Err(Error::Drifted);
         }
-        self.check(s, expected_index, 1.0, false)
+        self.check(s, expected_index, 1.0, Check::BootstrapIpv4)
     }
-    fn check(
-        &self,
-        s: &Snapshot,
-        expected_index: u32,
-        now: f64,
-        handshake: bool,
-    ) -> Result<(), Error> {
+    fn check(&self, s: &Snapshot, expected_index: u32, now: f64, mode: Check) -> Result<(), Error> {
         if expected_index == 0 || !now.is_finite() || now <= 0.0 {
             return Err(Error::InvalidInput);
         }
@@ -139,7 +141,13 @@ impl Plan {
         {
             return Err(Error::Drifted);
         }
-        let expected = expected_routes(self, &s.addresses, lo.index, expected_index);
+        let mut expected = expected_routes(self, &s.addresses, lo.index, expected_index);
+        if mode == Check::BootstrapIpv4 {
+            // The guard disables IPv6 under Offline quarantine BEFORE capturing
+            // its baseline. Linux consequently omits device-up multicast routes.
+            // Bootstrap requires their absence rather than learning live state.
+            expected.retain(|route| route.destination.is_ipv4());
+        }
         if !same(&s.routes, &expected) || !same(&s.rules, &expected_rules()) {
             return Err(Error::Drifted);
         }
@@ -158,7 +166,7 @@ impl Plan {
         {
             return Err(Error::Drifted);
         }
-        if !handshake {
+        if mode == Check::BootstrapIpv4 {
             return Ok(());
         }
         let time = p.handshake_unix.ok_or(Error::Drifted)?;
@@ -169,11 +177,22 @@ impl Plan {
         Ok(())
     }
 }
-pub(crate) fn same<T: PartialEq>(a: &[T], b: &[T]) -> bool {
-    a.len() == b.len()
-        && a.iter()
-            .all(|x| a.iter().filter(|y| *y == x).count() == b.iter().filter(|y| *y == x).count())
+pub(crate) fn same<T: Ord>(a: &[T], b: &[T]) -> bool {
+    if a == b {
+        return true;
+    }
+    if a.len() != b.len() {
+        return false;
+    }
+    // Reference sorting preserves complete values and multiplicity, with a
+    // deterministic O(n log n) bound even for adversarial native dump order.
+    let mut a: Vec<_> = a.iter().collect();
+    let mut b: Vec<_> = b.iter().collect();
+    a.sort_unstable();
+    b.sort_unstable();
+    a == b
 }
+
 pub(crate) fn expected_rules() -> Vec<Rule> {
     vec![
         Rule {
@@ -301,4 +320,107 @@ pub(crate) fn expected_routes(plan: &Plan, addresses: &[Address], lo: u32, wg: u
         0,
     );
     routes
+}
+
+#[cfg(test)]
+mod comparison_tests {
+    use super::same;
+    use std::cell::Cell;
+
+    #[test]
+    fn unchanged_kernel_snapshot_requires_only_linear_comparison_work() {
+        #[derive(Eq)]
+        struct Entry<'a> {
+            index: u32,
+            comparisons: &'a Cell<usize>,
+        }
+        impl PartialEq for Entry<'_> {
+            fn eq(&self, other: &Self) -> bool {
+                self.comparisons.set(self.comparisons.get() + 1);
+                self.index == other.index
+            }
+        }
+        impl PartialOrd for Entry<'_> {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+        impl Ord for Entry<'_> {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.index.cmp(&other.index)
+            }
+        }
+        let comparisons = Cell::new(0);
+        let entries = || {
+            (0..128)
+                .map(|index| Entry {
+                    index,
+                    comparisons: &comparisons,
+                })
+                .collect::<Vec<_>>()
+        };
+        let actual = entries();
+        let retained = entries();
+        assert!(same(&actual, &retained));
+        assert!(
+            comparisons.get() <= 2 * actual.len(),
+            "unchanged audit used {} comparisons for {} entries",
+            comparisons.get(),
+            actual.len()
+        );
+    }
+
+    #[test]
+    fn reordered_host_snapshot_has_bounded_comparison_work() {
+        #[derive(Eq)]
+        struct Entry<'a>(u32, &'a Cell<usize>);
+        impl PartialEq for Entry<'_> {
+            fn eq(&self, other: &Self) -> bool {
+                self.1.set(self.1.get() + 1);
+                self.0 == other.0
+            }
+        }
+        impl PartialOrd for Entry<'_> {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+        impl Ord for Entry<'_> {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.1.set(self.1.get() + 1);
+                self.0.cmp(&other.0)
+            }
+        }
+        let calls = Cell::new(0);
+        let a: Vec<_> = (0..4096).map(|i| Entry(i, &calls)).collect();
+        let b: Vec<_> = (0..4096).rev().map(|i| Entry(i, &calls)).collect();
+        assert!(same(&a, &b));
+        assert!(calls.get() < 4096 * 64, "{} comparisons", calls.get());
+    }
+
+    #[test]
+    fn snapshot_comparison_preserves_order_independence_and_duplicate_counts() {
+        // All sequences of up to four values drawn from three distinct values.
+        // Independently sorting copies supplies the multiset equality oracle.
+        let mut sequences = vec![Vec::<u8>::new()];
+        for length in 1..=4 {
+            for mut encoding in 0..3u32.pow(length) {
+                let mut values = Vec::new();
+                for _ in 0..length {
+                    values.push((encoding % 3) as u8);
+                    encoding /= 3;
+                }
+                sequences.push(values);
+            }
+        }
+        for actual in &sequences {
+            for retained in &sequences {
+                let mut a = actual.clone();
+                let mut b = retained.clone();
+                a.sort_unstable();
+                b.sort_unstable();
+                assert_eq!(same(actual, retained), a == b);
+            }
+        }
+    }
 }

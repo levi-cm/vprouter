@@ -1,0 +1,118 @@
+{
+  "observed_at_utc": "2026-10-29T12:19:11.406424+00:00",
+  "source_binding": {
+    "source_commit": "90a7dcc756f073cccd3a1c34959676f001eb7601",
+    "source_archive_sha256": "efbf8fd12c7a521cd7ba83544ceb99185dca5e0a7d9c737b702647cc1756e373",
+    "tracked_build_inputs_verified": 195,
+    "source_aggregate_sha256": "9cf69c8c83e44134bcdb513d7ba2781015ecbe3c9190954c428e601f516ff4a2"
+  },
+  "platform": "local Debian13 x86_64 owned VM",
+  "artifact_sha256": "f7ddba302b8d49d4d6ca64dfd39742427636992b13ff30089e8b538a4f33b36d",
+  "context_sha256": "67d05621a8e5efbdaddfd53d0deaadb1bf5e84707b705a42b2552818764d1d46",
+  "attempt": 396,
+  "exit_code": 0,
+  "cases": [
+    {
+      "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+      "result": "pass"
+    },
+    {
+      "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+      "result": "pass"
+    },
+    {
+      "case": "fixed_root_caps0_nnp_seccomp_cache_root_ipc_only_publisher_atomic_snapshot_cli_reader",
+      "result": "pass"
+    },
+    {
+      "case": "frozen_publisher_cannot_block_guard_quarantine_and_publication_expires_bounded_cleanup",
+      "result": "pass"
+    },
+    {
+      "case": "actual_live_daemon_fixed_native_tun_rules_bound_and_revalidated",
+      "result": "pass"
+    },
+    {
+      "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+      "result": "pass"
+    },
+    {
+      "case": "actual_both_preexec_role_profiles_state_mount_exec_and_syscall_exec_init_proc_denials",
+      "result": "pass"
+    },
+    {
+      "case": "actual_rust_protected_readonly_configuration_authenticated_one_use_peer_metadata_localapi",
+      "result": "pass"
+    },
+    {
+      "case": "actual_post_pin_tun_mtu_drift_revoked_offline_old_authority_stays_revoked_after_repair",
+      "result": "pass"
+    },
+    {
+      "case": "actual_post_pin_tun_address_drift_revoked_offline_old_authority_stays_revoked_after_repair",
+      "result": "pass"
+    },
+    {
+      "case": "actual_post_pin_route_drift_revoked_offline_old_authority_stays_revoked_after_repair",
+      "result": "pass"
+    },
+    {
+      "case": "actual_post_pin_rule_drift_revoked_offline_old_authority_stays_revoked_after_repair",
+      "result": "pass"
+    },
+    {
+      "case": "actual_go_signal_forwarding_bounded_reaping_empty_group_parent_accounting_unchanged",
+      "result": "pass"
+    },
+    {
+      "case": "actual_daemon_dead_revoked_baseline_and_full_offline_quarantine",
+      "result": "pass"
+    },
+    {
+      "case": "actual_fixed_monitor_authenticated_lifecycle_starting_host_cache_cli_offline_stop_no_ready",
+      "result": "pass"
+    },
+    {
+      "case": "actual_fixture_three_plane_positive_controls_capture_accounting_and_same_namespace_unauthorized_denial",
+      "result": "pass"
+    },
+    {
+      "case": "actual_go_rust_container_death_natural_reap_revocation_empty_group_retained_offline_quarantine",
+      "result": "pass"
+    }
+  ],
+  "capture_summary": {
+    "platform": "debian-clean-x86_64",
+    "source_commit": "90a7dcc756f073cccd3a1c34959676f001eb7601",
+    "record": "target/lab-state/actual-program-run-396.json",
+    "directory": "/var/lib/vprouter-v2-lab/task8b2-37464",
+    "capture_files": 6,
+    "packet_records": 112,
+    "forbidden_markers": 0,
+    "kernel_drops": 0,
+    "real_client_acceptance": "NOT_RUN",
+    "evidence_scope": "isolated Starting/observer/daemon component only"
+  },
+  "admission_markers_absent": true,
+  "current_workspace_tests": {
+    "passed": 393,
+    "failed": 0,
+    "ignored": 2
+  },
+  "current_workspace_matches_frozen_runtime_candidate": false,
+  "format": "PASS",
+  "diff_check": "PASS",
+  "strict_workspace_all_target_clippy": "PASS",
+  "independent_review": "IN_PROGRESS",
+  "evidence_sha256": {
+    "target/lab-state/actual-program-run-396.json": "7062841b4fc98e70f8be43c203ecf7758d5c48448592b0032c1af23d3c2cc223",
+    "target/task8b2-review-20261029T121555Z/task8b2-actual-20261029/metadata.json": "63dd1c153842ac2a32899c75c283aaa435860bff1f5d12c633e390300365feea",
+    "target/task8b2-review-20261029T121555Z/task8b2-actual-20261029/captures.json": "9a771f386fd42a2eed19b4967bf0cc47c544bd65d8d1b3d434ebc0cc7066189d",
+    "target/task8b2-workspace-20261029.log": "324ef4eea45784e643e20da42a82e888e990d2974ae091e1075b4bc7909609ab",
+    "target/task8b2-clippy-20261029.log": "33118f927393fb44ef63313a5ac017c981f3701a73c48eb5804bd7ac5f69e929"
+  },
+  "production_changes": false,
+  "release_ready": false,
+  "real_client_acceptance": "NOT_RUN",
+  "checkpoint_includes_unfinished_source": true
+}

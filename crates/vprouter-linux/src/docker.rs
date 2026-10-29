@@ -1,16 +1,21 @@
 //! GET-only Docker API. External response data is projected through typed fields.
+pub mod fixed;
+mod host_config;
+mod http;
+#[cfg(test)]
+mod http_tests;
+mod managed_json;
+mod managed_value;
+mod transport;
 use crate::{Error, Result};
-use bytes::Bytes;
-use http_body_util::{BodyExt, Empty};
-use hyper::{Request, client::conn::http1};
-use hyper_util::rt::TokioIo;
+pub use managed_value::{InputString, InputValue};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     time::Duration,
 };
-use tokio::{net::UnixStream, time::timeout};
+use tokio::time::timeout;
 
 const LIMIT: usize = 1024 * 1024;
 const API: &str = "/v1.45";
@@ -35,10 +40,10 @@ impl Default for DockerClient {
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct Version {
-    version: String,
-    api_version: String,
+    version: InputString,
+    api_version: InputString,
     #[serde(rename = "MinAPIVersion")]
-    min_api_version: String,
+    min_api_version: InputString,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct DockerVersion {
@@ -49,14 +54,14 @@ pub struct DockerVersion {
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct Listing {
-    id: String,
+    id: InputString,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct Inspect {
-    id: String,
-    name: String,
-    image: String,
+    id: InputString,
+    name: InputString,
+    image: InputString,
     restart_count: u64,
     state: ContainerState,
     config: ContainerConfig,
@@ -68,29 +73,29 @@ struct Inspect {
 #[serde(rename_all = "PascalCase")]
 struct ContainerConfig {
     #[serde(default)]
-    labels: Option<BTreeMap<String, String>>,
+    labels: Option<BTreeMap<InputString, InputString>>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct ContainerState {
-    status: String,
+    status: InputString,
     pid: u32,
-    started_at: String,
+    started_at: InputString,
     #[serde(rename = "OOMKilled")]
     oom_killed: bool,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct HostConfig {
-    network_mode: String,
+    network_mode: InputString,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct Mount {
     #[serde(rename = "Type")]
-    kind: String,
-    source: String,
-    destination: String,
+    kind: InputString,
+    source: InputString,
+    destination: InputString,
     #[serde(rename = "RW")]
     rw: bool,
 }
@@ -161,6 +166,7 @@ impl TryFrom<Inspect> for Container {
                     "io.vprouter.deployment" | "io.vprouter.exit" | "io.vprouter.role"
                 ) && scoped_value(v)
             })
+            .map(|(k, v)| (k.as_str().to_owned(), v.as_str().to_owned()))
             .collect();
         let state = match i.state.status.as_str() {
             "created" => "created",
@@ -178,7 +184,7 @@ impl TryFrom<Inspect> for Container {
             && started
                 .bytes()
                 .all(|b| b.is_ascii_digit() || matches!(b, b'-' | b'T' | b'Z' | b'.' | b':')))
-        .then(|| started.clone());
+        .then(|| started.as_str().to_owned());
         let network_mode = if matches!(
             i.host_config.network_mode.as_str(),
             "none" | "bridge" | "host" | "default"
@@ -188,18 +194,18 @@ impl TryFrom<Inspect> for Container {
             .strip_prefix("container:")
             .is_some_and(|s| id(s) || name(s))
         {
-            Some(i.host_config.network_mode)
+            Some(i.host_config.network_mode.as_str().to_owned())
         } else {
             None
         };
         Ok(Self {
-            id: i.id,
+            id: i.id.as_str().to_owned(),
             name: i
                 .name
                 .strip_prefix('/')
                 .filter(|s| name(s))
                 .map(str::to_owned),
-            image: i.image,
+            image: i.image.as_str().to_owned(),
             pid: i.state.pid,
             started_at,
             state,
@@ -228,20 +234,29 @@ impl TryFrom<Inspect> for Container {
 }
 /// Dedicated enforcement projection. Unlike observational inventory, every
 /// required functional field is mandatory and retains its exact Docker value.
-/// No environment, command, auth or logging payload is deserialized.
+/// Unknown Config fields are skipped; HostConfig extras (including logging)
+/// are retained as wiping input values until the exact policy rejects/accepts them.
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct LaunchContainer {
-    pub id: String,
-    pub image: String,
+    pub id: InputString,
+    pub image: InputString,
     pub state: LaunchState,
     pub config: LaunchConfig,
     pub host_config: LaunchHostConfig,
     pub mounts: Vec<LaunchMount>,
     #[serde(rename = "AppArmorProfile")]
-    pub app_armor_profile: String,
-    pub process_label: String,
-    pub mount_label: String,
+    pub app_armor_profile: InputString,
+    pub process_label: InputString,
+    pub mount_label: InputString,
+}
+impl LaunchContainer {
+    /// Decode untrusted Docker metadata only; this does not grant admission.
+    /// Ingress permanently taints the calling process even on a parse error.
+    pub fn decode_json(bytes: &[u8]) -> Result<Self> {
+        vprouter_core::secret_boundary::mark_ingress();
+        managed_json::decode(bytes).map_err(|_| Error::DockerProtocol)
+    }
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -251,89 +266,75 @@ pub struct LaunchState {
     pub restarting: bool,
     pub dead: bool,
     pub pid: u32,
-    pub started_at: String,
+    pub started_at: InputString,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct LaunchConfig {
-    pub labels: BTreeMap<String, String>,
-    pub user: String,
+    pub labels: BTreeMap<InputString, InputString>,
+    pub user: InputString,
     #[serde(deserialize_with = "required_option")]
-    pub volumes: Option<BTreeMap<String, serde_json::Value>>,
+    pub volumes: Option<BTreeMap<InputString, InputValue>>,
 }
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
 pub struct LaunchHostConfig {
-    pub network_mode: String,
+    pub network_mode: InputString,
     pub privileged: bool,
     pub readonly_rootfs: bool,
-    pub pid_mode: String,
-    pub userns_mode: String,
-    pub cgroupns_mode: String,
-    pub ipc_mode: String,
-    #[serde(rename = "UTSMode")]
-    pub uts_mode: String,
-    #[serde(deserialize_with = "required_option")]
-    pub cap_add: Option<Vec<String>>,
-    #[serde(deserialize_with = "required_option")]
-    pub cap_drop: Option<Vec<String>>,
-    #[serde(deserialize_with = "required_option")]
-    pub security_opt: Option<Vec<String>>,
-    #[serde(deserialize_with = "required_option")]
-    pub binds: Option<Vec<String>>,
+    pub pid_mode: InputString,
+    pub userns_mode: InputString,
+    pub cgroupns_mode: InputString,
+    pub ipc_mode: InputString,
+    pub uts_mode: InputString,
+    pub cap_add: Option<Vec<InputString>>,
+    pub cap_drop: Option<Vec<InputString>>,
+    pub security_opt: Option<Vec<InputString>>,
+    pub binds: Option<Vec<InputString>>,
     // Docker 26 omits this field when the option is inactive.
-    pub mounts: Option<Vec<serde_json::Value>>,
-    pub devices: Vec<serde_json::Value>,
-    #[serde(deserialize_with = "required_option")]
-    pub device_requests: Option<Vec<serde_json::Value>>,
-    #[serde(deserialize_with = "required_option")]
-    pub device_cgroup_rules: Option<Vec<String>>,
-    #[serde(deserialize_with = "required_option")]
-    pub volumes_from: Option<Vec<String>>,
+    pub mounts: Option<Vec<InputValue>>,
+    pub devices: Vec<InputValue>,
+    pub device_requests: Option<Vec<InputValue>>,
+    pub device_cgroup_rules: Option<Vec<InputString>>,
+    pub volumes_from: Option<Vec<InputString>>,
     // Docker 26 omits this field when the option is inactive.
-    pub tmpfs: Option<BTreeMap<String, String>>,
+    pub tmpfs: Option<BTreeMap<InputString, InputString>>,
     // Docker 26 omits this field when the option is inactive.
-    pub sysctls: Option<BTreeMap<String, String>>,
-    #[serde(deserialize_with = "required_option")]
-    pub group_add: Option<Vec<String>>,
-    pub cgroup_parent: String,
-    pub runtime: String,
+    pub sysctls: Option<BTreeMap<InputString, InputString>>,
+    pub group_add: Option<Vec<InputString>>,
+    pub cgroup_parent: InputString,
+    pub runtime: InputString,
     // Docker 26 omits this field when the option is inactive.
     pub init: Option<bool>,
-    #[serde(deserialize_with = "required_option")]
-    pub masked_paths: Option<Vec<String>>,
-    #[serde(deserialize_with = "required_option")]
-    pub readonly_paths: Option<Vec<String>>,
-    #[serde(flatten)]
-    pub additional: BTreeMap<String, serde_json::Value>,
+    pub masked_paths: Option<Vec<InputString>>,
+    pub readonly_paths: Option<Vec<InputString>>,
+    pub additional: BTreeMap<InputString, InputValue>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct LaunchMount {
     #[serde(rename = "Type")]
-    pub kind: String,
-    pub source: String,
-    pub destination: String,
+    pub kind: InputString,
+    pub source: InputString,
+    pub destination: InputString,
     #[serde(rename = "RW")]
     pub writable: bool,
-    pub propagation: String,
+    pub propagation: InputString,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct LaunchImage {
-    pub id: String,
-    pub repo_digests: Vec<String>,
-    pub os: String,
-    pub architecture: String,
+    pub id: InputString,
+    pub repo_digests: Vec<InputString>,
+    pub os: InputString,
+    pub architecture: InputString,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct LaunchDaemon {
-    pub security_options: Vec<String>,
-    pub cgroup_driver: String,
-    pub cgroup_version: String,
+    pub security_options: Vec<InputString>,
+    pub cgroup_driver: InputString,
+    pub cgroup_version: InputString,
     #[serde(rename = "OSType")]
-    pub os_type: String,
+    pub os_type: InputString,
 }
 fn required_option<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
 where
@@ -349,70 +350,8 @@ impl DockerClient {
             return Err(Error::DockerProtocol);
         }
         timeout(Duration::from_secs(9), async {
-            let stream = timeout(self.stage, UnixStream::connect(&self.socket))
-                .await
-                .map_err(|_| Error::DockerTimeout)?
-                .map_err(|_| Error::DockerUnavailable)?;
-            let (mut sender, connection) = timeout(
-                self.stage,
-                http1::Builder::new()
-                    .max_buf_size(16 * 1024)
-                    .handshake(TokioIo::new(stream)),
-            )
-            .await
-            .map_err(|_| Error::DockerTimeout)?
-            .map_err(|_| Error::DockerProtocol)?;
-            let driver = tokio::spawn(async move {
-                let _ = connection.await;
-            });
-            // Ensure the driver is aborted even on body/parser failure or cancellation.
-            struct Driver(tokio::task::JoinHandle<()>);
-            impl Drop for Driver {
-                fn drop(&mut self) {
-                    self.0.abort();
-                }
-            }
-            let _driver = Driver(driver);
-            let request = Request::builder()
-                .method("GET")
-                .uri(path)
-                .header("Host", "localhost")
-                .header("Connection", "close")
-                .body(Empty::<Bytes>::new())
-                .map_err(|_| Error::DockerProtocol)?;
-            let response = timeout(self.stage, sender.send_request(request))
-                .await
-                .map_err(|_| Error::DockerTimeout)?
-                .map_err(|_| Error::DockerProtocol)?;
-            if response.status() != 200 {
-                return Err(Error::DockerHttpFailure);
-            }
-            if response
-                .headers()
-                .get(hyper::header::CONTENT_LENGTH)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse::<u64>().ok())
-                .is_some_and(|n| n > LIMIT as u64)
-            {
-                return Err(Error::TooLarge);
-            }
-            let mut body = response.into_body();
-            let bytes = timeout(self.stage, async {
-                let mut bytes = Vec::new();
-                while let Some(frame) = body.frame().await {
-                    let frame = frame.map_err(|_| Error::DockerProtocol)?;
-                    if let Ok(data) = frame.into_data() {
-                        if data.len() > LIMIT - bytes.len() {
-                            return Err(Error::TooLarge);
-                        }
-                        bytes.extend_from_slice(&data);
-                    }
-                }
-                Ok(bytes)
-            })
-            .await
-            .map_err(|_| Error::DockerTimeout)??;
-            serde_json::from_slice(&bytes).map_err(|_| Error::DockerProtocol)
+            let bytes = transport::receive(&self.socket, path, self.stage).await?;
+            managed_json::decode(&bytes)
         })
         .await
         .map_err(|_| Error::DockerTimeout)?
@@ -452,7 +391,7 @@ impl DockerClient {
                     return Err(Error::InvalidInventory);
                 }
                 let inspect: Inspect = self
-                    .get(&format!("{API}/containers/{}/json", item.id))
+                    .get(&format!("{API}/containers/{}/json", item.id.as_str()))
                     .await?;
                 if inspect.id != item.id {
                     return Err(Error::InvalidInventory);
@@ -504,6 +443,39 @@ mod tests {
         io::{AsyncReadExt, AsyncWriteExt},
         net::UnixListener,
     };
+    #[test]
+    fn raw_http_ingress_taints_before_invalid_response_is_parsed() {
+        const CHILD: &str = "VPROUTER_DOCKER_INGRESS_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "docker::tests::raw_http_ingress_taints_before_invalid_response_is_parsed",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            return;
+        }
+        assert!(vprouter_core::secret_boundary::pristine());
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let (result, _) = response(b"not HTTP DO_NOT_PRINT_SECRET".to_vec(), false).await;
+                assert!(result.is_err());
+                assert!(!vprouter_core::secret_boundary::pristine());
+            });
+        // Neither HTTP/parser failure nor runtime/buffer Drop clears ingress.
+        assert!(!vprouter_core::secret_boundary::pristine());
+    }
     async fn response(raw: Vec<u8>, delay: bool) -> (Result<serde_json::Value>, Vec<u8>) {
         let t = Temp::new();
         let p = t.0.join("docker.sock");

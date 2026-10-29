@@ -6,9 +6,9 @@ use std::{
     sync::Arc,
 };
 use vprouter_core::allocation::{AllocationRecord, ExitAllocation};
-#[derive(Debug)]
 pub struct SocketProducer {
-    fd: OwnedFd,
+    fd: Option<OwnedFd>,
+    confined: Option<vprouter_native_role::ConfinedProducerGroup>,
     dev: u64,
     id: u64,
     namespace: (u64, u64),
@@ -66,7 +66,8 @@ impl SocketProducer {
             return Err(Error::InvalidInput);
         }
         let result = Arc::new(Self {
-            fd,
+            fd: Some(fd),
+            confined: None,
             dev: st.st_dev,
             id: st.st_ino,
             namespace: (ns.st_dev, ns.st_ino),
@@ -79,8 +80,36 @@ impl SocketProducer {
         result.verify()?;
         Ok(result)
     }
+    pub(crate) fn from_confined_bootstrap(
+        role: &vprouter_native_role::ConfinedProducerBootstrap,
+        alias: String,
+    ) -> Result<Arc<Self>> {
+        let confined = role.producer_group().map_err(|_| Error::Foreign)?;
+        let (dev, id) = confined.identity().map_err(|_| Error::Foreign)?;
+        let namespace = confined.namespace_identity().map_err(|_| Error::Foreign)?;
+        Ok(Arc::new(Self {
+            fd: None,
+            confined: Some(confined),
+            dev,
+            id,
+            namespace,
+            alias,
+            path: String::new(),
+        }))
+    }
     pub(crate) fn verify(&self) -> Result<()> {
-        let st = fs::fstat(&self.fd).map_err(|_| Error::Drifted)?;
+        if let Some(confined) = &self.confined {
+            if self.fd.is_some()
+                || !self.path.is_empty()
+                || confined.identity().map_err(|_| Error::Drifted)? != (self.dev, self.id)
+                || confined.namespace_identity().map_err(|_| Error::Drifted)? != self.namespace
+            {
+                return Err(Error::Drifted);
+            }
+            return Ok(());
+        }
+        let fd = self.fd.as_ref().ok_or(Error::Drifted)?;
+        let st = fs::fstat(fd).map_err(|_| Error::Drifted)?;
         if (st.st_dev, st.st_ino) != (self.dev, self.id)
             || st.st_uid != 0
             || st.st_gid != 0
@@ -114,11 +143,23 @@ impl SocketProducer {
 #[cfg(test)]
 pub(crate) fn fixture(id: u64) -> Arc<SocketProducer> {
     Arc::new(SocketProducer {
-        fd: std::fs::File::open("/dev/null").unwrap().into(),
+        fd: Some(std::fs::File::open("/dev/null").unwrap().into()),
+        confined: None,
         dev: 0,
         id,
         namespace: (0, 0),
         alias: String::new(),
         path: String::new(),
     })
+}
+
+impl std::fmt::Debug for SocketProducer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SocketProducer")
+            .field("dev", &self.dev)
+            .field("id", &self.id)
+            .field("namespace", &self.namespace)
+            .field("alias", &self.alias)
+            .finish_non_exhaustive()
+    }
 }

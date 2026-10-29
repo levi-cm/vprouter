@@ -1,0 +1,33 @@
+{
+  "source_binding": {
+    "source_commit": "1b0d7e723f51c54e0c2d624f2fb15a8d32b6fdaa",
+    "source_archive_sha256": "66594c50fe63b2115e6c7f4274c00014ad55427e02f9613072ba58dbbd2468c1",
+    "tracked_build_inputs_verified": 102,
+    "source_aggregate_sha256": "b8d335c583f7bcf0494b52092fc5f1ea6121625280e7190eac2352bb071fe2e8"
+  },
+  "test_command": "cargo test --workspace --locked",
+  "tests_passed": 185,
+  "tests_failed": 0,
+  "tests_ignored": 2,
+  "ordinary_only_guest_harness_skips": 7,
+  "clippy": "PASS --workspace --all-targets --locked -- -D warnings",
+  "format": "PASS",
+  "static_builds": [
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl"
+  ],
+  "arm64_runtime": "NOT_RUN",
+  "actual_program_attempt": 22,
+  "actual_program_cases_passed": 10,
+  "transport_scenarios_passed": 7,
+  "transport_captures_verified": 42,
+  "actual_program_captures_verified": 6,
+  "capture_kernel_drops": 0,
+  "forbidden_markers": 0,
+  "independent_review": "Important host TUN scope finding fixed and reviewed; no remaining Critical/Important in reviewed changes. Live post-pin drift injection remains unverified.",
+  "release_ready": false,
+  "production_changes": false,
+  "real_client_acceptance": "NOT_RUN",
+  "benchmark_acceptance": "NOT_RUN",
+  "notes": "All source changes remain local and uncommitted on rust/v2; immutable candidate objects retained under refs/vprouter-test-candidates. No production rollout."
+}

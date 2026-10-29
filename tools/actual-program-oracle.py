@@ -40,13 +40,15 @@ def context_check(context, source, architecture='amd64'):
     }[architecture]
     assert manifest['base_platform'] == platform
     entries = {entry['role']: entry for entry in manifest['programs']}
-    assert len(entries) == len(manifest['programs']) == 3
+    assert len(entries) == len(manifest['programs']) == 4
     paths = {
         'gateway_init': 'rootfs/usr/local/bin/vprouter-worker',
         'worker_observer': 'rootfs/usr/local/bin/vprouter-worker-observe',
+        'worker_monitor': 'rootfs/usr/local/bin/vprouter-worker-monitor',
         'tailscaled': 'rootfs/usr/local/bin/tailscaled',
     }
     assert set(entries) == set(paths)
+    assert entries['worker_monitor']['policy'] == 'guard-bound-monitor-zero-caps-private-root-v1'
     assert entries['tailscaled']['sha256'] == daemon_digest
     assert entries['tailscaled']['bytes'] == daemon_bytes
     manifest_digest = sha(manifest_bytes)
@@ -150,8 +152,15 @@ def run(args):
  return r.stdout
 routes=json.loads(run(['ip','-j','-4','route','show','table','all']))
 addresses=json.loads(run(['ip','-j','address','show']))
-assert not any(r.get('dst') in ['185.65.134.88','185.65.134.88/32','185.65.134.89','185.65.134.89/32'] for r in routes),'synthetic_endpoint_route_collision'
-assert not any(a.get('local') in ['185.65.134.88','185.65.134.89'] for i in addresses for a in i.get('addr_info',[])),'synthetic_endpoint_address_collision'
+if config['normal_fixture_descriptor']:
+ expected={'schema':1,'endpoint_policy':'bounded-nonce-18566-v1','candidate_limit':16,'exclusive_add_only':True}
+ descriptor=subprocess.run([str(root/('task8b2-'+config['payload']+'.payload')),'--normal-fixture-descriptor'],capture_output=True,text=True,timeout=5)
+ assert descriptor.returncode==0 and not descriptor.stderr and len(descriptor.stdout)<=2048,'invalid_normal_fixture_descriptor'
+ assert json.loads(descriptor.stdout)==expected,'unexpected_normal_fixture_descriptor'
+ print(json.dumps({'normal_fixture_endpoint_policy':expected,'legacy_fixed_endpoint_precheck':False}),flush=True)
+else:
+ assert not any(r.get('dst') in ['185.65.134.88','185.65.134.88/32','185.65.134.89','185.65.134.89/32'] for r in routes),'synthetic_endpoint_route_collision'
+ assert not any(a.get('local') in ['185.65.134.88','185.65.134.89'] for i in addresses for a in i.get('addr_info',[])),'synthetic_endpoint_address_collision'
 chain=json.loads(run(['nft','-j','list','chain','ip','filter','FORWARD']))
 assert any(v.get('chain',{}).get('policy')=='drop' for v in chain['nftables'])
 markers=[root/'task8b2-image',root/'task8b2-host-acceptance']
@@ -231,6 +240,8 @@ def main():
         sys.executable, 'tools/verify-frozen-build-inputs.py', source, commit
     ]))
     manifest_digest, inventory, init = context_check(context, source)
+    with tarfile.open(source) as frozen_source:
+        normal_fixture_descriptor = b'"--normal-fixture-descriptor"' in frozen_source.extractfile('crates/vprouter-launch/src/actual_lab_main.rs').read()
     base = pathlib.Path('target/lab-state')
     for path, expected, suffix in ((artifact, digest, 'payload'), (source, source_digest, 'source.tar'),
                                    (context, context_digest, 'context.tar')):
@@ -253,6 +264,7 @@ def main():
                            check=True, timeout=30, capture_output=True, text=True)
         guest = GUEST.replace('CONFIGURATION', repr({
             'payload': digest, 'context.tar': context_digest, 'manifest': manifest_digest,
+            'normal_fixture_descriptor': normal_fixture_descriptor,
             'init_sha256': init['sha256'], 'init_bytes': init['bytes'],
             'legacy_fixed_init': legacy_fixed_init, 'raw_syscall_metadata': raw_syscall_metadata,
             'file_path_metadata': file_path_metadata,

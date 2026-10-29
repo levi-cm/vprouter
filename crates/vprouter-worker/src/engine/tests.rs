@@ -26,6 +26,9 @@ impl Script {
     }
 }
 impl Inputs for Script {
+    fn now(&self) -> f64 {
+        self.origin.elapsed().as_secs_f64()
+    }
     async fn initialize(&mut self) -> Result<()> {
         self.event("initialize");
         Ok(())
@@ -360,6 +363,9 @@ struct TlsInputs {
     provider: Provider,
 }
 impl Inputs for TlsInputs {
+    fn now(&self) -> f64 {
+        self.script.now()
+    }
     async fn initialize(&mut self) -> Result<()> {
         self.script.initialize().await
     }
@@ -650,4 +656,516 @@ fn direct_mode_is_rejected() {
         Engine::new(e.inputs, ExitMode::Direct, "de-fra-wg-404", "n123", now),
         Err(Error::DirectUnsupported)
     ));
+}
+
+#[tokio::test]
+async fn operational_failure_waits_for_quarantine_ack_before_withdrawal_and_binds_commit() {
+    use crate::operation::{Channel, Reply, Request};
+    use vprouter_core::health::{Binding, HealthMessage, Snapshot, boot_seconds};
+    for wrong_commit in [false, true] {
+        let mut engine = engine();
+        engine.machine.block(Reason::ProviderFailure);
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        engine.inputs.faults.borrow_mut().guard_seen = Some(seen.clone());
+        let (client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
+        let peer = std::thread::spawn(move || {
+            for stage in 0..3 {
+                let request: Request = crate::bootstrap::read_message(&mut server).unwrap();
+                let frame = request.frame().clone();
+                assert_eq!(frame.sequence, stage + 1);
+                let reply = match (stage, request) {
+                    (0, Request::Prepare { message, .. }) => {
+                        assert_eq!(message.snapshot.unwrap().state, HealthState::Blocked);
+                        seen.store(true, std::sync::atomic::Ordering::SeqCst);
+                        Reply::Prepared { frame }
+                    }
+                    (
+                        1,
+                        Request::Persist {
+                            snapshot_sequence: 1,
+                            ..
+                        },
+                    ) => Reply::Persisted { frame },
+                    (
+                        2,
+                        Request::Commit {
+                            snapshot_sequence: 1,
+                            ..
+                        },
+                    ) => Reply::Enforced {
+                        frame,
+                        state: if wrong_commit {
+                            HealthState::Ready
+                        } else {
+                            HealthState::Blocked
+                        },
+                    },
+                    _ => panic!("out of order publication"),
+                };
+                crate::bootstrap::write_message(&mut server, &reply).unwrap();
+            }
+        });
+        let channel = Rc::new(tokio::sync::Mutex::new(
+            Channel::new(client, "a".repeat(64)).unwrap(),
+        ));
+        let binding = Binding {
+            deployment_id: "test".into(),
+            exit_id: "one".into(),
+            mode: ExitMode::Mullvad,
+            generation: 1,
+            display_name: "test-exit".into(),
+            expected_server: Some("de-fra-wg-404".into()),
+            node_id: "n123".into(),
+            config_fingerprint: "a".repeat(64),
+            boot_id: "01234567-1234-1234-1234-0123456789ab".into(),
+        };
+        let now = boot_seconds();
+        let snapshot = Snapshot::from_machine(binding, 1, now, &engine.machine).unwrap();
+        let message = HealthMessage {
+            version: 1,
+            lifecycle: "a".repeat(64),
+            sequence: 1,
+            sent_at: now,
+            snapshot: Some(snapshot),
+        };
+        let result = operational_publish(&channel, message, &mut engine.inputs, true).await;
+        assert_eq!(result.is_ok(), !wrong_commit);
+        assert_eq!(count(&engine, "withdraw"), 1);
+        peer.join().unwrap();
+    }
+}
+
+struct ChannelInputs {
+    script: Script,
+    channel: crate::operation::Channel,
+}
+
+// Real Channel and Engine; only provider/LocalAPI I/O is scripted. The peer
+// withholds its heartbeat ACK until the ordinary failure has been processed.
+struct RacingInputs {
+    script: Script,
+    channel: Rc<tokio::sync::Mutex<crate::operation::Channel>>,
+    failure: Option<(bool, tokio::sync::oneshot::Receiver<()>)>,
+    cancelled: Option<std::sync::mpsc::Sender<()>>,
+}
+
+#[tokio::test(start_paused = true)]
+async fn heartbeat_drain_keeps_original_sample_timeout_polled() {
+    use crate::operation::{Channel, Reply, Request};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (client, server) = std::os::unix::net::UnixStream::pair().unwrap();
+    server.set_nonblocking(true).unwrap();
+    let mut server = tokio::net::UnixStream::from_std(server).unwrap();
+    let channel = Rc::new(tokio::sync::Mutex::new(
+        Channel::new(client, "a".repeat(64)).unwrap(),
+    ));
+    let mut engine = engine();
+    engine.inputs.faults.borrow_mut().delay = Duration::from_secs(60);
+    let events = engine.inputs.events.clone();
+    let start = Instant::now();
+    let mut cadence = time::interval_at(start + Duration::from_secs(33), CADENCE);
+    let peer = async move {
+        time::advance(Duration::from_secs(33)).await;
+        let length = server.read_u32().await.unwrap();
+        let mut bytes = vec![0; length as usize];
+        server.read_exact(&mut bytes).await.unwrap();
+        let Request::Heartbeat { frame } = serde_json::from_slice(&bytes).unwrap() else {
+            panic!("expected heartbeat")
+        };
+        time::advance(Duration::from_secs(1)).await;
+        for _ in 0..16 {
+            if events.borrow().iter().any(|(event, _)| *event == "cancel") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            events
+                .borrow()
+                .contains(&("cancel", Duration::from_secs(34))),
+            "heartbeat suspended or reset the original sample timeout: {:?}; elapsed {:?}",
+            events.borrow(),
+            start.elapsed()
+        );
+        let reply = serde_json::to_vec(&Reply::Alive { frame }).unwrap();
+        server.write_u32(reply.len() as u32).await.unwrap();
+        server.write_all(&reply).await.unwrap();
+    };
+    let run = async {
+        tokio::join!(
+            operational_sample(&mut engine, &channel, &mut cadence),
+            peer
+        )
+    };
+    let (result, ()) = tokio::select! {
+        result = run => result,
+        _ = async {
+            // Disable paused-clock auto-advance while socket readiness is being
+            // delivered: only the two explicit advances define this scenario.
+            for _ in 0..10_000 { tokio::task::yield_now().await; }
+        } => panic!("operational sample did not complete after its original deadline"),
+    };
+    assert_eq!(result, Err(Error::Deadline));
+    assert_eq!(start.elapsed(), Duration::from_secs(34));
+    assert_eq!(engine.machine.state(), HealthState::Blocked);
+}
+impl Inputs for RacingInputs {
+    fn now(&self) -> f64 {
+        vprouter_core::health::boot_seconds()
+    }
+    async fn initialize(&mut self) -> Result<()> {
+        self.script.initialize().await
+    }
+    async fn structure(&mut self) -> Result<Structural> {
+        let e = self.channel.lock().await.structure().await?;
+        Ok(Structural {
+            at: e.checked_at,
+            handshake_age: e.handshake_age,
+        })
+    }
+    async fn provider(&mut self) -> Result<Confirmation> {
+        if self.failure.as_ref().is_some_and(|(local, _)| !local) {
+            self.failure.take().unwrap().1.await.unwrap();
+            return Err(Error::ProviderNegative);
+        }
+        self.script.provider().await
+    }
+    async fn local(&mut self) -> Result<Observation> {
+        if let Some((true, gate)) = self.failure.take() {
+            gate.await.unwrap();
+            return Err(Error::Identity);
+        }
+        self.script.local().await
+    }
+    async fn advertise(&mut self) -> Result<()> {
+        self.script.advertise().await
+    }
+    async fn withdraw(&mut self) -> Result<()> {
+        self.script.withdraw().await
+    }
+    fn cancel(&mut self) {
+        self.script.cancel();
+        if let Some(sender) = self.cancelled.take() {
+            sender.send(()).unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn ordinary_failure_during_heartbeat_reply_publishes_blocked_and_recovers_same_lifecycle() {
+    use crate::operation::{Channel, Reply, Request, StructuralEvidence};
+    use vprouter_core::health::{Binding, HealthMessage, Snapshot, boot_seconds};
+    for local_failure in [false, true] {
+        let (client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
+        let (fail, failed) = tokio::sync::oneshot::channel();
+        let (cancelled, cancellation) = std::sync::mpsc::channel();
+        let peer = std::thread::spawn(move || {
+            let mut fail = Some(fail);
+            let mut sequence = 0;
+            let mut published = Vec::new();
+            let mut state = HealthState::Starting;
+            loop {
+                let request: Request = crate::bootstrap::read_message(&mut server).unwrap();
+                let frame = request.frame().clone();
+                sequence += 1;
+                assert_eq!(frame.sequence, sequence);
+                assert_eq!(frame.lifecycle, "a".repeat(64));
+                let reply = match request {
+                    Request::Structure { .. } => Reply::Structure {
+                        frame,
+                        evidence: StructuralEvidence {
+                            checked_at: boot_seconds(),
+                            handshake_age: 10.,
+                        },
+                    },
+                    Request::Heartbeat { .. } => {
+                        if let Some(fail) = fail.take() {
+                            fail.send(()).unwrap();
+                            // Engine must keep being polled while the ACK is pending.
+                            cancellation.recv_timeout(Duration::from_secs(1)).unwrap();
+                            std::thread::sleep(Duration::from_millis(20));
+                        }
+                        Reply::Alive { frame }
+                    }
+                    Request::Prepare { message, .. } => {
+                        state = message.snapshot.unwrap().state;
+                        Reply::Prepared { frame }
+                    }
+                    Request::Persist { .. } => Reply::Persisted { frame },
+                    Request::Commit { .. } => {
+                        published.push(state);
+                        Reply::Enforced { frame, state }
+                    }
+                };
+                crate::bootstrap::write_message(&mut server, &reply).unwrap();
+                if published.last() == Some(&HealthState::Ready) {
+                    return published;
+                }
+            }
+        });
+        let channel = Rc::new(tokio::sync::Mutex::new(
+            Channel::new(client, "a".repeat(64)).unwrap(),
+        ));
+        let script = engine().inputs;
+        script.faults.borrow_mut().approved = true;
+        let inputs = RacingInputs {
+            script,
+            channel: channel.clone(),
+            failure: Some((local_failure, failed)),
+            cancelled: Some(cancelled),
+        };
+        let mut engine = Engine::new(
+            inputs,
+            ExitMode::Mullvad,
+            "de-fra-wg-404",
+            "n123",
+            Instant::now(),
+        )
+        .unwrap();
+        let binding = Binding {
+            deployment_id: "test".into(),
+            exit_id: "one".into(),
+            mode: ExitMode::Mullvad,
+            generation: 1,
+            display_name: "test-exit".into(),
+            expected_server: Some("de-fra-wg-404".into()),
+            node_id: "n123".into(),
+            config_fingerprint: "a".repeat(64),
+            boot_id: "01234567-1234-1234-1234-0123456789ab".into(),
+        };
+        let mut cadence = time::interval_at(Instant::now() + Duration::from_millis(10), CADENCE);
+        for sequence in 1..=5 {
+            let result = operational_sample(&mut engine, &channel, &mut cadence).await;
+            assert_eq!(
+                result,
+                if sequence == 1 {
+                    Err(if local_failure {
+                        Error::Identity
+                    } else {
+                        Error::ProviderNegative
+                    })
+                } else {
+                    Ok(())
+                }
+            );
+            let now = boot_seconds();
+            let snapshot =
+                Snapshot::from_machine(binding.clone(), sequence, now, &engine.machine).unwrap();
+            let message = HealthMessage {
+                version: 1,
+                lifecycle: "a".repeat(64),
+                sequence,
+                sent_at: now,
+                snapshot: Some(snapshot),
+            };
+            assert_eq!(
+                operational_publish(&channel, message, &mut engine.inputs, result.is_err()).await,
+                Ok(()),
+                "ordinary failure poisoned the shared control channel"
+            );
+        }
+        assert_eq!(
+            peer.join().unwrap(),
+            vec![
+                HealthState::Blocked,
+                HealthState::Blocked,
+                HealthState::Blocked,
+                HealthState::Recovering,
+                HealthState::Ready
+            ]
+        );
+        assert_eq!(
+            engine
+                .inputs
+                .script
+                .events
+                .borrow()
+                .iter()
+                .filter(|(event, _)| *event == "withdraw")
+                .count(),
+            1
+        );
+    }
+}
+impl Inputs for ChannelInputs {
+    fn now(&self) -> f64 {
+        vprouter_core::health::boot_seconds()
+    }
+    async fn initialize(&mut self) -> Result<()> {
+        self.script.initialize().await
+    }
+    async fn structure(&mut self) -> Result<Structural> {
+        let evidence = self.channel.structure().await?;
+        Ok(Structural {
+            at: evidence.checked_at,
+            handshake_age: evidence.handshake_age,
+        })
+    }
+    async fn provider(&mut self) -> Result<Confirmation> {
+        self.script.provider().await
+    }
+    async fn local(&mut self) -> Result<Observation> {
+        self.script.local().await
+    }
+    async fn advertise(&mut self) -> Result<()> {
+        self.script.advertise().await
+    }
+    async fn withdraw(&mut self) -> Result<()> {
+        self.script.withdraw().await
+    }
+    fn cancel(&mut self) {
+        self.script.cancel();
+    }
+}
+#[tokio::test]
+async fn same_engine_recovers_through_actual_framed_guard_structures_without_native_worker_socket()
+{
+    use crate::operation::{Channel, Reply, Request, StructuralEvidence};
+    let (client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
+    let peer = std::thread::spawn(move || {
+        let mut checks = Vec::new();
+        for sequence in 1..=12 {
+            let request: Request = crate::bootstrap::read_message(&mut server).unwrap();
+            let Request::Structure { frame } = request else {
+                panic!("nonstructure request")
+            };
+            assert_eq!(frame.sequence, sequence);
+            let checked_at = vprouter_core::health::boot_seconds();
+            checks.push(checked_at);
+            crate::bootstrap::write_message(
+                &mut server,
+                &Reply::Structure {
+                    frame,
+                    evidence: StructuralEvidence {
+                        checked_at,
+                        handshake_age: 10.,
+                    },
+                },
+            )
+            .unwrap();
+        }
+        checks
+    });
+    let script = engine().inputs;
+    script.faults.borrow_mut().approved = true;
+    let input = ChannelInputs {
+        script,
+        channel: Channel::new(client, "a".repeat(64)).unwrap(),
+    };
+    let mut engine = Engine::new(
+        input,
+        ExitMode::Mullvad,
+        "de-fra-wg-404",
+        "n123",
+        Instant::now(),
+    )
+    .unwrap();
+    for _ in 0..4 {
+        engine.sample().await.unwrap();
+    }
+    assert_eq!(engine.machine.state(), HealthState::Ready);
+    let checks = peer.join().unwrap();
+    assert!(checks.windows(2).all(|pair| pair[0] < pair[1]));
+    let snapshot = vprouter_core::health::Snapshot::from_machine(
+        vprouter_core::health::Binding {
+            deployment_id: "test".into(),
+            exit_id: "one".into(),
+            mode: ExitMode::Mullvad,
+            generation: 1,
+            display_name: "test-exit".into(),
+            expected_server: Some("de-fra-wg-404".into()),
+            node_id: "n123".into(),
+            config_fingerprint: "a".repeat(64),
+            boot_id: "01234567-1234-1234-1234-0123456789ab".into(),
+        },
+        4,
+        vprouter_core::health::boot_seconds(),
+        &engine.machine,
+    )
+    .unwrap();
+    assert_eq!(
+        snapshot.evidence.unwrap().structural_at,
+        *checks.last().unwrap(),
+        "original guard time was replaced by worker wrapper time"
+    );
+}
+
+#[tokio::test]
+async fn fresh_commit_frame_cannot_accept_expired_original_host_structure() {
+    use crate::operation::{Channel, Reply, Request};
+    use vprouter_core::{
+        health::{Binding, HealthMessage, Snapshot, boot_seconds},
+        state::{Evidence, VerificationResult},
+    };
+    let mut engine = engine();
+    let now = boot_seconds();
+    let binding = Binding {
+        deployment_id: "test".into(),
+        exit_id: "one".into(),
+        mode: ExitMode::Mullvad,
+        generation: 1,
+        display_name: "test-exit".into(),
+        expected_server: Some("de-fra-wg-404".into()),
+        node_id: "n123".into(),
+        config_fingerprint: "a".repeat(64),
+        boot_id: "01234567-1234-1234-1234-0123456789ab".into(),
+    };
+    let snapshot = Snapshot {
+        version: 1,
+        binding,
+        sequence: 1,
+        published_at: now,
+        state: HealthState::Ready,
+        reason: None,
+        evidence: Some(Evidence {
+            provider_ok: true,
+            structural_ok: true,
+            provider_at: now,
+            structural_at: now - 1.8,
+            heartbeat_at: now,
+            handshake_age_seconds: Some(1.),
+            online: true,
+            policy_approved: true,
+            server: Some("de-fra-wg-404".into()),
+            node_id: Some("n123".into()),
+            egress: Some("1.2.3.4".parse().unwrap()),
+            verified_at: Some(now),
+            dns: VerificationResult::NotTested,
+            ipv6: VerificationResult::NotTested,
+        }),
+    };
+    let message = HealthMessage {
+        version: 1,
+        lifecycle: "a".repeat(64),
+        sequence: 1,
+        sent_at: now,
+        snapshot: Some(snapshot),
+    };
+    let (client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
+    let peer = std::thread::spawn(move || {
+        for stage in 0..3 {
+            let request: Request = crate::bootstrap::read_message(&mut server).unwrap();
+            let frame = request.frame().clone();
+            let reply = match stage {
+                0 => Reply::Prepared { frame },
+                1 => Reply::Persisted { frame },
+                _ => {
+                    std::thread::sleep(Duration::from_millis(250));
+                    Reply::Enforced {
+                        frame,
+                        state: HealthState::Ready,
+                    }
+                }
+            };
+            crate::bootstrap::write_message(&mut server, &reply).unwrap();
+        }
+    });
+    let channel = Rc::new(tokio::sync::Mutex::new(
+        Channel::new(client, "a".repeat(64)).unwrap(),
+    ));
+    assert_eq!(
+        operational_publish(&channel, message, &mut engine.inputs, false).await,
+        Err(Error::GuardUnavailable)
+    );
+    peer.join().unwrap();
 }

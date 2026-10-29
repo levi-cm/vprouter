@@ -11,7 +11,8 @@ use super::{
 use rustix::fs::{self, FileType, Mode, OFlags, ResolveFlags};
 use std::{
     net::Ipv4Addr,
-    os::fd::{AsFd, BorrowedFd, OwnedFd},
+    os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
+    time::{Duration, Instant},
 };
 
 fn open(root: impl AsFd, path: &str, flags: OFlags) -> Result<OwnedFd> {
@@ -114,34 +115,133 @@ fn localapi(a: &Admission) -> Result<OwnedFd> {
     }
     Ok(fd)
 }
+/// Native socket credentials are a PID hint ONLY. This cannot mint LiveDaemon,
+/// permission, readiness or a cached inspection result.
+fn connect_pinned_socket(socket: impl AsFd, end: Instant) -> Result<rustix::net::UCred> {
+    use rustix::{event, net};
+    if Instant::now() >= end {
+        return Err(Error::Deadline);
+    }
+    let stream = net::socket_with(
+        net::AddressFamily::UNIX,
+        net::SocketType::STREAM,
+        net::SocketFlags::CLOEXEC | net::SocketFlags::NONBLOCK,
+        None,
+    )
+    .map_err(|_| Error::DescriptorPolicy)?;
+    let _inventory = inventory::Registration::owned(&[stream.as_fd()])?;
+    let address = net::SocketAddrUnix::new(format!("/proc/self/fd/{}", socket.as_fd().as_raw_fd()))
+        .map_err(|_| Error::DescriptorPolicy)?;
+    match net::connect(&stream, &address) {
+        Ok(()) => {}
+        Err(rustix::io::Errno::INPROGRESS) => {
+            let mut descriptors = [event::PollFd::new(&stream, event::PollFlags::OUT)];
+            let remaining = end.saturating_duration_since(Instant::now());
+            if remaining.is_zero()
+                || event::poll(
+                    &mut descriptors,
+                    Some(&event::Timespec::try_from(remaining).map_err(|_| Error::Deadline)?),
+                )
+                .map_err(|_| Error::DescriptorPolicy)?
+                    == 0
+            {
+                return Err(Error::Deadline);
+            }
+            net::sockopt::socket_error(&stream)
+                .map_err(|_| Error::DescriptorPolicy)?
+                .map_err(|_| Error::DescriptorPolicy)?;
+        }
+        // In particular, UNIX EAGAIN means no connection was initiated. A zero
+        // SO_ERROR after polling it would not prove a successful connection.
+        Err(_) => return Err(Error::DescriptorPolicy),
+    }
+    let peer = net::sockopt::socket_peercred(&stream).map_err(|_| Error::DescriptorPolicy)?;
+    if Instant::now() >= end {
+        return Err(Error::Deadline);
+    }
+    Ok(peer)
+}
+pub(super) fn daemon_pid_hint(a: &Admission, child: &kernel::Child, end: Instant) -> Result<u32> {
+    let state = state(a, ActualRole::Daemon)?;
+    let _state_inventory = inventory::Registration::owned(&[state.as_fd()])?;
+    // Only absence during fixed daemon startup is retryable. Unexpected path
+    // types, ownership, symlinks and connect/identity failures are terminal.
+    loop {
+        child.require_live()?;
+        if Instant::now() >= end {
+            return Err(Error::Deadline);
+        }
+        match fs::statat(&state, "tailscaled.sock", fs::AtFlags::SYMLINK_NOFOLLOW) {
+            Err(rustix::io::Errno::NOENT) => {
+                std::thread::sleep(Duration::from_millis(1));
+                continue;
+            }
+            Err(_) => return Err(Error::DescriptorPolicy),
+            Ok(_) => break,
+        }
+    }
+    let socket = localapi(a)?;
+    let _socket_inventory = inventory::Registration::owned(&[socket.as_fd()])?;
+    let identity = owned::Identity::of(&socket)?;
+    let state_identity = owned::Identity::of(&state)?;
+    let peer = connect_pinned_socket(&socket, end)?;
+    if peer.uid.as_raw() != 65534
+        || peer.gid.as_raw() != 65534
+        || peer.pid.as_raw_pid() <= 1
+        || owned::Identity::of(localapi(a)?)? != identity
+        || owned::Identity::of(self::state(a, ActualRole::Daemon)?)? != state_identity
+        || owned::Identity::of(&socket)? != identity
+    {
+        return Err(Error::DescriptorPolicy);
+    }
+    child.require_live()?;
+    if Instant::now() >= end {
+        return Err(Error::Deadline);
+    }
+    Ok(peer.pid.as_raw_pid() as u32)
+}
 #[allow(clippy::too_many_arguments)]
 pub(super) fn launch(
     a: &Admission,
-    tx: &Transaction<'_>,
+    tx: &Transaction,
     ns: &OwnedNamespaces,
     producer: &ProducerGroup,
     bundle: &ReviewedBundle,
     role: ActualRole,
     resolver: Ipv4Addr,
     placement: Option<BorrowedFd<'_>>,
+    enrollment: Option<&super::enrollment::AuthorizedEnrollment>,
+    before_release: impl FnOnce(ActualRole) -> Result<()>,
 ) -> Result<kernel::Child> {
     super::process::single_threaded()?;
-    a.process.revalidate(&a.spec, &a.staging)?;
+    tx.inspect_container(a)?;
     tx.revalidate(&a.spec)?;
     ns.bind(&a.spec)?;
     producer.verify(tx, &a.spec)?;
     if !resolver.is_private() {
         return Err(Error::ResolverUnavailable);
     }
-    if (role == ActualRole::Observer) != placement.is_some() {
+    if (role != ActualRole::Daemon) != placement.is_some() {
         return Err(Error::DescriptorPolicy);
     }
+    let daemon_configuration = if let Some(enrollment) = enrollment {
+        enrollment.verify(&a.spec)?;
+        if !matches!(role, ActualRole::Daemon | ActualRole::OperationalMonitor) {
+            return Err(Error::DescriptorPolicy);
+        }
+        kernel::DaemonConfiguration::PreservedEnrollment
+    } else {
+        if role == ActualRole::OperationalMonitor {
+            return Err(Error::DescriptorPolicy);
+        }
+        kernel::DaemonConfiguration::Unenrolled
+    };
     let program = bundle.open(
         a.process.root(),
-        if role == ActualRole::Observer {
-            Role::WorkerObserver
-        } else {
-            Role::Tailscaled
+        match role {
+            ActualRole::Observer => Role::WorkerObserver,
+            ActualRole::Monitor | ActualRole::OperationalMonitor => Role::WorkerMonitor,
+            ActualRole::Daemon => Role::Tailscaled,
         },
     )?;
     let ca = ca(a.process.root())?;
@@ -151,7 +251,7 @@ pub(super) fn launch(
     } else {
         None
     };
-    let localapi = if role == ActualRole::Observer {
+    let localapi = if role != ActualRole::Daemon {
         Some(localapi(a)?)
     } else {
         None
@@ -170,6 +270,7 @@ pub(super) fn launch(
         state.as_fd(),
         kernel::Actual {
             role,
+            daemon_configuration,
             executable: program.fd(),
             ca: ca.as_fd(),
             placement,
@@ -178,11 +279,102 @@ pub(super) fn launch(
             resolver,
         },
     )?;
-    if producer.release_child(&mut child, a, tx, ns).is_err() {
+    #[cfg(test)]
+    super::lab::stage("actual_fixed_child_created_at_placement_gate");
+    // Only the private guard caller supplies this bound verification. It runs
+    // in the host parent while this exact child remains at the existing fixed
+    // placement gate, before any executable or worker handshake timer starts.
+    if let Err(error) = before_release(role) {
+        child.terminate()?;
+        return Err(error);
+    }
+    if producer
+        .release_child(
+            &mut child,
+            a,
+            tx,
+            ns,
+            Some(match role {
+                ActualRole::Daemon => super::inspection::PeerRole::Daemon,
+                ActualRole::Observer => super::inspection::PeerRole::Observer,
+                ActualRole::Monitor | ActualRole::OperationalMonitor => {
+                    super::inspection::PeerRole::Monitor
+                }
+            }),
+        )
+        .is_err()
+    {
         child.terminate()?;
         return Err(Error::PlacementFailed);
     }
+    #[cfg(test)]
+    super::lab::stage("actual_fixed_child_placed_released_waiting_setup");
     child.setup_complete()?;
+    #[cfg(test)]
+    super::lab::stage("actual_fixed_child_setup_completed");
+    #[cfg(test)]
+    child.require_actual_negative(role)?;
+    #[cfg(test)]
+    super::lab::stage("actual_fixed_child_negative_profile_confirmed");
     producer.verify_child(child.pid(), tx, &a.spec)?;
     Ok(child)
+}
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+    #[test]
+    fn pinned_native_socket_connect_is_bounded_and_exposes_only_peer_hint() {
+        use std::os::unix::{fs::DirBuilderExt, net::UnixListener};
+        let directory = std::env::temp_dir().join(format!(
+            "vprouter-localapi-hint-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .unwrap();
+        let path = directory.join("tailscaled.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let socket = fs::open(
+            &path,
+            OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .unwrap();
+        let peer = connect_pinned_socket(&socket, Instant::now() + Duration::from_secs(1)).unwrap();
+        assert_eq!(peer.pid.as_raw_pid() as u32, std::process::id());
+        assert_eq!(peer.uid, rustix::process::getuid());
+        assert!(matches!(
+            connect_pinned_socket(&socket, Instant::now()),
+            Err(Error::Deadline)
+        ));
+        let not_socket =
+            fs::open(&directory, OFlags::PATH | OFlags::CLOEXEC, Mode::empty()).unwrap();
+        assert!(matches!(
+            connect_pinned_socket(&not_socket, Instant::now() + Duration::from_secs(1)),
+            Err(Error::DescriptorPolicy)
+        ));
+        // Replacement cannot change the already pinned native socket. The
+        // production path separately reopens and compares this exact identity.
+        std::fs::rename(&path, directory.join("old.sock")).unwrap();
+        let replacement = UnixListener::bind(&path).unwrap();
+        let current = fs::open(
+            &path,
+            OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .unwrap();
+        assert_ne!(
+            owned::Identity::of(&socket).unwrap(),
+            owned::Identity::of(current).unwrap()
+        );
+        drop((socket, not_socket, replacement, listener));
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_file(directory.join("old.sock")).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
 }

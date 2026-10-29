@@ -1,0 +1,9 @@
+import datetime,hashlib,json,pathlib,subprocess,sys,uuid
+if not __debug__:raise RuntimeError('optimized_python_refused')
+platform=sys.argv[1];port,known={'debian-clean-x86_64':(22036,'target/platform-lab/debian-clean-x86_64/known_hosts'),'arch-x86_64':(22033,'target/platform-lab/arch-x86_64/known_hosts'),'debian-arm64':(22034,'target/platform-lab/debian-arm64/known_hosts')}[platform]
+source=pathlib.Path('target/platform-lab/probe-peerpidfd.guest.py').read_bytes();compile(source,'peerpidfd-guest','exec');output=pathlib.Path('target/lab-state')/('peerpidfd-'+platform+'-'+uuid.uuid4().hex);output.mkdir(mode=0o700);(output/'guest.py').write_bytes(source)
+r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5','vprouterlab@127.0.0.1','python3 -I -'],input=source,capture_output=True,timeout=25)
+(output/'stdout').write_bytes(r.stdout);(output/'stderr').write_bytes(r.stderr)
+record=dict(observed_at_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),platform=platform,guest_sha256=hashlib.sha256(source).hexdigest(),runner_sha256=hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),ssh_exit_code=r.returncode,result=json.loads(r.stdout)if r.returncode==0 else None,privileged_actions=False,docker_or_production_access=False,functional_run_counter_used=False)
+with(output/'record.json').open('x')as f:json.dump(record,f,indent=2);f.write('\n')
+print(json.dumps(dict(record=str(output/'record.json'),**record)));raise SystemExit(r.returncode)

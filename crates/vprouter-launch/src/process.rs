@@ -85,6 +85,30 @@ fn read_at(fd: impl AsFd, name: &str, limit: usize) -> Result<String> {
     }
     String::from_utf8(bytes).map_err(|_| Error::ProcessChanged)
 }
+/// Fixed relative paths only. Each component is opened without following links;
+/// unlike openat2, the read-only inspector can enforce these scalar flags in BPF.
+pub(super) fn readonly_path(root: impl AsFd, path: &str) -> Result<OwnedFd> {
+    let parts: Vec<_> = path.split('/').collect();
+    if parts.is_empty()
+        || parts
+            .iter()
+            .any(|p| p.is_empty() || matches!(*p, "." | ".."))
+    {
+        return Err(Error::UnsafeInput);
+    }
+    let mut directory = None;
+    for (index, part) in parts.iter().enumerate() {
+        let fd = openat(
+            directory.as_ref().map_or(root.as_fd(), AsFd::as_fd),
+            *part,
+            if index + 1 == parts.len() { RD } else { DIR },
+            Mode::empty(),
+        )
+        .map_err(|_| Error::UnsafeInput)?;
+        directory = Some(fd);
+    }
+    directory.ok_or(Error::UnsafeInput)
+}
 fn trusted_root() -> Result<OwnedFd> {
     let fd = open("/", DIR, Mode::empty()).map_err(|_| Error::UnsafeInput)?;
     check_directory(&fd)?;
@@ -114,39 +138,9 @@ fn protected_path(path: &Path) -> Result<OwnedFd> {
     }
     Ok(fd)
 }
+
 pub(super) fn single_threaded() -> Result<()> {
-    let proc = open("/proc", DIR, Mode::empty()).map_err(|_| Error::UnsupportedPlatform)?;
-    fs_type(&proc, PROC)?;
-    // Deliberate kernel procfs self link remains valid across PID namespaces;
-    // procfs was validated, and no caller path component is accepted.
-    let own = openat(
-        &proc,
-        "self",
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-        Mode::empty(),
-    )
-    .map_err(|_| Error::ProcessUnavailable)?;
-    let task = openat(&own, "task", DIR, Mode::empty()).map_err(|_| Error::ProcessUnavailable)?;
-    let mut entries = fs::Dir::read_from(&task).map_err(|_| Error::ProcessUnavailable)?;
-    let mut count = 0;
-    for entry in &mut entries {
-        let entry = entry.map_err(|_| Error::ProcessUnavailable)?;
-        let name = entry.file_name().to_bytes();
-        if name == b"." || name == b".." {
-            continue;
-        }
-        if !name.iter().all(u8::is_ascii_digit) {
-            return Err(Error::ProcessChanged);
-        }
-        count += 1;
-        if count > 1 {
-            return Err(Error::NotSingleThreaded);
-        }
-    }
-    if count != 1 {
-        return Err(Error::NotSingleThreaded);
-    }
-    Ok(())
+    super::kernel_base::single_threaded()
 }
 pub(super) fn stat_start(s: &str, pid: u32) -> Result<u64> {
     // comm may contain spaces, parentheses and newlines. Final ') ' ends comm;
@@ -165,9 +159,126 @@ pub(super) fn stat_start(s: &str, pid: u32) -> Result<u64> {
         .filter(|s| *s > 0)
         .ok_or(Error::ProcessChanged)
 }
+pub(super) fn stat_stopped(text: &str, pid: u32, start: u64) -> Result<()> {
+    if stat_start(text, pid)? != start
+        || text
+            .rsplit_once(") ")
+            .and_then(|(_, tail)| tail.split_whitespace().next())
+            != Some("T")
+    {
+        return Err(Error::ProcessChanged);
+    }
+    Ok(())
+}
 pub(super) fn initial_map(s: &str) -> bool {
     let parts: Vec<_> = s.split_whitespace().collect();
     parts == ["0", "0", "4294967295"]
+}
+// Fixed setup operations: chown, protected file/cgroup access, signal, UID/GID/
+// capability reduction, network administration, private root/proc inspection,
+// and namespace/mount setup. No worker inherits this host setup mask.
+const HOST_SETUP_CAPS: u64 = (1 << 0)
+    | (1 << 1)
+    | (1 << 3)
+    | (1 << 5)
+    | (1 << 6)
+    | (1 << 7)
+    | (1 << 8)
+    | (1 << 12)
+    | (1 << 18)
+    | (1 << 19)
+    | (1 << 21);
+#[derive(Clone, Copy)]
+enum HostRole {
+    Setup,
+    Guard,
+}
+#[cfg(test)]
+fn host_credentials(status: &str, uid_map: &str, gid_map: &str, lsm: &str) -> Result<()> {
+    role_credentials(status, uid_map, gid_map, lsm, HostRole::Setup)
+}
+fn role_credentials(
+    status: &str,
+    uid_map: &str,
+    gid_map: &str,
+    lsm: &str,
+    role: HostRole,
+) -> Result<()> {
+    if !initial_map(uid_map) || !initial_map(gid_map) || lsm.trim() != "unconfined" {
+        return Err(Error::UnsupportedPlatform);
+    }
+    let field = |name: &str| {
+        let mut values = status.lines().filter_map(|l| l.strip_prefix(name));
+        let value = values.next().ok_or(Error::UnsupportedPlatform)?.trim();
+        if values.next().is_some() {
+            return Err(Error::UnsupportedPlatform);
+        }
+        Ok(value)
+    };
+    for name in ["Uid:", "Gid:"] {
+        if field(name)?.split_whitespace().collect::<Vec<_>>() != ["0"; 4] {
+            return Err(Error::UnsupportedPlatform);
+        }
+    }
+    for (name, expected) in [
+        (
+            "NoNewPrivs:",
+            match role {
+                HostRole::Setup => "0",
+                HostRole::Guard => "1",
+            },
+        ),
+        ("Seccomp:", "0"),
+        ("Threads:", "1"),
+    ] {
+        if field(name)? != expected {
+            return Err(Error::UnsupportedPlatform);
+        }
+    }
+    for name in ["CapPrm:", "CapEff:", "CapBnd:"] {
+        let mask = u64::from_str_radix(field(name)?, 16).map_err(|_| Error::UnsupportedPlatform)?;
+        let needed = match role {
+            HostRole::Setup => HOST_SETUP_CAPS,
+            HostRole::Guard => HOST_SETUP_CAPS & !(1 << 19),
+        };
+        if mask & needed != needed || matches!(role, HostRole::Guard) && mask & (1 << 19) != 0 {
+            return Err(Error::UnsupportedPlatform);
+        }
+    }
+    Ok(())
+}
+/// Read-only host checks before durable installation/namespace/network intent.
+/// This explicitly supports initial user namespace + unfiltered/unconfined
+/// root setup, not arbitrary inherited host seccomp or LSM domains.
+pub(super) fn host_preflight() -> Result<()> {
+    role_preflight(HostRole::Setup)
+}
+pub(super) fn guard_preflight() -> Result<()> {
+    role_preflight(HostRole::Guard)
+}
+pub(super) fn publisher_preflight() -> Result<()> {
+    // Two explicit native roles; neither path changes launch/journal authority.
+    host_preflight().or_else(|_| guard_preflight())
+}
+fn role_preflight(role: HostRole) -> Result<()> {
+    single_threaded()?;
+    let proc = open(
+        "/proc/self",
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|_| Error::UnsupportedPlatform)?;
+    fs_type(&proc, PROC)?;
+    role_credentials(
+        &read_at(&proc, "status", 65536)?,
+        &read_at(&proc, "uid_map", 4096)?,
+        &read_at(&proc, "gid_map", 4096)?,
+        &read_at(&proc, "attr/current", 256)?,
+        role,
+    )?;
+    let hierarchy =
+        open("/sys/fs/cgroup", DIR, Mode::empty()).map_err(|_| Error::UnsupportedPlatform)?;
+    fs_type(hierarchy, CGROUP2)
 }
 pub(super) fn cgroup_path(s: &str, id: &str) -> Result<String> {
     let path = s
@@ -277,19 +388,41 @@ impl PinnedProcess {
         stage: &StagingEvidence,
         c: &LaunchContainer,
     ) -> Result<Self> {
+        Self::open_pid(spec, stage, c.state.pid, &c.state.started_at)
+    }
+    pub(super) fn open_query(query: &super::kernel::docker_query::Accepted) -> Result<Self> {
+        query.require()?;
+        let request = query.request();
+        let pinned = Self::open_pid(
+            &request.spec,
+            &request.staging,
+            query.facts().pid,
+            &request.spec.started_at,
+        )?;
+        query.require()?;
+        Ok(pinned)
+    }
+    fn open_pid(
+        spec: &LaunchSpec,
+        stage: &StagingEvidence,
+        pid: u32,
+        started_at: &str,
+    ) -> Result<Self> {
+        if pid <= 1 || pid > i32::MAX as u32 || started_at != spec.started_at {
+            return Err(Error::ProcessChanged);
+        }
         let proc_root = protected_path(Path::new("/proc"))?;
         fs_type(&proc_root, PROC)?;
-        let proc = openat(&proc_root, c.state.pid.to_string(), DIR, Mode::empty())
+        let proc = openat(&proc_root, pid.to_string(), DIR, Mode::empty())
             .map_err(|_| Error::ProcessUnavailable)?;
         fs_type(&proc, PROC)?;
         let pidfd = pidfd_open(
-            Pid::from_raw(c.state.pid as i32).ok_or(Error::ProcessUnavailable)?,
+            Pid::from_raw(pid as i32).ok_or(Error::ProcessUnavailable)?,
             PidfdFlags::NONBLOCK,
         )
         .map_err(|_| Error::ProcessUnavailable)?;
         alive(&pidfd)?;
-        if stat_start(&read_at(&proc, "stat", 64 * 1024)?, c.state.pid)? != spec.process_start_time
-        {
+        if stat_start(&read_at(&proc, "stat", 64 * 1024)?, pid)? != spec.process_start_time {
             return Err(Error::ProcessChanged);
         }
         maps(&proc)?;
@@ -358,7 +491,7 @@ impl PinnedProcess {
         if cgroup_identity.dev != cgst.dev {
             return Err(Error::CgroupMismatch);
         }
-        membership(&cgroup, c.state.pid)?;
+        membership(&cgroup, pid)?;
         let artifact = protected_path(&stage.artifact_path)?;
         let artifact_identity = verify_executable(&artifact, stage)?;
         // openat2 forbids symlink/magiclink escape even inside pinned rootfs.
@@ -385,8 +518,8 @@ impl PinnedProcess {
             executable_identity,
             artifact,
             artifact_identity,
-            pid: c.state.pid,
-            started_at: c.state.started_at.clone(),
+            pid,
+            started_at: started_at.to_owned(),
         };
         let mut fds = vec![
             pinned.proc.as_fd(),
@@ -438,6 +571,65 @@ impl PinnedProcess {
     }
     pub(super) fn cgroup_parent(&self) -> std::os::fd::BorrowedFd<'_> {
         self.cgroup.as_fd()
+    }
+    /// Original admitted hierarchy only. The new operation supplies its own
+    /// current clock and policy query; these pins do not renew the admission.
+    pub(super) fn producer_ancestry(
+        &self,
+        spec: &LaunchSpec,
+        stage: &StagingEvidence,
+    ) -> Result<[OwnedFd; 2]> {
+        self.revalidate(spec, stage)?;
+        let root = self
+            .cgroup_root
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(|_| Error::DescriptorDuplicate)?;
+        let system = openat2(
+            &root,
+            "system.slice",
+            DIR,
+            Mode::empty(),
+            ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_XDEV,
+        )
+        .map_err(|_| Error::CgroupMismatch)?;
+        self.verify_producer_ancestry(spec, stage, root.as_fd(), system.as_fd())?;
+        Ok([root, system])
+    }
+    pub(super) fn verify_producer_ancestry(
+        &self,
+        spec: &LaunchSpec,
+        stage: &StagingEvidence,
+        root: std::os::fd::BorrowedFd<'_>,
+        system: std::os::fd::BorrowedFd<'_>,
+    ) -> Result<()> {
+        self.revalidate(spec, stage)?;
+        if !same_object(root, &self.cgroup_root)? {
+            return Err(Error::CgroupMismatch);
+        }
+        check_directory(root)?;
+        check_directory(system)?;
+        fs_type(root, CGROUP2)?;
+        fs_type(system, CGROUP2)?;
+        for (parent, name, expected) in [
+            (root, "..".to_owned(), root),
+            (root, "system.slice".to_owned(), system),
+            (
+                system,
+                format!("docker-{}.scope", spec.container_id),
+                self.cgroup.as_fd(),
+            ),
+        ] {
+            let at = fs::statat(parent, &name, fs::AtFlags::SYMLINK_NOFOLLOW)
+                .map_err(|_| Error::CgroupMismatch)?;
+            let st = fstat(expected).map_err(|_| Error::CgroupMismatch)?;
+            if (at.st_dev, at.st_ino, at.st_mode, at.st_uid, at.st_gid)
+                != (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid)
+            {
+                return Err(Error::CgroupMismatch);
+            }
+        }
+        self.revalidate(spec, stage)
     }
     pub(super) fn launch_fds(&self) -> super::kernel::ContainerFds<'_> {
         super::kernel::ContainerFds {
@@ -525,18 +717,35 @@ impl PinnedProcess {
         }
         // Reopen the fixed rootfs path: replacement/unlink does not inherit the
         // original executable FD's approval. Hash reads are bounded each time.
-        let current = openat2(
-            &self.root,
-            &WORKER[1..],
-            RD,
-            Mode::empty(),
-            ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS,
-        )
-        .map_err(|_| Error::ExecutableMismatch)?;
+        let current =
+            readonly_path(&self.root, &WORKER[1..]).map_err(|_| Error::ExecutableMismatch)?;
         if verify_executable(&current, stage)? != self.executable_identity {
             return Err(Error::ExecutableMismatch);
         }
+        if stat_start(&read_at(&self.proc, "stat", 64 * 1024)?, self.pid)? != s.process_start_time {
+            return Err(Error::ProcessChanged);
+        }
+        membership(&self.cgroup, self.pid)?;
         alive(&self.pidfd)
+    }
+    pub(super) fn select_guard(&self, inputs: &mut super::inventory::GuardInputs) -> Result<()> {
+        inputs.include(
+            self._inventory.as_ref().ok_or(Error::DescriptorPolicy)?,
+            super::inventory::GuardAuthority::SelectedMember,
+        )
+    }
+    pub(super) fn inspection_fds(&self) -> Vec<std::os::fd::BorrowedFd<'_>> {
+        let mut fds = vec![
+            self.proc.as_fd(),
+            self.pidfd.as_fd(),
+            self.root.as_fd(),
+            self.cgroup_root.as_fd(),
+            self.cgroup.as_fd(),
+            self.executable.as_fd(),
+            self.artifact.as_fd(),
+        ];
+        fds.extend(self.namespaces.iter().map(AsFd::as_fd));
+        fds
     }
 }
 fn maps(proc: impl AsFd) -> Result<()> {
@@ -680,6 +889,119 @@ fn verify_executable(fd: impl AsFd, stage: &StagingEvidence) -> Result<Identity>
 mod descriptor_tests {
     use super::*;
     use std::{fs, os::unix::fs::PermissionsExt};
+    #[test]
+    fn inspector_readonly_walk_refuses_absolute_parent_and_symlink_components() {
+        let directory =
+            std::env::temp_dir().join(format!("vprouter-inspection-walk-{}", std::process::id()));
+        std::fs::create_dir_all(directory.join("inner")).unwrap();
+        std::fs::write(directory.join("inner/value"), b"fixed").unwrap();
+        std::os::unix::fs::symlink("inner", directory.join("redirect")).unwrap();
+        let root = open(&directory, DIR, Mode::empty()).unwrap();
+        assert!(readonly_path(&root, "inner/value").is_ok());
+        for path in [
+            "",
+            "/inner/value",
+            "../value",
+            "inner/../value",
+            "inner//value",
+            "redirect/value",
+        ] {
+            assert!(readonly_path(&root, path).is_err(), "{path}");
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn fixed_guard_native_role_requires_no_ptrace_and_no_new_privileges() {
+        let status = format!(
+            "Uid: 0 0 0 0\nGid: 0 0 0 0\nNoNewPrivs: 1\nSeccomp: 0\nThreads: 1\nCapPrm: {:x}\nCapEff: {:x}\nCapBnd: {:x}\n",
+            HOST_SETUP_CAPS & !(1 << 19),
+            HOST_SETUP_CAPS & !(1 << 19),
+            HOST_SETUP_CAPS & !(1 << 19)
+        );
+        assert!(
+            role_credentials(
+                &status,
+                "0 0 4294967295",
+                "0 0 4294967295",
+                "unconfined",
+                HostRole::Guard
+            )
+            .is_ok()
+        );
+        assert!(
+            host_credentials(&status, "0 0 4294967295", "0 0 4294967295", "unconfined").is_err()
+        );
+        assert!(
+            role_credentials(
+                &status.replace("NoNewPrivs: 1", "NoNewPrivs: 0"),
+                "0 0 4294967295",
+                "0 0 4294967295",
+                "unconfined",
+                HostRole::Guard
+            )
+            .is_err()
+        );
+        for field in ["CapPrm", "CapEff", "CapBnd"] {
+            let changed = status.replace(
+                &format!("{field}: {:x}", HOST_SETUP_CAPS & !(1 << 19)),
+                &format!("{field}: {HOST_SETUP_CAPS:x}"),
+            );
+            assert!(
+                role_credentials(
+                    &changed,
+                    "0 0 4294967295",
+                    "0 0 4294967295",
+                    "unconfined",
+                    HostRole::Guard
+                )
+                .is_err()
+            );
+        }
+    }
+    #[test]
+    fn stopped_witness_requires_exact_start_and_actual_stop_not_sleep() {
+        let stopped = format!("24 (tricky) name) T {}7", "0 ".repeat(18));
+        stat_stopped(&stopped, 24, 7).unwrap();
+        assert!(stat_stopped(&stopped, 24, 8).is_err());
+        assert!(stat_stopped(&stopped, 25, 7).is_err());
+        for state in ["S", "R", "Z", "X", "t"] {
+            assert!(
+                stat_stopped(&stopped.replacen(") T ", &format!(") {state} "), 1), 24, 7).is_err()
+            );
+        }
+    }
+    #[test]
+    fn host_setup_preflight_refuses_missing_caps_maps_lsm_filters_or_root_before_mutation() {
+        let status = format!(
+            "Uid: 0 0 0 0\nGid: 0 0 0 0\nNoNewPrivs: 0\nSeccomp: 0\nThreads: 1\nCapPrm: {HOST_SETUP_CAPS:x}\nCapEff: {HOST_SETUP_CAPS:x}\nCapBnd: {HOST_SETUP_CAPS:x}\n"
+        );
+        let map = "0 0 4294967295\n";
+        assert!(host_credentials(&status, map, map, "unconfined\n").is_ok());
+        for (old, new) in [
+            ("Uid: 0", "Uid: 65534"),
+            ("Gid: 0", "Gid: 65534"),
+            ("NoNewPrivs: 0", "NoNewPrivs: 1"),
+            ("Seccomp: 0", "Seccomp: 2"),
+            ("Threads: 1", "Threads: 2"),
+        ] {
+            assert!(host_credentials(&status.replace(old, new), map, map, "unconfined").is_err());
+        }
+        for bit in 0..64 {
+            if HOST_SETUP_CAPS & (1 << bit) == 0 {
+                continue;
+            }
+            for field in ["CapPrm:", "CapEff:", "CapBnd:"] {
+                let changed = status.replace(
+                    &format!("{field} {HOST_SETUP_CAPS:x}"),
+                    &format!("{field} {:x}", HOST_SETUP_CAPS & !(1 << bit)),
+                );
+                assert!(host_credentials(&changed, map, map, "unconfined").is_err());
+            }
+        }
+        assert!(host_credentials(&status, "0 1000 65536", map, "unconfined").is_err());
+        assert!(host_credentials(&status, map, map, "docker-default (enforce)").is_err());
+        assert!(host_credentials(&(status + "Seccomp: 0\n"), map, map, "unconfined").is_err());
+    }
     #[test]
     fn owned_subgroup_directory_updates_preserve_only_exact_parent_identity() {
         let pinned = Identity {

@@ -6,22 +6,34 @@ mod actual;
 #[cfg(test)]
 pub mod actual_lab;
 #[allow(dead_code)]
+mod attachment;
+#[allow(dead_code)]
 mod daemon;
+#[allow(dead_code)]
+mod enrollment;
 mod evidence;
 #[allow(dead_code)]
 mod execution;
 #[cfg(test)]
 pub mod execution_lab;
 #[allow(dead_code)]
+mod expiry;
+#[allow(dead_code)]
 mod handoff;
+#[allow(dead_code)]
+mod inspection;
 #[allow(dead_code)]
 mod inventory;
 #[allow(unsafe_code, dead_code)]
 mod kernel;
+#[allow(unsafe_code, dead_code)]
+mod kernel_base;
 #[cfg(test)]
 pub mod lab;
 #[allow(dead_code)]
 mod owned;
+#[allow(dead_code)]
+mod owner;
 #[cfg(test)]
 pub mod probe;
 mod process;
@@ -29,7 +41,13 @@ mod process;
 mod producer;
 #[allow(dead_code)]
 mod programs;
+#[allow(dead_code)]
+mod publisher;
+#[allow(dead_code)]
+mod secret;
 mod spec;
+#[allow(dead_code)]
+mod supervision;
 #[cfg(test)]
 mod tests;
 #[allow(dead_code)]
@@ -37,92 +55,11 @@ mod transport;
 #[cfg(test)]
 pub mod transport_lab;
 
-use serde::Serialize;
+mod error;
+pub use error::{Error, Result};
 pub use spec::{LaunchSpec, StagingEvidence};
 use std::path::Path;
 use vprouter_linux::docker::DockerClient;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Error {
-    InvalidSpec,
-    ResolverUnavailable,
-    NetworkPolicy,
-    NetworkOperation,
-    AllocationMismatch,
-    UnsafeInput,
-    UnsupportedPlatform,
-    DockerUnavailable,
-    ContainerMismatch,
-    ImageMismatch,
-    UnsupportedConfiguration,
-    ProcessUnavailable,
-    ProcessChanged,
-    UnsupportedUserNamespace,
-    NamespaceMismatch,
-    RootMismatch,
-    CgroupMismatch,
-    ExecutableMismatch,
-    TooLarge,
-    NotSingleThreaded,
-    LabRequired,
-    LaunchUnavailable,
-    OwnershipMismatch,
-    LockBusy,
-    Interrupted,
-    NamespaceOperation,
-    PlacementFailed,
-    MountIsolation,
-    MountContainerRoot,
-    MountPrivate,
-    MountTmp,
-    MountExecutable,
-    MountExecutableClone,
-    MountStateClone,
-    MountExecutableBind,
-    MountExecutableReadonly,
-    MountState,
-    MountPivot,
-    MountProc,
-    MountReadonly,
-    DescriptorPolicy,
-    DescriptorNull,
-    DescriptorDuplicate,
-    DescriptorClose,
-    DescriptorFlags,
-    DescriptorStdio,
-    DescriptorHealth,
-    DescriptorExecutable,
-    DescriptorInventory,
-    DescriptorReadlink,
-    DescriptorScanOpen,
-    DescriptorScanDenied,
-    DescriptorScanCount,
-    WaitLsmTransition,
-    WaitLsmRead,
-    WaitLsmLabel,
-    WaitFilter,
-    ProbeProcHiddenInit,
-    ProbeProcSet,
-    ProbeProcRoot,
-    ProbeResolver,
-    ProbeStateWrite,
-    ProbeReadonly,
-    ProbeForbiddenRoot,
-    CapabilityPolicy,
-    ConfinementPolicy,
-    ChildFailed,
-    Deadline,
-}
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Stable enum-only redaction: never include external error payloads.
-        let encoded = serde_json::to_string(self).map_err(|_| std::fmt::Error)?;
-        f.write_str(encoded.trim_matches('"'))
-    }
-}
-impl std::error::Error for Error {}
-pub type Result<T> = std::result::Result<T, Error>;
 
 /// Non-clonable evidence. Handles are private, close-on-exec and intentionally
 /// have no Debug, Serialize, raw-FD getter or caller-assertion constructor.
@@ -139,6 +76,7 @@ impl Admission {
         Self::inspect_evidence(spec, staging).await
     }
     async fn inspect_evidence(spec: LaunchSpec, staging: StagingEvidence) -> Result<Self> {
+        process::host_preflight()?;
         spec.bind_staging(&staging)?;
         process::single_threaded()?;
         let docker = DockerClient::default();
@@ -204,5 +142,5 @@ pub fn load(spec: &Path, staging: &Path) -> Result<(LaunchSpec, StagingEvidence)
 /// Fixed immutable-image PID1. This is only an inert namespace holder; it cannot
 /// place a worker, start Tailscale, remove quarantine or authorize production.
 pub fn gateway_init() -> Result<()> {
-    kernel::gateway_init()
+    kernel_base::gateway_init()
 }

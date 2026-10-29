@@ -108,6 +108,40 @@ fn strict_specs_validate_full_record_generation_and_exit() {
     }
 }
 #[test]
+fn actual_gateway_staging_is_bound_to_compiled_inert_program_only() {
+    let (_, mut stage) = fixture();
+    let bundle = super::programs::ReviewedBundle::current().unwrap();
+    let (sha, size) = bundle.init().unwrap();
+    stage.artifact_kind = "actual_gateway_lab_v1".into();
+    stage.image_ref = format!("vprouter-v2-lab@{}", stage.content_id);
+    stage.artifact_path = format!("/var/lib/vprouter-v2-lab/task8b2-{sha}.gateway-init").into();
+    stage.artifact_sha256 = sha.into();
+    stage.artifact_size = size;
+    stage.execution_policy_sha256 = None;
+    let value = serde_json::to_value(&stage).unwrap();
+    let bytes = serde_json::to_vec(&value).unwrap();
+    assert!(StagingEvidence::parse_actual_gateway(&bytes).is_ok());
+    assert!(matches!(
+        StagingEvidence::parse(&bytes),
+        Err(Error::ExecutableMismatch)
+    ));
+    for (key, replacement) in [
+        ("artifact_kind", json!("vprouter_worker_v1")),
+        ("artifact_sha256", json!("a".repeat(64))),
+        ("artifact_size", json!(size + 1)),
+        (
+            "artifact_path",
+            json!("/var/lib/vprouter-v2-lab/foreign-init"),
+        ),
+        ("execution_policy_sha256", json!("a".repeat(64))),
+        ("image_ref", json!(format!("foreign@{}", stage.content_id))),
+    ] {
+        let mut bad = value.clone();
+        bad[key] = replacement;
+        assert!(StagingEvidence::parse_actual_gateway(&serde_json::to_vec(&bad).unwrap()).is_err());
+    }
+}
+#[test]
 fn docker_functional_projection_fails_closed_and_gateway_is_shared() {
     let (s, stage) = fixture();
     let value = container_value(&s, &stage);
@@ -208,19 +242,19 @@ fn docker_functional_projection_fails_closed_and_gateway_is_shared() {
 fn manifests_bind_platform_and_content_without_multiarch_confusion() {
     let (s, stage) = fixture();
     let mut i = LaunchImage {
-        id: stage.content_id.clone(),
-        repo_digests: vec![s.image_ref.clone()],
+        id: stage.content_id.clone().into(),
+        repo_digests: vec![s.image_ref.clone().into()],
         os: "linux".into(),
-        architecture: stage.architecture.clone(),
+        architecture: stage.architecture.clone().into(),
     };
     assert!(evidence::image(&s, &stage, &i).is_ok());
-    i.id = s.image_ref.split('@').nth(1).unwrap().to_string();
+    i.id = s.image_ref.split('@').nth(1).unwrap().into();
     assert_eq!(evidence::image(&s, &stage, &i), Err(Error::ImageMismatch));
-    i.id = stage.content_id.clone();
+    i.id = stage.content_id.clone().into();
     i.architecture = "foreign".into();
     assert_eq!(evidence::image(&s, &stage, &i), Err(Error::ImageMismatch));
-    i.architecture = stage.architecture.clone();
-    i.repo_digests.push(s.image_ref.clone());
+    i.architecture = stage.architecture.clone().into();
+    i.repo_digests.push(s.image_ref.clone().into());
     assert_eq!(evidence::image(&s, &stage, &i), Err(Error::ImageMismatch));
 }
 #[test]
@@ -274,7 +308,7 @@ fn inherited_daemon_security_profiles_are_exact_and_bind_container_apparmor() {
     use evidence::DaemonSecurity;
     use vprouter_linux::docker::LaunchDaemon;
     let make = |options: Vec<&str>| LaunchDaemon {
-        security_options: options.into_iter().map(str::to_owned).collect(),
+        security_options: options.into_iter().map(Into::into).collect(),
         cgroup_driver: "systemd".into(),
         cgroup_version: "2".into(),
         os_type: "linux".into(),
@@ -290,6 +324,11 @@ fn inherited_daemon_security_profiles_are_exact_and_bind_container_apparmor() {
         );
     }
     for options in [
+        vec![
+            "name=apparmor,profile=default",
+            "name=seccomp,profile=builtin",
+            "name=cgroupns",
+        ],
         vec![
             "name=apparmor",
             "name=seccomp,profile=builtin",
@@ -312,6 +351,33 @@ fn inherited_daemon_security_profiles_are_exact_and_bind_container_apparmor() {
         );
     }
     for options in [
+        vec![
+            "name=apparmor,profile=custom",
+            "name=seccomp,profile=builtin",
+            "name=cgroupns",
+        ],
+        vec![
+            "name=apparmor,profile=unconfined",
+            "name=seccomp,profile=builtin",
+            "name=cgroupns",
+        ],
+        vec![
+            "name=apparmor,profile=default,extra=unknown",
+            "name=seccomp,profile=builtin",
+            "name=cgroupns",
+        ],
+        vec![
+            "name=apparmor",
+            "name=apparmor,profile=default",
+            "name=seccomp,profile=builtin",
+            "name=cgroupns",
+        ],
+        vec![
+            "name=apparmor,profile=default",
+            "name=apparmor,profile=default",
+            "name=seccomp,profile=builtin",
+            "name=cgroupns",
+        ],
         vec![],
         vec!["name=cgroupns"],
         vec!["name=seccomp,profile=builtin"],

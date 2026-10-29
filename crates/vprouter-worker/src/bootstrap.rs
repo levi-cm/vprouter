@@ -38,7 +38,12 @@ pub struct Configuration {
     pub socket: Object,
     pub nonce: String,
     pub resolver: Ipv4Addr,
+    pub execution_policy: String,
     pub monitoring: MonitoringPlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_binding: Option<vprouter_core::health::Binding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrollment: Option<crate::operation::Enrollment>,
 }
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -65,6 +70,8 @@ pub struct Response {
 #[serde(rename_all = "snake_case")]
 pub enum Permission {
     ObserveOnce,
+    Monitor,
+    Operational,
 }
 pub fn digest(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
@@ -100,6 +107,29 @@ impl Configuration {
             || self.cgroup.split('/').any(|p| p == "." || p == "..")
         {
             return Err(Error::Bootstrap);
+        }
+        if let Some(binding) = &self.health_binding {
+            binding.validate().map_err(|_| Error::Bootstrap)?;
+            if binding.deployment_id != self.allocation.deployment_id
+                || binding.generation != self.allocation.generation
+                || binding.exit_id != self.exit.exit_id
+                || binding.mode != self.exit.mode
+            {
+                return Err(Error::Bootstrap);
+            }
+        }
+        let expected_policy = if self.enrollment.is_some() {
+            "operational-monitor-ipv4-tcp-udp-unix-zero-caps-v1"
+        } else if self.health_binding.is_some() {
+            "starting-monitor-unix-netlink-zero-caps-v1"
+        } else {
+            "observer-unix-netlink-zero-caps-v1"
+        };
+        if self.execution_policy != expected_policy {
+            return Err(Error::Bootstrap);
+        }
+        if let Some(enrollment) = &self.enrollment {
+            enrollment.validate(self.health_binding.as_ref().ok_or(Error::Bootstrap)?)?;
         }
         Plan::from_monitoring(&self.allocation, &self.exit, self.monitoring.clone())
             .map_err(|_| Error::Bootstrap)?;
@@ -348,7 +378,7 @@ pub fn write_message<T: Serialize>(stream: &mut UnixStream, value: &T) -> Result
         std::time::Instant::now() + Duration::from_secs(2),
     )
 }
-fn write_message_before<T: Serialize>(
+pub fn write_message_before<T: Serialize>(
     stream: &mut UnixStream,
     value: &T,
     end: std::time::Instant,
@@ -375,9 +405,12 @@ fn write_message_before<T: Serialize>(
             Err(_) => return Err(Error::Bootstrap),
         }
     }
+    if std::time::Instant::now() >= end {
+        return Err(Error::Bootstrap);
+    }
     Ok(())
 }
-fn nonblocking(stream: &UnixStream) -> Result<()> {
+pub(crate) fn nonblocking(stream: &UnixStream) -> Result<()> {
     // Use the already admitted fcntl operations rather than std's Linux
     // FIONBIO ioctl. Preserve every existing status flag on framing streams.
     let flags = fs::fcntl_getfl(stream).map_err(|_| Error::Bootstrap)?;
@@ -408,6 +441,9 @@ fn wait(
     {
         return Err(Error::Bootstrap);
     }
+    if std::time::Instant::now() >= end {
+        return Err(Error::Bootstrap);
+    }
     Ok(())
 }
 fn read_before(stream: &mut UnixStream, bytes: &mut [u8], end: std::time::Instant) -> Result<()> {
@@ -427,6 +463,9 @@ fn read_before(stream: &mut UnixStream, bytes: &mut [u8], end: std::time::Instan
             Err(_) => return Err(Error::Bootstrap),
         }
     }
+    if std::time::Instant::now() >= end {
+        return Err(Error::Bootstrap);
+    }
     Ok(())
 }
 pub fn read_message<T: serde::de::DeserializeOwned>(stream: &mut UnixStream) -> Result<T> {
@@ -444,7 +483,11 @@ pub fn read_message_before<T: serde::de::DeserializeOwned>(
     }
     let mut bytes = vec![0; size];
     read_before(stream, &mut bytes, end)?;
-    crate::json::decode(&bytes)
+    let value = crate::json::decode(&bytes)?;
+    if std::time::Instant::now() >= end {
+        return Err(Error::Bootstrap);
+    }
+    Ok(value)
 }
 struct Observation {
     config: Configuration,
@@ -495,10 +538,18 @@ fn connect_before(path: &std::path::Path, end: std::time::Instant) -> Result<Uni
     Ok(stream)
 }
 fn response_binding(response: &Response, hash: &str, nonce: &str) -> Result<()> {
+    response_permission(response, hash, nonce, Permission::ObserveOnce)
+}
+fn response_permission(
+    response: &Response,
+    hash: &str,
+    nonce: &str,
+    expected: Permission,
+) -> Result<()> {
     if response.schema != 1
         || response.config_sha256 != hash
         || response.nonce != nonce
-        || response.permission != Permission::ObserveOnce
+        || response.permission != expected
     {
         return Err(Error::Bootstrap);
     }
@@ -511,7 +562,21 @@ fn root_peer(peer: &nix::sys::socket::UnixCredentials) -> Result<()> {
     Ok(())
 }
 fn admit() -> Result<Observation> {
+    let (admitted, _) = admit_permission(Permission::ObserveOnce)?;
+    Ok(admitted)
+}
+fn admit_permission(permission: Permission) -> Result<(Observation, UnixStream)> {
     let (config, hash) = protected_configuration()?;
+    let permission = if permission == Permission::Monitor && config.enrollment.is_some() {
+        Permission::Operational
+    } else {
+        permission
+    };
+    if (permission != Permission::ObserveOnce) != config.health_binding.is_some()
+        || (permission == Permission::Operational) != config.enrollment.is_some()
+    {
+        return Err(Error::Bootstrap);
+    }
     credentials()?;
     environment()?;
     if current_namespace()? != config.namespace
@@ -545,13 +610,38 @@ fn admit() -> Result<Observation> {
         end,
     )?;
     let response: Response = read_message_before(&mut stream, end)?;
-    response_binding(&response, &hash, &config.nonce)?;
+    response_permission(&response, &hash, &config.nonce, permission)?;
     let result = Observation {
         config,
         _thread: PhantomData,
     };
     result.check()?;
-    Ok(result)
+    Ok((result, stream))
+}
+
+pub(crate) struct MonitorAdmission {
+    observation: Observation,
+    pub(crate) stream: UnixStream,
+}
+impl MonitorAdmission {
+    pub(crate) fn check(&self) -> Result<()> {
+        self.observation.check()
+    }
+    pub(crate) fn config(&self) -> &Configuration {
+        &self.observation.config
+    }
+    pub(crate) fn namespace(&self) -> Result<(u64, u64)> {
+        self.check()?;
+        let ns = self.observation.config.namespace;
+        Ok((ns.dev, ns.ino))
+    }
+}
+pub(crate) fn admit_monitor() -> Result<MonitorAdmission> {
+    let (observation, stream) = admit_permission(Permission::Monitor)?;
+    Ok(MonitorAdmission {
+        observation,
+        stream,
+    })
 }
 /// Fixed observation executable only. Native sockets are born after admission.
 /// No provider query, LocalAPI writes, Placed token, Engine or readiness exists.
@@ -626,6 +716,23 @@ pub fn observe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn decoding_cannot_complete_a_frame_after_its_absolute_deadline() {
+        struct Slow;
+        impl<'de> serde::Deserialize<'de> for Slow {
+            fn deserialize<D: serde::Deserializer<'de>>(
+                d: D,
+            ) -> std::result::Result<Self, D::Error> {
+                let _ = serde_json::Value::deserialize(d)?;
+                std::thread::sleep(Duration::from_millis(50));
+                Ok(Slow)
+            }
+        }
+        let (mut writer, mut reader) = UnixStream::pair().unwrap();
+        write_message(&mut writer, &serde_json::json!({})).unwrap();
+        let end = std::time::Instant::now() + Duration::from_millis(30);
+        assert!(read_message_before::<Slow>(&mut reader, end).is_err());
+    }
     #[test]
     fn translated_pid_zero_retains_raw_layout_and_requires_both_root_credentials() {
         for (pid, uid, gid, allowed) in [
@@ -765,6 +872,43 @@ mod tests {
             nonce: "d".repeat(64),
             resolver: "10.64.0.1".parse().unwrap(),
             monitoring,
+            health_binding: None,
+            enrollment: None,
+            execution_policy: "observer-unix-netlink-zero-caps-v1".into(),
+        }
+    }
+    #[test]
+    fn monitor_health_binding_rejects_cross_exit_generation_and_mode() {
+        let mut config = configuration();
+        let binding = vprouter_core::health::Binding {
+            deployment_id: "bootlab".into(),
+            exit_id: "one".into(),
+            generation: 7,
+            mode: vprouter_core::config::ExitMode::Mullvad,
+            display_name: "monitor-fixture".into(),
+            expected_server: Some("de-fra-wg-404".into()),
+            node_id: "fixture-node".into(),
+            config_fingerprint: "a".repeat(64),
+            boot_id: "01234567-1234-1234-1234-0123456789ab".into(),
+        };
+        config.health_binding = Some(binding.clone());
+        assert!(config.validate().is_err()); // observer policy cannot authorize monitor
+        config.execution_policy = "starting-monitor-unix-netlink-zero-caps-v1".into();
+        config.validate().unwrap();
+        for fault in 0..5 {
+            let mut wrong = binding.clone();
+            match fault {
+                0 => wrong.deployment_id = "other".into(),
+                1 => wrong.exit_id = "other".into(),
+                2 => wrong.generation += 1,
+                3 => {
+                    wrong.mode = vprouter_core::config::ExitMode::Direct;
+                    wrong.expected_server = None;
+                }
+                _ => wrong.boot_id = "malformed".into(),
+            }
+            config.health_binding = Some(wrong);
+            assert!(config.validate().is_err(), "fault {fault}");
         }
     }
     #[test]

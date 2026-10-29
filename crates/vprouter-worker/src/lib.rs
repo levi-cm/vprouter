@@ -9,6 +9,8 @@ mod dns;
 mod engine;
 mod json;
 mod localapi;
+pub mod monitor;
+pub mod operation;
 mod placement;
 mod provider;
 mod publish;

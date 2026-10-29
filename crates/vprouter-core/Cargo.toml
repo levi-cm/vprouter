@@ -9,3 +9,6 @@ license.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rustix.workspace = true
+zeroize.workspace = true
+x25519-dalek = { workspace = true, features = ["static_secrets"] }
+sha2.workspace = true

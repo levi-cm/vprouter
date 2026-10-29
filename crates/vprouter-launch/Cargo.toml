@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 vprouter-worker = { path = "../vprouter-worker" }
 vprouter-network = { path = "../vprouter-network" }
+vprouter-native-role = { path = "../vprouter-native-role" }
 vprouter-netfilter = { path = "../vprouter-netfilter" }
 vprouter-core = { path = "../vprouter-core" }
 vprouter-linux = { path = "../vprouter-linux" }
@@ -15,8 +16,10 @@ serde.workspace = true
 serde_json.workspace = true
 rustix = { workspace=true, features=["mount", "thread"] }
 sha2.workspace = true
+zeroize.workspace = true
 tokio.workspace = true
 libc = "=0.2.189"
+zbus = { version = "=6.0.0", default-features = false, features = ["tokio"] }
 
 [[bin]]
 name = "vprouter-launch-admit"
@@ -43,6 +46,8 @@ path = "src/transport_lab_main.rs"
 harness = false
 
 [dev-dependencies]
+vprouter-network = { path = "../vprouter-network", features = ["lab"] }
+vprouter-native-role = { path = "../vprouter-native-role", features = ["lab"] }
 x25519-dalek.workspace = true
 
 [[test]]

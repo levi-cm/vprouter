@@ -5,16 +5,43 @@
 
 mod audit;
 mod guarded;
+mod host_observation;
 mod native;
 mod plan;
 mod project;
+mod secret_role;
 mod socket;
 
 pub use audit::{Audit, Snapshot};
-pub use guarded::ActiveLinks;
-pub use native::{DownLink, MetadataSnapshot, NamespaceTarget, NativeNetwork, VethPair};
+pub use guarded::{
+    ActiveLinks, DaemonDeclaration, DaemonLinks, DaemonPeer, HostAdditionPlan, HostAuditTicket,
+    HostAuthority, HostRemovalPlan, NativeRemovalPlan, PendingHostAdmission,
+    planned_host_link_index,
+};
+pub use host_observation::{HOST_OBSERVATION_BYTES, HostObservation};
+#[cfg(feature = "lab")]
+pub use native::LabRouteRead;
+pub use native::{
+    DeclaredWanRead, DownLink, HostRead, MetadataSnapshot, NamespaceTarget, NativeNetwork,
+    RouteObserver, VethPair,
+};
 pub use plan::{MonitoringPlan, Plan};
 pub use project::{Address, Link, Peer, Route, Rule, Wireguard};
+pub use secret_role::{
+    PendingSocketPreparation, PendingVethCreation, PendingVethHostMove, PendingWireguardMove,
+    PendingWireguardProvision, PendingWireguardQuery, VerifiedSocketPreparation,
+    VerifiedVethCreation, VerifiedVethHostMove, VerifiedWireguardMove, VerifiedWireguardProvision,
+    VerifiedWireguardQuery,
+};
+
+/// Poll original fixed secret-query children retained after caller Drop. This
+/// gives no journal, cleanup, resource reuse or publication authority.
+pub fn poll_retained_secret_roles() {
+    secret_role::poll_retained();
+}
+pub fn retained_secret_children_reaped() -> bool {
+    secret_role::children_reaped()
+}
 
 /// Fixed errors intentionally carry no external errors, payloads, or keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -99,6 +99,17 @@ impl HealthMachine {
             reason: None,
         })
     }
+    pub(crate) fn matches_binding(&self, mode: ExitMode, server: Option<&str>, node: &str) -> bool {
+        self.mode == mode
+            && self.expected_server.as_deref() == server
+            && self.expected_node_id == node
+    }
+    pub(crate) fn current_evidence(&self, now: f64) -> Option<Evidence> {
+        self.evidence
+            .as_ref()
+            .filter(|e| self.check(now, e, false).is_ok())
+            .cloned()
+    }
     pub fn state(&self) -> HealthState {
         self.state
     }

@@ -5,7 +5,7 @@ use super::{Error, Result};
 use rustix::fs::{self, FileType, Mode, OFlags};
 use serde::Deserialize;
 use std::{
-    os::fd::{AsFd, OwnedFd},
+    os::fd::{AsFd, BorrowedFd, OwnedFd},
     path::Path,
 };
 use vprouter_worker::bootstrap::{MAX_PROGRAM, digest};
@@ -14,6 +14,7 @@ use vprouter_worker::bootstrap::{MAX_PROGRAM, digest};
 #[serde(rename_all = "snake_case")]
 pub(super) enum Role {
     WorkerObserver,
+    WorkerMonitor,
     Tailscaled,
     GatewayInit,
 }
@@ -73,11 +74,15 @@ impl ReviewedBundle {
                 } else {
                     "sha256:472c549d2ef8cebc000de2c8a94061bbdc864d2454177b2ada713262475449ef"
                 }
-            || b.programs.len() != 3
+            || !(3..=4).contains(&b.programs.len())
         {
             return Err(Error::ExecutableMismatch);
         }
-        for role in [Role::WorkerObserver, Role::Tailscaled, Role::GatewayInit] {
+        let mut roles = vec![Role::WorkerObserver, Role::Tailscaled, Role::GatewayInit];
+        if b.programs.len() == 4 {
+            roles.push(Role::WorkerMonitor);
+        }
+        for role in roles {
             let entries: Vec<_> = b.programs.iter().filter(|p| p.role == role).collect();
             if entries.len() != 1 {
                 return Err(Error::ExecutableMismatch);
@@ -87,6 +92,10 @@ impl ReviewedBundle {
                 Role::WorkerObserver => (
                     "/usr/local/bin/vprouter-worker-observe",
                     "observation-only-zero-caps-private-root-v2",
+                ),
+                Role::WorkerMonitor => (
+                    "/usr/local/bin/vprouter-worker-monitor",
+                    "guard-bound-monitor-zero-caps-private-root-v1",
                 ),
                 Role::GatewayInit => (
                     "/usr/local/bin/vprouter-worker",
@@ -144,15 +153,78 @@ impl ReviewedBundle {
         let p = self.entry(role)?;
         verify(fd, p, &self.bundle.architecture)
     }
+    /// One fresh hash covers these two descriptors only after exact native
+    /// object/metadata equality. Nothing is cached across inspection jobs.
+    pub fn verify_pinned(&self, current: impl AsFd, retained: impl AsFd, role: Role) -> Result<()> {
+        let pair = ExecutablePair::new(current.as_fd(), retained.as_fd())?;
+        self.verify(current.as_fd(), role)?;
+        pair.finish()
+    }
     #[cfg(test)]
     pub fn init(&self) -> Result<(&str, u64)> {
         let e = self.entry(Role::GatewayInit)?;
         Ok((&e.sha256, e.bytes))
     }
+    pub fn monitor_digest(&self) -> Result<&str> {
+        Ok(&self.entry(Role::WorkerMonitor)?.sha256)
+    }
     pub fn worker_digest(&self) -> Result<&str> {
         Ok(&self.entry(Role::WorkerObserver)?.sha256)
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileFingerprint([u64; 14]);
+impl FileFingerprint {
+    fn read(fd: impl AsFd) -> Result<Self> {
+        let s = fs::fstat(fd).map_err(|_| Error::ExecutableMismatch)?;
+        // atime is deliberately excluded: our own fresh pread can update it.
+        // All identity, ownership, permission, size, allocation and modification
+        // metadata are bound for BOTH descriptors before and after hashing.
+        Ok(Self([
+            s.st_dev,
+            s.st_ino,
+            s.st_mode as u64,
+            s.st_uid as u64,
+            s.st_gid as u64,
+            s.st_nlink as u64,
+            s.st_size as u64,
+            s.st_rdev,
+            s.st_blocks as u64,
+            s.st_blksize as u64,
+            s.st_mtime as u64,
+            s.st_mtime_nsec as u64,
+            s.st_ctime as u64,
+            s.st_ctime_nsec as u64,
+        ]))
+    }
+}
+struct ExecutablePair<'a> {
+    current: BorrowedFd<'a>,
+    retained: BorrowedFd<'a>,
+    fingerprint: FileFingerprint,
+}
+impl<'a> ExecutablePair<'a> {
+    fn new(current: BorrowedFd<'a>, retained: BorrowedFd<'a>) -> Result<Self> {
+        let fingerprint = FileFingerprint::read(current)?;
+        if FileFingerprint::read(retained)? != fingerprint {
+            return Err(Error::ExecutableMismatch);
+        }
+        Ok(Self {
+            current,
+            retained,
+            fingerprint,
+        })
+    }
+    fn finish(self) -> Result<()> {
+        if FileFingerprint::read(self.current)? != self.fingerprint
+            || FileFingerprint::read(self.retained)? != self.fingerprint
+        {
+            return Err(Error::ExecutableMismatch);
+        }
+        Ok(())
+    }
+}
+
 fn verify(fd: impl AsFd, p: &Entry, architecture: &str) -> Result<()> {
     let before = fs::fstat(&fd).map_err(|_| Error::ExecutableMismatch)?;
     if before.st_uid != 0
@@ -218,6 +290,73 @@ impl Program {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn pair_file() -> OwnedFd {
+        let fd =
+            fs::memfd_create(c"vprouter-executable-pair-test", fs::MemfdFlags::CLOEXEC).unwrap();
+        rustix::io::pwrite(&fd, b"same contents", 0).unwrap();
+        fd
+    }
+    #[test]
+    fn executable_pair_accepts_same_native_inode_and_rejects_identical_bytes_in_another_inode() {
+        let current = pair_file();
+        let retained = rustix::io::fcntl_dupfd_cloexec(&current, 3).unwrap();
+        let pair = ExecutablePair::new(current.as_fd(), retained.as_fd()).unwrap();
+        pair.finish().unwrap();
+        let foreign = pair_file();
+        assert!(ExecutablePair::new(current.as_fd(), foreign.as_fd()).is_err());
+    }
+    #[test]
+    fn executable_pair_rejects_native_metadata_mutation_through_either_descriptor() {
+        for mutate_current in [true, false] {
+            for resize in [true, false] {
+                let current = pair_file();
+                let retained = rustix::io::fcntl_dupfd_cloexec(&current, 3).unwrap();
+                let pair = ExecutablePair::new(current.as_fd(), retained.as_fd()).unwrap();
+                let changed = if mutate_current { &current } else { &retained };
+                if resize {
+                    fs::ftruncate(changed, 99).unwrap();
+                } else {
+                    fs::fchmod(changed, Mode::RUSR).unwrap();
+                }
+                assert_eq!(pair.finish(), Err(Error::ExecutableMismatch));
+            }
+        }
+    }
+    #[test]
+    fn fixed_monitor_role_is_separate_and_rejects_observer_or_argv_substitution() {
+        if !cfg!(target_arch = "x86_64") {
+            return;
+        }
+        let mut v: serde_json::Value =
+            serde_json::from_slice(include_bytes!("../../../docs/rust-v2/programs-amd64.json"))
+                .unwrap();
+        v["programs"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|e| e["role"] != "worker_monitor");
+        let entry = serde_json::json!({"role":"worker_monitor","path":"/usr/local/bin/vprouter-worker-monitor",
+            "sha256":"a".repeat(64),"bytes":128,"policy":"guard-bound-monitor-zero-caps-private-root-v1"});
+        v["programs"].as_array_mut().unwrap().push(entry);
+        assert!(ReviewedBundle::decode(&serde_json::to_vec(&v).unwrap()).is_ok());
+        for (field, value) in [
+            (
+                "path",
+                serde_json::json!("/usr/local/bin/vprouter-worker-observe"),
+            ),
+            (
+                "policy",
+                serde_json::json!("observation-only-zero-caps-private-root-v2"),
+            ),
+            ("argv", serde_json::json!(["/bin/sh"])),
+        ] {
+            let mut changed = v.clone();
+            changed["programs"][3][field] = value;
+            assert!(ReviewedBundle::decode(&serde_json::to_vec(&changed).unwrap()).is_err());
+        }
+        let duplicate = v["programs"][3].clone();
+        v["programs"].as_array_mut().unwrap().push(duplicate);
+        assert!(ReviewedBundle::decode(&serde_json::to_vec(&v).unwrap()).is_err());
+    }
     #[test]
     fn fixed_bundle_rejects_program_policy_platform_and_duplicate_substitution() {
         let original = include_bytes!("../../../docs/rust-v2/programs-amd64.json");

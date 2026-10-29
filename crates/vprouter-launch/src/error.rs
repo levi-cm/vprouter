@@ -1,0 +1,83 @@
+#![forbid(unsafe_code)]
+use serde::Serialize;
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Error {
+    InvalidSpec,
+    ResolverUnavailable,
+    NetworkPolicy,
+    NetworkOperation,
+    AllocationMismatch,
+    UnsafeInput,
+    UnsupportedPlatform,
+    DockerUnavailable,
+    ContainerMismatch,
+    ImageMismatch,
+    UnsupportedConfiguration,
+    ProcessUnavailable,
+    ProcessChanged,
+    UnsupportedUserNamespace,
+    NamespaceMismatch,
+    RootMismatch,
+    CgroupMismatch,
+    ExecutableMismatch,
+    TooLarge,
+    NotSingleThreaded,
+    LabRequired,
+    LaunchUnavailable,
+    OwnershipMismatch,
+    LockBusy,
+    Interrupted,
+    NamespaceOperation,
+    PlacementFailed,
+    MountIsolation,
+    MountContainerRoot,
+    MountPrivate,
+    MountTmp,
+    MountExecutable,
+    MountExecutableClone,
+    MountStateClone,
+    MountExecutableBind,
+    MountExecutableReadonly,
+    MountState,
+    MountPivot,
+    MountProc,
+    MountReadonly,
+    DescriptorPolicy,
+    DescriptorNull,
+    DescriptorDuplicate,
+    DescriptorClose,
+    DescriptorFlags,
+    DescriptorStdio,
+    DescriptorHealth,
+    DescriptorExecutable,
+    DescriptorInventory,
+    DescriptorReadlink,
+    DescriptorScanOpen,
+    DescriptorScanDenied,
+    DescriptorScanCount,
+    WaitLsmTransition,
+    WaitLsmRead,
+    WaitLsmLabel,
+    WaitFilter,
+    ProbeProcHiddenInit,
+    ProbeProcSet,
+    ProbeProcRoot,
+    ProbeResolver,
+    ProbeStateWrite,
+    ProbeReadonly,
+    ProbeForbiddenRoot,
+    CapabilityPolicy,
+    ConfinementPolicy,
+    ChildFailed,
+    Deadline,
+}
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Stable enum-only redaction: never include external error payloads.
+        let encoded = serde_json::to_string(self).map_err(|_| std::fmt::Error)?;
+        f.write_str(encoded.trim_matches('"'))
+    }
+}
+impl std::error::Error for Error {}
+pub type Result<T> = std::result::Result<T, Error>;

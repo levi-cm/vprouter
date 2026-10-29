@@ -8,6 +8,14 @@ pub(crate) struct Placed {
     _thread: PhantomData<Rc<()>>,
 }
 impl Placed {
+    pub(crate) fn authenticated(admission: &crate::bootstrap::MonitorAdmission) -> Result<Self> {
+        let result = Self {
+            identity: admission.namespace()?,
+            _thread: PhantomData,
+        };
+        result.check()?;
+        Ok(result)
+    }
     pub fn check(&self) -> Result<()> {
         if identity()? == self.identity {
             Ok(())

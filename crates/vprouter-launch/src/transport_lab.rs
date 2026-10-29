@@ -25,11 +25,24 @@ const ROOT: &str = "/var/lib/vprouter-v2-lab";
 const PROBE: &str = "/var/lib/vprouter-v2-lab/launch-execution-probe";
 const ENDPOINT: &str = "185.65.134.88";
 const HOST_WAN: &str = "185.65.134.89";
+const NORMAL_WAN_CANDIDATES: usize = 16;
+/// Test capability metadata only; this performs no admission or native action.
+pub fn normal_fixture_descriptor() -> serde_json::Value {
+    serde_json::json!({
+        "schema": 1,
+        "endpoint_policy": "bounded-nonce-18566-v1",
+        "candidate_limit": NORMAL_WAN_CANDIDATES,
+        "exclusive_add_only": true
+    })
+}
 const SERVER_KEY: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
 const CLIENT_KEY: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Scenario {
     Actual,
+    Inspection,
+    Terminal,
+    TerminalDeath,
     Reversible,
     DeletedWg,
     DeletedTransport,
@@ -87,18 +100,22 @@ fn b64(input: [u8; 32]) -> String {
     }
     s
 }
-fn profile_source() -> String {
+fn profile_source_at(endpoint: &str) -> String {
     let peer = b64(x25519_dalek::x25519(
         [2; 32],
         x25519_dalek::X25519_BASEPOINT_BYTES,
     ));
     format!(
-        "[Interface]\nPrivateKey={CLIENT_KEY}\nAddress=10.64.0.2/32\nDNS=10.64.0.1\n[Peer]\nPublicKey={peer}\nAllowedIPs=0.0.0.0/0\nEndpoint={ENDPOINT}:51820\n"
+        "[Interface]\nPrivateKey={CLIENT_KEY}\nAddress=10.64.0.2/32\nDNS=10.64.0.1\n[Peer]\nPublicKey={peer}\nAllowedIPs=0.0.0.0/0\nEndpoint={endpoint}:51820\n"
     )
 }
-fn profile() -> Result<Profile> {
-    Profile::parse(profile_source().as_bytes(), "de-fra-wg-404", None)
-        .map_err(|_| Error::InvalidSpec)
+fn profile_at(endpoint: &str) -> Result<Profile> {
+    Profile::parse(
+        profile_source_at(endpoint).as_bytes(),
+        "de-fra-wg-404",
+        None,
+    )
+    .map_err(|_| Error::InvalidSpec)
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -155,11 +172,30 @@ fn private(p: &Path) -> Result<()> {
         .map_err(|_| Error::UnsafeInput)
 }
 fn command(program: &str, args: &[&str]) -> Result<Vec<u8>> {
-    let o = Command::new(program)
-        .args(args)
-        .output()
-        .map_err(|_| Error::NetworkOperation)?;
+    let binary = match program {
+        "ip" => "ip",
+        "nft" => "nft",
+        "mount" => "mount",
+        "touch" => "touch",
+        "sysctl" => "sysctl",
+        _ => "other",
+    };
+    let o = Command::new(program).args(args).output().map_err(|error| {
+        let reason = match error.kind() {
+            std::io::ErrorKind::NotFound => "not_found",
+            std::io::ErrorKind::PermissionDenied => "permission_denied",
+            _ => "spawn_other",
+        };
+        eprintln!("LAB_COMMAND_FAILURE binary={binary} reason={reason}");
+        Error::NetworkOperation
+    })?;
     if !o.status.success() || o.stdout.len() > 4 * 1024 * 1024 {
+        let reason = if !o.status.success() {
+            "unsuccessful_status"
+        } else {
+            "oversized_output"
+        };
+        eprintln!("LAB_COMMAND_FAILURE binary={binary} reason={reason}");
         return Err(Error::NetworkOperation);
     }
     Ok(o.stdout)
@@ -316,41 +352,89 @@ impl Drop for Capture {
 fn has(bytes: &[u8], marker: &[u8]) -> bool {
     bytes.windows(marker.len()).any(|w| w == marker)
 }
-fn allocation(dir: &Path, deployment: &str) -> Result<AllocationRecord> {
+fn allocation_at(dir: &Path, deployment: &str, endpoint: &str) -> Result<AllocationRecord> {
     let value = serde_json::json!({"schema_version":2,"deployment_id":deployment,"site":"debdev","gateway_image":format!("sha256:{}","a".repeat(64)),"exits":[{"id":"one","enabled":true,"state_dir":dir.join("one"),"mode":{"kind":"mullvad","profile":dir.join("synthetic.conf"),"expected_server":"de-fra-wg-404"}}],"dependency_adapters":[],"client_policies":[]});
     let c = Configuration::parse(&serde_json::to_vec(&value).map_err(|_| Error::InvalidSpec)?)
         .map_err(|_| Error::InvalidSpec)?
-        .validate_with(|_, _| Profile::parse(profile_source().as_bytes(), "de-fra-wg-404", None))
+        .validate_with(|_, _| {
+            Profile::parse(
+                profile_source_at(endpoint).as_bytes(),
+                "de-fra-wg-404",
+                None,
+            )
+        })
         .map_err(|_| Error::InvalidSpec)?;
     AllocationRecord::from_configuration(&c, 1).map_err(|_| Error::AllocationMismatch)
 }
-fn setup_wan(peer: &str, host: &str, other: &str, dir: &Path) -> Result<()> {
+pub(super) fn health_configuration(
+    spec: &super::LaunchSpec,
+) -> Result<vprouter_core::config::ValidatedConfiguration> {
+    health_configuration_at(spec, ENDPOINT)
+}
+pub(super) fn health_configuration_at(
+    spec: &super::LaunchSpec,
+    endpoint: &str,
+) -> Result<vprouter_core::config::ValidatedConfiguration> {
+    let dir = spec.exit.state_dir.parent().ok_or(Error::InvalidSpec)?;
+    let (mode, client_mode) = match spec.exit.mode {
+        vprouter_core::config::ExitMode::Direct => (serde_json::json!({"kind":"direct"}), "direct"),
+        vprouter_core::config::ExitMode::Mullvad => (
+            serde_json::json!({"kind":"mullvad","profile":dir.join("synthetic.conf"),"expected_server":"de-fra-wg-404"}),
+            "protected",
+        ),
+    };
+    let value = serde_json::json!({"schema_version":2,"deployment_id":spec.allocation.deployment_id,"site":"debdev",
+        "gateway_image":format!("sha256:{}","a".repeat(64)),"exits":[{"id":"one","enabled":true,"state_dir":spec.exit.state_dir,
+        "mode":mode}],"dependency_adapters":[],
+        "client_policies":[{"id":"observational-fixture","exit_id":"one","selected_node_id":"fixture-observation","mode":client_mode,"dependency_adapters":[]}]});
+    Configuration::parse(&serde_json::to_vec(&value).map_err(|_| Error::InvalidSpec)?)
+        .map_err(|_| Error::InvalidSpec)?
+        .validate_with(|_, _| {
+            Profile::parse(
+                profile_source_at(endpoint).as_bytes(),
+                "de-fra-wg-404",
+                None,
+            )
+        })
+        .map_err(|_| Error::InvalidSpec)
+}
+fn setup_wan(
+    peer: &str,
+    host: &str,
+    other: &str,
+    dir: &Path,
+    endpoint: &str,
+    host_ip: &str,
+) -> Result<()> {
+    lab::stage("fixture_wan_create_peer_namespace");
     ip(&["netns", "add", peer])?;
+    lab::stage("fixture_wan_create_veth");
     ip(&[
         "link", "add", host, "type", "veth", "peer", "name", other, "netns", peer,
     ])?;
+    lab::stage("fixture_wan_ipv4_link_setup");
     ip(&["link", "set", host, "alias", "task8a-owned-synthetic-wan"])?;
     // Pin IPv4-only fixture topology before either end becomes usable. This
     // avoids unrelated tentative IPv6 DAD transitions during exact host audits.
     ip(&["link", "set", host, "addrgenmode", "none"])?;
     ip(&["-n", peer, "link", "set", other, "addrgenmode", "none"])?;
-    ip(&["address", "add", &format!("{HOST_WAN}/32"), "dev", host])?;
+    ip(&["address", "add", &format!("{host_ip}/32"), "dev", host])?;
     ip(&["link", "set", host, "up"])?;
     ip(&[
         "route",
         "add",
-        &format!("{ENDPOINT}/32"),
+        &format!("{endpoint}/32"),
         "dev",
         host,
         "src",
-        HOST_WAN,
+        host_ip,
     ])?;
     ip(&[
         "-n",
         peer,
         "address",
         "add",
-        &format!("{ENDPOINT}/32"),
+        &format!("{endpoint}/32"),
         "dev",
         other,
     ])?;
@@ -361,15 +445,17 @@ fn setup_wan(peer: &str, host: &str, other: &str, dir: &Path) -> Result<()> {
         peer,
         "route",
         "add",
-        &format!("{HOST_WAN}/32"),
+        &format!("{host_ip}/32"),
         "dev",
         other,
     ])?;
+    lab::stage("fixture_wan_create_wireguard_peer");
     ip(&["-n", peer, "link", "add", "wgpeer8a", "type", "wireguard"])?;
     let pubkey = b64(x25519_dalek::x25519(
         [1; 32],
         x25519_dalek::X25519_BASEPOINT_BYTES,
     ));
+    lab::stage("fixture_wan_configure_wireguard_peer");
     let config = dir.join("synthetic-peer.conf");
     lab::write(&config,format!("[Interface]\nPrivateKey={SERVER_KEY}\nListenPort=51820\n[Peer]\nPublicKey={pubkey}\nAllowedIPs=10.64.0.2/32\n").as_bytes())?;
     command(
@@ -419,6 +505,8 @@ fn drain(server: &UdpSocket) -> Result<()> {
         .map_err(|_| Error::NetworkOperation)
 }
 struct Continuous {
+    socket: UdpSocket,
+    original_nonblocking: bool,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     attempts: std::sync::Arc<std::sync::atomic::AtomicU64>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -431,6 +519,10 @@ impl Continuous {
             Arc,
             atomic::{AtomicBool, AtomicU64, Ordering},
         };
+        let original_nonblocking = rustix::fs::fcntl_getfl(socket)
+            .map_err(|_| Error::NetworkOperation)?
+            .contains(rustix::fs::OFlags::NONBLOCK);
+        let retained = socket.try_clone().map_err(|_| Error::NetworkOperation)?;
         let socket = socket.try_clone().map_err(|_| Error::NetworkOperation)?;
         socket
             .set_nonblocking(true)
@@ -451,6 +543,8 @@ impl Continuous {
             }
         });
         let result = Self {
+            socket: retained,
+            original_nonblocking,
             stop,
             attempts,
             thread: Some(thread),
@@ -483,6 +577,11 @@ impl Continuous {
         self.stop.store(true, std::sync::atomic::Ordering::Release);
         if let Some(thread) = self.thread.take() {
             thread.join().map_err(|_| Error::NetworkOperation)?;
+            // dup shares O_NONBLOCK with the application socket. Restore only
+            // after the continuous sender has joined, before later roundtrips.
+            self.socket
+                .set_nonblocking(self.original_nonblocking)
+                .map_err(|_| Error::NetworkOperation)?;
             let data = serde_json::json!({"attempts":self.attempts.load(std::sync::atomic::Ordering::Acquire),"bounded_nonblocking_sender":true,"joined":true,"checkpoints":self.checkpoints.borrow().as_slice()});
             lab::write(
                 &self.path,
@@ -569,7 +668,26 @@ fn fault_matrix(
             4 => ip(&["-n", dn, "route", "del", "default", "dev", &wg]),
             5 => ip(&["-n", dn, "route", "add", "185.65.134.88/32", "dev", "lo"]),
             6 => ip(&["-n", dn, "route", "add", "172.17.0.0/16", "dev", &wg]),
-            7 => ip(&["-n", dn, "-6", "route", "add", "default", "dev", &wg]),
+            7 => {
+                // Prove suppression itself rejects the route, then explicitly
+                // undo ONLY this owned device's suppression to inject real
+                // IPv6 drift behind the unchanged deny policy.
+                if ip(&["-n", dn, "-6", "route", "add", "default", "dev", &wg]).is_ok() {
+                    return Err(Error::NetworkPolicy);
+                }
+                command(
+                    "ip",
+                    &[
+                        "netns",
+                        "exec",
+                        dn,
+                        "sysctl",
+                        "-w",
+                        &format!("net.ipv6.conf.{wg}.disable_ipv6=0"),
+                    ],
+                )?;
+                ip(&["-n", dn, "-6", "route", "add", "default", "dev", &wg])
+            }
             8 => ip(&["-n", dn, "rule", "add", "priority", "100", "table", "100"]),
             9 => ip(&["-n", dn, "link", "add", "vr8fault", "type", "dummy"]),
             10 => ip(&["-n", tn, "route", "add", "default", "dev", &trans]),
@@ -716,7 +834,21 @@ fn fault_matrix(
             ]),
             5 => ip(&["-n", dn, "route", "del", "185.65.134.88/32", "dev", "lo"]),
             6 => ip(&["-n", dn, "route", "del", "172.17.0.0/16", "dev", &wg]),
-            7 => ip(&["-n", dn, "-6", "route", "del", "default", "dev", &wg]),
+            7 => {
+                ip(&["-n", dn, "-6", "route", "del", "default", "dev", &wg])?;
+                command(
+                    "ip",
+                    &[
+                        "netns",
+                        "exec",
+                        dn,
+                        "sysctl",
+                        "-w",
+                        &format!("net.ipv6.conf.{wg}.disable_ipv6=1"),
+                    ],
+                )
+                .map(|_| ())
+            }
             8 => ip(&["-n", dn, "rule", "del", "priority", "100", "table", "100"]),
             9 => ip(&["-n", dn, "link", "del", "vr8fault"]),
             10 => ip(&["-n", tn, "route", "del", "default", "dev", &trans]),
@@ -916,23 +1048,498 @@ fn nft_faults(
     );
     Ok(())
 }
+/// Syscall-only component proof: no enrollment, provider, or production entry.
+pub fn run_operational_profile() -> Result<()> {
+    admit(true)?;
+    kernel::operational_profile_lab()?;
+    lab::case(
+        "operational_profile_empty_netns_zero_caps_tokio_unix_udp_tcp_positive_and_forbidden_sockets_negative",
+    );
+    Ok(())
+}
+pub fn owner_domains_descriptor() -> Result<String> {
+    super::supervision::lab_descriptor()
+}
+pub fn run_owner_deployment() -> Result<()> {
+    admit(true)?;
+    super::owned::lab_owner_deployment()
+}
+pub fn owner_bootstrap_descriptor() -> Result<String> {
+    let bytes = vprouter_linux::storage::read(
+        Path::new(&format!("{ROOT}/owner-domain-nonce")),
+        vprouter_linux::storage::Kind::SecretFile,
+        64,
+    )
+    .map_err(|_| Error::LabRequired)?;
+    let nonce = std::str::from_utf8(&bytes).map_err(|_| Error::LabRequired)?;
+    let dir = Path::new(ROOT).join(format!("owner-bootstrap-{nonce}"));
+    let (cfg, _, _) = bootstrap_journal_configuration(nonce, &dir)?;
+    let (mut spec, _) = super::tests::fixture();
+    spec.allocation =
+        AllocationRecord::from_configuration(&cfg, 1).map_err(|_| Error::AllocationMismatch)?;
+    spec.exit = spec.allocation.exits[0].clone();
+    let domains = super::supervision::Domains::new(&spec, nonce)?;
+    serde_json::to_string(&serde_json::json!({"schema_version":1,"owner_unit":domains.owner_unit(),"deployment_id":spec.allocation.deployment_id,"nonce":nonce,"guard_role":"lifecycle_scope","component_only":true})).map_err(|_| Error::InvalidSpec)
+}
+pub fn run_owner_bootstrap() -> Result<()> {
+    admit(true)?;
+    run_bootstrap_journal_mutations(false, false, false, false, false, None)
+}
+// Matches the root runner preflight exactly. Kernel creates remain exclusive;
+// nonce reuse or a colliding retained route must fail without replacing anything.
+fn nonce_wan_pair(nonce: &str) -> Result<(String, String)> {
+    if !super::spec::digest(nonce) {
+        return Err(Error::InvalidSpec);
+    }
+    let byte =
+        |offset| u8::from_str_radix(&nonce[offset..offset + 2], 16).map_err(|_| Error::InvalidSpec);
+    let endpoint = format!("185.66.{}.{}", byte(0)?, byte(2)?);
+    let host = format!("185.66.{}.{}", byte(0)?, byte(2)? ^ 1);
+    Ok((endpoint, host))
+}
+fn wan_pair_conflicts(metadata: &vprouter_network::MetadataSnapshot, pair: [Ipv4Addr; 2]) -> bool {
+    use std::net::IpAddr;
+    let contains = |network: IpAddr, prefix: u8, candidate: Ipv4Addr| match network {
+        IpAddr::V4(network) if (1..=32).contains(&prefix) => {
+            let mask = u32::MAX << (32 - prefix);
+            u32::from(network) & mask == u32::from(candidate) & mask
+        }
+        _ => false,
+    };
+    pair.into_iter().any(|candidate| {
+        let exact = Some(IpAddr::V4(candidate));
+        metadata.addresses.iter().any(|address| {
+            address.address == IpAddr::V4(candidate)
+                || address.broadcast == Some(candidate)
+                || contains(address.address, address.prefix, candidate)
+        }) || metadata.routes.iter().any(|route| {
+            // A default route is expected on the disposable guest; every
+            // non-default covering prefix and explicit source/gateway is busy.
+            contains(route.destination, route.prefix, candidate)
+                || route.source == exact
+                || route.gateway == exact
+        })
+    })
+}
+fn normal_wan_pair(dir: &Path, deployment: &str) -> Result<(String, String)> {
+    use std::io::Read;
+    for _ in 0..NORMAL_WAN_CANDIDATES {
+        let mut random = [0u8; 32];
+        fs::File::open("/dev/urandom")
+            .and_then(|mut source| source.read_exact(&mut random))
+            .map_err(|_| Error::LabRequired)?;
+        let (endpoint, host) = nonce_wan_pair(&vprouter_linux::sha256(&random))?;
+        let allocation = allocation_at(dir, deployment, &endpoint)?;
+        let plan = vprouter_network::Plan::new(
+            &allocation,
+            deployment,
+            &allocation.exits[0],
+            &profile_at(&endpoint)?,
+        )
+        .map_err(|_| Error::InvalidSpec)?;
+        let (mut observer, _inventory) = super::inventory::Registration::network(plan)?;
+        let metadata = observer
+            .observe_metadata()
+            .map_err(|_| Error::NetworkOperation)?;
+        if !wan_pair_conflicts(
+            &metadata,
+            [
+                endpoint.parse().map_err(|_| Error::InvalidSpec)?,
+                host.parse().map_err(|_| Error::InvalidSpec)?,
+            ],
+        ) {
+            eprintln!("LAB_NORMAL_WAN endpoint={endpoint} host={host}");
+            return Ok((endpoint, host));
+        }
+    }
+    Err(Error::NetworkPolicy)
+}
+// Fresh LOCAL-only native Bootstrap fixture. Its public-form endpoint is routed
+// exclusively into a new owned WAN namespace; no real provider or identity use.
+fn bootstrap_journal_configuration(
+    nonce: &str,
+    dir: &Path,
+) -> Result<(
+    vprouter_core::config::ValidatedConfiguration,
+    String,
+    String,
+)> {
+    let (endpoint, host) = nonce_wan_pair(nonce)?;
+    let ids = [format!("a{}", &nonce[..12]), format!("b{}", &nonce[..12])];
+    let exits: Vec<_> = ids.iter().enumerate().map(|(i,id)| serde_json::json!({
+        "id":id,"enabled":true,"state_dir":dir.join(id),
+        "mode":{"kind":"mullvad","profile":dir.join(format!("synthetic-{i}.conf")),"expected_server":"de-fra-wg-404"}
+    })).collect();
+    let policies: Vec<_> = ids.iter().enumerate().map(|(i,id)| serde_json::json!({
+        "id":format!("journal-{i}"),"exit_id":id,"selected_node_id":format!("fixture-journal-{i}"),"mode":"protected","dependency_adapters":[]
+    })).collect();
+    let value = serde_json::json!({"schema_version":2,"deployment_id":format!("launchlab-{}", &nonce[..12]),"site":"debdev","gateway_image":format!("sha256:{}","a".repeat(64)),"exits":exits,"dependency_adapters":[],"client_policies":policies});
+    let cfg = Configuration::parse(&serde_json::to_vec(&value).map_err(|_| Error::InvalidSpec)?)
+        .map_err(|_| Error::InvalidSpec)?
+        .validate_with(|path, server| {
+            let seed = if path.ends_with("synthetic-0.conf") {
+                1
+            } else {
+                4
+            };
+            // Fixed synthetic bytes, never a provider key, file read or argv.
+            let source = profile_source_at(&endpoint).replace(CLIENT_KEY, &b64([seed; 32]));
+            Profile::parse(source.as_bytes(), server, None)
+        })
+        .map_err(|_| Error::InvalidSpec)?;
+    Ok((cfg, endpoint, host))
+}
+pub fn run_owner_host_audit() -> Result<()> {
+    admit(true)?;
+    run_bootstrap_journal_mutations(true, false, false, false, false, None)
+}
+pub fn run_owner_expiry_placement() -> Result<()> {
+    admit(true)?;
+    run_bootstrap_journal_mutations(false, true, false, false, false, None)
+}
+pub fn run_owner_inspection_held() -> Result<()> {
+    admit(true)?;
+    run_bootstrap_journal_mutations(false, false, true, false, false, None)
+}
+pub fn run_owner_inspection_setup() -> Result<()> {
+    admit(true)?;
+    run_bootstrap_journal_mutations(false, false, false, true, false, None)
+}
+pub fn run_owner_admission_stop() -> Result<()> {
+    admit(true)?;
+    run_bootstrap_journal_mutations(false, false, true, false, true, None)
+}
+pub fn run_owner_retained_drop() -> Result<()> {
+    admit(true)?;
+    run_bootstrap_journal_mutations(
+        false,
+        false,
+        false,
+        false,
+        false,
+        Some(owned::RetainedCase::Drop),
+    )
+}
+pub fn run_owner_retirement(fault: u8) -> Result<()> {
+    admit(true)?;
+    run_bootstrap_journal_mutations(
+        false,
+        false,
+        false,
+        false,
+        false,
+        Some(owned::RetainedCase::Retirement { fault }),
+    )
+}
+pub fn run_owner_expiry_drop(partial: bool) -> Result<()> {
+    admit(true)?;
+    run_bootstrap_journal_mutations(
+        false,
+        false,
+        false,
+        false,
+        false,
+        Some(owned::RetainedCase::ExpiryDrop { partial }),
+    )
+}
+pub fn run_owner_admission_birth_failure() -> Result<()> {
+    admit(true)?;
+    run_bootstrap_journal_mutations(
+        false,
+        false,
+        false,
+        false,
+        false,
+        Some(owned::RetainedCase::BirthFailure),
+    )
+}
+fn run_bootstrap_journal_mutations(
+    host_audit: bool,
+    expiry_placement: bool,
+    inspection_held: bool,
+    inspection_setup: bool,
+    admission_stop: bool,
+    retained: Option<owned::RetainedCase>,
+) -> Result<()> {
+    let bytes = vprouter_linux::storage::read(
+        Path::new(&format!("{ROOT}/owner-domain-nonce")),
+        vprouter_linux::storage::Kind::SecretFile,
+        64,
+    )
+    .map_err(|_| Error::LabRequired)?;
+    let nonce = std::str::from_utf8(&bytes).map_err(|_| Error::LabRequired)?;
+    if !super::spec::digest(nonce) {
+        return Err(Error::LabRequired);
+    }
+    let dir = Path::new(ROOT).join(format!("owner-bootstrap-{nonce}"));
+    let (cfg, endpoint, host_ip) = bootstrap_journal_configuration(nonce, &dir)?;
+    let record =
+        AllocationRecord::from_configuration(&cfg, 1).map_err(|_| Error::AllocationMismatch)?;
+    private(&dir)?;
+    for exit in &record.exits {
+        private(&exit.state_dir)?;
+    }
+    let records = dir.join("records");
+    private(&records)?;
+    let image = super::actual_lab::image()?;
+    let label = format!("io.vprouter.deployment={}", record.deployment_id);
+    let id = String::from_utf8(lab::docker(&[
+        "run",
+        "--detach",
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--device",
+        "/dev/net/tun:/dev/net/tun:rwm",
+        "--label",
+        &label,
+        "--label",
+        "io.vprouter.role=gateway",
+        &image,
+    ])?)
+    .map_err(|_| Error::DockerUnavailable)?
+    .trim()
+    .to_owned();
+    if !super::spec::digest(&id) {
+        return Err(Error::DockerUnavailable);
+    }
+    let peer = format!("vjt{}", &nonce[..10]);
+    let wan = format!("vjh{}", &nonce[..10]);
+    let other = format!("vjp{}", &nonce[..10]);
+    lab::write(&dir.join("resources.json"), &serde_json::to_vec(&serde_json::json!({"container":id,"wan_namespace":peer,"wan_host":wan,"wan_peer":other,"endpoint":endpoint,"host_ip":host_ip,"records":records,"allocation":record})).map_err(|_| Error::InvalidSpec)?)?;
+    lab::stage("bootstrap_journal_admit_first");
+    let first = execution_lab::inspect_actual_member(&id, &record, &image, 0)?;
+    lab::stage("bootstrap_journal_admit_second");
+    let second = execution_lab::inspect_actual_member(&id, &record, &image, 1)?;
+    lab::stage("bootstrap_journal_verify_external_owner");
+    let owner_domains = super::supervision::Domains::new(&first.spec, nonce)?;
+    let owner_domain = super::supervision::OwnerDomain::capture(&owner_domains)?;
+    // Exclusively create; collisions fail and retain evidence. Never replace or
+    // delete an existing route, namespace, gateway, identity, link or table.
+    lab::stage("bootstrap_journal_wan_exclusive_create");
+    ip(&["netns", "add", &peer])?;
+    ip(&[
+        "link", "add", &wan, "type", "veth", "peer", "name", &other, "netns", &peer,
+    ])?;
+    ip(&[
+        "link",
+        "set",
+        &wan,
+        "alias",
+        &format!("owner-bootstrap-{nonce}"),
+    ])?;
+    ip(&["link", "set", &wan, "addrgenmode", "none"])?;
+    ip(&["-n", &peer, "link", "set", &other, "addrgenmode", "none"])?;
+    ip(&["address", "add", &format!("{host_ip}/32"), "dev", &wan])?;
+    ip(&[
+        "-n",
+        &peer,
+        "address",
+        "add",
+        &format!("{endpoint}/32"),
+        "dev",
+        &other,
+    ])?;
+    ip(&["link", "set", &wan, "up"])?;
+    ip(&["-n", &peer, "link", "set", &other, "up"])?;
+    ip(&["-n", &peer, "link", "set", "lo", "up"])?;
+    ip(&[
+        "route",
+        "add",
+        &format!("{endpoint}/32"),
+        "dev",
+        &wan,
+        "src",
+        &host_ip,
+    ])?;
+    ip(&[
+        "-n",
+        &peer,
+        "route",
+        "add",
+        &format!("{host_ip}/32"),
+        "dev",
+        &other,
+    ])?;
+    let store = AllocationStore::open(&records, &record.deployment_id)
+        .map_err(|_| Error::OwnershipMismatch)?;
+    store
+        .lock()
+        .map_err(|_| Error::LockBusy)?
+        .commit(None, &record)
+        .map_err(|_| Error::AllocationMismatch)?;
+    lab::stage("bootstrap_journal_open_owned_namespace_transaction");
+    let mut tx_a = owned::Transaction::open_owned(
+        &store,
+        &records,
+        &first.spec,
+        &first.spec.exit.exit_id,
+        first.process.base_network(),
+        &owner_domains,
+        &owner_domain,
+    )?;
+    let mut tx_b = tx_a.for_exit(&second.spec)?;
+    lab::stage("bootstrap_journal_acquire_first_namespace");
+    let ns_a = tx_a.acquire(&first.spec, first.process.base_network())?;
+    lab::stage("bootstrap_journal_acquire_second_namespace");
+    let ns_b = tx_b.acquire(&second.spec, first.process.base_network())?;
+    let profile_a = cfg.exits()[0].profile().ok_or(Error::InvalidSpec)?;
+    let profile_b = cfg.exits()[1].profile().ok_or(Error::InvalidSpec)?;
+    lab::stage("bootstrap_journal_shared_host_declaration");
+    let authority = {
+        let plan = vprouter_network::Plan::new(
+            &record,
+            &record.deployment_id,
+            &record.exits[0],
+            profile_a,
+        )
+        .map_err(|_| Error::InvalidSpec)?;
+        let (mut host, _inventory) = super::inventory::Registration::network(plan)?;
+        // Test-learned baseline in this controlled owned guest. This exercises
+        // native activation/model integration, not independent production host
+        // declaration admission or an installation authority.
+        let declaration = host.observe().map_err(|_| Error::NetworkOperation)?;
+        vprouter_network::HostAuthority::admit_declared(&mut host, &record, declaration)
+            .map_err(|_| Error::NetworkOperation)?
+    };
+    lab::stage("bootstrap_journal_activate_first");
+    let mut a = GuardTransport::activate(tx_a, ns_a, &first, profile_a, &wan, &authority)?;
+    a.audit()?;
+    lab::stage("bootstrap_journal_activate_second");
+    let mut b = GuardTransport::activate(tx_b, ns_b, &second, profile_b, &wan, &authority)?;
+    lab::stage("bootstrap_journal_audit_second");
+    b.audit()?;
+    lab::stage("bootstrap_journal_reaudit_first_after_second");
+    a.audit()?;
+    lab::case(
+        "actual_two_member_shared_parent_host_authority_native_producer_link_quarantine_bootstrap_and_neighbor_reaudit",
+    );
+    if let Some(case) = retained {
+        return owned::lab_retained_owners(
+            &first.spec,
+            &second.spec,
+            &mut a,
+            b,
+            &cfg,
+            nonce,
+            &authority,
+            &owner_domain,
+            &dir,
+            case,
+        );
+    }
+    if inspection_held || inspection_setup {
+        return super::inspection::lab_held(
+            &first,
+            &second,
+            &mut a,
+            &mut b,
+            &cfg,
+            nonce,
+            &authority,
+            &dir,
+            inspection_setup,
+            &owner_domain,
+            admission_stop,
+        );
+    }
+    if expiry_placement {
+        return owned::lab_expiry_placement(
+            &first.spec,
+            &second.spec,
+            &mut a,
+            &mut b,
+            &cfg,
+            nonce,
+            &authority,
+            &store,
+        );
+    }
+    if host_audit {
+        return owned::lab_host_audits(
+            &first.spec,
+            &second.spec,
+            &mut a,
+            &mut b,
+            &cfg,
+            nonce,
+            &authority,
+        );
+    }
+    lab::stage("bootstrap_journal_authenticated_overlap");
+    owned::lab_bootstrap_mutations(&first.spec, &second.spec, &a, &b, &cfg, nonce)?;
+    // No cleanup authority follows this test: retained Bootstrap/quarantine,
+    // namespace pins, native links, producer groups and ownership records stay.
+    Ok(())
+}
+pub fn run_owner_journal() -> Result<()> {
+    admit(true)?;
+    super::owned::lab_owner_journal()
+}
+pub fn run_owner_domains() -> Result<()> {
+    admit(true)?;
+    super::supervision::lab_run()
+}
+pub fn run_owner_watchdog() -> Result<()> {
+    admit(true)?;
+    super::owner::lab_watchdog()
+}
 pub fn run(scenario: Scenario) -> Result<()> {
-    admit(scenario == Scenario::Actual)?;
+    admit(matches!(
+        scenario,
+        Scenario::Actual | Scenario::Inspection | Scenario::Terminal | Scenario::TerminalDeath
+    ))?;
     lab::stage("transport_admitted_exact_hash_guest_host_namespace");
     let pid = std::process::id();
     let dir = PathBuf::from(format!(
         "{ROOT}/{}-{pid}",
-        if scenario == Scenario::Actual {
+        if matches!(
+            scenario,
+            Scenario::Actual | Scenario::Inspection | Scenario::Terminal | Scenario::TerminalDeath
+        ) {
             "task8b2"
         } else {
             "task8a"
         }
     ));
+    let (deployment, endpoint, host_ip) = if matches!(
+        scenario,
+        Scenario::Inspection | Scenario::Terminal | Scenario::TerminalDeath
+    ) {
+        let bytes = vprouter_linux::storage::read(
+            Path::new(&format!("{ROOT}/owner-domain-nonce")),
+            vprouter_linux::storage::Kind::SecretFile,
+            64,
+        )
+        .map_err(|_| Error::LabRequired)?;
+        let nonce = std::str::from_utf8(&bytes).map_err(|_| Error::LabRequired)?;
+        if !super::spec::digest(nonce) {
+            return Err(Error::LabRequired);
+        }
+        let (endpoint, host_ip) = nonce_wan_pair(nonce)?;
+        (format!("launchlab-{}", &nonce[..12]), endpoint, host_ip)
+    } else if scenario == Scenario::Actual {
+        let deployment = format!("transportlab{pid}");
+        let (endpoint, host_ip) = normal_wan_pair(&dir, &deployment)?;
+        (deployment, endpoint, host_ip)
+    } else {
+        (
+            format!("transportlab{pid}"),
+            ENDPOINT.to_owned(),
+            HOST_WAN.to_owned(),
+        )
+    };
     private(&dir)?;
-    let deployment = format!("transportlab{pid}");
-    let record = allocation(&dir, &deployment)?;
+    let record = allocation_at(&dir, &deployment, &endpoint)?;
     private(&record.exits[0].state_dir)?;
-    if scenario == Scenario::Actual {
+    if matches!(
+        scenario,
+        Scenario::Actual | Scenario::Inspection | Scenario::Terminal | Scenario::TerminalDeath
+    ) {
         for role in ["worker", "daemon"] {
             let path = record.exits[0].state_dir.join(role);
             private(&path)?;
@@ -954,7 +1561,10 @@ pub fn run(scenario: Scenario) -> Result<()> {
         .map_err(|_| Error::LockBusy)?
         .commit(None, &record)
         .map_err(|_| Error::AllocationMismatch)?;
-    let actual_image = if scenario == Scenario::Actual {
+    let actual_image = if matches!(
+        scenario,
+        Scenario::Actual | Scenario::Inspection | Scenario::Terminal | Scenario::TerminalDeath
+    ) {
         Some(super::actual_lab::image()?)
     } else {
         None
@@ -1025,8 +1635,10 @@ pub fn run(scenario: Scenario) -> Result<()> {
     let peer = format!("vr8p{pid}");
     let wan = format!("vr8w{pid}");
     let other = format!("vr8o{pid}");
-    lab::write(&dir.join("resources.json"),&serde_json::to_vec(&serde_json::json!({"container":id,"wan_namespace":peer,"wan_host":wan,"records":records,"deployment":deployment,"allocation":record})).map_err(|_|Error::InvalidSpec)?)?;
-    setup_wan(&peer, &wan, &other, &dir)?;
+    lab::write(&dir.join("resources.json"),&serde_json::to_vec(&serde_json::json!({"container":id,"wan_namespace":peer,"wan_host":wan,"synthetic_endpoint":endpoint,"synthetic_host":host_ip,"records":records,"deployment":deployment,"allocation":record})).map_err(|_|Error::InvalidSpec)?)?;
+    lab::stage("fixture_wan_setup_begin");
+    setup_wan(&peer, &wan, &other, &dir, &endpoint, &host_ip)?;
+    lab::stage("fixture_wan_setup_completed");
     let a: Admission = if let Some(image) = &actual_image {
         execution_lab::inspect_actual(&id, &record, image)?
     } else {
@@ -1066,15 +1678,42 @@ pub fn run(scenario: Scenario) -> Result<()> {
     )?;
     let pf = ns_file(&peer)?;
     let server = socket(&pf, "10.64.0.1:40444")?;
+    lab::stage("fixture_forward_rules_read");
     let forward_before = forward_rules()?;
+    lab::stage("fixture_host_declaration_observe");
+    // This disposable oracle explicitly declares its precreated host fixtures;
+    // production must load the corresponding protected deployment declaration.
+    let host_authority = {
+        let plan = vprouter_network::Plan::new(
+            &record,
+            &record.deployment_id,
+            &record.exits[0],
+            &profile_at(&endpoint)?,
+        )
+        .map_err(|_| Error::InvalidSpec)?;
+        let (mut host, _inventory) = super::inventory::Registration::network(plan)?;
+        let declared = host.observe().map_err(|error| {
+            eprintln!("LAB_NATIVE_FAILURE stage=fixture_host_observe reason={error}");
+            Error::NetworkOperation
+        })?;
+        lab::stage("fixture_host_declaration_admit");
+        vprouter_network::HostAuthority::admit_declared(&mut host, &record, declared).map_err(
+            |error| {
+                eprintln!("LAB_NATIVE_FAILURE stage=fixture_host_admit reason={error}");
+                Error::NetworkOperation
+            },
+        )?
+    };
     let without_dns = Profile::parse(
-        profile_source().replace("DNS=10.64.0.1\n", "").as_bytes(),
+        profile_source_at(&endpoint)
+            .replace("DNS=10.64.0.1\n", "")
+            .as_bytes(),
         "de-fra-wg-404",
         None,
     )
     .map_err(|_| Error::InvalidSpec)?;
     if !matches!(
-        GuardTransport::activate(tx, namespaces, &a, &without_dns, &wan),
+        GuardTransport::activate(tx, namespaces, &a, &without_dns, &wan, &host_authority),
         Err(Error::ResolverUnavailable)
     ) {
         return Err(Error::NetworkPolicy);
@@ -1089,13 +1728,36 @@ pub fn run(scenario: Scenario) -> Result<()> {
         GuardTransport::lab_interrupt_activation_commit();
     }
     lab::stage("native_guard_down_provision_then_quarantined_activation");
-    let mut guard = GuardTransport::activate(tx, namespaces, &a, &profile()?, &wan)?;
+    let mut guard = GuardTransport::activate(
+        tx,
+        namespaces,
+        &a,
+        &profile_at(&endpoint)?,
+        &wan,
+        &host_authority,
+    )?;
     guard.audit()?;
     lab::case("durable_primary_base_native_transport_socket_birth_and_bootstrap");
+    if matches!(
+        scenario,
+        Scenario::Inspection | Scenario::Terminal | Scenario::TerminalDeath
+    ) {
+        drop(server);
+        drop(pf);
+        return super::expiry::lab_run(
+            &a,
+            guard,
+            &dir,
+            &store,
+            scenario == Scenario::TerminalDeath,
+            scenario == Scenario::Inspection,
+            &host_authority,
+        );
+    }
     if scenario == Scenario::Actual {
         drop(server);
         drop(pf);
-        super::actual_lab::run(&a, &mut guard, &dir, &data_name)?;
+        super::actual_lab::run(&a, &mut guard, &dir, &data_name, &endpoint)?;
         // End the actual phase before the existing packet/fault suite. Its
         // generated state is retained; stopped/unenrolled evidence is separate
         // from later8c enabled/advertised real-client acceptance.
@@ -1243,7 +1905,11 @@ pub fn run(scenario: Scenario) -> Result<()> {
                 )?;
             }
             Scenario::InterruptedActivation | Scenario::InterruptedCleanup => {}
-            Scenario::Reversible | Scenario::Actual => unreachable!(),
+            Scenario::Reversible
+            | Scenario::Actual
+            | Scenario::Inspection
+            | Scenario::Terminal
+            | Scenario::TerminalDeath => unreachable!(),
         }
         continuous.checkpoint("terminal_fault_before_audit")?;
         forbidden_burst(&application, "TERMINAL_BEFORE_AUDIT");
@@ -1280,6 +1946,30 @@ pub fn run(scenario: Scenario) -> Result<()> {
     lab::case("encrypted_roundtrip_plaintext_negatives_and_actual_docker_forward_drop_cooperation");
     if scenario == Scenario::Reversible {
         guard.audit()?;
+    }
+    if scenario == Scenario::Reversible {
+        // Independent component oracle only: this is not a runtime health or
+        // advertisement capability. Earlier forbidden capture windows are closed.
+        guard.lab_ready()?;
+        roundtrip(&application, &server, b"VR8A_READY_COMPONENT_APPLICATION")?;
+        guard.lab_begin_offline()?;
+        guard.lab_offline()?;
+        drain(&server)?;
+        forbidden_burst(&application, "READY_COMPONENT_WITHDRAWN");
+        let mut unexpected = [0; 2048];
+        match server.recv_from(&mut unexpected) {
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            _ => return Err(Error::NetworkPolicy),
+        }
+        guard.lab_resume_bootstrap()?;
+        guard.audit()?;
+        lab::case(
+            "actual_three_scope_ready_transition_application_roundtrip_then_offline_bootstrap",
+        );
     }
     drop(application);
     drop(stale);
@@ -1370,10 +2060,7 @@ pub(super) fn actual_packet_controls(
     roundtrip(&health, &server, b"VR8B2_POSITIVE_PRODUCER")?;
     let direct = socket(&g.lab_namespaces().0.transport, "0.0.0.0:0")?;
     direct
-        .send_to(
-            b"VR8B2_POSITIVE_PLAINTEXT_CAPTURE",
-            format!("{ENDPOINT}:51820"),
-        )
+        .send_to(b"VR8B2_POSITIVE_PLAINTEXT_CAPTURE", g.lab_plan().endpoint())
         .map_err(|_| Error::NetworkOperation)?;
     std::thread::sleep(Duration::from_millis(150));
     let [pd, pt, ph] = positive;
@@ -1443,4 +2130,277 @@ pub(super) fn actual_packet_controls(
         "actual_fixture_three_plane_positive_controls_capture_accounting_and_same_namespace_unauthorized_denial",
     );
     Ok(())
+}
+
+#[test]
+fn publisher_fixture_uses_validated_allocation_and_client_policy() {
+    use vprouter_core::config::{ClientMode, ExitMode};
+    let (mut spec, _) = super::tests::fixture();
+    for (mode, expected) in [
+        (ExitMode::Direct, ClientMode::Direct),
+        (ExitMode::Mullvad, ClientMode::Protected),
+    ] {
+        spec.exit.mode = mode;
+        let cfg = health_configuration(&spec).expect("fixture must preserve allocation mode");
+        if mode == ExitMode::Mullvad {
+            // Reallocate the complete fixture when changing mode: Mullvad also
+            // has a WireGuard interface, unlike the initial Direct allocation.
+            spec.allocation = vprouter_core::allocation::AllocationRecord::from_configuration(
+                &cfg,
+                spec.generation,
+            )
+            .unwrap();
+            spec.exit = spec.allocation.exits[0].clone();
+        }
+        spec.validate().unwrap();
+        spec.allocation.matches_configuration(&cfg).unwrap();
+        assert_eq!(cfg.configuration().client_policies[0].mode, expected);
+    }
+}
+
+#[test]
+fn continuous_sender_finish_restores_original_socket_receive_mode() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64},
+    };
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    let clone = socket.try_clone().unwrap();
+    clone.set_nonblocking(true).unwrap();
+    let dir = std::env::temp_dir().join(format!("vprouter-continuous-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let sender = Continuous {
+        socket: socket.try_clone().unwrap(),
+        original_nonblocking: false,
+        stop: Arc::new(AtomicBool::new(false)),
+        attempts: Arc::new(AtomicU64::new(0)),
+        thread: Some(std::thread::spawn(move || drop(clone))),
+        checkpoints: std::cell::RefCell::new(vec![]),
+        path: dir.join("sender.json"),
+    };
+    sender.finish().unwrap();
+    let destination = socket.local_addr().unwrap();
+    let responder = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(30));
+        UdpSocket::bind("127.0.0.1:0")
+            .unwrap()
+            .send_to(b"response", destination)
+            .unwrap();
+    });
+    let result = socket.recv_from(&mut [0; 16]);
+    responder.join().unwrap();
+    fs::remove_dir_all(dir).unwrap();
+    assert_eq!(
+        result.unwrap().0,
+        8,
+        "original socket must wait for asynchronous reply after sender joins"
+    );
+}
+
+#[test]
+fn bootstrap_journal_fixture_binds_distinct_profiles_members_policies_and_unique_resources() {
+    for nonce in ["0".repeat(64), "f".repeat(64), "1234567890abcdef".repeat(4)] {
+        let dir = Path::new(ROOT).join(format!("owner-bootstrap-{nonce}"));
+        let (cfg, endpoint, host) = bootstrap_journal_configuration(&nonce, &dir).unwrap();
+        assert_ne!(endpoint, host);
+        let record = AllocationRecord::from_configuration(&cfg, 1).unwrap();
+        assert_eq!(record.exits.len(), 2);
+        assert_eq!(record.deployment_id, format!("launchlab-{}", &nonce[..12]));
+        assert_ne!(
+            record.exits[0].host_interface,
+            record.exits[1].host_interface
+        );
+        for index in 0..2 {
+            let binding = vprouter_linux::status::expected_binding(
+                &cfg,
+                index,
+                1,
+                "01234567-1234-1234-1234-0123456789ab",
+            )
+            .unwrap();
+            binding.validate().unwrap();
+            assert_eq!(binding.exit_id, record.exits[index].exit_id);
+            assert_eq!(binding.mode, vprouter_core::config::ExitMode::Mullvad);
+            assert_eq!(
+                cfg.exits()[index]
+                    .profile()
+                    .unwrap()
+                    .endpoint()
+                    .ip()
+                    .to_string(),
+                endpoint
+            );
+        }
+    }
+    assert!(bootstrap_journal_configuration("bad", Path::new(ROOT)).is_err());
+}
+
+#[test]
+fn terminal_nonce_endpoint_matches_profile_allocation_plan_and_health_binding() {
+    for (prefix, expected, expected_host) in [
+        ("0000", "185.66.0.0", "185.66.0.1"),
+        ("1234", "185.66.18.52", "185.66.18.53"),
+        ("ffff", "185.66.255.255", "185.66.255.254"),
+    ] {
+        let nonce = format!("{prefix}{}", "0".repeat(60));
+        let (endpoint, host) = nonce_wan_pair(&nonce).unwrap();
+        assert_eq!(endpoint, expected);
+        assert_eq!(host, expected_host);
+        assert_ne!(endpoint, ENDPOINT);
+        let (mut spec, _) = super::tests::fixture();
+        let dir = spec.exit.state_dir.parent().unwrap().to_path_buf();
+        spec.allocation = allocation_at(&dir, &spec.allocation.deployment_id, &endpoint).unwrap();
+        spec.exit = spec.allocation.exits[0].clone();
+        let cfg = health_configuration_at(&spec, &endpoint).unwrap();
+        spec.allocation.matches_configuration(&cfg).unwrap();
+        let profile = cfg.exits()[0].profile().unwrap();
+        let plan = vprouter_network::Plan::new(
+            &spec.allocation,
+            &spec.allocation.deployment_id,
+            &spec.exit,
+            profile,
+        )
+        .unwrap();
+        assert_eq!(plan.endpoint().ip().to_string(), endpoint);
+        let binding = vprouter_linux::status::expected_binding(
+            &cfg,
+            0,
+            spec.generation,
+            "01234567-1234-1234-1234-0123456789ab",
+        )
+        .unwrap();
+        binding.validate().unwrap();
+        assert_ne!(profile.endpoint(), profile_at(ENDPOINT).unwrap().endpoint());
+    }
+    for malformed in ["bad".to_string(), "g".repeat(64), "0".repeat(63)] {
+        assert!(nonce_wan_pair(&malformed).is_err());
+    }
+}
+
+#[test]
+fn normal_pair_refuses_addresses_covering_routes_and_explicit_route_references() {
+    let pair = [
+        Ipv4Addr::new(185, 66, 18, 52),
+        Ipv4Addr::new(185, 66, 18, 53),
+    ];
+    let mut metadata = vprouter_network::MetadataSnapshot {
+        links: vec![],
+        addresses: vec![],
+        routes: vec![],
+        rules: vec![],
+    };
+    assert!(!wan_pair_conflicts(&metadata, pair));
+    for candidate in pair {
+        metadata.addresses = vec![vprouter_network::Address {
+            broadcast: None,
+            route_priority: None,
+            flags: 0,
+            index: 2,
+            address: candidate.into(),
+            prefix: 32,
+            scope: 0,
+        }];
+        assert!(wan_pair_conflicts(&metadata, pair));
+    }
+    metadata.addresses.clear();
+    let mut route = vprouter_network::Route {
+        nexthop_id: None,
+        preference: 0,
+        destination: Ipv4Addr::UNSPECIFIED.into(),
+        prefix: 0,
+        table: 123,
+        output: 2,
+        source: None,
+        gateway: Some(Ipv4Addr::new(192, 168, 1, 1).into()),
+        kind: 1,
+        scope: 0,
+        protocol: 3,
+        metric: 0,
+        flags: 0,
+    };
+    metadata.routes = vec![route.clone()];
+    assert!(!wan_pair_conflicts(&metadata, pair));
+    for candidate in pair {
+        for source in [false, true] {
+            let mut reference = route.clone();
+            if source {
+                reference.source = Some(candidate.into());
+            } else {
+                reference.gateway = Some(candidate.into());
+            }
+            metadata.routes = vec![reference];
+            assert!(wan_pair_conflicts(&metadata, pair));
+        }
+        let mut exact = route.clone();
+        exact.destination = candidate.into();
+        exact.prefix = 32;
+        metadata.routes = vec![exact];
+        assert!(wan_pair_conflicts(&metadata, pair));
+    }
+    route.destination = Ipv4Addr::new(185, 66, 18, 0).into();
+    route.prefix = 24;
+    metadata.routes = vec![route.clone()];
+    assert!(wan_pair_conflicts(&metadata, pair));
+    route.destination = Ipv4Addr::new(185, 65, 134, 88).into();
+    route.prefix = 32;
+    metadata.routes = vec![route];
+    assert!(!wan_pair_conflicts(&metadata, pair));
+}
+
+/// Descriptor reads public configuration only, never a profile.
+pub fn secret_preparation_descriptor() -> Result<String> {
+    super::secret::lab_descriptor()
+}
+pub fn secret_attachment_descriptor() -> Result<String> {
+    super::attachment::mount::lab_descriptor()
+}
+pub fn run_secret_attachment(fault: u8) -> Result<()> {
+    admit(true)?;
+    super::attachment::mount::lab_run(fault)
+}
+pub fn run_secret_preparation(fault: u8) -> Result<()> {
+    admit(true)?;
+    super::secret::lab_run(fault)
+}
+
+pub fn run_secret_provision(fault: u8) -> Result<()> {
+    admit(true)?;
+    super::attachment::provision::lab_run(fault)
+}
+
+pub fn run_secret_movement(fault: u8) -> Result<()> {
+    admit(true)?;
+    super::attachment::movement::lab_run(fault)
+}
+
+pub fn run_secret_quarantine(fault: u8) -> Result<()> {
+    admit(true)?;
+    super::attachment::quarantine::lab_run(fault)
+}
+
+#[cfg(test)]
+pub fn run_secret_assembly(fault: u8) -> Result<()> {
+    admit(true)?;
+    super::attachment::assembly::lab_run(fault)
+}
+
+#[cfg(test)]
+pub fn run_secret_producer_binding(fault: u8) -> Result<()> {
+    admit(true)?;
+    super::attachment::producer_binding::lab_run(fault)
+}
+
+#[cfg(test)]
+pub fn run_secret_host_addition(fault: u8) -> Result<()> {
+    admit(true)?;
+    super::attachment::host_addition::lab_run(fault)
+}
+
+#[cfg(test)]
+pub fn run_secret_bootstrap(fault: u8) -> Result<()> {
+    admit(true)?;
+    super::attachment::operational::bootstrap::lab_run(fault)
 }

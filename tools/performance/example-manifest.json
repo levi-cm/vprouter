@@ -1,0 +1,115 @@
+{
+  "schema": 2,
+  "boot_id": "boot",
+  "groups": [
+    {
+      "role": "control",
+      "relative": "lab/control",
+      "native_identity": [
+        1,
+        2
+      ],
+      "accounting_class": "control"
+    },
+    {
+      "role": "runtime",
+      "relative": "lab/runtime",
+      "native_identity": [
+        1,
+        3
+      ],
+      "accounting_class": "runtime"
+    },
+    {
+      "role": "tailscale",
+      "relative": "lab/tailscale",
+      "native_identity": [
+        1,
+        4
+      ],
+      "accounting_class": "tailscale"
+    }
+  ],
+  "executable_labels": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "worker_control",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "docker_runtime",
+    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc": "tailscale"
+  },
+  "binding": {
+    "implementation": "rust",
+    "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "workload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "identity_set_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "peers_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "network_conditions_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tailscale_version": "1.90.1",
+    "tailscale_artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "host_id_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "run_id": "run-1",
+    "repetition": 1,
+    "exits": 1,
+    "exit_ids": [
+      "exit1"
+    ],
+    "exit_modes": [
+      "mullvad"
+    ],
+    "scenario": "steady",
+    "monitoring": {
+      "provider_seconds": 5,
+      "retry_seconds": 1,
+      "handshake_seconds": 180,
+      "health_seconds": 45,
+      "watchdog_seconds": 90
+    }
+  },
+  "evidence_origin": "synthetic",
+  "accounting": {
+    "method": "disjoint_cgroup_v2_memory_current",
+    "scope_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "review_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "complete": true,
+    "outside_domain_overhead": "none_on_isolated_host",
+    "required_components": {
+      "host_guard_publisher": [
+        "control"
+      ],
+      "worker_control": [
+        "control"
+      ],
+      "init_shim": [
+        "control"
+      ],
+      "docker_runtime": [
+        "runtime"
+      ],
+      "tailscale": [
+        "tailscale"
+      ]
+    },
+    "kernel_buffers": "included_in_memory_current_and_memory_stat",
+    "isolated_host": true
+  },
+  "stable_processes": [
+    {
+      "pid": 123,
+      "start": 100,
+      "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "group": "control"
+    },
+    {
+      "pid": 124,
+      "start": 101,
+      "executable_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "group": "runtime"
+    },
+    {
+      "pid": 125,
+      "start": 102,
+      "executable_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "group": "tailscale"
+    }
+  ]
+}

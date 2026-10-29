@@ -1,6 +1,9 @@
 //! Deterministic, scoped resource reservations and root-owned atomic storage.
 use crate::{
-    config::{ExitMode, MAX_EXITS, ValidatedConfiguration, absolute_path, label},
+    config::{
+        Configuration, ExitMode, MAX_EXITS, PublicConfiguration, StructuredConfiguration,
+        ValidatedConfiguration, absolute_path, label,
+    },
     reason::{Reason, Result, err},
 };
 use rustix::{
@@ -57,16 +60,33 @@ impl AllocationRecord {
         configuration: &ValidatedConfiguration,
         generation: u64,
     ) -> Result<Self> {
-        let deployment = &configuration.configuration().deployment_id;
+        Self::from_public_shape(configuration.configuration(), generation)
+    }
+    /// Allocation names only, before secret-role birth. This does not prove
+    /// profiles or authorize namespace/link creation or operational admission.
+    pub fn from_structure(
+        configuration: &StructuredConfiguration,
+        generation: u64,
+    ) -> Result<Self> {
+        Self::from_public_shape(configuration.configuration(), generation)
+    }
+    pub fn from_public_configuration(
+        configuration: &PublicConfiguration,
+        generation: u64,
+    ) -> Result<Self> {
+        Self::from_public_shape(configuration.configuration(), generation)
+    }
+    fn from_public_shape(configuration: &Configuration, generation: u64) -> Result<Self> {
+        let deployment = &configuration.deployment_id;
         let exits = configuration
-            .exits()
+            .exits
             .iter()
-            .map(|e| {
+            .map(|exit| {
                 allocation(
                     deployment,
-                    &e.exit().id,
-                    e.exit().mode.kind(),
-                    e.exit().state_dir.clone(),
+                    &exit.id,
+                    exit.mode.kind(),
+                    exit.state_dir.clone(),
                 )
             })
             .collect();
@@ -275,13 +295,19 @@ pub(crate) fn secure_open_read(path: &Path) -> Result<File> {
 }
 
 pub struct AllocationStore {
+    core: std::sync::Arc<StoreCore>,
+}
+/// Immutable ownership of the original admitted directory, never a reopened or
+/// duplicated native handle. The unique transaction retains it through errors.
+struct StoreCore {
     dir: OwnedFd,
     deployment: String,
     owner: u32,
 }
 /// flock remains held until this guard is dropped. The lock file is never unlinked.
-pub struct AllocationTransaction<'a> {
-    store: &'a AllocationStore,
+/// The original store directory outlives its caller without cloning writer authority.
+pub struct AllocationTransaction {
+    store: std::sync::Arc<StoreCore>,
     _lock: File,
 }
 impl AllocationStore {
@@ -323,28 +349,23 @@ impl AllocationStore {
             return Err(err(Reason::StorageUnsafe));
         }
         Ok(Self {
-            dir,
-            deployment: deployment.to_owned(),
-            owner,
+            core: std::sync::Arc::new(StoreCore {
+                dir,
+                deployment: deployment.to_owned(),
+                owner,
+            }),
         })
     }
-    fn check_directory(&self) -> Result<()> {
-        let stat = fstat(&self.dir).map_err(|_| err(Reason::StorageUnsafe))?;
-        if stat.st_uid != self.owner || stat.st_mode & 0o7777 != 0o700 {
-            return Err(err(Reason::StorageUnsafe));
-        }
-        Ok(())
-    }
-    pub fn lock(&self) -> Result<AllocationTransaction<'_>> {
-        self.check_directory()?;
+    pub fn lock(&self) -> Result<AllocationTransaction> {
+        self.core.check_directory()?;
         let fd = openat(
-            &self.dir,
+            &self.core.dir,
             LOCK_NAME,
             OFlags::CREATE | OFlags::RDWR | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
             Mode::RUSR | Mode::WUSR,
         )
         .map_err(|_| err(Reason::StorageUnsafe))?;
-        check_file(&fd, self.owner)?;
+        check_file(&fd, self.core.owner)?;
         flock(&fd, FlockOperation::NonBlockingLockExclusive).map_err(|error| {
             err(if error == Errno::WOULDBLOCK {
                 Reason::LockBusy
@@ -353,7 +374,7 @@ impl AllocationStore {
             })
         })?;
         Ok(AllocationTransaction {
-            store: self,
+            store: self.core.clone(),
             _lock: File::from(fd),
         })
     }
@@ -361,7 +382,25 @@ impl AllocationStore {
         self.lock()?.read()
     }
 }
-impl AllocationTransaction<'_> {
+impl StoreCore {
+    fn check_directory(&self) -> Result<()> {
+        let stat = fstat(&self.dir).map_err(|_| err(Reason::StorageUnsafe))?;
+        if stat.st_uid != self.owner || stat.st_mode & 0o7777 != 0o700 {
+            return Err(err(Reason::StorageUnsafe));
+        }
+        Ok(())
+    }
+}
+impl AllocationTransaction {
+    /// Duplicate only the held flock's open-file description for a surviving
+    /// fixed executor. This is not an allocation writer or a fresh independent
+    /// flock. Its recipient must forbid write/flock/dup/close on the lease FD
+    /// until its final _exit; no record or directory authority is included.
+    pub fn retain_executor_lock(&self) -> Result<OwnedFd> {
+        self.store.check_directory()?;
+        check_file(&self._lock, self.store.owner)?;
+        rustix::io::fcntl_dupfd_cloexec(&self._lock, 3).map_err(|_| err(Reason::StorageUnavailable))
+    }
     /// Verify a retained directory is exactly this locked allocation authority.
     /// Exposes no store/lock descriptor or caller-provided evidence flag.
     pub fn verify_directory(&self, directory: std::os::fd::BorrowedFd<'_>) -> Result<()> {
@@ -405,7 +444,7 @@ impl AllocationTransaction<'_> {
     ///
     /// ```compile_fail
     /// use vprouter_core::allocation::{AllocationRecord,AllocationTransaction};
-    /// fn concurrent_commit(tx: &AllocationTransaction<'_>, record: &AllocationRecord) {
+    /// fn concurrent_commit(tx: &AllocationTransaction, record: &AllocationRecord) {
     ///     std::thread::scope(|scope| {
     ///         scope.spawn(|| tx.commit(None,record));
     ///         scope.spawn(|| tx.commit(None,record));
@@ -516,6 +555,48 @@ mod storage_tests {
             .open(path)
             .unwrap();
         f.write_all(bytes).unwrap();
+    }
+    #[test]
+    fn retained_executor_lock_outlives_transaction_and_prevents_generation_reuse() {
+        let root = TempRoot::new();
+        let store = root.store();
+        let tx = store.lock().unwrap();
+        let lease = tx.retain_executor_lock().unwrap();
+        drop(tx);
+        assert!(store.lock().is_err_and(|e| e.reason() == Reason::LockBusy));
+        drop(lease);
+        store.lock().unwrap();
+    }
+    #[test]
+    fn owned_transaction_retains_original_store_and_exclusive_commit_authority() {
+        use std::os::fd::AsRawFd;
+        let root = TempRoot::new();
+        let store = root.store();
+        let mut tx = store.lock().unwrap();
+        let original_fd = tx.store.dir.as_raw_fd();
+        let original = fstat(&tx.store.dir).unwrap();
+        drop(store);
+        assert_eq!(tx.store.dir.as_raw_fd(), original_fd);
+        let retained = fstat(&tx.store.dir).unwrap();
+        assert_eq!(
+            (retained.st_dev, retained.st_ino),
+            (original.st_dev, original.st_ino)
+        );
+        let independent = root.store();
+        assert!(
+            independent
+                .lock()
+                .is_err_and(|e| e.reason() == Reason::LockBusy)
+        );
+        tx.commit(None, &record(1)).unwrap();
+        assert_eq!(tx.read().unwrap().unwrap().generation, 1);
+        drop(tx);
+        independent
+            .lock()
+            .unwrap()
+            .commit(Some(1), &record(2))
+            .unwrap();
+        assert_eq!(independent.read().unwrap().unwrap().generation, 2);
     }
     #[test]
     fn retained_transaction_directory_is_exact_and_mode_checked() {

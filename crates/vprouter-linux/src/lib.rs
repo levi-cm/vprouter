@@ -61,7 +61,7 @@ pub fn parse_configuration(bytes: &[u8]) -> Result<ValidatedConfiguration> {
         .map_err(|_| Error::InvalidConfiguration)
 }
 pub fn load_profile(path: &Path, expected: &str) -> vprouter_core::reason::Result<Profile> {
-    let bytes = storage::read(path, storage::Kind::SecretFile, 64 * 1024).map_err(|_| {
+    let bytes = storage::read_secret(path, 64 * 1024).map_err(|_| {
         vprouter_core::reason::Error::new(vprouter_core::reason::Reason::ProfileUnavailable)
     })?;
     Profile::parse(&bytes, expected, Some(path))

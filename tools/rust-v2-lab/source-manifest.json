@@ -1,0 +1,1715 @@
+{
+  "scope": "archival controller/test Python sources only; private VM state excluded",
+  "files": [
+    {
+      "source_path": "target/actual-program-inspect-monitor.py",
+      "archive_path": "tools/rust-v2-lab/target/actual-program-inspect-monitor.py",
+      "sha256": "ef0fbff5ed39d047f0c58836650e9e4d7e26192ae431c06b46df7a6490e79c61",
+      "bytes": 5148
+    },
+    {
+      "source_path": "target/aggregate-normal-captures.py",
+      "archive_path": "tools/rust-v2-lab/target/aggregate-normal-captures.py",
+      "sha256": "dcd59cb64f1819066dfa951b5ecdeac4bcf3d10a3d2c7361e1dfc5552b6abbe8",
+      "bytes": 2992
+    },
+    {
+      "source_path": "target/archive-failed-owner-nonce.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-failed-owner-nonce.py",
+      "sha256": "dce2021197569b1e5017d9569b23ed1297273e497a5ad8db3433794b8e417733",
+      "bytes": 3526
+    },
+    {
+      "source_path": "target/archive-secret-assembly-selectors.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-secret-assembly-selectors.py",
+      "sha256": "2fe99f5315e658ce74e852de038a51084bc19b3f4cf55c720a1efd76cfbebc75",
+      "bytes": 5107
+    },
+    {
+      "source_path": "target/archive-secret-attachment-selectors.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-secret-attachment-selectors.py",
+      "sha256": "d37ea8faa4a14442ca333adb222e2eb2655df02def3758aa2acd764088a3f2ad",
+      "bytes": 3693
+    },
+    {
+      "source_path": "target/archive-secret-host-addition-selectors.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-secret-host-addition-selectors.py",
+      "sha256": "f473caab188be2d3a026168ea0fafcba2b965863eb4947c640d56fcef9a6aa4e",
+      "bytes": 5155
+    },
+    {
+      "source_path": "target/archive-secret-movement-selectors.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-secret-movement-selectors.py",
+      "sha256": "2ae64029e16384693979607de30ec6bc24a9b06bc8d6f33d96fdd13c132ea7f3",
+      "bytes": 3795
+    },
+    {
+      "source_path": "target/archive-secret-preparation-selectors.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-secret-preparation-selectors.py",
+      "sha256": "05a4a773acc8e0a5a913d844e231b73140e151a6f6fc07cb617bf95a7f0c57a7",
+      "bytes": 3765
+    },
+    {
+      "source_path": "target/archive-secret-producer-binding-selectors.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-secret-producer-binding-selectors.py",
+      "sha256": "39503c1f6bfe6794ca42df0994c83df32c47a17f96e0297d6dcd26137a068feb",
+      "bytes": 5145
+    },
+    {
+      "source_path": "target/archive-secret-provision-selectors.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-secret-provision-selectors.py",
+      "sha256": "b94890a4b08224499d5e757cacdc6e33f1a4b51840519d65132d9b01cab69b19",
+      "bytes": 3801
+    },
+    {
+      "source_path": "target/archive-secret-quarantine-selectors.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-secret-quarantine-selectors.py",
+      "sha256": "b45724f3693ba2830d9762c599f446dec137890b67092b6da2329ff7f2f0186f",
+      "bytes": 5109
+    },
+    {
+      "source_path": "target/assembly-evidence-schema-before-epoch-hardening.py",
+      "archive_path": "tools/rust-v2-lab/target/assembly-evidence-schema-before-epoch-hardening.py",
+      "sha256": "e83e6ed1a1793bcc4a9c3c9bdd8baf3490650aa29ee63e2d0116baa7d518213c",
+      "bytes": 5771
+    },
+    {
+      "source_path": "target/assembly-evidence-schema-before-type-hardening.py",
+      "archive_path": "tools/rust-v2-lab/target/assembly-evidence-schema-before-type-hardening.py",
+      "sha256": "4425f3b7f2102d40650e8ae3bfa47d8493f8b62870ecc7a9486bd960ce9d1b4f",
+      "bytes": 5576
+    },
+    {
+      "source_path": "target/assembly_evidence_schema.py",
+      "archive_path": "tools/rust-v2-lab/target/assembly_evidence_schema.py",
+      "sha256": "3282c028ae3fb30e64f1f20b4760764f9fbaaad803b66d22be0db720690d3237",
+      "bytes": 6332
+    },
+    {
+      "source_path": "target/author-arm-host-baseline-template.py",
+      "archive_path": "tools/rust-v2-lab/target/author-arm-host-baseline-template.py",
+      "sha256": "5fd244ee39821536700f7cc05194f14fec3fdd958a9bc4435bf2de53d77b35c7",
+      "bytes": 9497
+    },
+    {
+      "source_path": "target/author-host-baseline-after-addition.py",
+      "archive_path": "tools/rust-v2-lab/target/author-host-baseline-after-addition.py",
+      "sha256": "dc3c7d75fd8ebb6644bee6383f6cfb0d51fb635cb28183ac636b74857664668c",
+      "bytes": 5070
+    },
+    {
+      "source_path": "target/author-host-baseline-template.py",
+      "archive_path": "tools/rust-v2-lab/target/author-host-baseline-template.py",
+      "sha256": "cf6ab527bed3ce9c70bae33d1641b8382436b1ee4bc32ec1759a80b64bbe47cb",
+      "bytes": 5571
+    },
+    {
+      "source_path": "target/build-2e44c7a-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-2e44c7a-partial-index.py",
+      "sha256": "8fc70ee87c6be28b0b277abbff4658e5aab62d70424ff5f57ffca8b38e0467ef",
+      "bytes": 5541
+    },
+    {
+      "source_path": "target/build-4bdd241-normal-supplement.py",
+      "archive_path": "tools/rust-v2-lab/target/build-4bdd241-normal-supplement.py",
+      "sha256": "01c37eb751702a2d012c84599693b9d57d5b42b1a17c01a417fe6e1c21c1e30e",
+      "bytes": 3712
+    },
+    {
+      "source_path": "target/build-4bdd241-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-4bdd241-partial-index.py",
+      "sha256": "0fda657b31b0641c0f4e941fbaa39b975c064a406958e728adf6f3f341791704",
+      "bytes": 5313
+    },
+    {
+      "source_path": "target/build-4c7021c-normal-supplement.py",
+      "archive_path": "tools/rust-v2-lab/target/build-4c7021c-normal-supplement.py",
+      "sha256": "b2e5f457cfa6259b35828023cbc64d1b66ef17a49131d9607834ee24bef37c70",
+      "bytes": 3474
+    },
+    {
+      "source_path": "target/build-4c7021c-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-4c7021c-partial-index.py",
+      "sha256": "5e5d482c733e53c3468b3d6e414bdecb3f1ccbccb284d043b73c0df9dadb49b3",
+      "bytes": 5169
+    },
+    {
+      "source_path": "target/build-55cf31c-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-55cf31c-partial-index.py",
+      "sha256": "34e0865bd4c2fc9b56205d85a8af6861dcd4b30f5b3267bdc8c3d0710415dba1",
+      "bytes": 5153
+    },
+    {
+      "source_path": "target/build-6c648ee-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-6c648ee-partial-index.py",
+      "sha256": "331f1c4234b3c46afd244d36c5728980d8aea96c9a31cbc9fb7073c332da0eb1",
+      "bytes": 5110
+    },
+    {
+      "source_path": "target/build-71d69a6-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-71d69a6-partial-index.py",
+      "sha256": "8aa0a57f179e41a55f7221c29108dd6c6946ed505c67d976a349bf1aa12ef4f2",
+      "bytes": 5518
+    },
+    {
+      "source_path": "target/build-7f9bfed-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-7f9bfed-partial-index.py",
+      "sha256": "07996e2ab322b76012f13508a6e21c8521652c11162c9b7bd4e6933012761f4a",
+      "bytes": 4978
+    },
+    {
+      "source_path": "target/build-a8a267-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-a8a267-partial-index.py",
+      "sha256": "bff364be3babc0ee9bb5df92c02792463c4a5717c9163f8e68447773b992fc3d",
+      "bytes": 4670
+    },
+    {
+      "source_path": "target/build-a95ac92-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-a95ac92-partial-index.py",
+      "sha256": "75d9298a6213bbe5140a47eb4f3242737ce03616d33543e25f9b548f9315fa75",
+      "bytes": 5525
+    },
+    {
+      "source_path": "target/build-af54fa7-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-af54fa7-partial-index.py",
+      "sha256": "b9df2e90e116e91bae0eae2733963c2cfd994b3b4bf3271c4303c1aa6e4eca23",
+      "bytes": 5524
+    },
+    {
+      "source_path": "target/build-bdc3f32-normal-supplement.py",
+      "archive_path": "tools/rust-v2-lab/target/build-bdc3f32-normal-supplement.py",
+      "sha256": "8ca3d35d69594876e001afa5930120a7e228853a7c1399955766c81853eb29a7",
+      "bytes": 3474
+    },
+    {
+      "source_path": "target/build-bdc3f32-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-bdc3f32-partial-index.py",
+      "sha256": "128d9a8a11af34e9d2a6927e9a0008e93bdcc1fa71be84285c1b8d2d2298d6db",
+      "bytes": 6160
+    },
+    {
+      "source_path": "target/build-d696629-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-d696629-partial-index.py",
+      "sha256": "afe216e6d252662a6e207ecc24056954141807707c83c1fa2348e9dc62e635b4",
+      "bytes": 5459
+    },
+    {
+      "source_path": "target/build-dbcac60-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-dbcac60-partial-index.py",
+      "sha256": "d8054c0d671808cc6482c2f0e11ddffea51832b86981d9e7e187ab3af8f1d08e",
+      "bytes": 3237
+    },
+    {
+      "source_path": "target/build-ee9e454-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-ee9e454-partial-index.py",
+      "sha256": "1ee7622bae938a98f6ca2990621132ae283eb51c04b679130faffbf1359fae9b",
+      "bytes": 5060
+    },
+    {
+      "source_path": "target/build-efd8bf6-partial-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-efd8bf6-partial-index.py",
+      "sha256": "113226a80301266136c691b78cc30ec2c728cd7787d5e460d5ad1e65b2ec47e7",
+      "bytes": 5263
+    },
+    {
+      "source_path": "target/build-secret-preparation-checkpoint-index.py",
+      "archive_path": "tools/rust-v2-lab/target/build-secret-preparation-checkpoint-index.py",
+      "sha256": "1c44d5d9a1a1d8256fcc5713f55115e9cadf13695fbc6531936e919ed9d6b0ae",
+      "bytes": 3712
+    },
+    {
+      "source_path": "target/cleanup_failure_diagnostic.py",
+      "archive_path": "tools/rust-v2-lab/target/cleanup_failure_diagnostic.py",
+      "sha256": "7d4028ade8286feb729f7a3ee335f8b81e78cd5f96ed5f31c12c6db430132dc9",
+      "bytes": 1979
+    },
+    {
+      "source_path": "target/collect-admission-stop.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-admission-stop.py",
+      "sha256": "7c5eea44160567213750b42a5275ec3c4b9ddf927307a17a94802e25cc2d95be",
+      "bytes": 4587
+    },
+    {
+      "source_path": "target/collect-attachment-phase-profile.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-attachment-phase-profile.py",
+      "sha256": "ad94ea0fd74debb5a2b690d37a0c09d197cdcd6fabab665407114664fe9ed082",
+      "bytes": 6085
+    },
+    {
+      "source_path": "target/collect-guard-hot-add.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-guard-hot-add.py",
+      "sha256": "1875728bd68763e7aa798d18cd560258cc27927bb88f1292946b357aa828c105",
+      "bytes": 3448
+    },
+    {
+      "source_path": "target/collect-handoff-profile.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-handoff-profile.py",
+      "sha256": "b90e7876cad8d58dbe322da2985346a294006f48aa58f25dffed265e8d4e4404",
+      "bytes": 3974
+    },
+    {
+      "source_path": "target/collect-initial-quarantine-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-initial-quarantine-failure.py",
+      "sha256": "aee29809ace5d74868906032a3bf2d8829f865391f7c0c1880bf55ded2e85eb2",
+      "bytes": 5790
+    },
+    {
+      "source_path": "target/collect-inspection-failure-profile.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-inspection-failure-profile.py",
+      "sha256": "fdb8e07c47b2993d0ce0b843cecc5cfc50fe3bad80d7cf5831d2909d3776168c",
+      "bytes": 4358
+    },
+    {
+      "source_path": "target/collect-metadata-pair.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-metadata-pair.py",
+      "sha256": "bb33e6d61a059062570374cfe7f4aa6dd551422922db46553be4ab4ea1f44c21",
+      "bytes": 4811
+    },
+    {
+      "source_path": "target/collect-movement-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-movement-failure.py",
+      "sha256": "1340621b18fbc64eee08a412c5259ef58d8f6f2d3dadf89ad97c275e1ef5030c",
+      "bytes": 5633
+    },
+    {
+      "source_path": "target/collect-owner-expiry-drop.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-owner-expiry-drop.py",
+      "sha256": "9dea67e44f1880327067bda4c23c3707f021b3e3d687ce36274efca1f87da629",
+      "bytes": 9085
+    },
+    {
+      "source_path": "target/collect-owner-host-audit.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-owner-host-audit.py",
+      "sha256": "c6aa15cc5e372ea7104184c11847e4a32fbc6e31921f06b384b770be0e03d935",
+      "bytes": 6495
+    },
+    {
+      "source_path": "target/collect-owner-native-lifecycle.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-owner-native-lifecycle.py",
+      "sha256": "cdb7e28c7bc073070514b4c8125007068f83a86deb075e3f653c72fdc7624ef5",
+      "bytes": 7211
+    },
+    {
+      "source_path": "target/collect-owner-retirement-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-owner-retirement-failure.py",
+      "sha256": "132e8aa2638e683b6a55b2cc5da72b18694ad414ac609984df12a40e834a3396",
+      "bytes": 6328
+    },
+    {
+      "source_path": "target/collect-owner-retirement-stop.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-owner-retirement-stop.py",
+      "sha256": "43e9058264bf4280b3f31e2b293d8f6372e84c5b148f29b5d4199145e1a4d02d",
+      "bytes": 6681
+    },
+    {
+      "source_path": "target/collect-owner-retirement.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-owner-retirement.py",
+      "sha256": "729c126e3d25b7742f654371a23c61b265616483af8757d4356f7987beb19d38",
+      "bytes": 14459
+    },
+    {
+      "source_path": "target/collect-producer-binding-postfault.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-producer-binding-postfault.py",
+      "sha256": "14c4d689a47aeb3db5e76d5a00a86a932d10fa518c0b15dd62bb3a2916cc376a",
+      "bytes": 5005
+    },
+    {
+      "source_path": "target/collect-quarantine-wireguard-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-quarantine-wireguard-failure.py",
+      "sha256": "f4635aab74c388b0286148e690dfb7ac868d255866401b8577b3a5723a19954c",
+      "bytes": 7404
+    },
+    {
+      "source_path": "target/collect-retirement-cleanup-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-retirement-cleanup-failure.py",
+      "sha256": "0ff415a8eabbf72d8bb80c29a9c347397d3d0d5e8605ff557684656260602dc8",
+      "bytes": 4310
+    },
+    {
+      "source_path": "target/collect-retirement-input-selection.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-retirement-input-selection.py",
+      "sha256": "d5b3a529b44f683f38d6615050bf17257c6e9df999223012d13b38fc74ed1605",
+      "bytes": 4823
+    },
+    {
+      "source_path": "target/collect-secret-assembly.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-secret-assembly.py",
+      "sha256": "b6acad5a5a66da3ea3d4fe2484c165afd0fe5d9c8ed4b9a410fc680efa2341a8",
+      "bytes": 3858
+    },
+    {
+      "source_path": "target/collect-secret-attachment.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-secret-attachment.py",
+      "sha256": "bba13858f26098bf057a63b399c970a8bdef1d9114ca3f24273d117d6547d273",
+      "bytes": 18451
+    },
+    {
+      "source_path": "target/collect-secret-host-addition.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-secret-host-addition.py",
+      "sha256": "d7dfa4060d214b685db701e55f8572b27b036471b4f0db2edecb635cf8a75586",
+      "bytes": 8249
+    },
+    {
+      "source_path": "target/collect-secret-movement.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-secret-movement.py",
+      "sha256": "5becfae1de263bb6da2e23201588d9a1797ee96a7ac8fd4347f933c4b0e5e52e",
+      "bytes": 11157
+    },
+    {
+      "source_path": "target/collect-secret-preparation.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-secret-preparation.py",
+      "sha256": "e7e0d3458c33942d11a2f14c23562eb9308c8fb8a983a0b8713bdea1c402d2e6",
+      "bytes": 8563
+    },
+    {
+      "source_path": "target/collect-secret-producer-binding.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-secret-producer-binding.py",
+      "sha256": "7e1a673f624eb4831744b1d8b717cbf5de1280fe1c6d5c01866fde94f989e8df",
+      "bytes": 3266
+    },
+    {
+      "source_path": "target/collect-secret-provision.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-secret-provision.py",
+      "sha256": "b3be4d91521482af39e4fa898e416a36e0c4314452d6ccf15cd80fbe5d543e67",
+      "bytes": 12026
+    },
+    {
+      "source_path": "target/collect-secret-quarantine.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-secret-quarantine.py",
+      "sha256": "2af9aa5b5bca9fcdf653461a395a9b8ffcb1f372c57d3cac29dea579ed4efb48",
+      "bytes": 3353
+    },
+    {
+      "source_path": "target/collect-terminal-witness.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-terminal-witness.py",
+      "sha256": "7da567bdac277fab84dbb43f205c6e1d61bc4922c1a696b2ea6e8e65694c4a0a",
+      "bytes": 2804
+    },
+    {
+      "source_path": "target/collect-wireguard-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/collect-wireguard-failure.py",
+      "sha256": "ef2ff820e657c46171d17a71c2055e042bf1d4a024c661920e0e3c49d9b64814",
+      "bytes": 7230
+    },
+    {
+      "source_path": "target/continue-actual-build.py",
+      "archive_path": "tools/rust-v2-lab/target/continue-actual-build.py",
+      "sha256": "c9f5af8c66b81730005b4cafd7e53e41683c486319919e9001049ca1770c6310",
+      "bytes": 4949
+    },
+    {
+      "source_path": "target/copy-frozen-contexts.py",
+      "archive_path": "tools/rust-v2-lab/target/copy-frozen-contexts.py",
+      "sha256": "38cb8990db1172e6de200b007d7d23cc019484989baacc20c9078b83cbe28833",
+      "bytes": 866
+    },
+    {
+      "source_path": "target/drain-exact-terminal-guard.py",
+      "archive_path": "tools/rust-v2-lab/target/drain-exact-terminal-guard.py",
+      "sha256": "dcf5bc63d75784348640ed8b630a1dadfc321c7b5a5c06d68561a1bae4104091",
+      "bytes": 3629
+    },
+    {
+      "source_path": "target/drain-expiry-drop-failure-guards.py",
+      "archive_path": "tools/rust-v2-lab/target/drain-expiry-drop-failure-guards.py",
+      "sha256": "3c831fc881dd5815f79f9546a2e9955c5a99b0a036697e4987fdcfc4ef10c11f",
+      "bytes": 4627
+    },
+    {
+      "source_path": "target/drain-retirement-failure-guard.py",
+      "archive_path": "tools/rust-v2-lab/target/drain-retirement-failure-guard.py",
+      "sha256": "b78dc76293f9e62f43605bad3f4b7a62f5a8295e55ae13dc21ae2b94664aceb4",
+      "bytes": 5097
+    },
+    {
+      "source_path": "target/drain-stopped-owner-guards.py",
+      "archive_path": "tools/rust-v2-lab/target/drain-stopped-owner-guards.py",
+      "sha256": "f8aa8ac4ac9c6f035bafeb3798b419dd0da6fcd8c0fbf4787bec292b479821db",
+      "bytes": 3203
+    },
+    {
+      "source_path": "target/host_addition_evidence_schema.py",
+      "archive_path": "tools/rust-v2-lab/target/host_addition_evidence_schema.py",
+      "sha256": "cc2a8cbba295eaa374a2172627de8cf9770c7ec58f4cdd51e3de9b7db4c040cd",
+      "bytes": 19806
+    },
+    {
+      "source_path": "target/implementation-20261026-build.py",
+      "archive_path": "tools/rust-v2-lab/target/implementation-20261026-build.py",
+      "sha256": "0b6afdae0761439900782a010ec1fa48e27b02037c0305c296cfe5483804fc58",
+      "bytes": 6174
+    },
+    {
+      "source_path": "target/initial_quarantine_failure_schema.py",
+      "archive_path": "tools/rust-v2-lab/target/initial_quarantine_failure_schema.py",
+      "sha256": "a9002a0580ae76c97c7bb6745401294d7678618f85610312cd8648d26dbac95f",
+      "bytes": 5741
+    },
+    {
+      "source_path": "target/inspect-bootstrap-route-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-bootstrap-route-failure.py",
+      "sha256": "af1c575e91bcfb050fd3de1a8d33d355337993fbb293bbbb403d3bf6a22b9a94",
+      "bytes": 2683
+    },
+    {
+      "source_path": "target/inspect-expiry-drop-deny.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-expiry-drop-deny.py",
+      "sha256": "d3ef148ef3f91236297ed0cc469f9df05b4b6941ef9c46b2a4c6416f0cda68b1",
+      "bytes": 2837
+    },
+    {
+      "source_path": "target/inspect-expiry-drop-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-expiry-drop-failure.py",
+      "sha256": "49e9306f9db66034a84af9750e655924e40856fcaf50f347675b85d3defed9e5",
+      "bytes": 4522
+    },
+    {
+      "source_path": "target/inspect-failed-owner-terminal.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-failed-owner-terminal.py",
+      "sha256": "f4349a2bdede51e740bc7a8c02f5483716d9d38775f1182b136fd048180cc092",
+      "bytes": 3673
+    },
+    {
+      "source_path": "target/inspect-secret-assembly-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-secret-assembly-failure.py",
+      "sha256": "45d3c92d85954fb188213b8bdd8d19bcd30c449563c206ebda06259554a40cef",
+      "bytes": 6166
+    },
+    {
+      "source_path": "target/inspect-secret-attachment-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-secret-attachment-failure.py",
+      "sha256": "7e08d1d241bac87e40c129b25b9cd53b892ec6f5349f214c0d63623336cfddd5",
+      "bytes": 5174
+    },
+    {
+      "source_path": "target/inspect-secret-host-addition-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-secret-host-addition-failure.py",
+      "sha256": "73f7080c4074417dd2d5b39367656d905f6a56a745c651b1cc817fa37a6f190b",
+      "bytes": 6645
+    },
+    {
+      "source_path": "target/inspect-secret-movement-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-secret-movement-failure.py",
+      "sha256": "799177dddaa016099335a3279417d9932ff68aeed6a509f97f0e6c6b9e5b8859",
+      "bytes": 5278
+    },
+    {
+      "source_path": "target/inspect-secret-preparation-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-secret-preparation-failure.py",
+      "sha256": "c24f5a1551c0085065ef17b8faba409d6f213086e08a5523c7bc784e675e05d3",
+      "bytes": 4079
+    },
+    {
+      "source_path": "target/inspect-secret-producer-binding-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-secret-producer-binding-failure.py",
+      "sha256": "197f929fad3245eb9fc5473fab59f30c30dc45e1ce7ccd9f6ab3e1f2e4a47775",
+      "bytes": 6196
+    },
+    {
+      "source_path": "target/inspect-secret-provision-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-secret-provision-failure.py",
+      "sha256": "7e6e5aef3fd3e0a4573cbbda5b124c426c39a1dedcf2a791eb69831a26420eb1",
+      "bytes": 5283
+    },
+    {
+      "source_path": "target/inspect-secret-quarantine-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-secret-quarantine-failure.py",
+      "sha256": "653881a070ef5f407d39696fc68f12ce98e785b614403a8df4732b61fc132a28",
+      "bytes": 6166
+    },
+    {
+      "source_path": "target/inspect-stopped-owner-guards.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-stopped-owner-guards.py",
+      "sha256": "ecf472ebcad27bf7f735f5d906adb48b129229d906ff3318ecc3745e10c562b6",
+      "bytes": 1832
+    },
+    {
+      "source_path": "target/inspect-terminal-deny.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-terminal-deny.py",
+      "sha256": "3d39d76c7492f2150d465dc722ab3a54122cc03fdf464c9519f16e94945f2692",
+      "bytes": 2756
+    },
+    {
+      "source_path": "target/movement_evidence_base.py",
+      "archive_path": "tools/rust-v2-lab/target/movement_evidence_base.py",
+      "sha256": "f81af1906b45bb532eacbea3f107156d18190c9fb32d3bdc3c163934a6037373",
+      "bytes": 18275
+    },
+    {
+      "source_path": "target/movement_failure_schema.py",
+      "archive_path": "tools/rust-v2-lab/target/movement_failure_schema.py",
+      "sha256": "137c2c30001d7d59d75ced6db2d60126a32c08920e0804c38056cae56e8bc2d7",
+      "bytes": 6604
+    },
+    {
+      "source_path": "target/prepare-bounded-retirement-nonce-selection.py",
+      "archive_path": "tools/rust-v2-lab/target/prepare-bounded-retirement-nonce-selection.py",
+      "sha256": "122cd7c574aad46a0ad0d05615ad5f01d901b53be5c12cec52a6cfcbe30b1634",
+      "bytes": 6181
+    },
+    {
+      "source_path": "target/producer_binding_evidence_schema.py",
+      "archive_path": "tools/rust-v2-lab/target/producer_binding_evidence_schema.py",
+      "sha256": "26546c14d124b9418e5138cc6b1ec818523306664873598ee129059092ad5864",
+      "bytes": 13795
+    },
+    {
+      "source_path": "target/producer_binding_postfault_schema.py",
+      "archive_path": "tools/rust-v2-lab/target/producer_binding_postfault_schema.py",
+      "sha256": "68d79dc75a879d788716253247951d8350b280ff7f98ea016cff613303d49a16",
+      "bytes": 4473
+    },
+    {
+      "source_path": "target/profile-identity-inventory-20261026.py",
+      "archive_path": "tools/rust-v2-lab/target/profile-identity-inventory-20261026.py",
+      "sha256": "233a79c8e6e2d648fdb51326d5b9eb6a77ddb5382db53fb3280a049c2c21b690",
+      "bytes": 2304
+    },
+    {
+      "source_path": "target/provision_evidence_base.py",
+      "archive_path": "tools/rust-v2-lab/target/provision_evidence_base.py",
+      "sha256": "acd5cea7ff73f1fa00145ae79ffd05a1ba87fb0914f286820b202f0740894135",
+      "bytes": 18180
+    },
+    {
+      "source_path": "target/quarantine_evidence_base.py",
+      "archive_path": "tools/rust-v2-lab/target/quarantine_evidence_base.py",
+      "sha256": "e8fce88abd163c129952372f97c96144795c34474f03bc13de4fa9325b5730fc",
+      "bytes": 29703
+    },
+    {
+      "source_path": "target/quarantine_history_schema.py",
+      "archive_path": "tools/rust-v2-lab/target/quarantine_history_schema.py",
+      "sha256": "c7c00fd5c72caf7346024919541536694bdaffe754058265dc248fba51766f23",
+      "bytes": 6642
+    },
+    {
+      "source_path": "target/quarantine_native_schema.py",
+      "archive_path": "tools/rust-v2-lab/target/quarantine_native_schema.py",
+      "sha256": "af6c9f5c98307fd76dcac27ec53656a0ff19bf1ded5a160ee5c053fdfded2dad",
+      "bytes": 2680
+    },
+    {
+      "source_path": "target/quarantine_producer_schema.py",
+      "archive_path": "tools/rust-v2-lab/target/quarantine_producer_schema.py",
+      "sha256": "da182450dd9c11fabfeda5fd3514fda72775fac3f72c3b7a36078d30d47e3ce8",
+      "bytes": 7712
+    },
+    {
+      "source_path": "target/record-source-continuation.py",
+      "archive_path": "tools/rust-v2-lab/target/record-source-continuation.py",
+      "sha256": "bf3919e0c31e16a080e334b95ece02083bc0d6187768d253c2036f84e527b6bf",
+      "bytes": 2671
+    },
+    {
+      "source_path": "target/run-a8a267-attachment-three.py",
+      "archive_path": "tools/rust-v2-lab/target/run-a8a267-attachment-three.py",
+      "sha256": "8b1b154f496ae0a2480356183bcddaa128ce23f50e5865ef4d00fe32885f81f3",
+      "bytes": 694
+    },
+    {
+      "source_path": "target/run-a8a267-owner-regressions.py",
+      "archive_path": "tools/rust-v2-lab/target/run-a8a267-owner-regressions.py",
+      "sha256": "66000cffb92ae83b50ee61f396d5b3b14027765c6bcd1932b028c1bcbce039aa",
+      "bytes": 1890
+    },
+    {
+      "source_path": "target/run-frozen-assembly-modes.py",
+      "archive_path": "tools/rust-v2-lab/target/run-frozen-assembly-modes.py",
+      "sha256": "4c20653cdb130e415e6837c9ebfc92a64f44ec47dc688d05e30a0ebcb64c32f0",
+      "bytes": 1113
+    },
+    {
+      "source_path": "target/run-frozen-host-addition-modes.py",
+      "archive_path": "tools/rust-v2-lab/target/run-frozen-host-addition-modes.py",
+      "sha256": "af73ee49073853e3eed156265c0d708067157dcf536cc58f36013a815ba0758d",
+      "bytes": 1113
+    },
+    {
+      "source_path": "target/run-frozen-movement-modes.py",
+      "archive_path": "tools/rust-v2-lab/target/run-frozen-movement-modes.py",
+      "sha256": "758ba67a7be0f4f3b93105573ba8445ece6645203e8a872fdcfd3e1d3051e2f9",
+      "bytes": 1103
+    },
+    {
+      "source_path": "target/run-frozen-producer-binding-modes.py",
+      "archive_path": "tools/rust-v2-lab/target/run-frozen-producer-binding-modes.py",
+      "sha256": "7e056e3fe826da54929b3c76e63bd744654a34225de4b4745890f35176faea88",
+      "bytes": 1119
+    },
+    {
+      "source_path": "target/run-frozen-provision-modes.py",
+      "archive_path": "tools/rust-v2-lab/target/run-frozen-provision-modes.py",
+      "sha256": "40c7da18ef5b7c7d5b719e6e91b05c91b1c600a1a063e8aa1178fa721c261a68",
+      "bytes": 1105
+    },
+    {
+      "source_path": "target/run-frozen-quarantine-modes.py",
+      "archive_path": "tools/rust-v2-lab/target/run-frozen-quarantine-modes.py",
+      "sha256": "dc25e0ba4978560d3cff1abd6e7f18fb7746be38c8ebbae2255a12542d7b61e0",
+      "bytes": 1107
+    },
+    {
+      "source_path": "target/run-netfilter-native-frozen.py",
+      "archive_path": "tools/rust-v2-lab/target/run-netfilter-native-frozen.py",
+      "sha256": "b416f4b44584c65eb8421313df2ff3afaf9e40a71244cd6b238e1f1422e126b9",
+      "bytes": 3841
+    },
+    {
+      "source_path": "target/run-root-frozen-workspace.py",
+      "archive_path": "tools/rust-v2-lab/target/run-root-frozen-workspace.py",
+      "sha256": "17fbe6f9a9a831f00a2a26034cf5e7968231e48897c3d411c2621edb320ec26d",
+      "bytes": 1767
+    },
+    {
+      "source_path": "target/run-shared-lease-regression-frozen.py",
+      "archive_path": "tools/rust-v2-lab/target/run-shared-lease-regression-frozen.py",
+      "sha256": "e5202eca37d34258a23008eced7d75690740fefbe38138f0559b8ed85857b9cc",
+      "bytes": 3574
+    },
+    {
+      "source_path": "target/run-transport-regression-frozen-original.py",
+      "archive_path": "tools/rust-v2-lab/target/run-transport-regression-frozen-original.py",
+      "sha256": "c563cdbc71d900e6d8f97f96a556cff8747c0113f31cc40ed484e66884f7aced",
+      "bytes": 3600
+    },
+    {
+      "source_path": "target/run-transport-regression-frozen.py",
+      "archive_path": "tools/rust-v2-lab/target/run-transport-regression-frozen.py",
+      "sha256": "efa4d4b9f14dfa70d4ac455424f0a2598738b8a9c54fde993bafaaa241c8d53f",
+      "bytes": 5372
+    },
+    {
+      "source_path": "target/run-transport-regression.py",
+      "archive_path": "tools/rust-v2-lab/target/run-transport-regression.py",
+      "sha256": "e9a6d1fee1a3df96cbc9ca887023821fde581fda1a29f606f5a41feb6c3a5db2",
+      "bytes": 3378
+    },
+    {
+      "source_path": "target/smoke-accounting-summary.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-accounting-summary.py",
+      "sha256": "33fbc2a5f38f58d8bd5a495080d77ce0969097af704badb82b547bdd649fccd5",
+      "bytes": 4677
+    },
+    {
+      "source_path": "target/smoke-arm-host-baseline-history.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-arm-host-baseline-history.py",
+      "sha256": "9e5a768027b23045ead3e6643e194bd2343944473a1b8b9a11ebd168af893ff7",
+      "bytes": 12371
+    },
+    {
+      "source_path": "target/smoke-assembly-continuation.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-assembly-continuation.py",
+      "sha256": "3103b09d7bdfe79c24087dfe611181264b1debec38e141f2f31830ce6ad63c99",
+      "bytes": 3840
+    },
+    {
+      "source_path": "target/smoke-assembly-evidence.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-assembly-evidence.py",
+      "sha256": "820c0c39db17dfc84b581b1535a69550c9f0cf2f2d5a205bd8476bdb558ca821",
+      "bytes": 11187
+    },
+    {
+      "source_path": "target/smoke-attachment-ack-schema.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-attachment-ack-schema.py",
+      "sha256": "10fe4a7bf1841b9f4e08df7b0340708b784938943a0b1a1f86bad1137c68e160",
+      "bytes": 2484
+    },
+    {
+      "source_path": "target/smoke-attachment-environment.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-attachment-environment.py",
+      "sha256": "0702c09035bd40c4b374ace837495236f1747ada08dbd36e96d28aa41d0b74cb",
+      "bytes": 4452
+    },
+    {
+      "source_path": "target/smoke-binding-continuation.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-binding-continuation.py",
+      "sha256": "731adb928bedbe170e5b4e26f298318cfa21f2ab0131e74aca2577069faa190d",
+      "bytes": 4178
+    },
+    {
+      "source_path": "target/smoke-capacity-mechanics.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-capacity-mechanics.py",
+      "sha256": "e7390b55bcff4bc43e6757b2308422f29ddf5b65b75fd702c83cb12b9285432e",
+      "bytes": 5883
+    },
+    {
+      "source_path": "target/smoke-host-addition-controller.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-host-addition-controller.py",
+      "sha256": "e4b241f74b9ed69388cb2c6b74adb455784472443b60abff7de3522705e2e464",
+      "bytes": 3784
+    },
+    {
+      "source_path": "target/smoke-host-addition-evidence.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-host-addition-evidence.py",
+      "sha256": "838b165c52a6249420dc2db0034a737ae38481bb3a456e44a0098748abf94dd3",
+      "bytes": 34377
+    },
+    {
+      "source_path": "target/smoke-host-baseline-after-addition.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-host-baseline-after-addition.py",
+      "sha256": "930f0bd333bd03d9d9b7939a2c217d24a7c54ab78fabf5028063a58681beb485",
+      "bytes": 2615
+    },
+    {
+      "source_path": "target/smoke-host-baseline-declaration.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-host-baseline-declaration.py",
+      "sha256": "3a8a0a3419a3fe9807572586ead3f30fcc8de1aad67c2f15a5e4f0bd2a5e2474",
+      "bytes": 5532
+    },
+    {
+      "source_path": "target/smoke-host-projection-controller.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-host-projection-controller.py",
+      "sha256": "17524906f93eb13fe62b18394e9004c346555c6ec44eaad96e49c85fcc359f9a",
+      "bytes": 5932
+    },
+    {
+      "source_path": "target/smoke-host-projection-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-host-projection-failure.py",
+      "sha256": "8589f6fa703019aae41af9b37d624ddd9333afda41e702c172b12f8db949824b",
+      "bytes": 3987
+    },
+    {
+      "source_path": "target/smoke-initial-quarantine-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-initial-quarantine-failure.py",
+      "sha256": "5e1c40caff41e6e2589ea345588081396bb9e4706672eae877943ccd09984f4a",
+      "bytes": 6540
+    },
+    {
+      "source_path": "target/smoke-movement-continuation.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-movement-continuation.py",
+      "sha256": "594bc3fada76d053b1e7e0b4f3f3228aae472aa2618922b006ad56a00e811527",
+      "bytes": 2561
+    },
+    {
+      "source_path": "target/smoke-movement-evidence.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-movement-evidence.py",
+      "sha256": "690bedac59e274c4ed6b909d6a12f91b28b6eecabc72e8b99511bc7e81e6d419",
+      "bytes": 9422
+    },
+    {
+      "source_path": "target/smoke-movement-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-movement-failure.py",
+      "sha256": "b07c6a905bb028fba38d648994a37d2a358528cbe94d89c59a0caaac9413e4c8",
+      "bytes": 7964
+    },
+    {
+      "source_path": "target/smoke-producer-binding-evidence.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-producer-binding-evidence.py",
+      "sha256": "ca6bde367aa0dc35a6203595085b1bd6d699eb499e1ae0c72e8fbb898f15e9ea",
+      "bytes": 16565
+    },
+    {
+      "source_path": "target/smoke-producer-binding-postfault.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-producer-binding-postfault.py",
+      "sha256": "74bd15ad0c8389302be66de73a1572580013aefa9034534263c0351ee2da63bf",
+      "bytes": 6236
+    },
+    {
+      "source_path": "target/smoke-producer-netfilter-mechanics.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-producer-netfilter-mechanics.py",
+      "sha256": "97b4314571c3fec1c79abe10c8f67a5ac980af4822124d17d584a79ad5e80b8e",
+      "bytes": 4843
+    },
+    {
+      "source_path": "target/smoke-provision-evidence.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-provision-evidence.py",
+      "sha256": "2f5e80d53e3103121dc3c59b6cb82b9bd4f5e233973bc61cd66a9ec1d7418722",
+      "bytes": 11331
+    },
+    {
+      "source_path": "target/smoke-quarantine-continuation.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-quarantine-continuation.py",
+      "sha256": "594bf11df39cde39e96de243a1cffa55a9cafd291f549056d20f05ada071377a",
+      "bytes": 5002
+    },
+    {
+      "source_path": "target/smoke-quarantine-fixture-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-quarantine-fixture-failure.py",
+      "sha256": "3589ffdc75cda763795d2d1762584bdc295bba5c38ae74abbfa003d446083478",
+      "bytes": 4751
+    },
+    {
+      "source_path": "target/smoke-quarantine-history.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-quarantine-history.py",
+      "sha256": "d0f6829615952ef377a953bb4cd60c9bafe5ffe2b958d1aefa1beb538054619e",
+      "bytes": 6701
+    },
+    {
+      "source_path": "target/smoke-quarantine-host-input.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-quarantine-host-input.py",
+      "sha256": "113b5c43bcd77321bbc8dd08e0fe361149d3ae6c27c04a5cb9d70f13ff34bae1",
+      "bytes": 4028
+    },
+    {
+      "source_path": "target/smoke-quarantine-native-evidence.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-quarantine-native-evidence.py",
+      "sha256": "2375c473315c927000ee76041f9b5ee514a039e5ea30fc25edf6a4b29f129a99",
+      "bytes": 5106
+    },
+    {
+      "source_path": "target/smoke-quarantine-own-intent.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-quarantine-own-intent.py",
+      "sha256": "b86c1396ba028be8e2a9901fab26b5cbbb223c49774cc48b1d7f6dba8d357ce0",
+      "bytes": 4287
+    },
+    {
+      "source_path": "target/smoke-quarantine-producer.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-quarantine-producer.py",
+      "sha256": "2197b36d9f93cab83e73d00c06bda900444742649baf59ec8eeee047dd54ee62",
+      "bytes": 9634
+    },
+    {
+      "source_path": "target/smoke-quarantine-public-evidence.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-quarantine-public-evidence.py",
+      "sha256": "e2bf91c7fd9104c798092fb5ffa72bc52a4693a18f4bfd393eb597fff8f2166f",
+      "bytes": 4888
+    },
+    {
+      "source_path": "target/smoke-selftest-mechanics.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-selftest-mechanics.py",
+      "sha256": "354047b986905a717238bd8872b972753814358ea5976eaf986307279ccd8150",
+      "bytes": 6647
+    },
+    {
+      "source_path": "target/smoke-veth-mechanics.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-veth-mechanics.py",
+      "sha256": "5897ff72e8a6b1f9b4cbe463a6e0fa64650f5a8b2df73b30da03d4bd6de96e9c",
+      "bytes": 4608
+    },
+    {
+      "source_path": "target/smoke-veth-move-mechanics.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-veth-move-mechanics.py",
+      "sha256": "14afd74ed43e73e2f4da4b435a4da3cca20451e3cd0d717e8ac142d5700cf664",
+      "bytes": 5461
+    },
+    {
+      "source_path": "target/smoke-wireguard-postcompletion.py",
+      "archive_path": "tools/rust-v2-lab/target/smoke-wireguard-postcompletion.py",
+      "sha256": "6e4e290f9452d9bace55edf84fdd36b232ccd80b6d4681b7f7d8d8d3e64ace3b",
+      "bytes": 4110
+    },
+    {
+      "source_path": "target/summarize-readonly-accounting.py",
+      "archive_path": "tools/rust-v2-lab/target/summarize-readonly-accounting.py",
+      "sha256": "98ac545c694d81a655c39ab241573c808e7f332f764c5d5b1eef620fcf32eaab",
+      "bytes": 15473
+    },
+    {
+      "source_path": "target/verify-frozen-inspection-preflight.py",
+      "archive_path": "tools/rust-v2-lab/target/verify-frozen-inspection-preflight.py",
+      "sha256": "385514d9b0c2053495335221540c233101afea1ae5e5a3f6a2ae9d6adb8597fc",
+      "bytes": 4904
+    },
+    {
+      "source_path": "target/wireguard_inventory_schema.py",
+      "archive_path": "tools/rust-v2-lab/target/wireguard_inventory_schema.py",
+      "sha256": "cd77f4e032f1f2f31dc3a2696f0f8d405a6cfa383fe1ecd71018850d9286c552",
+      "bytes": 688
+    },
+    {
+      "source_path": "target/platform-lab/arm-trace-summary.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/arm-trace-summary.py",
+      "sha256": "c9e9459198c152e5214e1d1c778ce0b9970a48184e7bf629a136379dd8ef8a1b",
+      "bytes": 2787
+    },
+    {
+      "source_path": "target/platform-lab/attachment_context_check.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/attachment_context_check.py",
+      "sha256": "66be3dc0ba17ec34e551a39f37218259af8df5d3eb996f9f7986f4bdf37b9635",
+      "bytes": 4987
+    },
+    {
+      "source_path": "target/platform-lab/capture-approved-kernel-ipv4.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/capture-approved-kernel-ipv4.guest.py",
+      "sha256": "c9a658b2b5ea437c2d418d6fc966e11ab0af529f2337d12490caec49e637b5bd",
+      "bytes": 6314
+    },
+    {
+      "source_path": "target/platform-lab/capture-approved-kernel.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/capture-approved-kernel.py",
+      "sha256": "78cf6ef75573b537e9d4653276969c4240459cb750626e57b31e217f84bc599d",
+      "bytes": 6532
+    },
+    {
+      "source_path": "target/platform-lab/capture-void-cgroup.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/capture-void-cgroup.py",
+      "sha256": "fd304d77e308e593d963a223f4a005e4700ae654e30254f1ac4f61bf46a45334",
+      "bytes": 3543
+    },
+    {
+      "source_path": "target/platform-lab/collect-component-evidence.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/collect-component-evidence.py",
+      "sha256": "8742285a628697f8d8c941d8f901c499b94d3d4454984ee666627a26f7294fe1",
+      "bytes": 2670
+    },
+    {
+      "source_path": "target/platform-lab/download-inputs.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/download-inputs.py",
+      "sha256": "3e81a8a8c9e27529ee7a16016f50ea8f54bb81bafb85b53512bb6019a7f222b3",
+      "bytes": 2813
+    },
+    {
+      "source_path": "target/platform-lab/explicit-ifindex.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/explicit-ifindex.guest.py",
+      "sha256": "d5791af22b13eb09342f4779ffe1b46ae7f94030e83f8a00740e8078695c4d85",
+      "bytes": 11684
+    },
+    {
+      "source_path": "target/platform-lab/host_baseline_arm_history.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/host_baseline_arm_history.py",
+      "sha256": "1eb0bfce8df818b48065470d6259f83bc7c9ca7e527596314c8d6ed1c49e4854",
+      "bytes": 20693
+    },
+    {
+      "source_path": "target/platform-lab/host_baseline_declaration.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/host_baseline_declaration.py",
+      "sha256": "367d2322ea841a81d9ec00006f7c38cf694300cffb77783e4f72903317d1a212",
+      "bytes": 7178
+    },
+    {
+      "source_path": "target/platform-lab/host_baseline_prior.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/host_baseline_prior.py",
+      "sha256": "0ea98ae8b1855f545a5bed1655f9107d189b431f948aa4fd37ba2e0bf1da4289",
+      "bytes": 5633
+    },
+    {
+      "source_path": "target/platform-lab/probe-cloud-guests.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/probe-cloud-guests.py",
+      "sha256": "901daaa5a245f6803937c876d18a5abdd308bfaf6c6d11f1ed0722d46764f181",
+      "bytes": 2310
+    },
+    {
+      "source_path": "target/platform-lab/probe-nsfs-fd-mount.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/probe-nsfs-fd-mount.guest.py",
+      "sha256": "86b4eceb91d41278b42a784c5f5d49e73e595cab591c39299c51b1612e1fb4a7",
+      "bytes": 5990
+    },
+    {
+      "source_path": "target/platform-lab/probe-original-scope-pin-order.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/probe-original-scope-pin-order.py",
+      "sha256": "7ce33e7572f4cc1e337037b1dea9bba704fc907d299e785f2b5a64607eb54641",
+      "bytes": 15180
+    },
+    {
+      "source_path": "target/platform-lab/probe-original-scope-pin.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/probe-original-scope-pin.py",
+      "sha256": "37471b05df2ef9ea0d830375f3c41b4d0549f1443f98ef0fe7c497bf3d0e9984",
+      "bytes": 13913
+    },
+    {
+      "source_path": "target/platform-lab/probe-peerpidfd.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/probe-peerpidfd.guest.py",
+      "sha256": "3d3bb152593bf1a7815ad7ebe3da3d12578752012daca78bc840aa3e3b37d76c",
+      "bytes": 3699
+    },
+    {
+      "source_path": "target/platform-lab/probe-proc-remount.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/probe-proc-remount.py",
+      "sha256": "9bbf0e5d1d2bec9f6aeef38af3b579f0291484e9807ce074282854530b49b63e",
+      "bytes": 2087
+    },
+    {
+      "source_path": "target/platform-lab/quarantine_host_declaration.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/quarantine_host_declaration.py",
+      "sha256": "c5a1bd0afa835854be4558237c36bb50c1e38758614b96f55a5bf97f5832e164",
+      "bytes": 1827
+    },
+    {
+      "source_path": "target/platform-lab/readonly-accounting.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/readonly-accounting.guest.py",
+      "sha256": "182a6afac179a34423c1a96fce73bc34ce2c7e053af975e57c172036921590a3",
+      "bytes": 15953
+    },
+    {
+      "source_path": "target/platform-lab/reboot-void-after-backend.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/reboot-void-after-backend.py",
+      "sha256": "cb411ec9b815722301b11130ae413c71fd4702b052df68e7d0dd497992e23df1",
+      "bytes": 2460
+    },
+    {
+      "source_path": "target/platform-lab/run-actual-arch-x86_64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-actual-arch-x86_64.py",
+      "sha256": "e70e7ef71d1ed756f0fe3a1ed391763f5c016a5adc17273adf61972f7e54358d",
+      "bytes": 17842
+    },
+    {
+      "source_path": "target/platform-lab/run-actual-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-actual-debian-arm64.py",
+      "sha256": "d6ecdfa1df4cf44d3ce7d182702dc7e26ee6d85e895a73ecbe35b1be3b6f14f0",
+      "bytes": 17844
+    },
+    {
+      "source_path": "target/platform-lab/run-actual-monitor-arch-x86_64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-actual-monitor-arch-x86_64.py",
+      "sha256": "919d2ac3fa2c06a0501b80e902009e1e7f4ba6273e27abda9e820440010faee7",
+      "bytes": 18926
+    },
+    {
+      "source_path": "target/platform-lab/run-actual-monitor-debian-arm64-tcg120.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-actual-monitor-debian-arm64-tcg120.py",
+      "sha256": "0ede5e1648bbf54b42f12cd3480cb8180612c6fd667efa6a5008f94245ea0dc7",
+      "bytes": 19011
+    },
+    {
+      "source_path": "target/platform-lab/run-actual-monitor-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-actual-monitor-debian-arm64.py",
+      "sha256": "12504704b82b56a354a069d90388a39f06fc4ccbdf88505eb8982ff8373c1a62",
+      "bytes": 18928
+    },
+    {
+      "source_path": "target/platform-lab/run-actual-monitor-debian-clean-x86_64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-actual-monitor-debian-clean-x86_64.py",
+      "sha256": "dd8a9d456770208f0ca7d7f0b25158311426fb198df669d88740088866ce7f97",
+      "bytes": 18817
+    },
+    {
+      "source_path": "target/platform-lab/run-actual-monitor-debian-x86_64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-actual-monitor-debian-x86_64.py",
+      "sha256": "979556480909e7b2fdad76febefa41627a1a43436d78736cc5afb7f3e1cbce3c",
+      "bytes": 18770
+    },
+    {
+      "source_path": "target/platform-lab/run-actual-monitor-void-x86_64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-actual-monitor-void-x86_64.py",
+      "sha256": "bea11b07c1d38a4d5927ec7104dc23eef787340ca79ccee0832993bf798e88f5",
+      "bytes": 18926
+    },
+    {
+      "source_path": "target/platform-lab/run-actual-void-x86_64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-actual-void-x86_64.py",
+      "sha256": "07b8a8b536e72c224c3e3709a3cf5d29e350454f5d445bc4f05e587ccf6f54e3",
+      "bytes": 17842
+    },
+    {
+      "source_path": "target/platform-lab/run-explicit-ifindex-probe.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-explicit-ifindex-probe.py",
+      "sha256": "c2f0755ea1aaa508315011bf4cc0e875964aa145116f97b448d4f1df42f320f9",
+      "bytes": 1906
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-host-projection.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-host-projection.py",
+      "sha256": "687ed1627b0a5f1efac5d1a90be283ac185d8e5710b46646c57e2e7b6a9e08af",
+      "bytes": 12332
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-platform-actual.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-platform-actual.py",
+      "sha256": "ddda15eef0e164bdbbed9ba366d0a2e5433c504ddfab2eeb42bbd7a0ecf7945d",
+      "bytes": 6537
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-secret-assembly.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-assembly.py",
+      "sha256": "de9804a89b5ee019c2602c1274410cf88f1cf3ddf7a13330ddd29511a8420b23",
+      "bytes": 7601
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-secret-attachment.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-attachment.py",
+      "sha256": "a3bfcc1d102fc6c9611819cd83a86e63aaa7998d29508f3bf03b9a2e8ee1810e",
+      "bytes": 7052
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-secret-host-addition.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-host-addition.py",
+      "sha256": "3472f7a7ed760aa589871daa7ad5faffb64428380eebd7cd1737fb501be9fdfb",
+      "bytes": 10007
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-secret-movement.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-movement.py",
+      "sha256": "b534ef84893e7d68c6a61360f4e5db09981544108939cb484d409682799b9c61",
+      "bytes": 7151
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-secret-preparation.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-preparation.py",
+      "sha256": "f0c23807c204bef28058f903593c7078b64d1a1f3d1e0ef691775d81d3f5a7af",
+      "bytes": 6290
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-secret-producer-binding.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-producer-binding.py",
+      "sha256": "61088600f7e1b405e26608a2b89423875c1f60b8a4408bc743424160741f50c0",
+      "bytes": 7686
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-secret-provision.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-provision.py",
+      "sha256": "b68f317831e273324724cb23361f97d2c0a6a6cdbb93ac19d2b8cc9438f76bff",
+      "bytes": 7166
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-secret-quarantine.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-quarantine.py",
+      "sha256": "d2e616ea1dfdc90766bfa66c614ef2fb9542694b64ecf4ddbd2a5cdb5b97926b",
+      "bytes": 7615
+    },
+    {
+      "source_path": "target/platform-lab/run-native-inspection-preflight.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-native-inspection-preflight.py",
+      "sha256": "d56d5e11aabd1883aad4b1e58a62bbdc74f8f87e8fec4e9937f048b4770eaf1f",
+      "bytes": 6382
+    },
+    {
+      "source_path": "target/platform-lab/run-nsfs-fd-mount-probe.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-nsfs-fd-mount-probe.py",
+      "sha256": "31036fdd1dddf63943cdc68e7027cc4fe8930c16e17a2dd087ddd21ef34838a1",
+      "bytes": 1854
+    },
+    {
+      "source_path": "target/platform-lab/run-operational-profile-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-operational-profile-debian-arm64.py",
+      "sha256": "b8c6d77f9fe40bd3be498708613d7f1f788bc886aabf7fecad476f1eea9edcea",
+      "bytes": 18187
+    },
+    {
+      "source_path": "target/platform-lab/run-operational-profile-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-operational-profile-debian.py",
+      "sha256": "93545db2cdc3534c3e4180928399a96fde85efa13becfa9f33b9da16c8a0a59c",
+      "bytes": 17938
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-admission-birth-failure-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-admission-birth-failure-debian-arm64.py",
+      "sha256": "87c90b7800ba3a3280104823327250bd6461d3bde5820f5e22d9c8f964f98bc2",
+      "bytes": 20928
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-admission-birth-failure-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-admission-birth-failure-debian-clean.py",
+      "sha256": "532e687dabeda61bef3e7fc7e2e0b3e2522c2f461a459826701c71107af52645",
+      "bytes": 20944
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-admission-birth-failure-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-admission-birth-failure-debian.py",
+      "sha256": "7737de67ccfcfa7714e733e7bb5fef6a08ab1cafcff087fdf0ab6bcaebe95a5a",
+      "bytes": 20897
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-admission-stop-arch.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-admission-stop-arch.py",
+      "sha256": "6df2a4a2a4a6d2f20c1de42f445a0b84bfd7b10ebf015a076ac10095a9808497",
+      "bytes": 20703
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-admission-stop-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-admission-stop-debian-arm64.py",
+      "sha256": "46b09f1a65c722a7cbc73c908f9fce99fd850ed60f4382a2c4d13a938ac0d317",
+      "bytes": 20716
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-admission-stop-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-admission-stop-debian-clean.py",
+      "sha256": "f280e3994a140e3b15b98a87ea5124576408a65a0ad731c129a0d7d207a8e4df",
+      "bytes": 20732
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-admission-stop-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-admission-stop-debian.py",
+      "sha256": "f5c3bc577d5834354ff34ea5d683507a43290d7e052df5918254261e139c9964",
+      "bytes": 20685
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-bootstrap-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-bootstrap-debian-arm64.py",
+      "sha256": "a59df77c727f88f3ef1d73bbd201e6cca3e2edae644b90085731eeedd82e1860",
+      "bytes": 20002
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-bootstrap-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-bootstrap-debian-clean.py",
+      "sha256": "d9e8d7b94fb94934a5114bdf13969c89abe909226ecfa483d47ac7713319e489",
+      "bytes": 20018
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-bootstrap-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-bootstrap-debian.py",
+      "sha256": "56b3f4c488eec36936a343046023dbe20aec34f044d456036709d285b9fc25ac",
+      "bytes": 19971
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-deployment-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-deployment-debian-arm64.py",
+      "sha256": "d9a41007214522e61022a4010707d487885d6801d072a8d6e534637cece03024",
+      "bytes": 19911
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-deployment-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-deployment-debian-clean.py",
+      "sha256": "9a93285b0932d5cc01f803ae8024e8f6cc8c08b4058081ec9b7606ed84e3293f",
+      "bytes": 19927
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-deployment-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-deployment-debian.py",
+      "sha256": "824f1d02f963ef3b18dee264c5a5e997029c988071d4550c66d9d76c7a1b67e7",
+      "bytes": 19880
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-domains-arch.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-domains-arch.py",
+      "sha256": "26e58b85caa351723b3092a69738f656d01bc5a2f3afb8e06918077dcb15efdc",
+      "bytes": 19884
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-domains-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-domains-debian-arm64.py",
+      "sha256": "51fc63cc85143caa46dba9c41f25c3be6b03cd8c418df96f0d34dea0642f013a",
+      "bytes": 19902
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-domains-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-domains-debian-clean.py",
+      "sha256": "40f349dbd215abdf3509cd7337b48854c2effd77f4ec52ad0db2eeef950d9a47",
+      "bytes": 19918
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-domains-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-domains-debian.py",
+      "sha256": "97dbb9513e3abe02d264b678319b1791a72d63548149f2b4b5d01648329ae775",
+      "bytes": 19871
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-expiry-drop-arch.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-expiry-drop-arch.py",
+      "sha256": "62f0f3fddcaf17c217ed7ba32032e4d55064ff37a82037c24254d7085288c6f9",
+      "bytes": 20867
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-expiry-drop-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-expiry-drop-debian-arm64.py",
+      "sha256": "3570e3c4d9623442e9a72118ea12a5a493b814e58f0efbcc410ba54a2934fb23",
+      "bytes": 20880
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-expiry-drop-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-expiry-drop-debian-clean.py",
+      "sha256": "f3fa87abefcdcf8033f0cc252960e365393637fac1fcabfcb60e00c98084616c",
+      "bytes": 20896
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-expiry-drop-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-expiry-drop-debian.py",
+      "sha256": "6cc9eb23f92a94694f57aca2d8c96b96dad5b46264110fd9db507789a9aa46fe",
+      "bytes": 20849
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-expiry-partial-drop-arch.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-expiry-partial-drop-arch.py",
+      "sha256": "c09fc47bc53a7578f8a952089ca1ebdb79bfbf91556ba1c62cc9c6fbb4f52235",
+      "bytes": 20899
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-expiry-partial-drop-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-expiry-partial-drop-debian-arm64.py",
+      "sha256": "dbc09efa43e2be4adf6986691045d46b47f354287372831a16e62f1bea0c4463",
+      "bytes": 20912
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-expiry-partial-drop-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-expiry-partial-drop-debian-clean.py",
+      "sha256": "e12185bf6189cb094b6dda23f10c6938dcd1aeebb5fc3ff7e86305c1e8ffb9fa",
+      "bytes": 20928
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-expiry-partial-drop-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-expiry-partial-drop-debian.py",
+      "sha256": "86175633cee5610f46cb9a6e962bc484e520ac18417f6e42ebbfaa6727286089",
+      "bytes": 20881
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-expiry-placement-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-expiry-placement-debian-arm64.py",
+      "sha256": "fecf1a6471bf26f34bc460e2aab2d9c00abf966ad34c26f4042102f78cd8f849",
+      "bytes": 20722
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-expiry-placement-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-expiry-placement-debian-clean.py",
+      "sha256": "a8b0b69445a60be1ccade4306e8e9c8fe3fdd4228678ddd4c349281eede2dac3",
+      "bytes": 20738
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-expiry-placement-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-expiry-placement-debian.py",
+      "sha256": "34a6dc2140d30309d8b9190b9a790b4a330a06c5abff925a1e62b6d119df6481",
+      "bytes": 20691
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-host-audit-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-host-audit-debian-arm64.py",
+      "sha256": "3be07edf971b50d7ad504130a9c250df81466507c29a3721794a5573676989dc",
+      "bytes": 20005
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-host-audit-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-host-audit-debian-clean.py",
+      "sha256": "3abb588e5e83c182877911c4f1a77e859eaf0a68072214aab327abd798524968",
+      "bytes": 20021
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-host-audit-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-host-audit-debian.py",
+      "sha256": "b99b04963e46efc590d1bfd84a752f1acd9d6bdff451077ec2d45980c15d4a00",
+      "bytes": 19974
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-inspection-held-arch.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-inspection-held-arch.py",
+      "sha256": "cbf6ebfaca00d15717ac227a6b50cfb0f6486c72356d756fdd470a804a1de4ce",
+      "bytes": 20706
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-inspection-held-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-inspection-held-debian-arm64.py",
+      "sha256": "2dd14c9bccca2d55b378c76aff61106b230c364cf13a307b557518cbdfb46c09",
+      "bytes": 20719
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-inspection-held-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-inspection-held-debian-clean.py",
+      "sha256": "15904637465e2a502d5ae4616d578c59d47e9b586d69f226428d7011fc5ddeb4",
+      "bytes": 20735
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-inspection-held-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-inspection-held-debian.py",
+      "sha256": "9a8eaecdb36479513421ac8c5a9315b95dbc6afddc6c497063c0fc15786c2248",
+      "bytes": 20688
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-inspection-setup-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-inspection-setup-debian-arm64.py",
+      "sha256": "1de03e33a5487ee86dcbf88c2431363425c7a248bbf658bf0e83434183307e12",
+      "bytes": 20722
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-inspection-setup-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-inspection-setup-debian-clean.py",
+      "sha256": "5330ef5ebd88ea160a4aa04a7998f01c1a6a41521fdd0b61dc5b83475120e955",
+      "bytes": 20738
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-inspection-setup-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-inspection-setup-debian.py",
+      "sha256": "6e1451805d4623394126842018e25465ab143793283e7ea7653fb55f79a22ef7",
+      "bytes": 20691
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-journal-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-journal-debian-arm64.py",
+      "sha256": "3d9f96434ff3e7ee9ae341b263ec8504bc3c2e31bb80212949ff6c33af5d0c58",
+      "bytes": 19902
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-journal-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-journal-debian-clean.py",
+      "sha256": "2cc9eb99686f11421b5c1be42d3aec4a81a640ed23de21233f3bd41d46cffcff",
+      "bytes": 19918
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-journal-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-journal-debian.py",
+      "sha256": "0d28c86839d703f8fcdcb45fb7e0598261cc30039ce8feaf92a3542f0d46f27a",
+      "bytes": 19871
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-process-inspection-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-process-inspection-debian-arm64.py",
+      "sha256": "32fe268b3de9a1e94c8fba53f839cb4a8e968a639670b6fc289a35b5a34d5dad",
+      "bytes": 20734
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-process-inspection-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-process-inspection-debian-clean.py",
+      "sha256": "a5e392427790ffc323d2d6603fecc8dc4f6836a406f8af77aa8b8456ebe63f77",
+      "bytes": 20750
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-process-inspection-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-process-inspection-debian.py",
+      "sha256": "de001d4eed85b6207bdb8cc628a80be3fe9d8739e9d4194419772f619a52d696",
+      "bytes": 20703
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retained-drop-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retained-drop-debian-arm64.py",
+      "sha256": "84526276f65576fb53942da5a576a05699517b8b23a609125b52eb3de6f35d4c",
+      "bytes": 20888
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retained-drop-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retained-drop-debian-clean.py",
+      "sha256": "0dc0599e3ef6a811bfeefaa7078bf737880efb41ab1f27dffaa1f012ddd184ae",
+      "bytes": 20904
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retained-drop-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retained-drop-debian.py",
+      "sha256": "4de03f6769ac16f107a8bbf5189af2df7e85f12cb552fa20dbc85ed0837b0727",
+      "bytes": 20857
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-arch.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-arch.py",
+      "sha256": "0cecd7f2f1740388b2a417f9040b90c966a3863faae91adcf57e722d030dc5b9",
+      "bytes": 23701
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-debian-arm64.py",
+      "sha256": "2edc71165a50d6998425d39e1fcc3d068a90893d27d29b7c1afc365b50383224",
+      "bytes": 23714
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-debian-clean.py",
+      "sha256": "32b552a3da81261b708a8cec4b271a62187bfa6624cd02b26445488afbc7d65d",
+      "bytes": 23730
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-debian.py",
+      "sha256": "471439b63019944eb20d4128a8b2fb30a889d3f8930a87f04430d72ef0fcdd6e",
+      "bytes": 23683
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-global-stop-arch.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-global-stop-arch.py",
+      "sha256": "879925d7ddd7f84e15652471db2a74e15bec1781bb8ddd46455e6ed87f28b5e1",
+      "bytes": 23749
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-global-stop-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-global-stop-debian-arm64.py",
+      "sha256": "bff64736f0a272c5f4937569cc2a5d16743ec8c740ef4ca9323d7215fb0c1e70",
+      "bytes": 23762
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-global-stop-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-global-stop-debian-clean.py",
+      "sha256": "8753d2a7fbd09fd70ea4f14b709061ffc0253ee7c79f0559994289b36ce7dadb",
+      "bytes": 23778
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-global-stop-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-global-stop-debian.py",
+      "sha256": "46d62040e381aef60385a6614ff653642a580ac71d6545cf6a09656eb86284b4",
+      "bytes": 23731
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-host-span-arch.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-host-span-arch.py",
+      "sha256": "32d266077caa5b873a6358d6ca2d303935e0687769898b8415ad532c0eb01dfb",
+      "bytes": 23741
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-host-span-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-host-span-debian-arm64.py",
+      "sha256": "05579c539069b4aa0359be7f4307a35c9d5a0c73fa73d1831e0a22e30877f1b7",
+      "bytes": 23754
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-host-span-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-host-span-debian-clean.py",
+      "sha256": "7813c201376aacc6d3c9e2888ff8b8891c1246ff3de636869590cad921f2b902",
+      "bytes": 23770
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-host-span-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-host-span-debian.py",
+      "sha256": "2aacc54e5f2c9550912e109a2cea9eb49932697efdcc0256c4f944b9a69ee55c",
+      "bytes": 23723
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-queued-failure-arch.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-queued-failure-arch.py",
+      "sha256": "cc0557c634cef9ef6d568ca3f55f1256bcb28f45d038c7b6619e6007b95873b5",
+      "bytes": 23761
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-queued-failure-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-queued-failure-debian-arm64.py",
+      "sha256": "2eeddf84b6261082dcfb9aad4f059167630cf470ef8bb71c516a14d4d4fb685a",
+      "bytes": 23774
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-queued-failure-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-queued-failure-debian-clean.py",
+      "sha256": "76829af7a945b9f03ad45a9d9dbaf0eda0bf4c0b087a2cd7fd0f192e791797e1",
+      "bytes": 23790
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-queued-failure-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-queued-failure-debian.py",
+      "sha256": "a28cc751c49ca8a935aef62f2c9290d044d2ce3335a3350c7db6dad489249837",
+      "bytes": 23743
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-writer-failure-arch.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-writer-failure-arch.py",
+      "sha256": "8be0eb40d679f6777db097ebf5e7540f33524fe7a95b26aeb0279d6328e093d3",
+      "bytes": 23761
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-writer-failure-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-writer-failure-debian-arm64.py",
+      "sha256": "ec529e38b0ff226c4649939416b32b24d469bbd7436e971a5a973f7319b893f0",
+      "bytes": 23774
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-writer-failure-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-writer-failure-debian-clean.py",
+      "sha256": "ec0583d34afa83527ebcbb752acc0c34bd3cf50e814efebc60dd43d02cd0390e",
+      "bytes": 23790
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-retirement-writer-failure-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-retirement-writer-failure-debian.py",
+      "sha256": "5804f58a6bb7f0fca72c741ab8ccf19891bdc434c244eb519fe8e186d507104d",
+      "bytes": 23743
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-terminal-death-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-terminal-death-debian-clean.py",
+      "sha256": "5dd6ed2538231efc27c2a4880e32b7a172b9c09fc73bfcd1f489e726039ef4bb",
+      "bytes": 20732
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-terminal-death-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-terminal-death-debian.py",
+      "sha256": "8064fac3bf09ca69bfb74cb371413c275d3e623f0ef0029085236e05ce81489a",
+      "bytes": 20685
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-terminal-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-terminal-debian-clean.py",
+      "sha256": "1ea90e983b1b1bcaaeac879bd82ce9c9c3d40b2b6731704124d673eea1d52993",
+      "bytes": 20714
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-terminal-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-terminal-debian.py",
+      "sha256": "6a219140ee5dc9e32f0fbcddd38bf65e9ed48bbec67e097c61ebdd5e7704814d",
+      "bytes": 20667
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-watchdog-debian-clean.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-watchdog-debian-clean.py",
+      "sha256": "ce19638da8ae1a71829fd2a9a770dc3db825c48aedf9fc24137931606c0c10f2",
+      "bytes": 19921
+    },
+    {
+      "source_path": "target/platform-lab/run-owner-watchdog-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-owner-watchdog-debian.py",
+      "sha256": "2c5c3a5c1a259a1110efcc8bea7ba42efe5df3d0e744407011b60853fa2db76c",
+      "bytes": 19874
+    },
+    {
+      "source_path": "target/platform-lab/run-peerpidfd-probe.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-peerpidfd-probe.py",
+      "sha256": "3d802d67e18a5665afcc671775aea9c9c665928af45298534a56367dbe61fdc9",
+      "bytes": 1576
+    },
+    {
+      "source_path": "target/platform-lab/run-terminal-death-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-terminal-death-debian.py",
+      "sha256": "3d0c227876015d412ebf9cce562fcd07db4224d406ea6d1940906caff7ebedfb",
+      "bytes": 17929
+    },
+    {
+      "source_path": "target/platform-lab/run-terminal-executor-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-terminal-executor-debian.py",
+      "sha256": "b53cc477441e9ac2b84a55bece020bd3a6f25571ea10abf05030d1b09ef4a2ad",
+      "bytes": 17911
+    },
+    {
+      "source_path": "target/platform-lab/secret-assembly.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/secret-assembly.guest.py",
+      "sha256": "585aa7208241435a1571ff399c3bdb23d63762d4eae7e7ab527b5a41a351e16a",
+      "bytes": 17188
+    },
+    {
+      "source_path": "target/platform-lab/secret-attachment.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/secret-attachment.guest.py",
+      "sha256": "3a6928a3d93af9d29270123d79b6647c3523c36daca2f5463431015b5ae2d3c6",
+      "bytes": 15565
+    },
+    {
+      "source_path": "target/platform-lab/secret-host-addition.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/secret-host-addition.guest.py",
+      "sha256": "5a422737ed6b9131d82b9f6c626dabc7f9bf9524b8dc65f6ef48c62bf2219a83",
+      "bytes": 22139
+    },
+    {
+      "source_path": "target/platform-lab/secret-movement.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/secret-movement.guest.py",
+      "sha256": "07b44d5b9ca0aea3b5ce1381ef183fcde004bfd3237318b4ce4e7a1cb5cda034",
+      "bytes": 15947
+    },
+    {
+      "source_path": "target/platform-lab/secret-preparation.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/secret-preparation.guest.py",
+      "sha256": "e4ecf76b4bd734acd253382d3e212fd6b977ea6763c3338494a12e7cfa30ea37",
+      "bytes": 8048
+    },
+    {
+      "source_path": "target/platform-lab/secret-producer-binding.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/secret-producer-binding.guest.py",
+      "sha256": "ac7edd67f343f62cfc4bf557e8cc447f74f9d8e263e850ce5993a23c5592a807",
+      "bytes": 17196
+    },
+    {
+      "source_path": "target/platform-lab/secret-provision.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/secret-provision.guest.py",
+      "sha256": "d529db886e99b2bf04fcc336594ce81018490c6f51a59f6c0ab250071979ef35",
+      "bytes": 15948
+    },
+    {
+      "source_path": "target/platform-lab/secret-quarantine.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/secret-quarantine.guest.py",
+      "sha256": "dcfd4d990e9bae10bb50e509d33ea6444eedf291dca7dff5b5da1c68509c3a1b",
+      "bytes": 17190
+    },
+    {
+      "source_path": "target/platform-lab/selftest_mechanics.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/selftest_mechanics.py",
+      "sha256": "44564bcf87832f22c1f7ff97c34a1da59df95e87b7dc4869d15da37445e9c923",
+      "bytes": 10542
+    },
+    {
+      "source_path": "target/platform-lab/smoke-readonly-accounting.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/smoke-readonly-accounting.py",
+      "sha256": "0052ceac0df8191ae73e5a0dd5da2c904289522fcce57d22f0e340259f647b14",
+      "bytes": 15059
+    },
+    {
+      "source_path": "target/platform-lab/start-additional-clean-debian.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/start-additional-clean-debian.py",
+      "sha256": "5db133313f666171adc5227972d681f3aae95b4db2c74e0f92b551ef13b43842",
+      "bytes": 4933
+    },
+    {
+      "source_path": "target/platform-lab/start-cloud-guests.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/start-cloud-guests.py",
+      "sha256": "50dd2d0f7de0325e0e45b1cb828514ac088086f242f2e49af35b5c02cbab38da",
+      "bytes": 4522
+    },
+    {
+      "source_path": "target/platform-lab/start-void-live.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/start-void-live.py",
+      "sha256": "e0e4af1c87fa21c708e40a5523c2e43b1fe621099ee9dafbc1887f5fa1ff13b5",
+      "bytes": 4832
+    },
+    {
+      "source_path": "target/platform-lab/switch-void-nft-backend.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/switch-void-nft-backend.py",
+      "sha256": "6a716ac1f7557f68808e239b0913a79228f947348b66f7550cff05f1c5a3a8ff",
+      "bytes": 2357
+    }
+  ]
+}

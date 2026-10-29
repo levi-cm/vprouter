@@ -12,6 +12,22 @@ pub(crate) struct DaemonStatus {
     pub self_node: Option<Node>,
     #[serde(rename = "TailscaleIPs", default)]
     ips: Vec<IpAddr>,
+    #[serde(rename = "Peer", default)]
+    peers: Option<std::collections::BTreeMap<String, PeerIdentity>>,
+}
+#[derive(Deserialize)]
+struct PeerIdentity {
+    #[serde(rename = "ID")]
+    id: String,
+    #[serde(rename = "TailscaleIPs")]
+    ips: Vec<IpAddr>,
+    #[serde(rename = "Expired", deserialize_with = "nullable_boolean")]
+    expired: bool,
+    #[serde(rename = "InNetworkMap")]
+    in_network_map: bool,
+}
+fn nullable_boolean<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<bool, D::Error> {
+    Ok(Option::<bool>::deserialize(d)?.unwrap_or(false))
 }
 #[derive(Deserialize)]
 pub(crate) struct Node {
@@ -113,6 +129,7 @@ impl UnenrolledStatus {
 }
 // Fixed observation-only diagnostic alphabet. No field value, string, length,
 // identifier, URL, state or arbitrary key is emitted. This cannot grant access.
+#[cfg(test)]
 fn diagnostic_type(value: Option<&serde_json::Value>) -> u8 {
     match value {
         None => 0,
@@ -124,6 +141,7 @@ fn diagnostic_type(value: Option<&serde_json::Value>) -> u8 {
         Some(serde_json::Value::Object(_)) => 6,
     }
 }
+#[cfg(test)]
 fn observation_types(bytes: &[u8], fields: &[&str]) -> Result<Vec<u8>> {
     let value: serde_json::Value = json::decode(bytes)?;
     let object = value.as_object().ok_or(Error::Malformed)?;
@@ -133,59 +151,10 @@ fn observation_types(bytes: &[u8], fields: &[&str]) -> Result<Vec<u8>> {
         .collect())
 }
 pub(crate) fn require_unenrolled(status: &[u8], prefs: &[u8]) -> Result<()> {
-    // These exact public field-name lists are deliberately closed. The decimal
-    // type/predicate alphabet is safe even if a daemon returns sensitive data.
-    let status_types =
-        observation_types(status, &["Version", "BackendState", "Self", "TailscaleIPs"])
-            .inspect_err(|_| eprintln!("observation_status_json_refused"))?;
-    eprintln!("observation_status_types={status_types:?}");
-    let status_json: serde_json::Value = json::decode(status)?;
-    let node = status_json
-        .get("Self")
-        .and_then(serde_json::Value::as_object);
-    let node_types: Vec<_> = ["ID", "Online", "ExitNodeOption", "TailscaleIPs"]
-        .iter()
-        .map(|field| diagnostic_type(node.and_then(|v| v.get(*field))))
-        .collect();
-    eprintln!("observation_status_node_types={node_types:?}");
-    let prefs_types = observation_types(
-        prefs,
-        &[
-            "WantRunning",
-            "LoggedOut",
-            "RouteAll",
-            "CorpDNS",
-            "AdvertiseRoutes",
-            "NetfilterMode",
-            "ExitNodeID",
-            "ExitNodeIP",
-            "NoStatefulFiltering",
-            "RunSSH",
-            "NoSNAT",
-        ],
-    )
-    .inspect_err(|_| eprintln!("observation_prefs_json_refused"))?;
-    eprintln!("observation_prefs_types={prefs_types:?}");
     let status: UnenrolledStatus =
         json::decode(status).inspect_err(|_| eprintln!("observation_status_parse_refused"))?;
     let status_predicates = status.predicates();
-    let node_predicates = status.node_predicates();
-    eprintln!("observation_status_node_predicates={node_predicates:?}");
-    eprintln!("observation_status_predicates={status_predicates:?}");
     let prefs = parse_prefs(prefs).inspect_err(|_| eprintln!("observation_prefs_parse_refused"))?;
-    let prefs_predicates = [
-        !prefs.want_running,
-        !prefs.route_all,
-        !prefs.corp_dns,
-        prefs.netfilter_mode == 0,
-        !prefs.run_ssh,
-        prefs.no_snat,
-        prefs.exit_node_id.is_empty(),
-        prefs.exit_node_ip.is_empty(),
-        prefs.no_stateful_filtering,
-        prefs.advertise_routes.is_empty(),
-    ];
-    eprintln!("observation_prefs_predicates={prefs_predicates:?}");
     if !status_predicates.into_iter().all(|v| v) || !prefs.unenrolled() {
         return Err(Error::Identity);
     }
@@ -304,6 +273,26 @@ impl Prefs {
             && self.no_stateful_filtering
     }
 }
+fn match_peers(status: &DaemonStatus, expected: &[crate::operation::EnrolledPeer]) -> Result<()> {
+    let peers = status.peers.as_ref().ok_or(Error::Identity)?;
+    if peers.len() != expected.len() {
+        return Err(Error::Identity);
+    }
+    let mut seen = std::collections::HashSet::new();
+    for peer in peers.values() {
+        if !seen.insert(&peer.id)
+            || !expected.iter().any(|want| {
+                want.node_id == peer.id
+                    && same(&want.ips, &peer.ips)
+                    && want.expired == peer.expired
+                    && want.in_network_map == peer.in_network_map
+            })
+        {
+            return Err(Error::Identity);
+        }
+    }
+    Ok(())
+}
 pub(crate) struct Observation {
     pub advertised: bool,
     pub approved: bool,
@@ -312,6 +301,7 @@ pub(crate) struct LocalApi {
     placed: Rc<Placed>,
     socket: PathBuf,
     identity: Identity,
+    expected_peers: Option<Vec<crate::operation::EnrolledPeer>>,
     http: tokio::sync::Mutex<Option<client::Http>>,
 }
 impl LocalApi {
@@ -322,8 +312,37 @@ impl LocalApi {
             placed,
             socket: "/run/tailscale/tailscaled.sock".into(),
             identity,
+            expected_peers: None,
             http: tokio::sync::Mutex::new(None),
         })
+    }
+    pub fn new_enrolled(
+        placed: Rc<Placed>,
+        enrollment: &crate::operation::Enrollment,
+    ) -> Result<Self> {
+        enrollment.validate(&enrollment.binding)?;
+        let mut api = Self::new(
+            placed,
+            Identity {
+                node_id: enrollment.binding.node_id.clone(),
+                ips: enrollment.ips.clone(),
+                routes: vec!["0.0.0.0/0".into(), "::/0".into()],
+            },
+        )?;
+        api.expected_peers = Some(enrollment.peers.clone());
+        Ok(api)
+    }
+    async fn status(&self) -> Result<DaemonStatus> {
+        let path = if self.expected_peers.is_some() {
+            "/localapi/v0/status?peers=true"
+        } else {
+            "/localapi/v0/status?peers=false"
+        };
+        let status = parse_status(&self.request("GET", path, b"").await?)?;
+        if let Some(expected) = &self.expected_peers {
+            match_peers(&status, expected)?;
+        }
+        Ok(status)
     }
     pub fn identity(&self) -> &Identity {
         &self.identity
@@ -364,6 +383,7 @@ impl LocalApi {
     /// No identity reset/auth key/hostname/default preferences are written.
     pub async fn initialize(&self) -> Result<()> {
         self.withdraw().await?;
+        self.verify_identity().await?;
         self.request("PATCH","/localapi/v0/prefs",br#"{"NetfilterMode":0,"NetfilterModeSet":true,"RunSSH":false,"RunSSHSet":true,"NoSNAT":true,"NoSNATSet":true}"#).await?;
         let prefs = parse_prefs(&self.request("GET", "/localapi/v0/prefs", b"").await?)?;
         if !prefs.safe() || !prefs.advertise_routes.is_empty() {
@@ -372,6 +392,7 @@ impl LocalApi {
         Ok(())
     }
     pub async fn withdraw(&self) -> Result<()> {
+        self.verify_identity().await?;
         self.request(
             "PATCH",
             "/localapi/v0/prefs",
@@ -385,6 +406,7 @@ impl LocalApi {
         Ok(())
     }
     pub async fn advertise(&self) -> Result<()> {
+        self.verify_identity().await?;
         let body = serde_json::to_vec(
             &serde_json::json!({"AdvertiseRoutes":self.identity.routes,"AdvertiseRoutesSet":true}),
         )
@@ -392,12 +414,24 @@ impl LocalApi {
         self.request("PATCH", "/localapi/v0/prefs", &body).await?;
         Ok(())
     }
+    async fn verify_identity(&self) -> Result<()> {
+        self.match_identity(&self.status().await?, false)
+    }
+    fn match_identity(&self, status: &DaemonStatus, require_online: bool) -> Result<()> {
+        let node = status.self_node.as_ref().ok_or(Error::Identity)?;
+        if !status.version_pinned()
+            || !matches!(status.backend_state.as_str(), "Running" | "Stopped")
+            || require_online && (status.backend_state != "Running" || !node.online)
+            || node.id != self.identity.node_id
+            || !same(&node.ips, &self.identity.ips)
+            || !same(&status.ips, &self.identity.ips)
+        {
+            return Err(Error::Identity);
+        }
+        Ok(())
+    }
     pub async fn observe(&self) -> Result<Observation> {
-        let s = parse_status(
-            &self
-                .request("GET", "/localapi/v0/status?peers=false", b"")
-                .await?,
-        )?;
+        let s = self.status().await?;
         let p = parse_prefs(&self.request("GET", "/localapi/v0/prefs", b"").await?)?;
         if !s.version_pinned() || s.backend_state != "Running" {
             return Err(Error::Identity);
@@ -426,7 +460,57 @@ impl LocalApi {
             placed,
             socket,
             identity,
+            expected_peers: None,
             http: tokio::sync::Mutex::new(None),
+        }
+    }
+}
+#[cfg(test)]
+mod enrolled_tests {
+    #[test]
+    fn full_peer_identity_matches_ids_and_all_logical_ips_without_enabling_ipv6_routes() {
+        use super::*;
+        let expected = vec![crate::operation::EnrolledPeer {
+            node_id: "peer-one".into(),
+            expired: false,
+            in_network_map: true,
+            ips: vec![
+                "100.64.0.8".parse().unwrap(),
+                "fd7a:115c:a1e0::8".parse().unwrap(),
+            ],
+        }];
+        let value = serde_json::json!({"Version":"1.102.5","BackendState":"Running","TailscaleIPs":["100.64.0.7","fd7a:115c:a1e0::7"],
+            "Self":{"ID":"node-self","Online":true,"ExitNodeOption":false,"TailscaleIPs":["100.64.0.7","fd7a:115c:a1e0::7"]},
+            "Peer":{"synthetic-public-key":{"ID":"peer-one","Expired":null,"InNetworkMap":true,"Online":false,"TailscaleIPs":["100.64.0.8","fd7a:115c:a1e0::8"]}}});
+        let parse = |v: &serde_json::Value| parse_status(&serde_json::to_vec(v).unwrap()).unwrap();
+        match_peers(&parse(&value), &expected).unwrap();
+        for fault in 0..8 {
+            let mut wrong = value.clone();
+            match fault {
+                0 => wrong["Peer"]["synthetic-public-key"]["ID"] = "foreign-node-same-ip".into(),
+                1 => {
+                    wrong["Peer"]["synthetic-public-key"]["TailscaleIPs"] =
+                        serde_json::json!(["100.64.0.9", "fd7a:115c:a1e0::8"])
+                }
+                2 => {
+                    wrong["Peer"]["synthetic-public-key"]["TailscaleIPs"] =
+                        serde_json::json!(["100.64.0.8", "fd7a:115c:a1e0::9"])
+                }
+                3 => {
+                    wrong["Peer"]["synthetic-public-key"]["TailscaleIPs"] =
+                        serde_json::json!(["100.64.0.8"])
+                }
+                4 => wrong["Peer"] = serde_json::json!({}),
+                5 => {
+                    wrong.as_object_mut().unwrap().remove("Peer");
+                }
+                6 => wrong["Peer"]["synthetic-public-key"]["Expired"] = true.into(),
+                _ => wrong["Peer"]["synthetic-public-key"]["InNetworkMap"] = false.into(),
+            }
+            assert!(
+                match_peers(&parse(&wrong), &expected).is_err(),
+                "fault{fault}"
+            );
         }
     }
 }

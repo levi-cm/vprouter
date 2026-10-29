@@ -42,7 +42,7 @@ fn route(
         flags: 0,
     }
 }
-fn snapshot(p: &Plan) -> Snapshot {
+pub(crate) fn snapshot(p: &Plan) -> Snapshot {
     let links = vec![
         Link {
             name: "lo".into(),
@@ -58,6 +58,10 @@ fn snapshot(p: &Plan) -> Snapshot {
             promiscuity: 0,
             all_multicast: 0,
             alternate_names: Vec::new(),
+            tun_info: Vec::new(),
+            max_pacing_offload_horizon: None,
+            headroom: None,
+            tailroom: None,
         },
         Link {
             name: p.wireguard_name().into(),
@@ -73,6 +77,10 @@ fn snapshot(p: &Plan) -> Snapshot {
             promiscuity: 0,
             all_multicast: 0,
             alternate_names: Vec::new(),
+            tun_info: Vec::new(),
+            max_pacing_offload_horizon: None,
+            headroom: None,
+            tailroom: None,
         },
     ];
     let addresses = vec![
@@ -164,6 +172,43 @@ fn snapshot(p: &Plan) -> Snapshot {
         }),
     }
 }
+#[test]
+fn ipv4_only_bootstrap_requires_no_ipv6_metadata_and_exact_ipv4_routes() {
+    let p = plan();
+    let mut ipv4 = snapshot(&p);
+    ipv4.routes.retain(|route| route.destination.is_ipv4());
+    assert!(p.bootstrap_structure(&ipv4, 4).is_ok());
+
+    let mut multicast = ipv4.clone();
+    multicast
+        .routes
+        .push(route("ff00::", 8, 255, 4, None, 5, 0, 2, 256));
+    assert!(p.bootstrap_structure(&multicast, 4).is_err());
+
+    let mut address = ipv4.clone();
+    address.addresses.push(Address {
+        address: "::1".parse().unwrap(),
+        prefix: 128,
+        ..ipv4.addresses[0].clone()
+    });
+    assert!(p.bootstrap_structure(&address, 4).is_err());
+
+    for fault in 0..5 {
+        let mut changed = ipv4.clone();
+        let default = changed.routes.iter_mut().find(|r| r.prefix == 0).unwrap();
+        match fault {
+            0 => default.table = 52,
+            1 => default.output = 1,
+            2 => default.flags = 16,
+            3 => default.gateway = Some("192.0.2.1".parse().unwrap()),
+            _ => {
+                changed.routes.pop();
+            }
+        }
+        assert!(p.bootstrap_structure(&changed, 4).is_err(), "fault {fault}");
+    }
+}
+
 #[test]
 fn matching_is_observational_and_absent_is_not_unverified() {
     let p = plan();
@@ -364,6 +409,10 @@ fn local_loopback_and_narrow_tailscale_ipv6_supported_but_no_forward_path() {
         promiscuity: 0,
         all_multicast: 0,
         alternate_names: Vec::new(),
+        tun_info: Vec::new(),
+        max_pacing_offload_horizon: None,
+        headroom: None,
+        tailroom: None,
     });
     for (index, address, scope) in [
         (1, "::1", 254),
@@ -705,6 +754,81 @@ fn raw_host_bridge_data_is_bounded_and_veth_peer_grammar_still_rejected() {
     );
     assert!(crate::project::route_message(&peer).is_err());
 }
+#[test]
+fn unrelated_host_tun_metadata_is_retained_without_owned_daemon_policy() {
+    use netlink_packet_core::DefaultNla;
+    use netlink_packet_route::link::{
+        InfoData, InfoKind, InfoTun, LinkAttribute as L, LinkInfo, LinkMessage,
+    };
+    let check = |vnet_header| {
+        let mut message = LinkMessage::default();
+        message.header.index = 12;
+        message.attributes = vec![
+            L::IfName("vpn0".into()),
+            L::Mtu(1500),
+            L::LinkInfo(vec![
+                LinkInfo::Kind(InfoKind::Tun),
+                LinkInfo::Data(InfoData::Tun(
+                    [(3, 1), (4, 0), (5, vnet_header), (6, 1), (7, 1)]
+                        .into_iter()
+                        .map(|(kind, value)| InfoTun::Other(DefaultNla::new(kind, vec![value])))
+                        .collect(),
+                )),
+            ]),
+        ];
+        crate::project::link(message)
+    };
+    let original = check(0).expect("an unrelated persistent multiqueue host TUN is observable");
+    let changed = check(1).expect("changed host TUN metadata is observable");
+    assert_ne!(original, changed, "host TUN drift must remain visible");
+}
+
+#[test]
+fn native_tun_info_requires_all_exact_fixed_values_and_no_unknown_duplicate_or_wide_attributes() {
+    use netlink_packet_core::DefaultNla;
+    use netlink_packet_route::link::{
+        InfoData, InfoKind, InfoTun, LinkAttribute as L, LinkInfo, LinkMessage,
+    };
+    let fixed: Vec<_> = [(3, 1), (4, 0), (5, 1), (6, 0), (7, 0)]
+        .into_iter()
+        .map(|(k, v)| InfoTun::Other(DefaultNla::new(k, vec![v])))
+        .collect();
+    let check = |info| {
+        let mut m = LinkMessage::default();
+        m.header.index = 9;
+        m.attributes = vec![
+            L::IfName("tailscale0".into()),
+            L::Mtu(1280),
+            L::LinkInfo(vec![
+                LinkInfo::Kind(InfoKind::Tun),
+                LinkInfo::Data(InfoData::Tun(info)),
+            ]),
+        ];
+        crate::project::link(m).and_then(|link| crate::project::fixed_tun_info(&link.tun_info))
+    };
+    assert!(check(fixed.clone()).is_ok());
+    for i in 0..5 {
+        let mut info = fixed.clone();
+        info[i] = InfoTun::Other(DefaultNla::new((i + 3) as u16, vec![9]));
+        assert!(check(info).is_err());
+    }
+    for extra in [
+        DefaultNla::new(3, vec![1]),
+        DefaultNla::new(1, vec![0; 4]),
+        DefaultNla::new(8, vec![1; 4]),
+        DefaultNla::new(100, vec![0]),
+    ] {
+        let mut info = fixed.clone();
+        info.push(InfoTun::Other(extra));
+        assert!(check(info).is_err());
+    }
+    let mut missing = fixed.clone();
+    missing.pop();
+    assert!(check(missing).is_err());
+    let mut wide = fixed;
+    wide[0] = InfoTun::Other(DefaultNla::new(3, vec![1, 0, 0, 0]));
+    assert!(check(wide).is_err());
+}
 
 #[test]
 fn dynamic_host_address_flags_are_retained_and_protected_dynamic_flags_rejected() {
@@ -763,4 +887,64 @@ fn complete_local_host_rtm_oracle_projects_without_discarding_forwarding_fields(
         }
     }
     assert!(broadcast && priority && indirect && flags);
+}
+
+#[test]
+fn pacing_horizon_and_buffer_room_are_typed_exact_retained_metadata() {
+    use netlink_packet_core::DefaultNla;
+    use netlink_packet_route::link::{LinkAttribute as L, LinkMessage};
+    let message = |kind, value| {
+        let mut m = LinkMessage::default();
+        m.header.index = 1;
+        m.attributes = vec![
+            L::IfName("lo".into()),
+            L::Mtu(65536),
+            L::Other(DefaultNla::new(kind, value)),
+        ];
+        m
+    };
+    for (kind, bytes, changed) in [
+        (66, 0u32.to_ne_bytes().to_vec(), 1u32.to_ne_bytes().to_vec()),
+        (
+            68,
+            12u16.to_ne_bytes().to_vec(),
+            13u16.to_ne_bytes().to_vec(),
+        ),
+        (69, 0u16.to_ne_bytes().to_vec(), 1u16.to_ne_bytes().to_vec()),
+    ] {
+        let good = message(kind, bytes.clone());
+        let observed =
+            crate::project::link(good.clone()).expect("exact canonical public link attribute");
+        assert_ne!(
+            observed,
+            crate::project::link(message(kind, changed)).unwrap()
+        );
+        let mut duplicate = good.clone();
+        duplicate.attributes.push(good.attributes[2].clone());
+        assert!(crate::project::link(duplicate).is_err());
+        for bad in [vec![], vec![0; bytes.len() - 1], vec![0; bytes.len() + 1]] {
+            assert!(crate::project::link(message(kind, bad)).is_err());
+        }
+        for bad_kind in [kind | 0x8000, kind | 0x4000, 70] {
+            assert!(crate::project::link(message(bad_kind, bytes.clone())).is_err());
+        }
+    }
+}
+
+#[test]
+fn public_profile_plan_preserves_exact_existing_identity_without_private_access() {
+    let (record, secret) = fixture();
+    let old = Plan::new(&record, &record.deployment_id, &record.exits[0], &secret).unwrap();
+    let metadata = secret.public_metadata();
+    drop(secret);
+    let public =
+        Plan::from_public(&record, &record.deployment_id, &record.exits[0], &metadata).unwrap();
+    assert_eq!(public, old);
+    let mut altered = serde_json::to_value(metadata).unwrap();
+    altered["device_public_key"] = serde_json::json!(vec![0; 32]);
+    let invalid: vprouter_core::profile::PublicProfile = serde_json::from_value(altered).unwrap();
+    assert_eq!(
+        Plan::from_public(&record, &record.deployment_id, &record.exits[0], &invalid),
+        Err(Error::InvalidInput)
+    );
 }

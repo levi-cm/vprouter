@@ -7,7 +7,7 @@ use vprouter_linux::storage::{self, Kind};
 
 pub(super) const WORKER: &str = "/usr/local/bin/vprouter-worker";
 pub(super) const LIMIT: usize = 64 * 1024 * 1024;
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSpec {
     pub(super) schema_version: u32,
@@ -178,5 +178,31 @@ impl StagingEvidence {
             return Err(Error::ExecutableMismatch);
         }
         Ok(v)
+    }
+    #[cfg(test)]
+    pub(super) fn load_actual_gateway(path: &Path) -> Result<Self> {
+        Self::parse_actual_gateway(&read(path)?)
+    }
+    #[cfg(test)]
+    pub(super) fn parse_actual_gateway(bytes: &[u8]) -> Result<Self> {
+        let value = Self::decode(bytes)?;
+        let bundle = super::programs::ReviewedBundle::current()?;
+        let (sha256, size) = bundle.init()?;
+        if value.artifact_kind != "actual_gateway_lab_v1"
+            || value.image_ref != format!("vprouter-v2-lab@{}", value.content_id)
+            || value.artifact_path
+                != Path::new(&format!(
+                    "/var/lib/vprouter-v2-lab/task8b2-{sha256}.gateway-init"
+                ))
+            || value.artifact_sha256 != sha256
+            || value.artifact_size != size
+            || value.execution_policy_sha256.is_some()
+        {
+            return Err(Error::ExecutableMismatch);
+        }
+        // This is only the inert, immutable test image's staging declaration.
+        // The fixed query and native process checks still verify actual bytes;
+        // no production staging or placement authority is minted here.
+        Ok(value)
     }
 }

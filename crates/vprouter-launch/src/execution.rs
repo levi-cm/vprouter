@@ -108,7 +108,7 @@ fn state(a: &Admission) -> Result<OwnedFd> {
 }
 pub(super) fn launch(
     a: &Admission,
-    tx: &owned::Transaction<'_>,
+    tx: &owned::Transaction,
     ns: &owned::OwnedNamespaces,
     program: VerifiedProgram,
 ) -> Result<Running> {
@@ -125,7 +125,7 @@ pub(super) fn launch(
 #[cfg(test)]
 pub(super) fn lab_failed_placement(
     a: &Admission,
-    tx: &owned::Transaction<'_>,
+    tx: &owned::Transaction,
     ns: &owned::OwnedNamespaces,
 ) -> Result<Running> {
     launch_inner(
@@ -140,7 +140,7 @@ pub(super) fn lab_failed_placement(
 #[cfg(test)]
 pub(super) fn lab_producer(
     a: &Admission,
-    tx: &owned::Transaction<'_>,
+    tx: &owned::Transaction,
     ns: &owned::OwnedNamespaces,
     producer: &super::producer::ProducerGroup,
     killed: bool,
@@ -160,7 +160,7 @@ pub(super) fn lab_producer(
 }
 fn launch_inner(
     a: &Admission,
-    tx: &owned::Transaction<'_>,
+    tx: &owned::Transaction,
     ns: &owned::OwnedNamespaces,
     program: VerifiedProgram,
     producer: Option<&super::producer::ProducerGroup>,
@@ -190,13 +190,21 @@ fn launch_inner(
     inherited_descriptors()?;
     #[cfg(test)]
     eprintln!("LAB_EXEC_STAGE placement_gated_spawn");
+    let lease = if producer.is_none() {
+        Some(tx.retain_mutator_lease(&a.spec)?)
+    } else {
+        None
+    };
     let mut child = kernel::spawn(a.process.launch_fds(), ns.data.as_fd(), state.as_fd())?;
+    if let Some(lease) = lease {
+        child.retain_lease(lease)?;
+    }
     #[cfg(test)]
     if let Some(fault) = before_place {
         fault(&mut child)?;
     }
     let placed = if let Some(producer) = producer {
-        producer.release_child(&mut child, a, tx, ns)
+        producer.release_child(&mut child, a, tx, ns, None)
     } else {
         a.process
             .place(child.pid(), &a.spec)
@@ -210,7 +218,8 @@ fn launch_inner(
         return Err(Error::PlacementFailed);
     }
     // PID1 readiness requires successful post-exec probe verification, not merely
-    // child creation or Docker status. An error kills/reaps boundedly in Drop.
+    // child creation or Docker status. Drop retains uncertain native ownership;
+    // synthetic unscoped descendants cannot authorize retirement from root reap.
     #[cfg(test)]
     eprintln!("LAB_EXEC_STAGE post_exec_readiness");
     child.ready()?;

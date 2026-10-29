@@ -1,5 +1,5 @@
 use crate::{
-    profile::Profile,
+    profile::{Profile, PublicProfile},
     reason::{Reason, Result, err},
 };
 use serde::{Deserialize, Serialize};
@@ -96,7 +96,171 @@ pub struct ValidatedExit {
     hostname: String,
     profile: Option<Profile>,
 }
+/// Validated public shape, without any claim that a referenced profile exists.
+/// Owner-domain/allocation intents may be established from this before the first
+/// secret-role birth. No native mutation permit is derived from this type alone.
+pub struct StructuredConfiguration {
+    configuration: Configuration,
+    hostnames: Vec<String>,
+}
+pub const MAX_PUBLIC_CONFIGURATION_BYTES: usize = 256 * 1024;
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicConfigurationReport {
+    configuration_digest: [u8; 32],
+    exits: Vec<PublicExitReport>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PublicExitReport {
+    id: String,
+    hostname: String,
+    mode: ExitMode,
+    profile: Option<PublicProfile>,
+}
+/// Public facts bound to the exact public input. Launch additionally requires
+/// its constructor-origin no-fork child receipt; parsing this is not admission.
+#[derive(Clone)]
+pub struct PublicConfiguration {
+    configuration: Configuration,
+    exits: Vec<PublicExit>,
+}
+#[derive(Clone)]
+pub struct PublicExit {
+    exit: Exit,
+    hostname: String,
+    profile: Option<PublicProfile>,
+}
+fn public_configuration_digest(config: &Configuration) -> Result<[u8; 32]> {
+    use sha2::{Digest, Sha256};
+    let bytes = serde_json::to_vec(config).map_err(|_| err(Reason::InvalidSchema))?;
+    Ok(Sha256::digest(bytes).into())
+}
+impl PublicConfigurationReport {
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        let bytes = serde_json::to_vec(self).map_err(|_| err(Reason::InvalidSchema))?;
+        if bytes.len() > MAX_PUBLIC_CONFIGURATION_BYTES {
+            return Err(err(Reason::InvalidSchema));
+        }
+        Ok(bytes)
+    }
+}
+impl StructuredConfiguration {
+    pub fn configuration(&self) -> &Configuration {
+        &self.configuration
+    }
+    pub fn digest(&self) -> Result<[u8; 32]> {
+        public_configuration_digest(&self.configuration)
+    }
+    pub fn bind_public_report(self, bytes: &[u8]) -> Result<PublicConfiguration> {
+        if bytes.len() > MAX_PUBLIC_CONFIGURATION_BYTES {
+            return Err(err(Reason::InvalidSchema));
+        }
+        let report: PublicConfigurationReport =
+            serde_json::from_slice(bytes).map_err(|_| err(Reason::InvalidSchema))?;
+        if report.configuration_digest != self.digest()?
+            || report.exits.len() != self.configuration.exits.len()
+        {
+            return Err(err(Reason::InvalidSchema));
+        }
+        let mut devices = HashSet::new();
+        let mut exits = Vec::with_capacity(report.exits.len());
+        for ((exit, hostname), reported) in self
+            .configuration
+            .exits
+            .iter()
+            .zip(self.hostnames)
+            .zip(report.exits)
+        {
+            if reported.id != exit.id
+                || reported.hostname != hostname
+                || reported.mode != exit.mode.kind()
+            {
+                return Err(err(Reason::InvalidSchema));
+            }
+            match (&exit.mode, &reported.profile) {
+                (
+                    Mode::Mullvad {
+                        expected_server, ..
+                    },
+                    Some(profile),
+                ) => {
+                    profile.validate()?;
+                    if profile.expected_server() != expected_server {
+                        return Err(err(Reason::ProfileServerMismatch));
+                    }
+                    if !devices.insert(profile.device_public_key()) {
+                        return Err(err(Reason::DuplicatePrivateKey));
+                    }
+                }
+                (Mode::Direct {}, None) => {}
+                _ => return Err(err(Reason::InvalidSchema)),
+            }
+            exits.push(PublicExit {
+                exit: exit.clone(),
+                hostname,
+                profile: reported.profile,
+            });
+        }
+        Ok(PublicConfiguration {
+            configuration: self.configuration,
+            exits,
+        })
+    }
+}
+impl PublicConfiguration {
+    pub fn configuration(&self) -> &Configuration {
+        &self.configuration
+    }
+    pub fn exits(&self) -> &[PublicExit] {
+        &self.exits
+    }
+    /// Re-encode only the already-public facts for an exact fixed-role reload
+    /// comparison. This does not read profiles or mint native admission.
+    pub fn public_report(&self) -> Result<PublicConfigurationReport> {
+        Ok(PublicConfigurationReport {
+            configuration_digest: public_configuration_digest(&self.configuration)?,
+            exits: self
+                .exits
+                .iter()
+                .map(|exit| PublicExitReport {
+                    id: exit.exit.id.clone(),
+                    hostname: exit.hostname.clone(),
+                    mode: exit.exit.mode.kind(),
+                    profile: exit.profile.clone(),
+                })
+                .collect(),
+        })
+    }
+}
+impl PublicExit {
+    pub fn exit(&self) -> &Exit {
+        &self.exit
+    }
+    pub fn hostname(&self) -> &str {
+        &self.hostname
+    }
+    pub fn profile(&self) -> Option<&PublicProfile> {
+        self.profile.as_ref()
+    }
+}
+
 impl ValidatedConfiguration {
+    pub fn public_report(&self) -> Result<PublicConfigurationReport> {
+        Ok(PublicConfigurationReport {
+            configuration_digest: public_configuration_digest(&self.configuration)?,
+            exits: self
+                .exits
+                .iter()
+                .map(|exit| PublicExitReport {
+                    id: exit.exit.id.clone(),
+                    hostname: exit.hostname.clone(),
+                    mode: exit.exit.mode.kind(),
+                    profile: exit.profile.as_ref().map(Profile::public_metadata),
+                })
+                .collect(),
+        })
+    }
     pub fn configuration(&self) -> &Configuration {
         &self.configuration
     }
@@ -131,6 +295,49 @@ impl Configuration {
     where
         F: FnMut(&Path, &str) -> Result<Profile>,
     {
+        let structural = self.validate_structure()?;
+        let mut private_keys = Vec::with_capacity(structural.configuration.exits.len());
+        let mut validated = Vec::with_capacity(structural.configuration.exits.len());
+        for (exit, hostname) in structural
+            .configuration
+            .exits
+            .iter()
+            .zip(structural.hostnames)
+        {
+            let profile = match &exit.mode {
+                Mode::Mullvad {
+                    profile,
+                    expected_server,
+                } => {
+                    let parsed = reader(profile, expected_server).map_err(|e| err(e.reason()))?;
+                    // A reader cannot bypass the configured exact server binding.
+                    if parsed.expected_server() != expected_server {
+                        return Err(err(Reason::ProfileServerMismatch));
+                    }
+                    let identity = parsed.private_key_identity();
+                    if private_keys.contains(&identity) {
+                        return Err(err(Reason::DuplicatePrivateKey));
+                    }
+                    private_keys.push(identity);
+                    Some(parsed)
+                }
+                Mode::Direct {} => None,
+            };
+            validated.push(ValidatedExit {
+                exit: exit.clone(),
+                hostname,
+                profile,
+            });
+        }
+        Ok(ValidatedConfiguration {
+            configuration: structural.configuration,
+            exits: validated,
+        })
+    }
+    /// Public shape validation only: never opens or reads a profile. It cannot
+    /// authorize provisioning; all profiles, including disabled members, still
+    /// require the no-fork child's full validation and exact native receipt.
+    pub fn validate_structure(self) -> Result<StructuredConfiguration> {
         if self.schema_version != 2
             || self.exits.is_empty()
             || self.exits.len() > MAX_EXITS
@@ -178,8 +385,7 @@ impl Configuration {
             names.push(name);
         }
         let mut unique_names = HashSet::new();
-        let mut private_keys = HashSet::new();
-        let mut validated = Vec::new();
+        let mut hostnames = Vec::with_capacity(self.exits.len());
         for (exit, base_name) in self.exits.iter().zip(names) {
             let hostname = if counts[&base_name] > 1 {
                 format!("{base_name}-{}", exit.id)
@@ -190,28 +396,7 @@ impl Configuration {
             if !unique_names.insert(hostname.clone()) {
                 return Err(err(Reason::HostnameConflict));
             }
-            let profile = match &exit.mode {
-                Mode::Mullvad {
-                    profile,
-                    expected_server,
-                } => {
-                    let parsed = reader(profile, expected_server).map_err(|e| err(e.reason()))?;
-                    // A reader cannot bypass the configured exact server binding.
-                    if parsed.expected_server() != expected_server {
-                        return Err(err(Reason::ProfileServerMismatch));
-                    }
-                    if !private_keys.insert(parsed.private_key_identity()) {
-                        return Err(err(Reason::DuplicatePrivateKey));
-                    }
-                    Some(parsed)
-                }
-                Mode::Direct {} => None,
-            };
-            validated.push(ValidatedExit {
-                exit: exit.clone(),
-                hostname,
-                profile,
-            });
+            hostnames.push(hostname);
         }
         let mut adapters = HashSet::new();
         for adapter in &self.dependency_adapters {
@@ -261,9 +446,9 @@ impl Configuration {
                 }
             }
         }
-        Ok(ValidatedConfiguration {
+        Ok(StructuredConfiguration {
             configuration: self,
-            exits: validated,
+            hostnames,
         })
     }
 }
@@ -417,4 +602,95 @@ fn repository_component(s: &str) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod public_configuration_tests {
+    use super::*;
+    const PROFILE: &[u8] = b"[Interface]\nPrivateKey=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\nAddress=10.64.0.2/32\nDNS=10.64.0.1\n[Peer]\nPublicKey=AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\nEndpoint=185.65.134.88:51820\nAllowedIPs=0.0.0.0/0\n";
+    fn configuration() -> Configuration {
+        Configuration::parse(serde_json::to_vec(&serde_json::json!({
+            "schema_version":2,"deployment_id":"secretlab","site":"testsite",
+            "gateway_image":format!("sha256:{}", "a".repeat(64)),
+            "exits":[{"id":"first","enabled":false,"state_dir":"/synthetic/first",
+                "mode":{"kind":"mullvad","profile":"/nonexistent/synthetic.conf","expected_server":"de-fra-wg-401"}}],
+            "dependency_adapters":[],"client_policies":[]
+        })).unwrap().as_slice()).unwrap()
+    }
+    #[test]
+    fn structural_configuration_never_loads_profiles_and_public_report_binds_exact_input() {
+        let cfg = configuration();
+        let structural = cfg.clone().validate_structure().unwrap();
+        let prebirth_allocation =
+            crate::allocation::AllocationRecord::from_structure(&structural, 7).unwrap();
+        let mut read_count = 0;
+        let secret = cfg
+            .clone()
+            .validate_with(|_, server| {
+                read_count += 1;
+                Profile::parse(PROFILE, server, None)
+            })
+            .unwrap();
+        assert_eq!(read_count, 1); // Disabled exits retain validation, too.
+        let bytes = secret.public_report().unwrap().encode().unwrap();
+        let old_allocation =
+            crate::allocation::AllocationRecord::from_configuration(&secret, 7).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&prebirth_allocation).unwrap(),
+            serde_json::to_vec(&old_allocation).unwrap()
+        );
+        drop(secret);
+        let public = structural.bind_public_report(&bytes).unwrap();
+        let public_allocation =
+            crate::allocation::AllocationRecord::from_public_configuration(&public, 7).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&public_allocation).unwrap(),
+            serde_json::to_vec(&old_allocation).unwrap()
+        );
+        assert_eq!(
+            public.exits()[0].profile().unwrap().endpoint().to_string(),
+            "185.65.134.88:51820"
+        );
+        let mut different = cfg;
+        different.site = "changedsite".into();
+        assert!(
+            different
+                .validate_structure()
+                .unwrap()
+                .bind_public_report(&bytes)
+                .is_err()
+        );
+        assert!(
+            !bytes
+                .windows(44)
+                .any(|window| window == b"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=")
+        );
+    }
+    #[test]
+    fn public_report_cannot_substitute_disabled_member_or_secret_field() {
+        let cfg = configuration();
+        let secret = cfg
+            .clone()
+            .validate_with(|_, server| Profile::parse(PROFILE, server, None))
+            .unwrap();
+        let value = serde_json::to_value(secret.public_report().unwrap()).unwrap();
+        let mut altered = value.clone();
+        altered["exits"][0]["id"] = serde_json::json!("other");
+        assert!(
+            cfg.clone()
+                .validate_structure()
+                .unwrap()
+                .bind_public_report(&serde_json::to_vec(&altered).unwrap())
+                .is_err()
+        );
+        let mut altered = value;
+        altered["exits"][0]["profile"]["private_key"] =
+            serde_json::json!("synthetic-rejected-marker");
+        assert!(
+            cfg.validate_structure()
+                .unwrap()
+                .bind_public_report(&serde_json::to_vec(&altered).unwrap())
+                .is_err()
+        );
+    }
 }

@@ -2,27 +2,14 @@ use crate::{
     Error, Result, sha256,
     storage::{self, Kind},
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{fs::File, io::Read, path::PathBuf};
 use vprouter_core::{
+    allocation::AllocationRecord,
     config::{ExitMode, Mode, ValidatedConfiguration},
-    state::{Evidence, HealthMachine, HealthState},
+    health::{Binding, Snapshot},
 };
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Snapshot {
-    pub version: u32,
-    pub deployment_id: String,
-    pub exit_id: String,
-    pub mode: ExitMode,
-    pub display_name: String,
-    pub expected_server: Option<String>,
-    pub config_fingerprint: String,
-    pub boot_id: String,
-    pub state: HealthState,
-    pub evidence: Evidence,
-}
 #[derive(Serialize)]
 pub struct ExitStatus {
     pub exit_id: String,
@@ -54,32 +41,21 @@ fn public_text(path: &str) -> Option<String> {
     (bytes.len() <= 4096).then_some(())?;
     String::from_utf8(bytes).ok()
 }
-fn validate_snapshot(
-    snapshot: &Snapshot,
+/// Shared producer-to-reader validation. Expected generation comes from the
+/// independently owned allocation record, never from a received snapshot.
+pub fn expected_binding(
     cfg: &ValidatedConfiguration,
     index: usize,
-    now: f64,
+    generation: u64,
     boot: &str,
-) -> Result<Option<f64>> {
-    let exit = &cfg.exits()[index];
+) -> Result<Binding> {
+    let exit = cfg.exits().get(index).ok_or(Error::InvalidSnapshot)?;
     let expected_server = match &exit.exit().mode {
         Mode::Mullvad {
             expected_server, ..
-        } => Some(expected_server.as_str()),
+        } => Some(expected_server.clone()),
         Mode::Direct {} => None,
     };
-    if snapshot.version != 1
-        || snapshot.deployment_id != cfg.configuration().deployment_id
-        || snapshot.exit_id != exit.exit().id
-        || snapshot.mode != exit.exit().mode.kind()
-        || snapshot.display_name != exit.hostname()
-        || snapshot.expected_server.as_deref() != expected_server
-        || snapshot.config_fingerprint != config_fingerprint(cfg)?
-        || snapshot.boot_id != boot
-    {
-        return Err(Error::SnapshotBindingMismatch);
-    }
-    // A node ID supplied by the snapshot cannot be its own authority.
     let mut nodes = cfg
         .configuration()
         .client_policies
@@ -90,32 +66,51 @@ fn validate_snapshot(
     if nodes.any(|n| n != node) {
         return Err(Error::InvalidSnapshot);
     }
-    let mut machine = HealthMachine::new(snapshot.mode, expected_server, node)
-        .map_err(|_| Error::InvalidSnapshot)?;
-    machine
-        .observe(now, snapshot.evidence.clone())
+    let binding = Binding {
+        deployment_id: cfg.configuration().deployment_id.clone(),
+        exit_id: exit.exit().id.clone(),
+        generation,
+        mode: exit.exit().mode.kind(),
+        display_name: exit.hostname().into(),
+        expected_server,
+        node_id: node.into(),
+        config_fingerprint: config_fingerprint(cfg)?,
+        boot_id: boot.into(),
+    };
+    Ok(binding)
+}
+pub fn validate_snapshot(
+    snapshot: &Snapshot,
+    cfg: &ValidatedConfiguration,
+    index: usize,
+    generation: u64,
+    now: f64,
+    boot: &str,
+) -> Result<Option<f64>> {
+    let binding = expected_binding(cfg, index, generation, boot)?;
+    if snapshot.binding != binding {
+        return Err(Error::SnapshotBindingMismatch);
+    }
+    snapshot
+        .validate(&binding, now)
         .map_err(|e| match e.reason() {
             vprouter_core::reason::Reason::StaleEvidence => Error::StaleSnapshot,
             _ => Error::InvalidSnapshot,
-        })?;
-    machine.status(now).map_err(|_| Error::InvalidSnapshot)?;
-    // Even cached declared READY must carry the full evidence fields. This
-    // does not reconstruct a recovery streak, liveness or resource ownership.
-    if snapshot.state == HealthState::Ready
-        && (!snapshot.evidence.online
-            || !snapshot.evidence.policy_approved
-            || snapshot.evidence.node_id.as_deref() != Some(node)
-            || snapshot.evidence.server.as_deref() != expected_server
-            || snapshot.evidence.egress.is_none()
-            || snapshot.evidence.verified_at.is_none())
-    {
-        return Err(Error::InvalidSnapshot);
-    }
-    Ok(snapshot.evidence.verified_at.map(|t| now - t))
+        })
 }
 pub fn status(cfg: &ValidatedConfiguration) -> Vec<ExitStatus> {
-    let now =
-        public_text("/proc/uptime").and_then(|s| s.split_whitespace().next()?.parse::<f64>().ok());
+    let now = vprouter_core::health::boot_seconds();
+    let allocation_path = PathBuf::from("/run/vprouter-v2")
+        .join(&cfg.configuration().deployment_id)
+        .join("allocations.json");
+    let allocation =
+        storage::read(&allocation_path, Kind::SecretFile, 64 * 1024).and_then(|bytes| {
+            let a = AllocationRecord::parse(&bytes, &cfg.configuration().deployment_id, &[])
+                .map_err(|_| Error::InvalidSnapshot)?;
+            a.matches_configuration(cfg)
+                .map_err(|_| Error::SnapshotBindingMismatch)?;
+            Ok(a)
+        });
     let boot = public_text("/proc/sys/kernel/random/boot_id").map(|s| s.trim().to_owned());
     cfg.exits()
         .iter()
@@ -156,15 +151,14 @@ pub fn status(cfg: &ValidatedConfiguration) -> Vec<ExitStatus> {
                 .ok_or(Error::UnsafePath)
                 .and_then(|parent| storage::metadata(parent, Kind::PrivateDirectory))
                 .and_then(|_| storage::read(&path, Kind::SecretFile, 64 * 1024))
-                .and_then(|bytes| {
-                    serde_json::from_slice::<Snapshot>(&bytes).map_err(|_| Error::InvalidSnapshot)
-                })
+                .and_then(|bytes| Snapshot::decode(&bytes).map_err(|_| Error::InvalidSnapshot))
                 .and_then(|snapshot| {
                     validate_snapshot(
                         &snapshot,
                         cfg,
                         i,
-                        now.ok_or(Error::InvalidSnapshot)?,
+                        allocation.as_ref().map_err(|e| *e)?.generation,
+                        now,
                         boot.as_deref().ok_or(Error::InvalidSnapshot)?,
                     )
                 });
@@ -187,53 +181,57 @@ mod tests {
     fn config() -> ValidatedConfiguration {
         Configuration::parse(br#"{"schema_version":2,"deployment_id":"test","site":"site","gateway_image":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","exits":[{"id":"direct","enabled":true,"state_dir":"/private/direct","mode":{"kind":"direct"}}],"dependency_adapters":[],"client_policies":[{"id":"client","exit_id":"direct","selected_node_id":"node1","mode":"direct","dependency_adapters":[]}]}"#).unwrap().validate().unwrap()
     }
+    const BOOT: &str = "01234567-1234-1234-1234-0123456789ab";
     fn snapshot(cfg: &ValidatedConfiguration) -> Snapshot {
-        serde_json::from_value(serde_json::json!({"version":1,"deployment_id":"test","exit_id":"direct","mode":"direct","display_name":cfg.exits()[0].hostname(),"expected_server":null,"config_fingerprint":config_fingerprint(cfg).unwrap(),"boot_id":"boot","state":"READY",
+        serde_json::from_value(serde_json::json!({"version":2,"binding":{"deployment_id":"test","exit_id":"direct","mode":"direct","generation":1,"node_id":"node1","display_name":cfg.exits()[0].hostname(),"expected_server":null,"config_fingerprint":config_fingerprint(cfg).unwrap(),"boot_id":BOOT},"sequence":1,"published_at":100.,"state":"READY","reason":null,
             "evidence":{"provider_ok":true,"structural_ok":true,"provider_at":100.0,"structural_at":100.0,"heartbeat_at":100.0,"handshake_age_seconds":null,"online":true,"policy_approved":true,"server":null,"node_id":"node1","egress":"8.8.8.8","verified_at":100.0,"dns":"not_tested","ipv6":"not_tested"}})).unwrap()
     }
     #[test]
     fn stale_wrong_boot_or_config_cannot_validate() {
         let cfg = config();
         let mut s = snapshot(&cfg);
-        assert_eq!(validate_snapshot(&s, &cfg, 0, 101.0, "boot"), Ok(Some(1.0)));
         assert_eq!(
-            validate_snapshot(&s, &cfg, 0, 145.0, "boot"),
+            validate_snapshot(&s, &cfg, 0, 1, 101.0, BOOT),
+            Ok(Some(1.0))
+        );
+        assert_eq!(
+            validate_snapshot(&s, &cfg, 0, 1, 145.0, BOOT),
             Err(Error::StaleSnapshot)
         );
         assert_eq!(
-            validate_snapshot(&s, &cfg, 0, 101.0, "otherboot"),
+            validate_snapshot(&s, &cfg, 0, 1, 101.0, "otherboot"),
             Err(Error::SnapshotBindingMismatch)
         );
-        s.display_name = "old-name".into();
+        s.binding.display_name = "old-name".into();
         assert_eq!(
-            validate_snapshot(&s, &cfg, 0, 101.0, "boot"),
+            validate_snapshot(&s, &cfg, 0, 1, 101.0, BOOT),
             Err(Error::SnapshotBindingMismatch)
         );
         s = snapshot(&cfg);
-        s.evidence.node_id = Some("forged-node".into());
+        s.evidence.as_mut().unwrap().node_id = Some("forged-node".into());
         assert_eq!(
-            validate_snapshot(&s, &cfg, 0, 101.0, "boot"),
+            validate_snapshot(&s, &cfg, 0, 1, 101.0, BOOT),
             Err(Error::InvalidSnapshot)
         );
         for change in ["deployment", "id", "mode", "server", "fingerprint"] {
             let mut s = snapshot(&cfg);
             match change {
-                "deployment" => s.deployment_id = "other".into(),
-                "id" => s.exit_id = "other".into(),
-                "mode" => s.mode = ExitMode::Mullvad,
-                "server" => s.expected_server = Some("de-fra-wg-404".into()),
-                "fingerprint" => s.config_fingerprint = "0".repeat(64),
+                "deployment" => s.binding.deployment_id = "other".into(),
+                "id" => s.binding.exit_id = "other".into(),
+                "mode" => s.binding.mode = ExitMode::Mullvad,
+                "server" => s.binding.expected_server = Some("de-fra-wg-404".into()),
+                "fingerprint" => s.binding.config_fingerprint = "0".repeat(64),
                 _ => unreachable!(),
             }
             assert_eq!(
-                validate_snapshot(&s, &cfg, 0, 101.0, "boot"),
+                validate_snapshot(&s, &cfg, 0, 1, 101.0, BOOT),
                 Err(Error::SnapshotBindingMismatch)
             );
         }
         s = snapshot(&cfg);
-        s.evidence.policy_approved = false;
+        s.evidence.as_mut().unwrap().policy_approved = false;
         assert_eq!(
-            validate_snapshot(&s, &cfg, 0, 101.0, "boot"),
+            validate_snapshot(&s, &cfg, 0, 1, 101.0, BOOT),
             Err(Error::InvalidSnapshot)
         );
     }

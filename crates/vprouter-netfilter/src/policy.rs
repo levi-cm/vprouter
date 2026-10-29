@@ -107,6 +107,27 @@ impl Policy {
             producer: None,
         })
     }
+    /// Digest of authored public initial policy, never native authority.
+    pub fn initial_digest(&self) -> Result<[u8; 32]> {
+        use sha2::Digest;
+        if self.producer.is_some() {
+            return Err(Error::InvalidInput);
+        }
+        let mut hash = sha2::Sha256::new();
+        hash.update(b"fixed_initial_quarantine_v1");
+        for table in [self.emergency_table(), self.table(true), self.table(false)] {
+            let ops = table.operations();
+            hash.update((ops.len() as u64).to_le_bytes());
+            for (kind, flags, attrs) in ops {
+                let bytes = encode_attrs(&attrs);
+                hash.update(kind.to_le_bytes());
+                hash.update(flags.to_le_bytes());
+                hash.update((bytes.len() as u64).to_le_bytes());
+                hash.update(bytes);
+            }
+        }
+        Ok(hash.finalize().into())
+    }
     pub fn with_producer(
         mut self,
         producer: std::sync::Arc<crate::SocketProducer>,

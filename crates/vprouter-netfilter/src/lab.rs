@@ -210,6 +210,69 @@ pub(crate) fn run() -> Result<()> {
         if a.reconcile() != (R::Matching, R::Absent) {
             return Err(Error::Drifted);
         }
+        // Distinct terminal authority must survive a later ordinary Ready
+        // release, and repeating an already matching terminal deny must commit
+        // a real generation change. Only this disposable lab removes it later.
+        a.install_permit()?;
+        let lifecycle = "a".repeat(64);
+        let table = crate::terminal::terminal_table(&policy, &lifecycle)?;
+        let namespace = a.namespace();
+        let mut old = Socket::open()?;
+        let old_generation = old.generation(deadline())?;
+        let boot_deadline = || crate::BootDeadline::at(vprouter_core::health::boot_seconds() + 5.);
+        let mut terminal = crate::TerminalQuarantine::open(&policy, &lifecycle, namespace)?;
+        terminal.contain(boot_deadline()?)?;
+        if terminal.contain(boot_deadline()?).is_ok() {
+            return Err(Error::Drifted);
+        }
+        // A previously prepared release generation cannot cross the completed
+        // terminal commit. Even a fresh release owns only ordinary deny tables.
+        let stale = old.batch(
+            &[crate::actuator::delete(&policy.table(true))],
+            old_generation,
+            deadline(),
+        );
+        if stale != Err(Error::GenerationChanged) {
+            return Err(Error::GenerationChanged);
+        }
+        a.release_quarantine()?;
+        // Read-only witness BEFORE any second terminal writer can repair an
+        // accidental deletion by ordinary release. This proves persistence.
+        let mut observer = Socket::open()?;
+        let tables = observer.dump(1, &[], deadline())?;
+        if crate::actuator::inspect_table_from(&mut observer, &table, &tables, deadline())?
+            != R::Matching
+        {
+            return Err(Error::Drifted);
+        }
+        let matching_generation = observer.generation(deadline())?;
+        let mut terminal = crate::TerminalQuarantine::open(&policy, &lifecycle, namespace)?;
+        terminal.contain(boot_deadline()?)?;
+        if observer.generation(deadline())? == matching_generation {
+            return Err(Error::GenerationChanged);
+        }
+        // Even the Matching branch must fence a batch prepared before it.
+        if observer.batch(
+            &[crate::actuator::delete(&table)],
+            matching_generation,
+            deadline(),
+        ) != Err(Error::GenerationChanged)
+        {
+            return Err(Error::GenerationChanged);
+        }
+        let mut observer = Socket::open()?;
+        let tables = observer.dump(1, &[], deadline())?;
+        if crate::actuator::inspect_table_from(&mut observer, &table, &tables, deadline())?
+            != R::Matching
+        {
+            return Err(Error::Drifted);
+        }
+        println!(
+            "{{\"case\":\"terminal_commit_fences_stale_release_and_survives_fresh_release\",\"scope\":\"{scope:?}\",\"result\":\"pass\"}}"
+        );
+        a.cleanup_permit()?;
+        // No product deletion API exists; exact disposable harness cleanup only.
+        raw(&[crate::actuator::delete(&table)])?;
         let mut s = Socket::open()?;
         let tables = s.dump(1, &[], deadline())?;
         let preserved = tables.iter().any(|m| {

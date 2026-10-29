@@ -35,3 +35,7 @@ harness = false
 [[bin]]
 name = "vprouter-worker-observe"
 path = "src/observe_main.rs"
+
+[[bin]]
+name = "vprouter-worker-monitor"
+path = "src/monitor_main.rs"

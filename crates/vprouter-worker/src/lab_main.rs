@@ -1,6 +1,8 @@
 //! Controller-only static read-only owned-guest harness; no startup authority.
 #![forbid(unsafe_code)]
 #![allow(dead_code)]
+#[path = "bootstrap.rs"]
+mod bootstrap;
 #[path = "client.rs"]
 mod client;
 #[path = "json.rs"]
@@ -9,7 +11,7 @@ mod json;
 mod localapi;
 #[path = "placement.rs"]
 mod placement;
-use vprouter_worker::Error;
+use vprouter_worker::{Error, operation};
 type Result<T> = std::result::Result<T, Error>;
 fn main() {
     if !std::env::args().any(|a| a == "--ignored") {

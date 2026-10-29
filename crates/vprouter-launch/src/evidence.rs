@@ -3,11 +3,11 @@ use super::{
     Error, Result,
     spec::{LaunchSpec, StagingEvidence, WORKER},
 };
-use vprouter_linux::docker::{LaunchContainer, LaunchDaemon, LaunchImage};
+use vprouter_linux::docker::{InputString, LaunchContainer, LaunchDaemon, LaunchImage};
 
 /// Produced only by an exact native daemon-profile match. No caller boolean or
 /// arbitrary security-option string can assert an accepted inherited profile.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(super) enum DaemonSecurity {
     BuiltinSeccomp,
     AppArmorBuiltinSeccomp,
@@ -43,6 +43,10 @@ pub(super) fn daemon(d: &LaunchDaemon) -> Result<DaemonSecurity> {
         Ok(DaemonSecurity::BuiltinSeccomp)
     } else if matches(&[
         "name=apparmor",
+        "name=seccomp,profile=builtin",
+        "name=cgroupns",
+    ]) || matches(&[
+        "name=apparmor,profile=default",
         "name=seccomp,profile=builtin",
         "name=cgroupns",
     ]) {
@@ -93,7 +97,7 @@ fn configuration(accepted: bool, reason: &'static str) -> Result<()> {
 fn empty<T>(v: &Option<Vec<T>>) -> bool {
     v.as_ref().is_none_or(Vec::is_empty)
 }
-fn paths(v: &Option<Vec<String>>, expected: &[&str]) -> bool {
+fn paths(v: &Option<Vec<InputString>>, expected: &[&str]) -> bool {
     v.as_ref().is_some_and(|p| {
         p.len() == expected.len()
             && expected
@@ -106,10 +110,42 @@ pub(super) fn container(
     stage: &StagingEvidence,
     c: &LaunchContainer,
 ) -> Result<()> {
+    container_inner(s, stage, c, true)
+}
+pub(super) fn container_quiet(
+    s: &LaunchSpec,
+    stage: &StagingEvidence,
+    c: &LaunchContainer,
+) -> Result<()> {
+    container_inner(s, stage, c, false)
+}
+fn container_inner(
+    s: &LaunchSpec,
+    stage: &StagingEvidence,
+    c: &LaunchContainer,
+    diagnostics: bool,
+) -> Result<()> {
+    let configuration = |accepted, reason| {
+        if diagnostics {
+            configuration(accepted, reason)
+        } else if accepted {
+            Ok(())
+        } else {
+            Err(Error::UnsupportedConfiguration)
+        }
+    };
     if c.id != s.container_id
         || c.image != stage.content_id
-        || c.config.labels.get("io.vprouter.deployment") != Some(&s.allocation.deployment_id)
-        || c.config.labels.get("io.vprouter.role").map(String::as_str) != Some("gateway")
+        || c.config
+            .labels
+            .get("io.vprouter.deployment")
+            .map(InputString::as_str)
+            != Some(s.allocation.deployment_id.as_str())
+        || c.config
+            .labels
+            .get("io.vprouter.role")
+            .map(InputString::as_str)
+            != Some("gateway")
         || !c.state.running
         || c.state.paused
         || c.state.restarting
@@ -262,7 +298,12 @@ pub(super) fn container(
             "{}:{WORKER}:ro",
             stage.artifact_path.to_str().ok_or(Error::UnsafeInput)?
         );
-        if c.mounts.len() != 1 || h.binds.as_ref() != Some(&vec![expected]) {
+        if c.mounts.len() != 1
+            || !h
+                .binds
+                .as_ref()
+                .is_some_and(|v| v.len() == 1 && v[0] == expected)
+        {
             configuration(false, "bind_list")?;
         }
         let m = &c.mounts[0];

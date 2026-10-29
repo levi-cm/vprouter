@@ -439,9 +439,40 @@ pub(crate) fn json_response(v: serde_json::Value) -> Vec<u8> {
     response(200, &serde_json::to_vec(&v).unwrap())
 }
 #[tokio::test]
+async fn no_localapi_write_precedes_independent_preserved_identity_check() {
+    for operation in 0..3 {
+        let mut wrong = status();
+        wrong["Self"]["ID"] = "foreign-identity".into();
+        let mut server = UnixMock::scripted(vec![(
+            "GET",
+            "/localapi/v0/status?peers=false",
+            None,
+            json_response(wrong),
+        )]);
+        let api = localapi::LocalApi::synthetic(
+            Rc::new(Placed::synthetic()),
+            server.path.clone(),
+            identity(),
+        );
+        let result = match operation {
+            0 => api.initialize().await,
+            1 => api.withdraw().await,
+            _ => api.advertise().await,
+        };
+        assert_eq!(result, Err(Error::Identity));
+        server.finished().await;
+    }
+}
+#[tokio::test]
 async fn actual_unix_initialize_withdraws_first_and_only_writes_masked_preferences() {
     let empty = prefs(serde_json::Value::Null);
     let mut server = UnixMock::scripted(vec![
+        (
+            "GET",
+            "/localapi/v0/status?peers=false",
+            None,
+            json_response(status()),
+        ),
         (
             "PATCH",
             "/localapi/v0/prefs",
@@ -453,6 +484,12 @@ async fn actual_unix_initialize_withdraws_first_and_only_writes_masked_preferenc
             "/localapi/v0/prefs",
             None,
             json_response(empty.clone()),
+        ),
+        (
+            "GET",
+            "/localapi/v0/status?peers=false",
+            None,
+            json_response(status()),
         ),
         (
             "PATCH",
@@ -475,6 +512,12 @@ async fn actual_unix_initialize_withdraws_first_and_only_writes_masked_preferenc
             json_response(status()),
         ),
         ("GET", "/localapi/v0/prefs", None, json_response(empty)),
+        (
+            "GET",
+            "/localapi/v0/status?peers=false",
+            None,
+            json_response(status()),
+        ),
         (
             "PATCH",
             "/localapi/v0/prefs",
@@ -697,23 +740,27 @@ async fn health_file_is_atomic_private_and_refuses_symlink_hardlink_and_pending_
         "n123",
     )
     .unwrap();
-    let status = machine.status(0.0).unwrap();
-    publisher.write(&status).await.unwrap();
-    publisher.write(&status).await.unwrap();
+
+    publisher.write(&machine, 0.0).await.unwrap();
+    publisher.write(&machine, 0.0).await.unwrap();
     let path = dir.join("health.json");
+    let wire = vprouter_core::health::Snapshot::decode(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(wire.sequence, 2);
+    assert_eq!(wire.binding.node_id, "n123");
+    assert_eq!(wire.validate(&wire.binding, 0.0), Ok(None));
     let m = std::fs::symlink_metadata(&path).unwrap();
     assert_eq!(m.mode() & 0o7777, 0o600);
     assert_eq!(m.nlink(), 1);
     assert!(!dir.join(".health.json.pending").exists());
     std::fs::hard_link(&path, dir.join("hard")).unwrap();
-    assert_eq!(publisher.write(&status).await, Err(Error::Storage));
+    assert_eq!(publisher.write(&machine, 0.0).await, Err(Error::Storage));
     std::fs::remove_file(dir.join("hard")).unwrap();
     std::fs::remove_file(&path).unwrap();
     std::os::unix::fs::symlink("target", &path).unwrap();
-    assert_eq!(publisher.write(&status).await, Err(Error::Storage));
+    assert_eq!(publisher.write(&machine, 0.0).await, Err(Error::Storage));
     std::fs::remove_file(&path).unwrap();
     std::fs::write(dir.join(".health.json.pending"), b"untrusted").unwrap();
-    assert_eq!(publisher.write(&status).await, Err(Error::Storage));
+    assert_eq!(publisher.write(&machine, 0.0).await, Err(Error::Storage));
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -735,14 +782,14 @@ async fn stalled_health_writer_has_bounded_one_in_flight_queue() {
         "n123",
     )
     .unwrap();
-    let status = machine.status(0.0).unwrap();
+
     let before = tokio::time::Instant::now();
-    assert_eq!(p.write(&status).await, Err(Error::Storage));
+    assert_eq!(p.write(&machine, 0.0).await, Err(Error::Storage));
     assert!(
         before.elapsed() >= Duration::from_secs(2) && before.elapsed() < Duration::from_secs(3)
     );
     let before = tokio::time::Instant::now();
-    assert_eq!(p.write(&status).await, Err(Error::Storage));
+    assert_eq!(p.write(&machine, 0.0).await, Err(Error::Storage));
     assert!(before.elapsed() < Duration::from_millis(100));
     release.send(()).unwrap();
     for _ in 0..100 {

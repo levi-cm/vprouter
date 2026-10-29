@@ -9,12 +9,19 @@ use std::{
     path::Path,
 };
 
+use zeroize::{Zeroize, Zeroizing};
+
 pub const MAX_PROFILE_BYTES: usize = 64 * 1024;
 // No Debug or Serialize implementation; callers cannot accidentally print keys.
 struct SecretKey([u8; 32]);
+impl Zeroize for SecretKey {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
 impl Drop for SecretKey {
     fn drop(&mut self) {
-        self.0.fill(0);
+        self.zeroize();
     }
 }
 pub struct Profile {
@@ -27,18 +34,116 @@ pub struct Profile {
     expected_server: String,
     server_hint_verified: bool,
 }
+/// Bounded public metadata only. This is NOT native provisioning/admission
+/// authority, nor proof that its caller has never held a secret. Operational
+/// parents obtain it only through their original no-fork child receipt.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicProfile {
+    peer_public_key: [u8; 32],
+    device_public_key: [u8; 32],
+    address: Ipv4Addr,
+    endpoint: SocketAddrV4,
+    dns: Vec<IpAddr>,
+    resolvers: Vec<Ipv4Addr>,
+    expected_server: String,
+    server_hint_verified: bool,
+}
+impl PublicProfile {
+    pub fn parse_public(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() > 4096 {
+            return Err(err(Reason::InvalidProfile));
+        }
+        let value: Self = serde_json::from_slice(bytes).map_err(|_| err(Reason::InvalidProfile))?;
+        value.validate()?;
+        Ok(value)
+    }
+    pub fn validate(&self) -> Result<()> {
+        server_name(&self.expected_server)?;
+        let mut unique = HashSet::new();
+        let resolvers: Vec<_> = self
+            .dns
+            .iter()
+            .filter_map(|address| match address {
+                IpAddr::V4(ip) if ip.is_private() => Some(*ip),
+                _ => None,
+            })
+            .collect();
+        if self.peer_public_key == [0; 32]
+            || self.device_public_key == [0; 32]
+            || self.address.is_unspecified()
+            || self.address.is_multicast()
+            || self.address.is_loopback()
+            || self.address.is_broadcast()
+            || self.endpoint.port() == 0
+            || !public_ipv4(*self.endpoint.ip())
+            || self.dns.len() > 8
+            || !self.dns.iter().all(|ip| unique.insert(ip))
+            || self.resolvers != resolvers
+        {
+            return Err(err(Reason::InvalidProfile));
+        }
+        Ok(())
+    }
+    pub fn peer_public_key(&self) -> &[u8; 32] {
+        &self.peer_public_key
+    }
+    pub fn device_public_key(&self) -> [u8; 32] {
+        self.device_public_key
+    }
+    pub fn address(&self) -> Ipv4Addr {
+        self.address
+    }
+    pub fn endpoint(&self) -> SocketAddrV4 {
+        self.endpoint
+    }
+    pub fn dns_metadata(&self) -> &[IpAddr] {
+        &self.dns
+    }
+    pub fn resolvers(&self) -> &[Ipv4Addr] {
+        &self.resolvers
+    }
+    pub fn expected_server(&self) -> &str {
+        &self.expected_server
+    }
+    pub fn has_matching_server_hint(&self) -> bool {
+        self.server_hint_verified
+    }
+}
+
 impl Profile {
+    /// Called inside the fixed no-fork secret role for operational use. Owned
+    /// key material remains in this process and is erased on normal/error drop;
+    /// the role exits instead of ever forking after secret ingress.
+    pub fn public_metadata(&self) -> PublicProfile {
+        let secret = x25519_dalek::StaticSecret::from(self.private_key.0);
+        let device_public_key = x25519_dalek::PublicKey::from(&secret).to_bytes();
+        PublicProfile {
+            peer_public_key: self.public_key,
+            device_public_key,
+            address: self.address,
+            endpoint: self.endpoint,
+            dns: self.dns.clone(),
+            resolvers: self.resolvers.clone(),
+            expected_server: self.expected_server.clone(),
+            server_hint_verified: self.server_hint_verified,
+        }
+    }
     pub fn load(path: &Path, expected_server: &str) -> Result<Self> {
+        crate::secret_boundary::mark_ingress();
         absolute_path(path)?;
         let file = crate::allocation::secure_open_read(path)
             .map_err(|_| err(Reason::ProfileUnavailable))?;
-        let mut bytes = Vec::new();
+        // Allocate the bounded input once: reallocating could leave secret bytes
+        // in a freed allocation. Zeroizing covers successful and failed reads.
+        let mut bytes = Zeroizing::new(Vec::with_capacity(MAX_PROFILE_BYTES + 1));
         file.take((MAX_PROFILE_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
             .map_err(|_| err(Reason::ProfileUnavailable))?;
         Self::parse(&bytes, expected_server, Some(path))
     }
     pub fn parse(input: &[u8], expected_server: &str, source_path: Option<&Path>) -> Result<Self> {
+        crate::secret_boundary::mark_ingress();
         let invalid = || err(Reason::InvalidProfile);
         server_name(expected_server)?;
         if input.len() > MAX_PROFILE_BYTES {
@@ -97,7 +202,7 @@ impl Profile {
                 return Err(invalid());
             }
             match (section, field.as_str()) {
-                ("[Interface]", "privatekey") => private_key = Some(SecretKey(decode_key(value)?)),
+                ("[Interface]", "privatekey") => private_key = Some(decode_key(value)?),
                 ("[Interface]", "address") => {
                     let mut seen = HashSet::new();
                     for network in value.split(',').map(str::trim) {
@@ -148,7 +253,7 @@ impl Profile {
                         return Err(invalid());
                     }
                 }
-                ("[Peer]", "publickey") => public_key = Some(decode_key(value)?),
+                ("[Peer]", "publickey") => public_key = Some(decode_key(value)?.0),
                 ("[Peer]", "endpoint") => {
                     let ep = value.parse::<SocketAddrV4>().map_err(|_| invalid())?;
                     if ep.port() == 0 || !public_ipv4(*ep.ip()) {
@@ -235,11 +340,11 @@ impl Profile {
     pub fn with_private_key<T>(&self, provision: impl FnOnce(&[u8; 32]) -> T) -> T {
         provision(&self.private_key.0)
     }
-    pub(crate) fn private_key_identity(&self) -> [u8; 32] {
+    pub(crate) fn private_key_identity(&self) -> Zeroizing<[u8; 32]> {
         // WireGuard uses X25519, which ignores these scalar bits. Compare the
         // effective scalar so alternative encodings cannot create another exit
         // with the same cryptographic identity. This never leaves the crate.
-        let mut identity = self.private_key.0;
+        let mut identity = Zeroizing::new(self.private_key.0);
         identity[0] &= 248;
         identity[31] &= 127;
         identity[31] |= 64;
@@ -252,13 +357,13 @@ fn check_hint(hint: &str, expected: &str) -> Result<()> {
     }
     Ok(())
 }
-fn decode_key(s: &str) -> Result<[u8; 32]> {
+fn decode_key(s: &str) -> Result<SecretKey> {
     let invalid = || err(Reason::InvalidProfile);
     if s.len() != 44 || s.as_bytes()[43] != b'=' {
         return Err(invalid());
     }
-    let mut out = [0u8; 32];
-    let mut buffer = 0u32;
+    let mut out = SecretKey([0u8; 32]);
+    let mut buffer = Zeroizing::new(0u32);
     let mut bits = 0u8;
     let mut index = 0;
     for b in s.bytes().take(43) {
@@ -270,15 +375,15 @@ fn decode_key(s: &str) -> Result<[u8; 32]> {
             b'/' => 63,
             _ => return Err(invalid()),
         };
-        buffer = (buffer << 6) | u32::from(n);
+        *buffer = (*buffer << 6) | u32::from(n);
         bits += 6;
         if bits >= 8 {
             bits -= 8;
-            out[index] = (buffer >> bits) as u8;
+            out.0[index] = (*buffer >> bits) as u8;
             index += 1;
         }
     }
-    if bits != 2 || buffer & 3 != 0 {
+    if bits != 2 || *buffer & 3 != 0 {
         return Err(invalid());
     }
     Ok(out)
@@ -299,4 +404,77 @@ pub fn public_ipv4(ip: Ipv4Addr) -> bool {
         || a == 192 && b == 88 && c == 99
         || a == 198 && b == 51 && c == 100
         || a == 203 && b == 0 && c == 113)
+}
+
+#[cfg(test)]
+mod secret_tests {
+    use super::*;
+
+    const SYNTHETIC_PUBLIC_PROJECTION: &[u8] = b"[Interface]\nPrivateKey=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\nAddress=10.64.0.2/32\nDNS=10.64.0.1,1.1.1.1\n[Peer]\nPublicKey=AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\nEndpoint=185.65.134.88:51820\nAllowedIPs=0.0.0.0/0\n";
+
+    #[test]
+    fn public_profile_projection_has_no_private_key_fields_or_bytes() {
+        let secret = Profile::parse(SYNTHETIC_PUBLIC_PROJECTION, "de-fra-wg-401", None).unwrap();
+        let public = secret.public_metadata();
+        drop(secret);
+        assert_eq!(public.peer_public_key(), &[2; 32]);
+        assert_ne!(public.device_public_key(), [1; 32]);
+        assert_eq!(public.resolvers(), &[Ipv4Addr::new(10, 64, 0, 1)]);
+        let bytes = serde_json::to_vec(&public).unwrap();
+        assert!(
+            !bytes
+                .windows(44)
+                .any(|window| window == b"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=")
+        );
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let keys: std::collections::BTreeSet<_> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "address",
+                "device_public_key",
+                "dns",
+                "endpoint",
+                "expected_server",
+                "peer_public_key",
+                "resolvers",
+                "server_hint_verified"
+            ]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+        );
+        assert_eq!(PublicProfile::parse_public(&bytes).unwrap(), public);
+    }
+
+    #[test]
+    fn public_profile_receipt_refuses_secret_fields_and_invalid_public_facts() {
+        let secret = Profile::parse(SYNTHETIC_PUBLIC_PROJECTION, "de-fra-wg-401", None).unwrap();
+        let value = serde_json::to_value(secret.public_metadata()).unwrap();
+        let mut with_secret = value.clone();
+        with_secret["private_key"] = serde_json::json!("synthetic-rejected-marker");
+        assert!(PublicProfile::parse_public(&serde_json::to_vec(&with_secret).unwrap()).is_err());
+        for (field, invalid) in [
+            ("endpoint", serde_json::json!("127.0.0.1:51820")),
+            ("device_public_key", serde_json::json!(vec![0; 32])),
+            ("expected_server", serde_json::json!("not-a-server")),
+            ("resolvers", serde_json::json!(["8.8.8.8"])),
+        ] {
+            let mut altered = value.clone();
+            altered[field] = invalid;
+            assert!(PublicProfile::parse_public(&serde_json::to_vec(&altered).unwrap()).is_err());
+        }
+        assert!(PublicProfile::parse_public(&vec![b' '; 4097]).is_err());
+    }
+
+    #[test]
+    fn secret_key_explicit_erasure_clears_all_bytes() {
+        let mut key = SecretKey([0xa5; 32]);
+        key.zeroize();
+        assert_eq!(key.0, [0; 32]);
+    }
 }

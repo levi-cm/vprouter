@@ -4,7 +4,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use vprouter_core::{
     allocation::{AllocationRecord, ExitAllocation},
     config::ExitMode,
-    profile::Profile,
+    profile::{Profile, PublicProfile},
 };
 
 /// Public facts only. No private key, arbitrary names, or JSON constructor.
@@ -18,6 +18,36 @@ pub struct Plan {
     pub(crate) public_key: [u8; 32],
 }
 impl Plan {
+    /// Public structural plan only. The launch owner separately binds its
+    /// original secret-role receipt; this cannot create a native DOWN token.
+    pub fn from_public(
+        record: &AllocationRecord,
+        deployment: &str,
+        exit: &ExitAllocation,
+        profile: &PublicProfile,
+    ) -> Result<Self> {
+        record
+            .validate(deployment, &[])
+            .map_err(|_| Error::InvalidInput)?;
+        profile.validate().map_err(|_| Error::InvalidInput)?;
+        if !record.exits.contains(exit) {
+            return Err(Error::Foreign);
+        }
+        if exit.mode != ExitMode::Mullvad {
+            return Err(Error::DirectUnsupported);
+        }
+        Ok(Self {
+            allocation: exit.clone(),
+            alias: format!(
+                "vprouter-v2:{deployment}:{}:{}",
+                record.generation, exit.exit_id
+            ),
+            endpoint: profile.endpoint(),
+            address: profile.address(),
+            peer: *profile.peer_public_key(),
+            public_key: profile.device_public_key(),
+        })
+    }
     pub fn new(
         record: &AllocationRecord,
         deployment: &str,

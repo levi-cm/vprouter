@@ -3,7 +3,7 @@ use crate::{Error, Result};
 use rustix::fs::{self, FileType, Mode, OFlags};
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc,
 };
 use std::{
@@ -11,7 +11,10 @@ use std::{
     os::fd::{AsFd, OwnedFd},
 };
 use tokio::sync::oneshot;
-use vprouter_core::state::Status;
+use vprouter_core::{
+    health::{Binding, Snapshot},
+    state::HealthMachine,
+};
 struct Publication {
     bytes: Vec<u8>,
     ack: oneshot::Sender<Result<()>>,
@@ -19,6 +22,8 @@ struct Publication {
 pub(crate) struct Publisher {
     queue: mpsc::SyncSender<Publication>,
     in_flight: Arc<AtomicBool>,
+    binding: Binding,
+    sequence: AtomicU64,
 }
 struct Writer {
     directory: OwnedFd,
@@ -32,9 +37,11 @@ impl Publisher {
     fn placed(
         placed: &crate::placement::Placed,
         writer: Writer,
+        binding: Binding,
         #[cfg(test)] stall: Option<mpsc::Receiver<()>>,
     ) -> Result<Self> {
         placed.check()?;
+        binding.validate().map_err(|_| Error::Storage)?;
         let (queue, rx) = mpsc::sync_channel::<Publication>(1);
         let in_flight = Arc::new(AtomicBool::new(false));
         let lane = in_flight.clone();
@@ -53,10 +60,22 @@ impl Publisher {
             })
             .map_err(|_| Error::Storage)?;
         placed.check()?;
-        Ok(Self { queue, in_flight })
+        Ok(Self {
+            queue,
+            in_flight,
+            binding,
+            sequence: AtomicU64::new(0),
+        })
     }
-    pub async fn write(&self, status: &Status) -> Result<()> {
-        let bytes = serde_json::to_vec(status).map_err(|_| Error::Storage)?;
+    pub async fn write(&self, machine: &HealthMachine, now: f64) -> Result<()> {
+        let sequence = self
+            .sequence
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
+            .map_err(|_| Error::Storage)?
+            + 1;
+        let snapshot = Snapshot::from_machine(self.binding.clone(), sequence, now, machine)
+            .map_err(|_| Error::Storage)?;
+        let bytes = serde_json::to_vec(&snapshot).map_err(|_| Error::Storage)?;
         if bytes.len() > 16384 {
             return Err(Error::Storage);
         }
@@ -86,6 +105,17 @@ impl Publisher {
                 directory,
                 uid: s.st_uid,
                 gid: s.st_gid,
+            },
+            Binding {
+                deployment_id: "test".into(),
+                exit_id: "primary".into(),
+                mode: vprouter_core::config::ExitMode::Mullvad,
+                generation: 1,
+                display_name: "mullvad-site-exit-de-fra-wg-404".into(),
+                expected_server: Some("de-fra-wg-404".into()),
+                node_id: "n123".into(),
+                config_fingerprint: "a".repeat(64),
+                boot_id: "01234567-1234-1234-1234-0123456789ab".into(),
             },
             stall,
         )

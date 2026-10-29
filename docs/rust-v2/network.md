@@ -12,13 +12,16 @@ contains public facts only, including the X25519 device public identity derived
 from the private scalar. Alias markers detect foreign/drifted cooperative state;
 they are not authentication against privileged host writers.
 
-## DOWN-only boundary and namespace trust
+## DOWN provisioning, retained quarantine and namespace trust
 
-There is no sound retained netfilter quarantine handle across these crates yet.
-Consequently this crate exposes **no activation, address installation, default or
-endpoint route installation, arbitrary deletion, or quarantine release method**.
-The plan exposes allocated host/transport IPv4 addresses (subnet +1/+2) for later
-integration; computing them does not install an address or a route. WG and both
+The crate provides DOWN provisioning and guarded activation through retained
+netfilter enforcement authority. Guarded activation checks three-scope Offline
+quarantine before each owned mutation; ambiguity retains quarantine. These APIs
+provide no readiness or application-forwarding authority. The guard establishes
+IPv6 suppression before its baseline; bootstrap requires exact IPv4 routes and
+no IPv6 addresses or routes. See [current validation](testing-2026-10-26.md).
+The plan exposes allocated host/transport IPv4 addresses (subnet +1/+2);
+computing them does not install an address or a route. WG and both
 veth ends are created DOWN, MTU1420, with the exact ownership alias, unaddressed.
 Linux may ignore IFLA_IFALIAS in NEWLINK. Only after this operation's successful
 exclusive-create ACK, private initialization verifies newly created DOWN links,

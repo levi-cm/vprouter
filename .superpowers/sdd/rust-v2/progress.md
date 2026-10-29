@@ -816,3 +816,16 @@ selectors archived with exclusive receipt, allotherresources retained/no profile
 reads/signals/unmounts. OriginalFAIL/zero cases and diagnostic limits retained.
 Completion/publicscope immutable audit pending before failuremilestone push.
 Production read-only freshlyactive; full8cACTIVE/release_readyfalse.
+
+405failure milestone115e500 remote-confirmed fork/rust/v2. Corrected405diagnosis
+2620a12c and retainedcostbrief5624e0e2 independently diagnosis/SPEC/QUALITY/
+requirementsPASS review32cf5cff; one conflated query/policy snapshot sentence
+resolved before freeze. Ruling: measure retained transport/DATA/owner/history/
+digest/native-group work and Sourcefanout before further optimization; existing
+inclusive totals establish no dominant purework. Costifwrong: one bounded
+diagnostic experiment/observeroverhead, never deadline or livecheck relaxation.
+Soleimplementer autonomous_guard authorized exactly5cfg(test)sourcepaths; separate
+24fixedrows, selectedrow updates, original13+30rows and all2s/custody/hold/negative/
+release/ACK checks exact. Independent source review/coherentartifact/preservation/
+push gates required before newnativeVMrun. Parser-only extension separately
+assigned bootstrap_fixture_audit; no other source work. Full8cACTIVE/releasefalse.

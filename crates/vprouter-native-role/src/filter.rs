@@ -334,6 +334,66 @@ mod tests {
             ALLOW
         );
     }
+    #[test]
+    fn original_ancestry_filter_uses_only_internal_reverse_edge() {
+        use std::os::fd::{AsFd, AsRawFd};
+        let fixture = crate::producer_bootstrap::tests::AncestryFixture::new("filter");
+        let ancestry = fixture.ancestry();
+        let rules = ancestry.rules(fixture.parent.as_fd());
+        let pins = [
+            ancestry.root.as_raw_fd(),
+            ancestry.system_slice.as_raw_fd(),
+            fixture.parent.as_raw_fd(),
+            fixture.group.as_raw_fd(),
+        ];
+        let policy = producer_bootstrap(&[44, 45, 46, 47], &[30, 31], &pins, 50, 51, &rules);
+        let old = wireguard(&[44, 45, 46, 47], &[30, 31], &pins, 50, 51);
+        let args = [
+            ancestry.system_slice.as_raw_fd() as u64,
+            crate::producer_bootstrap::tests::internal_parent_name().as_ptr() as u64,
+            0xdead,
+            libc::AT_SYMLINK_NOFOLLOW as u64,
+            0,
+            0,
+        ];
+        let stat = libc::SYS_newfstatat;
+        assert_eq!(evaluate(&policy, stat, args), ALLOW);
+        for (field, value) in [
+            (0, ancestry.root.as_raw_fd() as u64),
+            (0, fixture.group.as_raw_fd() as u64),
+            (0, args[0] | (1u64 << 32)),
+            (1, rules[1].1),
+            (1, args[1] ^ (1u64 << 32)),
+            (3, 0),
+            (3, args[3] | (1u64 << 32)),
+        ] {
+            let mut wrong = args;
+            wrong[field] = value;
+            assert_eq!(evaluate(&policy, stat, wrong), DENY);
+        }
+        for (fd, name) in rules {
+            let args = [
+                fd as u64,
+                name,
+                0xdead,
+                libc::AT_SYMLINK_NOFOLLOW as u64,
+                0,
+                0,
+            ];
+            assert_eq!(evaluate(&policy, stat, args), ALLOW);
+            assert_eq!(evaluate(&old, stat, args), DENY);
+        }
+        for nr in [
+            libc::SYS_openat,
+            libc::SYS_write,
+            libc::SYS_dup,
+            libc::SYS_mkdirat,
+            libc::SYS_unlinkat,
+            libc::SYS_setns,
+        ] {
+            assert_eq!(evaluate(&policy, nr, args), DENY);
+        }
+    }
     fn evaluate(program: &[Insn], nr: c_long, args: [u64; 6]) -> u32 {
         let mut words = [0u32; 16];
         words[0] = nr as u32;

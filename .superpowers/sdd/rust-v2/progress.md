@@ -610,3 +610,22 @@ edge with actualinternalreverseedge and changeonly firstexactstatFD; preserveall
 originalroot/forwardedge/cgroup2/identity/confinementchecks. RealFD sharedcore and
 actualAncestry-generated filter regressions required; old13+approved6 untouched.
 No newnative action untilreview/coherentbinding; full8cACTIVE.
+
+Ancestry correction frozen3sources/reporta17c212f; fresh independent reviewer
+review_ancestry_fix SPEC+QUALITYPASS/no findings reviewddb932e7. Both verifiers
+now prove actualsystem.slice/'..' originalroot and onlyfirstexactstatFD changes;
+prior13pendingrepair+sixreceipt hashes unchanged. RealFD and actualgeneratedrule
+regressions RED3->GREEN3; Root freshworkspace399/0/2ignored/fmt/strictalltargetClippy
+PASS. Root botharchcoherentfreezeab20f1d7/202inputs/archive7e284b0d/aggregatee7bf990e
+current/archive/Git equalityPASS, bothstaticpayload/strict7filecontextsPASS,
+exactAMD64muslfilter+pendingcorepreflightPASS. ReadonlyownedDebianprojectionPASS;
+unchangedv2helper reconstructs preserved54/51/154/5 baselinefrom401, exactmultisets
+and order-onlyalignmentPASS. Separate finalartifact/template/publicscope audit
+pending; no nativeBootstrap run yet forab20; full8cACTIVE/release_readyfalse.
+
+Ancestry finalcandidate202input/artifact/strictcontexts/rootproof/preflight and
+protected54linkbaseline/projection/JSONrefs independentlyPASS/no findings. Source
+review remainsPASS/all19protectedfilesunchanged; publicchecks399/0/2+fmt/clippy,
+source/staticcomponentmilestone only. Nativeforab20 remainsNOT_RUN, ARM runtime
+NOT_RUN/full8cACTIVE. Finalpublicscope audit/explicitcheckpoint follows before
+newnativeBootstrap invocation; no original401failure rewritten.

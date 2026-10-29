@@ -1,0 +1,61 @@
+{
+  "binding": {
+    "source_commit": "ab20f1d7ce5f366da327c7b0193a489810cb67a8",
+    "source_archive_sha256": "7e284b0dbd88a935cc55cee9a0328588541c15647b6e8ffe855fae7b5a542ffb",
+    "tracked_build_inputs_verified": 202,
+    "source_aggregate_sha256": "e7bf990e30d3c36c3cfd3f25eb110692f62a6c4b5d1b3bc9ef08e2dc9c62c6f3"
+  },
+  "current_source_matches": true,
+  "platforms": {
+    "amd64": {
+      "manifest_sha256": "20b80264a521c030c52af56ba8645b232b22c035ba46f3b71653cb1f7480f65a",
+      "context_sha256": "f95434ea47702d720772ce10f5b23237c00f4e93837f8ddbcfb9d61711d7b9bc",
+      "payload_sha256": "82e0e3b644794540798a9a050dc404b5d7aad8627a2f17320e42fb4357703199",
+      "verified_context_files": 7,
+      "static_elf": true
+    },
+    "arm64": {
+      "manifest_sha256": "4d266ef01b48e33bc38ca3e49c94af9bb97d604fc640bf081bc4005432c9ff1b",
+      "context_sha256": "faf493db1398d974b1c806ea1750c241387650d1f47777ddc424d0d451bff992",
+      "payload_sha256": "a7ea79217aa8bb1e6431a5284cf106c6597b2651114fafcd1ec66e4469745214",
+      "verified_context_files": 7,
+      "static_elf": true
+    }
+  },
+  "native_bootstrap": "NOT_RUN",
+  "arm64_runtime": "NOT_RUN",
+  "release_ready": false,
+  "scope": "bounded cgroup internal-parent edge correction; no new runtime or forwarding authority",
+  "source_review": {
+    "spec": "PASS",
+    "quality": "PASS",
+    "blocking_findings": 0
+  },
+  "candidate_provenance_review": "PASS",
+  "preservation_baseline_review": "PASS",
+  "checks": {
+    "workspace_passed": 399,
+    "workspace_failed": 0,
+    "workspace_ignored": 2,
+    "fmt": "PASS",
+    "strict_workspace_clippy": "PASS",
+    "both_architecture_static_builds": "PASS",
+    "amd64_static_filter_and_pending_core_preflight": "PASS",
+    "read_only_debian_projection": "PASS"
+  },
+  "evidence_hashes": {
+    "target/continuation-20261029T141400Z/root-verification.json": "404f3e78d05537a9f531f73f67d15cc1db4e53febf7357fcac852ad575f72493",
+    ".superpowers/sdd/rust-v2/task-8c-bootstrap-ancestry-fix-report.md": "a17c212f3e57cba6a8b5281678f978e7788da78c042f98044b2823c64fcb175e",
+    ".superpowers/sdd/rust-v2/task-8c-bootstrap-ancestry-fix-review.md": "ddb932e77f9c099d45ac2e96687b6df52705ade7f6741dff683c0919e922e07b",
+    "target/task8c-ancestry-20261029T141252Z/root-coherent-build.log": "39383d3500c10aa84b0d005adbe19ee931123f4fab9868345c9f363cb92131fe"
+  },
+  "baseline": {
+    "links": 54,
+    "addresses": 51,
+    "routes": 154,
+    "rules": 5,
+    "template_sha256": "2f9ae1315cd3a99b3ea07979209b1d4eb6af2042ba2632a809ea4a177dff764b",
+    "reconciliation_sha256": "58af37a2c5d37e7e94bbd1dc17691c7f5ed9b9c28a1c02c94c7a046f06e795fd",
+    "host_authority_granted": false
+  }
+}

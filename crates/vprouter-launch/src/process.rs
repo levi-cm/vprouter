@@ -611,24 +611,7 @@ impl PinnedProcess {
         check_directory(system)?;
         fs_type(root, CGROUP2)?;
         fs_type(system, CGROUP2)?;
-        for (parent, name, expected) in [
-            (root, "..".to_owned(), root),
-            (root, "system.slice".to_owned(), system),
-            (
-                system,
-                format!("docker-{}.scope", spec.container_id),
-                self.cgroup.as_fd(),
-            ),
-        ] {
-            let at = fs::statat(parent, &name, fs::AtFlags::SYMLINK_NOFOLLOW)
-                .map_err(|_| Error::CgroupMismatch)?;
-            let st = fstat(expected).map_err(|_| Error::CgroupMismatch)?;
-            if (at.st_dev, at.st_ino, at.st_mode, at.st_uid, at.st_gid)
-                != (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid)
-            {
-                return Err(Error::CgroupMismatch);
-            }
-        }
+        verify_producer_links(root, system, self.cgroup.as_fd(), &spec.container_id)?;
         self.revalidate(spec, stage)
     }
     pub(super) fn launch_fds(&self) -> super::kernel::ContainerFds<'_> {
@@ -885,10 +868,106 @@ fn verify_executable(fd: impl AsFd, stage: &StagingEvidence) -> Result<Identity>
     Ok(before)
 }
 
+// Borrowed named-edge comparisons only. Admission, original-root identity,
+// directory trust and cgroup2 checks remain in the original caller.
+fn verify_producer_links(
+    root: std::os::fd::BorrowedFd<'_>,
+    system: std::os::fd::BorrowedFd<'_>,
+    scope: std::os::fd::BorrowedFd<'_>,
+    container: &str,
+) -> Result<()> {
+    for (parent, name, expected) in [
+        (system, "..".to_owned(), root),
+        (root, "system.slice".to_owned(), system),
+        (system, format!("docker-{container}.scope"), scope),
+    ] {
+        let at = fs::statat(parent, &name, fs::AtFlags::SYMLINK_NOFOLLOW)
+            .map_err(|_| Error::CgroupMismatch)?;
+        let st = fstat(expected).map_err(|_| Error::CgroupMismatch)?;
+        if (at.st_dev, at.st_ino, at.st_mode, at.st_uid, at.st_gid)
+            != (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid)
+        {
+            return Err(Error::CgroupMismatch);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod descriptor_tests {
     use super::*;
     use std::{fs, os::unix::fs::PermissionsExt};
+    #[test]
+    fn original_ancestry_uses_internal_parent_and_refuses_foreign_or_replaced_edges() {
+        // Only the real borrowed-edge core is under test, not cgroup admission.
+        let path =
+            std::env::temp_dir().join(format!("vprouter-host-ancestry-{}", std::process::id()));
+        std::fs::create_dir(&path).unwrap();
+        struct Remove(std::path::PathBuf);
+        impl Drop for Remove {
+            fn drop(&mut self) {
+                std::fs::remove_dir_all(&self.0).unwrap();
+            }
+        }
+        let _remove = Remove(path.clone());
+        let container = "a".repeat(64);
+        let system_path = path.join("system.slice");
+        let scope_name = format!("docker-{container}.scope");
+        let scope_path = system_path.join(&scope_name);
+        std::fs::create_dir_all(scope_path.join("health")).unwrap();
+        let root = std::fs::File::open(&path).unwrap();
+        let system = std::fs::File::open(&system_path).unwrap();
+        let scope = std::fs::File::open(&scope_path).unwrap();
+        let group = std::fs::File::open(scope_path.join("health")).unwrap();
+        let external = std::fs::File::open(path.parent().unwrap()).unwrap();
+        assert!(!same_object(&root, &external).unwrap());
+        verify_producer_links(root.as_fd(), system.as_fd(), scope.as_fd(), &container).unwrap();
+        for (r, s, c) in [
+            (external.as_fd(), system.as_fd(), scope.as_fd()),
+            (root.as_fd(), scope.as_fd(), scope.as_fd()),
+            (root.as_fd(), system.as_fd(), group.as_fd()),
+        ] {
+            assert_eq!(
+                verify_producer_links(r, s, c, &container),
+                Err(Error::CgroupMismatch)
+            );
+        }
+        std::fs::rename(&scope_path, system_path.join("old.scope")).unwrap();
+        assert_eq!(
+            verify_producer_links(root.as_fd(), system.as_fd(), scope.as_fd(), &container),
+            Err(Error::CgroupMismatch)
+        );
+        std::fs::create_dir(&scope_path).unwrap();
+        assert_eq!(
+            verify_producer_links(root.as_fd(), system.as_fd(), scope.as_fd(), &container),
+            Err(Error::CgroupMismatch)
+        );
+        std::fs::remove_dir(&scope_path).unwrap();
+        std::os::unix::fs::symlink("old.scope", &scope_path).unwrap();
+        assert_eq!(
+            verify_producer_links(root.as_fd(), system.as_fd(), scope.as_fd(), &container),
+            Err(Error::CgroupMismatch)
+        );
+        std::fs::remove_file(&scope_path).unwrap();
+        std::fs::rename(system_path.join("old.scope"), &scope_path).unwrap();
+        verify_producer_links(root.as_fd(), system.as_fd(), scope.as_fd(), &container).unwrap();
+        std::fs::rename(&system_path, path.join("old.slice")).unwrap();
+        assert_eq!(
+            verify_producer_links(root.as_fd(), system.as_fd(), scope.as_fd(), &container),
+            Err(Error::CgroupMismatch)
+        );
+        std::fs::create_dir(&system_path).unwrap();
+        assert_eq!(
+            verify_producer_links(root.as_fd(), system.as_fd(), scope.as_fd(), &container),
+            Err(Error::CgroupMismatch)
+        );
+        std::fs::remove_dir(&system_path).unwrap();
+        std::os::unix::fs::symlink("old.slice", &system_path).unwrap();
+        assert_eq!(
+            verify_producer_links(root.as_fd(), system.as_fd(), scope.as_fd(), &container),
+            Err(Error::CgroupMismatch)
+        );
+    }
     #[test]
     fn inspector_readonly_walk_refuses_absolute_parent_and_symlink_components() {
         let directory =

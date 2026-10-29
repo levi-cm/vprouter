@@ -19,6 +19,11 @@ CATEGORIES = (
     'record_json_encode', 'expected_record_json_encode', 'record_sha256',
     'journal_advance',
 )
+RETAINED_CATEGORIES = (
+    'retained_transport', 'retained_data', 'retained_owner_record',
+    'retained_history', 'history_allocation_digest', 'created_group_native',
+    'source_identity_entries', 'native_source_entries',
+)
 STEPS = (
     'absent', 'query_intent', 'query_birth', 'query_reading', 'query_result',
     'intent', 'birth', 'reading', 'result', 'next', 'complete',
@@ -140,6 +145,29 @@ def main():
     require(tuple((row['family'], row['category']) for row in nested)
             == tuple((family, key) for family in ('query', 'policy', 'other')
                      for key in CATEGORIES))
+
+    retained = []
+    retained_marker = 'LAB_SECRET_BOOTSTRAP_RETAINED_TOTAL'
+    for line in lines:
+        # A malformed occurrence must not silently look like an absent extension.
+        if retained_marker not in line:
+            continue
+        row = fields(line, retained_marker + ' ')
+        require(set(row) == {'family', 'category', 'calls', 'elapsed_ns',
+                             'measurement', 'grouping'}
+                and row.pop('measurement') == 'inclusive_retained_elapsed'
+                and row.pop('grouping') == 'lab_loop_entry_step_family')
+        row['calls'] = integer(row['calls'], 64)
+        row['elapsed_ns'] = integer(row['elapsed_ns'], 128)
+        require(row['calls'] > 0 or row['elapsed_ns'] == 0)
+        require(row['category'] not in RETAINED_CATEGORIES[-2:]
+                or row['elapsed_ns'] == 0)
+        retained.append(row)
+    if retained:
+        require(tuple((row['family'], row['category']) for row in retained)
+                == tuple((family, key) for family in ('query', 'policy', 'other')
+                         for key in RETAINED_CATEGORIES))
+
     output = dict(
         record_sha256=hashlib.sha256(raw).hexdigest(),
         source_binding=binding, boundary=boundary,
@@ -147,6 +175,8 @@ def main():
         total_wrapper_elapsed_ns=sum(row['elapsed_ns'] for row in wrappers),
         scope='Closed fixed labels and bounded values only; inclusive nested rows overlap and are not summed. No CPU, inner-predicate or performance-fix attribution.',
     )
+    if retained:
+        output['retained'] = retained
     with destination.open('x') as stream:
         json.dump(output, stream, indent=2, allow_nan=False)
         stream.write('\n')

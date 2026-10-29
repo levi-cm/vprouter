@@ -829,3 +829,12 @@ Soleimplementer autonomous_guard authorized exactly5cfg(test)sourcepaths; separa
 release/ACK checks exact. Independent source review/coherentartifact/preservation/
 push gates required before newnativeVMrun. Parser-only extension separately
 assigned bootstrap_fixture_audit; no other source work. Full8cACTIVE/releasefalse.
+
+Retained-reader parser4309e488 report2a912599 independent SPEC/QUALITYPASS/no
+findings reviewa06313e9. Root fresh AST/exact405 byteequalityPASS; retained
+implementer3valid syntheticcases/23malformedrefusals/exclusiveoutput checksPASS.
+Optional exact24rows/countonlyzero/closedlabels validated; prior405bytesf743c668
+unchanged, no existing evidence rewritten. Reader arithmetic doesnot sumnew
+inclusiverows; syntheticparserchecks are notnativecost evidence. Explicit
+parser/docs checkpoint excludes in-progress5Rustpaths and allprivatetargetdata.
+Full8cACTIVE/releasefalse; nativeforretaineddiagnosticNOT_RUN.

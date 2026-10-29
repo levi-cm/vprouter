@@ -2373,5 +2373,28 @@
     "real_client_acceptance": "NOT_RUN",
     "release_ready": false,
     "report": "testing-2026-10-26.md"
+  },
+  "dated_task8b2_review_2026_10_29": {
+    "review_source": "90a7dcc756f073cccd3a1c34959676f001eb7601",
+    "review_base": "836210a12a37860a8e0ba7771e787c3f77b0cfa1",
+    "independent_spec_review": "PASS_SCOPED_TASK8B2",
+    "independent_quality_review": "PASS_SCOPED_TASK8B2",
+    "open_critical_or_important": 0,
+    "actual_program_attempt": 396,
+    "actual_program_cases_passed": 17,
+    "live_post_pin_drift_cases_passed": 4,
+    "capture_files": 6,
+    "packet_records": 112,
+    "forbidden_markers": 0,
+    "kernel_drops": 0,
+    "admission_markers_absent": true,
+    "historical_remaining_gates_preserved": true,
+    "historical_live_post_pin_gate": "CLOSED_ONLY_FOR_REVIEWED_90a7dcc_BY_ATTEMPT_396",
+    "current_source_beyond_review": "UNFINISHED_CHECKPOINT_REQUIRES_SEPARATE_REVIEW",
+    "task8c": "MAY_IMPLEMENT_NOT_ACCEPTED",
+    "real_client_acceptance": "NOT_RUN",
+    "release_ready": false,
+    "report": ".superpowers/sdd/rust-v2/task-8b2-independent-review-2026-10-29.md",
+    "public_evidence": "docs/rust-v2/testing-2026-10-29.json"
   }
 }

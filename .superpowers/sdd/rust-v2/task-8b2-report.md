@@ -299,3 +299,39 @@ path after this isolated proof. Full worker43 tests, fmt and all-target launch/
 worker clippy pass; botharchitecture static artifacts are rebuilt/source-bound.
 No enrolled identity/ready/kernel-shape authority or daemon networking success
 is claimed by this compatibility fix; recvmmsgEPERM remains unapproved/unverified.
+
+
+## Dated task8b2 reconciliation — 2026-10-29
+
+The candidate01–12 notes above describe historical failed/incomplete attempts;
+no separate candidate13 completion report was recovered. Subsequent immutable
+source `1b0d7e723f51c54e0c2d624f2fb15a8d32b6fdaa` passed original ten-case actual
+program attempt22. Its 102 build-input archive and both payloads independently
+verify. Its missing live post-pin fault evidence remained incomplete then.
+
+Later source `899a874ac70b1710b23d766d498f5068297a5657` added actual TUN MTU,
+address, route and rule mutations with quarantine-before-repair and permanent
+old-token revocation. Historical passes do not change the original snapshot's
+acceptance. Latest independently reviewed source is
+`90a7dcc756f073cccd3a1c34959676f001eb7601` (195 exact build inputs; both platform
+static payloads and strict public image contexts verified).
+
+Root's fresh local owned Debian13 AMD64 attempt396 passes all 17 actual-program
+component cases on exact 90a7dcc. Independent six-capture accounting records 112
+packets, positive controls, zero forbidden markers and zero kernel drops. Both
+admission markers are absent afterward. Fixture resources and every historical
+failure remain retained. No production or approved/enrolled identity was used.
+
+Independent spec/quality review against base 836210a, with original 1b0d7e and
+latest 90a7dcc source qualification, now passes for task8b2's bounded component.
+No Critical/Important finding remains. Minor M1 is resolved by this dated report
+and the dated status in actual-program-lab-evidence.json. Full review and
+recovery details are in task-8b2-independent-review-2026-10-29.md and
+task-8b2-recovery-2026-10-29.md. Root commands/evidence hashes and fresh current
+393-test/fmt/clippy results are in docs/rust-v2/testing-2026-10-29.md/json.
+
+This approval permits task8c work/review only. Current exact20/Bootstrap changes
+beyond 90a7dcc require their own source/runtime binding and review. Autonomous
+protocol/provider/readiness, enrolled-daemon shapes, managed-client leak proof,
+multi-exit/direct, migration, lifecycle/platform, performance and 24h acceptance
+remain incomplete; release_ready=false. No production activation is authorized.

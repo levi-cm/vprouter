@@ -773,3 +773,11 @@ Costifwrong: additional equivalence/native experiment, with no deadline or
 ownership relaxation; do not claim saved native budget from timerentrycounts.
 Soleimplementer must freezebenchmarkreport beforeappsourceedit and obtain fresh
 source review +coherentbinding/checkpoint before next ownedlocalVMtest.
+
+Mechanism/catalog/docs milestone446845b remote-confirmed fork/rust/v2. Onefile
+allocationcomparison frozen owned b1490090/report940b40b6/diff87b0f288: 80actual
+Result oraclepairs/4tests PASS; two deliberately incorrect path/precheckmutants
+failed as intended and restored. Root fresh workspace407/0/2ignored, fmt and
+strictworkspacealltargetsClippy PASS; all178unowned Rust inputs unchanged.
+Fresh independent source review pending; nativeeffect/2sfit unproved,404FAIL
+retained. Botharch coherentbuild next, no new VMfixture before remaining gates.

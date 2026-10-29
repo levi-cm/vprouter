@@ -9,7 +9,9 @@ use std::{
     os::fd::{AsFd, OwnedFd},
     path::Path,
 };
-use vprouter_core::allocation::{AllocationRecord, AllocationStore, AllocationTransaction};
+use vprouter_core::allocation::{
+    AllocationRecord, AllocationStore, AllocationTransaction, ExitAllocation,
+};
 pub(super) mod preparation;
 const RD: OFlags = OFlags::RDONLY
     .union(OFlags::CLOEXEC)
@@ -642,8 +644,72 @@ struct Record {
     entries: Vec<Entry>,
 }
 fn same_allocation(a: &AllocationRecord, b: &AllocationRecord) -> Result<bool> {
-    Ok(serde_json::to_vec(a).map_err(|_| Error::OwnershipMismatch)?
-        == serde_json::to_vec(b).map_err(|_| Error::OwnershipMismatch)?)
+    let AllocationRecord {
+        schema_version: a_schema,
+        deployment_id: a_deployment,
+        generation: a_generation,
+        exits: a_exits,
+    } = a;
+    let AllocationRecord {
+        schema_version: b_schema,
+        deployment_id: b_deployment,
+        generation: b_generation,
+        exits: b_exits,
+    } = b;
+    // serde_core 1.0.228 ser/impls.rs: PathBuf delegates to Path::to_str.
+    // Preserve both serialization errors, in A-then-B order, before mismatches.
+    for exits in [a_exits, b_exits] {
+        for exit in exits {
+            exit.state_dir.to_str().ok_or(Error::OwnershipMismatch)?;
+        }
+    }
+    // allocation.rs derives serialization for these fields; integer, String,
+    // ordered Vec, ExitMode and Option<String> encodings are injective here.
+    Ok(a_schema == b_schema
+        && a_deployment == b_deployment
+        && a_generation == b_generation
+        && a_exits.len() == b_exits.len()
+        && a_exits
+            .iter()
+            .zip(b_exits)
+            .all(|(a, b)| same_exit_allocation(a, b)))
+}
+fn same_exit_allocation(a: &ExitAllocation, b: &ExitAllocation) -> bool {
+    let ExitAllocation {
+        exit_id: a_id,
+        mode: a_mode,
+        state_dir: a_path,
+        data_namespace: a_data,
+        transport_namespace: a_transport,
+        nft_table: a_nft,
+        host_interface: a_host,
+        data_interface: a_interface,
+        wireguard_interface: a_wireguard,
+        transport_subnet: a_subnet,
+    } = a;
+    let ExitAllocation {
+        exit_id: b_id,
+        mode: b_mode,
+        state_dir: b_path,
+        data_namespace: b_data,
+        transport_namespace: b_transport,
+        nft_table: b_nft,
+        host_interface: b_host,
+        data_interface: b_interface,
+        wireguard_interface: b_wireguard,
+        transport_subnet: b_subnet,
+    } = b;
+    a_id == b_id
+        && a_mode == b_mode
+        // Path equality normalizes components; serialization preserves spelling.
+        && a_path.as_os_str() == b_path.as_os_str()
+        && a_data == b_data
+        && a_transport == b_transport
+        && a_nft == b_nft
+        && a_host == b_host
+        && a_interface == b_interface
+        && a_wireguard == b_wireguard
+        && a_subnet == b_subnet
 }
 impl Record {
     fn new(s: &LaunchSpec, primary: &str, base: Identity) -> Result<Self> {
@@ -8043,6 +8109,142 @@ fn lab_native_job_drop_retention(host: bool, fail_parent: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Catch omitted fields, vector normalization, path normalization and premature
+    // mismatch returns using the former implementation as an independent oracle.
+    fn assert_allocation_comparison(
+        a: &AllocationRecord,
+        b: &AllocationRecord,
+        expected: Result<bool>,
+    ) {
+        let serialized = (|| {
+            Ok(serde_json::to_vec(a).map_err(|_| Error::OwnershipMismatch)?
+                == serde_json::to_vec(b).map_err(|_| Error::OwnershipMismatch)?)
+        })();
+        assert_eq!(serialized, expected, "hand-checked serializer result");
+        assert_eq!(same_allocation(a, b), serialized, "differential result");
+    }
+
+    #[test]
+    fn allocation_comparison_includes_every_scalar_field_and_option() {
+        use vprouter_core::config::ExitMode;
+        let mut base = super::super::tests::record();
+        base.exits[0].mode = ExitMode::Mullvad;
+        base.exits[0].wireguard_interface = Some("wg-fixture".into());
+        assert_allocation_comparison(&base, &base.clone(), Ok(true));
+        let changes: [fn(&mut AllocationRecord); 13] = [
+            |a| a.schema_version += 1,
+            |a| a.deployment_id.push('x'),
+            |a| a.generation += 1,
+            |a| a.exits[0].exit_id.push('x'),
+            |a| a.exits[0].mode = ExitMode::Direct,
+            |a| a.exits[0].state_dir.push("different"),
+            |a| a.exits[0].data_namespace.push('x'),
+            |a| a.exits[0].transport_namespace.push('x'),
+            |a| a.exits[0].nft_table.push('x'),
+            |a| a.exits[0].host_interface.push('x'),
+            |a| a.exits[0].data_interface.push('x'),
+            |a| a.exits[0].wireguard_interface = None,
+            |a| a.exits[0].transport_subnet.push('x'),
+        ];
+        for change in changes {
+            let mut changed = base.clone();
+            change(&mut changed);
+            assert_allocation_comparison(&base, &changed, Ok(false));
+            assert_allocation_comparison(&changed, &changed.clone(), Ok(true));
+        }
+        let mut empty_option = base.clone();
+        empty_option.exits[0].wireguard_interface = Some(String::new());
+        let mut absent_option = empty_option.clone();
+        absent_option.exits[0].wireguard_interface = None;
+        assert_allocation_comparison(&empty_option, &empty_option.clone(), Ok(true));
+        assert_allocation_comparison(&empty_option, &absent_option, Ok(false));
+        let mut boundaries = base.clone();
+        boundaries.schema_version = u32::MAX;
+        boundaries.generation = u64::MAX;
+        assert_allocation_comparison(&boundaries, &boundaries.clone(), Ok(true));
+        boundaries.generation = 0;
+        assert_allocation_comparison(&base, &boundaries, Ok(false));
+    }
+
+    #[test]
+    fn allocation_comparison_preserves_exit_order_duplicates_and_length() {
+        let base = super::super::tests::record();
+        let mut empty = base.clone();
+        empty.exits.clear();
+        assert_allocation_comparison(&empty, &empty.clone(), Ok(true));
+        assert_allocation_comparison(&base, &empty, Ok(false));
+        let mut duplicate = base.clone();
+        duplicate.exits.push(duplicate.exits[0].clone());
+        assert_allocation_comparison(&duplicate, &duplicate.clone(), Ok(true));
+        assert_allocation_comparison(&base, &duplicate, Ok(false));
+        let mut ordered = duplicate.clone();
+        ordered.exits[1].exit_id.push('x');
+        let mut reversed = ordered.clone();
+        reversed.exits.reverse();
+        assert_allocation_comparison(&ordered, &ordered.clone(), Ok(true));
+        assert_allocation_comparison(&ordered, &reversed, Ok(false));
+        assert_allocation_comparison(&duplicate, &ordered, Ok(false));
+    }
+
+    #[test]
+    fn allocation_comparison_preserves_exact_path_and_string_spelling() {
+        let mut base = super::super::tests::record();
+        base.exits[0].state_dir = "/fixture/a".into();
+        for path in [
+            "",
+            "/fixture/a",
+            "/fixture//a",
+            "/fixture/./a",
+            "/fixture/a/",
+            "/fixture/é",
+            "/fixture/e\u{301}",
+            "/fixture/a\0b",
+        ] {
+            let mut changed = base.clone();
+            changed.exits[0].state_dir = path.into();
+            assert_allocation_comparison(&changed, &changed.clone(), Ok(true));
+            assert_allocation_comparison(&base, &changed, Ok(path == "/fixture/a"));
+        }
+        for text in ["", "\0", "\n\"\\", "é", "e\u{301}"] {
+            let mut changed = base.clone();
+            changed.deployment_id = text.into();
+            changed.exits[0].exit_id = text.into();
+            assert_allocation_comparison(&changed, &changed.clone(), Ok(true));
+            assert_allocation_comparison(&base, &changed, Ok(false));
+        }
+        let mut composed = base.clone();
+        composed.exits[0].exit_id = "é".into();
+        let mut decomposed = composed.clone();
+        decomposed.exits[0].exit_id = "e\u{301}".into();
+        assert_allocation_comparison(&composed, &decomposed, Ok(false));
+    }
+
+    #[test]
+    fn allocation_comparison_reports_invalid_paths_before_any_mismatch() {
+        use std::os::unix::ffi::OsStringExt;
+        let base = super::super::tests::record();
+        let mut malformed = base.clone();
+        malformed.exits[0].state_dir = std::ffi::OsString::from_vec(vec![b'/', 0xff]).into();
+        let error = Err(Error::OwnershipMismatch);
+        assert_allocation_comparison(&malformed, &base, error);
+        assert_allocation_comparison(&base, &malformed, error);
+        assert_allocation_comparison(&malformed, &malformed.clone(), error);
+        let mut late = base.clone();
+        late.exits.push(malformed.exits[0].clone());
+        for invalid in [&malformed, &late] {
+            let mut scalar_mismatch = base.clone();
+            scalar_mismatch.schema_version += 1;
+            let mut length_mismatch = base.clone();
+            length_mismatch.exits.clear();
+            let mut entry_mismatch = base.clone();
+            entry_mismatch.exits[0].exit_id.push('x');
+            for other in [&scalar_mismatch, &length_mismatch, &entry_mismatch] {
+                assert_allocation_comparison(invalid, other, error);
+                assert_allocation_comparison(other, invalid, error);
+            }
+        }
+    }
     #[test]
     fn pre_container_record_binds_exact_allocation_without_inventing_launch_identity() {
         let allocation = super::super::tests::record();

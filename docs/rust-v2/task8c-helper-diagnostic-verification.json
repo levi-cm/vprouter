@@ -1,0 +1,60 @@
+{
+  "binding": {
+    "source_commit": "c6f3c5e8917f81ee7b4b9070388ee3c524531b8b",
+    "source_archive_sha256": "56c1c02b4806c4d490100b098b9e9c1ac7dca4d42bd4fec7b047a7fc6844d633",
+    "tracked_build_inputs_verified": 202,
+    "source_aggregate_sha256": "f1a84685bb540b74b23f1a6393470b4a845b9ed11523a21f1f1ec8d65c54b57a"
+  },
+  "current_source_matches": true,
+  "platforms": {
+    "amd64": {
+      "manifest_sha256": "20b80264a521c030c52af56ba8645b232b22c035ba46f3b71653cb1f7480f65a",
+      "context_sha256": "f95434ea47702d720772ce10f5b23237c00f4e93837f8ddbcfb9d61711d7b9bc",
+      "payload_sha256": "9486d7e15faeaa6c855ca72bd465d68f285a27e5e55e8bc8f0dcecc1314c5a86",
+      "verified_context_files": 7,
+      "static_elf": true
+    },
+    "arm64": {
+      "manifest_sha256": "4d266ef01b48e33bc38ca3e49c94af9bb97d604fc640bf081bc4005432c9ff1b",
+      "context_sha256": "faf493db1398d974b1c806ea1750c241387650d1f47777ddc424d0d451bff992",
+      "payload_sha256": "d0855568dbf95ab01bebe00436b1c3a97c3491af365342b5cac7a02b5e636c55",
+      "verified_context_files": 7,
+      "static_elf": true
+    }
+  },
+  "native_bootstrap": "NOT_RUN",
+  "arm64_runtime": "NOT_RUN",
+  "release_ready": false,
+  "scope": "one-file cfg(test) original-error boundary and measured wrapper diagnostics; no enforcement fix",
+  "source_review": {
+    "spec": "PASS",
+    "quality": "PASS",
+    "blocking_findings": 0
+  },
+  "candidate_provenance_review": "PASS",
+  "preservation_baseline_review": "PASS",
+  "checks": {
+    "launch_library_passed": 148,
+    "launch_library_failed": 0,
+    "fmt": "PASS",
+    "strict_launch_lib_tests_clippy": "PASS",
+    "both_architecture_static_builds": "PASS",
+    "amd64_static_filter_and_pending_core_preflight": "PASS",
+    "read_only_debian_projection": "PASS"
+  },
+  "baseline": {
+    "links": 55,
+    "addresses": 51,
+    "routes": 154,
+    "rules": 5,
+    "template_sha256": "c2aacc8f867f358e2d149d9521630bff62d17ff98f29de87040e17077227f8af",
+    "reconciliation_sha256": "8f89c5db097744b4d91cedf0e09272ae73a3e8f6686790c944e803511a278b69",
+    "host_authority_granted": false
+  },
+  "evidence_hashes": {
+    "target/continuation-20261029T153856Z/root-verification.json": "2a4807bf52c9c12ddc3873be3746e1f683dad6fbdf90c827c0139f1ca6e83b91",
+    ".superpowers/sdd/rust-v2/task-8c-bootstrap-helper-diagnostic-report.md": "fe3b6223a62db74b73d3a831e7a260464a3e33d76522c2fd021436c2d5617305",
+    ".superpowers/sdd/rust-v2/task-8c-bootstrap-helper-diagnostic-review.md": "158fdd1e14586f930e38a68546c4710b9e4055dba2ada581805d0d7780732d6e",
+    "target/task8c-helper-diagnostic-20261029T153811Z/root-coherent-build.log": "834ca3a13767d2f21ec7f3530ec21385719bd94cbdda62922dffabfa88982636"
+  }
+}

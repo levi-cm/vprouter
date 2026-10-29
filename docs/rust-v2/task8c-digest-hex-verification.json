@@ -24,9 +24,9 @@
   },
   "arm64_runtime": "NOT_RUN",
   "release_ready": false,
-  "native_bootstrap": "NOT_RUN",
+  "native_bootstrap": "FAIL_ATTEMPT407",
   "scope": "one-file shared SHA256 lowercase-hex representation change; identical hash/input/64lowercase output and unchanged call sites/live checks",
-  "runtime_cost_effect": "NOT_RUN",
+  "runtime_cost_effect": "UNPROVED_ATTEMPT407_FAILED",
   "source_review": {
     "spec": "PASS",
     "quality": "PASS",
@@ -68,5 +68,5 @@
     "target/task8c-digest-hex-root-20261029/root-coherent-build.log": "f47188e57c051ba2d120ca147fe65e0c63e7a714b6622710c68fe0b33c435567",
     "target/task8c-digest-hex-root-20261029/program-manifest-scope.json": "92195589cb3f157fa28c84820ba296943daf481ac2e9646d38e80fe316c24751"
   },
-  "performance_limit": "Host actual-library experiment establishes only a local formatting mechanism. Native cost share, saved budget, speedup, original two-second fit, complete Bootstrap and release performance remain unproved; original398-406 failures preserved."
+  "performance_limit": "Native407 failed HOST native_poll/reading/Deadline with zero completed cases. Same-count query digest elapsed is lower than406, but not a controlled A/B result; counts/work reached and scheduling differ. No causal native speedup, original two-second fit, completed Bootstrap or release performance is proved."
 }

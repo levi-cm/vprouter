@@ -915,3 +915,22 @@ change only formatting, exactdigest/identityoutputs. Nativecost/Bootstrap/ARM
 NOT_RUN/releasefalse remain. Finalimmutablepublicaudit precedes source/checkpoint
 and exact51c15016tag push, then nextownedlocalVMexperiment. No claimed native
 savedbudget/2sfit or acceptancefix; original398-406 retained.
+
+Digesthexsource milestone58a28b7 and exact51c15016tag rust-v2-test-20261029T174000Z
+remote-confirmed fork/rust/v2. OwnedDebian407FAILexit1/19.377s/zerocases, HOST
+native_poll/reading/Deadline after query+policyheld2/negatives6+12/releasestrue.
+Original2s unchanged; posterrorobservation9.827366ms late, notinnerfailedclock.
+Root unchanged exactreadonlyinspection+closed13+30+24metadataparsePASS. Query
+digest6522/12549100ns vs406samecount/24420007ns is observedelapsed only, not
+controlledcausalspeedup/CPU/savedbudget; owner4292/223044898ns and policycounts
+changed. Formattingchange has not made Bootstrap pass; no completedHOSTscope.
+All6selectors/otherresources retained pending independent407preservationreview.
+Source frozen, soleimplementer readonlynextproposal; no identicalretry/cache/
+checkremoval/deadlineextension. Full8cACTIVE/release_readyfalse/ARMNOT_RUN.
+
+407 independent failure/provenance/preservation/exactsix prerequisitePASS. Root
+unchangedarchiver freshoriginalowner/gateway/selector gatesPASS; exact6archived
+with exclusive receipt/allotherresources retained/no profile reads/signals/
+unmounts. PublicoriginalFAIL/zerocases/2sdeadline/observerlimits retained. Final
+completion/publicaudit pending before failuremilestone push; source remains
+frozen and all broader8c/client/migration/performance/release gates OPEN.

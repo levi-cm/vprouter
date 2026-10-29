@@ -297,6 +297,16 @@ impl Source {
             .ok_or(Error::OwnershipMismatch)?
             .verify_history(self)
     }
+    pub(crate) fn verify_acknowledged_write(
+        &self,
+        proof: &super::super::owned::preparation::OriginalWrite<'_>,
+    ) -> Result<()> {
+        self.require_acknowledged()?;
+        self.receipt
+            .as_ref()
+            .ok_or(Error::OwnershipMismatch)?
+            .verify_write(self, proof)
+    }
 
     pub(crate) fn accept(
         &mut self,

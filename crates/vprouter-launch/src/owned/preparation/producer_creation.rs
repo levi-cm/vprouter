@@ -422,6 +422,38 @@ pub(crate) struct Receipt {
     history: History,
 }
 impl Receipt {
+    pub(crate) fn verify_write(
+        &self,
+        source: &kernel::producer_creation::Source,
+        proof: &OriginalWrite<'_>,
+    ) -> Result<()> {
+        proof.verify_origin(&self.shared, &self.member)?;
+        source.verify_retained()?;
+        source
+            .intent()?
+            .verify_owner_origin(&self.shared, &self.member)?;
+        if self.creator != std::process::id()
+            || self.history.request != source.request().digest()
+            || self.history.birth.as_ref() != Some(&source.birth()?)
+            || self.history.group != Some(source.identity()?)
+            || self.history.verified_at != Some(source.verified_at())
+            || self.shared.fenced.get()
+        {
+            return Err(Error::OwnershipMismatch);
+        }
+        let j = self.shared.journal.borrow();
+        let e = j
+            .record
+            .entries
+            .iter()
+            .find(|e| e.exit_id == self.member)
+            .ok_or(Error::OwnershipMismatch)?;
+        let p = e.preparation.as_ref().ok_or(Error::OwnershipMismatch)?;
+        if p.producer_creation.as_ref() != Some(&self.history) {
+            return Err(Error::OwnershipMismatch);
+        }
+        self.history.validate(&j.record, e, p)
+    }
     pub(crate) fn verify(&self, source: &kernel::producer_creation::Source) -> Result<()> {
         source.verify()?;
         self.verify_history(source)

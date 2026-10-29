@@ -1136,7 +1136,7 @@ struct SharedJournal {
 }
 /// Outstanding exact fixed-role constructor receipts, independent of service
 /// pending/queued fields. Completed slots are pruned only after full collection.
-struct NativeJobs {
+pub(super) struct NativeJobs {
     creator: u32,
     next: u64,
     pending: std::collections::BTreeMap<u64, (String, kernel::NativeJobDrain)>,
@@ -1232,6 +1232,25 @@ pub(super) struct MutatorLease {
     exit: String,
 }
 impl MutatorLease {
+    pub(super) fn matches_writer_owner(
+        &self,
+        jobs: &std::rc::Rc<std::cell::RefCell<NativeJobs>>,
+        member: &str,
+    ) -> Result<bool> {
+        if !self.counted
+            || !self._inventory.contains(self.fd.as_fd())
+            || !std::rc::Rc::ptr_eq(jobs, &self.native_jobs)
+            || self.exit != member
+        {
+            return Ok(false);
+        }
+        let ticket = self.native_job.as_ref().ok_or(Error::OwnershipMismatch)?;
+        let jobs = jobs.try_borrow().map_err(|_| Error::LockBusy)?;
+        Ok(jobs.creator == std::process::id()
+            && jobs.pending.values().any(|(owner, original)| {
+                owner == member && original.matches_original_writer(ticket)
+            }))
+    }
     pub(super) fn retain_host_window(
         &mut self,
         window: std::rc::Rc<std::cell::RefCell<vprouter_network::HostAuditTicket>>,
@@ -7917,6 +7936,25 @@ fn lab_native_job_drop_retention(host: bool, fail_parent: bool) -> Result<()> {
         let child = kernel::spawn_journal_io(directory, lease, &job)?;
         let (before, after, end) = job.constructor_binding();
         let after = after.ok_or(Error::OwnershipMismatch)?;
+        preparation::lab_pending_write_core(&child, &native_jobs, before, after, end)?;
+        if child.drained()
+            || !child.matches_owned_mutation_io(&native_jobs, "one", before, after, end)?
+        {
+            eprintln!("LAB_PENDING_WRITE_REGRESSION exact_original_writer_refused=true");
+            return Err(Error::OwnershipMismatch);
+        }
+        let foreign_jobs = std::rc::Rc::new(std::cell::RefCell::new(NativeJobs::new()));
+        for refused in [
+            child.matches_owned_mutation_io(&foreign_jobs, "one", before, after, end)?,
+            child.matches_owned_mutation_io(&native_jobs, "other", before, after, end)?,
+            child.matches_owned_mutation_io(&native_jobs, "one", [0; 32], after, end)?,
+            child.matches_owned_mutation_io(&native_jobs, "one", before, [0; 32], end)?,
+            child.matches_owned_mutation_io(&native_jobs, "one", before, after, end + 1.)?,
+        ] {
+            if refused {
+                return Err(Error::OwnershipMismatch);
+            }
+        }
         if !child.matches_mutation_io(before, after, end)?
             || child.matches_mutation_io([0; 32], after, end)?
             || child.matches_mutation_io(before, [0; 32], end)?

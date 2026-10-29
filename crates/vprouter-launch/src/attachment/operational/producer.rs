@@ -121,6 +121,19 @@ impl Pins {
             return Err(Error::OwnershipMismatch);
         }
         self.source.verify_acknowledged_history()?;
+        self.verify_slots()
+    }
+    pub(super) fn verify_write(
+        &self,
+        proof: &super::super::super::owned::preparation::OriginalWrite<'_>,
+    ) -> Result<()> {
+        if self.creator != std::process::id() || !vprouter_core::secret_boundary::pristine() {
+            return Err(Error::OwnershipMismatch);
+        }
+        self.source.verify_acknowledged_write(proof)?;
+        self.verify_slots()
+    }
+    fn verify_slots(&self) -> Result<()> {
         if self.fds.len() != 8 || self.tokens.len() != 8 || self.identities.len() != 8 {
             return Err(Error::DescriptorInventory);
         }

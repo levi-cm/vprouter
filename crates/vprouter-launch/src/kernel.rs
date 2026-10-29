@@ -1650,6 +1650,18 @@ fn poll_retired_journal_io() {
     });
 }
 impl JournalChild {
+    pub(super) fn matches_owned_mutation_io(
+        &self,
+        jobs: &std::rc::Rc<std::cell::RefCell<super::owned::NativeJobs>>,
+        member: &str,
+        before: [u8; 32],
+        after: [u8; 32],
+        deadline: f64,
+    ) -> Result<bool> {
+        self.creator()?;
+        Ok(self._lease.matches_writer_owner(jobs, member)?
+            && self.matches_mutation_io(before, after, deadline)?)
+    }
     // Immutable constructor input binding, never a parsed completion or ACK.
     pub(super) fn matches_mutation_io(
         &self,
@@ -2327,6 +2339,13 @@ impl Drop for NativeJobTicket {
     }
 }
 impl NativeJobDrain {
+    pub(super) fn matches_original_writer(&self, ticket: &NativeJobTicket) -> bool {
+        self.creator == std::process::id()
+            && ticket.creator == self.creator
+            && ticket.kind == NativeJobKind::Journal
+            && std::rc::Rc::ptr_eq(&self.state, &ticket.state)
+            && self.state.get() == NativeJobState::Born
+    }
     pub(super) fn matches_reaped(&self, ticket: &NativeJobTicket) -> Result<bool> {
         if self.creator != std::process::id() || ticket.creator != self.creator {
             return Err(Error::OwnershipMismatch);

@@ -497,12 +497,18 @@ impl Server {
             request.clone(),
         )
     }
-    pub(crate) fn poll_bootstrap_intent(&mut self, request: &Request) -> Result<Option<Intent>> {
-        request.verify()?;
+    pub(crate) fn poll_bootstrap_intent(
+        &mut self,
+        request: &Rc<Request>,
+    ) -> Result<Option<Intent>> {
+        request
+            .binding()
+            .verify_bootstrap_progress(self, request, Progress::Intent)?;
         let n = self.native.as_mut().ok_or(Error::Interrupted)?;
         if !n.poll_inspection(phase(request.index(), Stage::Intent))? {
             return Ok(None);
         }
+        request.verify()?;
         let intent = Intent {
             creator: n.creator,
             shared: n.transaction.shared.clone(),
@@ -573,11 +579,16 @@ impl Server {
         source: &kernel::bootstrap::Verified,
     ) -> Result<Option<Receipt>> {
         source.bind_service(self)?;
-        source.verify()?;
+        source.request().binding().verify_bootstrap_progress(
+            self,
+            source.request(),
+            Progress::Result(source),
+        )?;
         let n = self.native.as_mut().ok_or(Error::Interrupted)?;
         if !n.poll_inspection(phase(source.request().index(), Stage::Result))? {
             return Ok(None);
         }
+        source.verify()?;
         let h = n.bootstrap_history(source.request().index())?;
         if h.birth.as_ref() != Some(&source.birth()?)
             || h.result.as_ref() != Some(source.result()?)
@@ -650,7 +661,7 @@ impl quarantine::Binding {
         stage: Progress<'_>,
     ) -> Result<()> {
         self.verify_service_custody(server)?;
-        request.verify()?;
+        request.check()?;
         if !Rc::ptr_eq(self, request.binding()) {
             return Err(Error::OwnershipMismatch);
         }
@@ -684,6 +695,10 @@ impl quarantine::Binding {
             result: None,
             verified_at: None,
         };
+        let verified = match &stage {
+            Progress::Result(value) => Some(*value),
+            _ => None,
+        };
         let phase = match stage {
             Progress::Intent => {
                 if p.bootstrap.len() != request.index() {
@@ -707,12 +722,13 @@ impl quarantine::Binding {
                     return Err(Error::OwnershipMismatch);
                 }
                 v.bind_service(server)?;
-                h.birth = Some(v.birth()?);
+                let (birth, result, accepted_at) = v.write_evidence()?;
+                h.birth = Some(birth);
                 if p.bootstrap.get(request.index()) != Some(&h) {
                     return Err(Error::OwnershipMismatch);
                 }
-                h.result = Some(v.result()?.clone());
-                h.verified_at = Some(v.accepted_at()?);
+                h.result = Some(result);
+                h.verified_at = Some(accepted_at);
                 phase(request.index(), Stage::Result)
             }
         };
@@ -724,6 +740,16 @@ impl quarantine::Binding {
                 .ok_or(Error::OwnershipMismatch)? = h;
         }
         n.verify_owned_progress(&expected, phase, request.requested_at())?;
+        let proof = OriginalWrite {
+            server,
+            expected,
+            phase,
+            started: request.requested_at(),
+        };
+        request.verify_write(&proof)?;
+        if let Some(verified) = verified {
+            verified.verify_write(&proof)?;
+        }
         self.verify_retained()?;
         request.check()
     }

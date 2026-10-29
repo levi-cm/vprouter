@@ -1095,22 +1095,26 @@ impl Native {
                 }
             }
             (Some(job), None) => {
-                if !job.mutation
-                    || job.failed
-                    || job.deadline != started + 2.
-                    || encode_record(
-                        shared
-                            .pending
-                            .borrow()
-                            .as_ref()
-                            .ok_or(Error::OwnershipMismatch)?,
-                    )? != expected_bytes
+                PendingWriter {
+                    child: &job.child,
+                    jobs: &shared.native_jobs,
+                    member: &self.history.member,
+                    phase: c.phase,
+                    started: c.started_at,
+                    deadline: job.deadline,
+                    mutation: job.mutation,
+                    failed: job.failed,
+                    fenced: shared.fenced.get(),
+                }
+                .verify(phase, started, before, record_digest(&expected_bytes))?;
+                if encode_record(
+                    shared
+                        .pending
+                        .borrow()
+                        .as_ref()
+                        .ok_or(Error::OwnershipMismatch)?,
+                )? != expected_bytes
                     || !shared.queue.borrow().0.is_empty()
-                    || !job.child.matches_mutation_io(
-                        before,
-                        record_digest(&expected_bytes),
-                        started + 2.,
-                    )?
                 {
                     return Err(Error::OwnershipMismatch);
                 }

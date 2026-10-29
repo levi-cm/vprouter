@@ -140,10 +140,9 @@ fn socket_role(
     );
     // Fixed names belong to the original immutable selected owner. No arbitrary
     // path, follow-symlink mode, or directory write is permitted.
-    #[cfg(target_arch = "x86_64")]
+    // libc names the fstatat syscall SYS_newfstatat on both supported ABIs
+    // (x86_64: 262, aarch64: 79).
     let stat = libc::SYS_newfstatat;
-    #[cfg(target_arch = "aarch64")]
-    let stat = libc::SYS_fstatat;
     for &(fd, name) in ancestry {
         rule(
             &mut out,
@@ -288,10 +287,7 @@ mod tests {
     use super::*;
     #[test]
     fn bootstrap_ancestry_is_exact_read_only_and_does_not_expand_old_role() {
-        #[cfg(target_arch = "x86_64")]
         let stat = libc::SYS_newfstatat;
-        #[cfg(target_arch = "aarch64")]
-        let stat = libc::SYS_fstatat;
         let names = [(40, 0x1234), (41, 0x2345), (42, 0x3456), (40, 0x4567)];
         let policy = producer_bootstrap(
             &[44, 45, 46, 47],

@@ -1,5 +1,21 @@
 # Rust v2 implementation status — in progress
 
+Dated update, 2026-10-29: all saved source is checkpointed on fork/rust/v2.
+Latest coherent test source is `b51b5d7dd7a127d88a6e770f0b8780951190805b`, 202
+exact inputs, independently verified AMD64/ARM64 static payloads and contexts.
+Local owned Debian actual-program397 passes 17 cases, including four live post-pin
+faults/revocation, with six independent captures/112 packets/zero forbidden
+markers/zero kernel drops. The ARM64 Bootstrap syscall-name compile error was
+fixed without widening policy; original failure is retained. Fresh ordinary
+workspace 393 tests and focused 12 native-role tests pass, as do fmt/strictClippy;
+84 performance-tool unit tests pass without benchmark acceptance.
+Task8b2 independently passes against 836210a through reviewed 90a7dcc/run396;
+new current-source regression review is separate. New Bootstrap native execution,
+operational/runtime/client/migration/performance/release acceptance remain open.
+See `testing-2026-10-29.md/json` and the dated task8b2 reviews for source limits.
+
+## Historical checkpoint notes recorded before 2026-10-29
+
 Current frozen source candidate: `90a7dcc756f073cccd3a1c34959676f001eb7601`,
 worktree `/DATA/AppData/vprouter-rust-v2`, branch `rust/v2`.
 Root passes 388 workspace tests (zero failures, two ignored), all 195 source

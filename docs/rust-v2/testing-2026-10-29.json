@@ -115,5 +115,141 @@
   "release_ready": false,
   "real_client_acceptance": "NOT_RUN",
   "checkpoint_includes_unfinished_source": true,
-  "independent_review_report": ".superpowers/sdd/rust-v2/task-8b2-independent-review-2026-10-29.md"
+  "independent_review_report": ".superpowers/sdd/rust-v2/task-8b2-independent-review-2026-10-29.md",
+  "current_checkpoint_regression": {
+    "source_binding": {
+      "source_commit": "b51b5d7dd7a127d88a6e770f0b8780951190805b",
+      "source_archive_sha256": "efd893b6b136e2f0bae55cadcea6cfe1823ecd0129bef32fe76093271201d98d",
+      "tracked_build_inputs_verified": 202,
+      "source_aggregate_sha256": "0ce0488bee605e94f7aaf6fa4df915cc1284227efa3d773d78b6130bbfd06fe6"
+    },
+    "artifact_sha256": "7383d330350bdf445f2a77d95229955de38060426aa6ec7f8df17d7d2fb8d21b",
+    "context_sha256": "1170bc2a5980ab5adfb140e81bd91ed8fd28b6d2d7c2d58da91dff22119032e7",
+    "static_platforms_built_and_verified": [
+      "amd64",
+      "arm64"
+    ],
+    "source_tag": "rust-v2-test-20261029T122356Z",
+    "attempt": 397,
+    "exit_code": 0,
+    "cases": [
+      {
+        "case": "missing_private_dns_refused_before_intent_and_native_changes_offline_reacquire_succeeds",
+        "result": "pass"
+      },
+      {
+        "case": "durable_primary_base_native_transport_socket_birth_and_bootstrap",
+        "result": "pass"
+      },
+      {
+        "case": "fixed_root_caps0_nnp_seccomp_cache_root_ipc_only_publisher_atomic_snapshot_cli_reader",
+        "result": "pass"
+      },
+      {
+        "case": "frozen_publisher_cannot_block_guard_quarantine_and_publication_expires_bounded_cleanup",
+        "result": "pass"
+      },
+      {
+        "case": "actual_live_daemon_fixed_native_tun_rules_bound_and_revalidated",
+        "result": "pass"
+      },
+      {
+        "case": "actual_pinned_go_uid_netadmin_only_lsm_seccomp_private_root_state_fds",
+        "result": "pass"
+      },
+      {
+        "case": "actual_both_preexec_role_profiles_state_mount_exec_and_syscall_exec_init_proc_denials",
+        "result": "pass"
+      },
+      {
+        "case": "actual_rust_protected_readonly_configuration_authenticated_one_use_peer_metadata_localapi",
+        "result": "pass"
+      },
+      {
+        "case": "actual_post_pin_tun_mtu_drift_revoked_offline_old_authority_stays_revoked_after_repair",
+        "result": "pass"
+      },
+      {
+        "case": "actual_post_pin_tun_address_drift_revoked_offline_old_authority_stays_revoked_after_repair",
+        "result": "pass"
+      },
+      {
+        "case": "actual_post_pin_route_drift_revoked_offline_old_authority_stays_revoked_after_repair",
+        "result": "pass"
+      },
+      {
+        "case": "actual_post_pin_rule_drift_revoked_offline_old_authority_stays_revoked_after_repair",
+        "result": "pass"
+      },
+      {
+        "case": "actual_go_signal_forwarding_bounded_reaping_empty_group_parent_accounting_unchanged",
+        "result": "pass"
+      },
+      {
+        "case": "actual_daemon_dead_revoked_baseline_and_full_offline_quarantine",
+        "result": "pass"
+      },
+      {
+        "case": "actual_fixed_monitor_authenticated_lifecycle_starting_host_cache_cli_offline_stop_no_ready",
+        "result": "pass"
+      },
+      {
+        "case": "actual_fixture_three_plane_positive_controls_capture_accounting_and_same_namespace_unauthorized_denial",
+        "result": "pass"
+      },
+      {
+        "case": "actual_go_rust_container_death_natural_reap_revocation_empty_group_retained_offline_quarantine",
+        "result": "pass"
+      }
+    ],
+    "capture_summary": {
+      "platform": "debian-clean-x86_64",
+      "source_commit": "b51b5d7dd7a127d88a6e770f0b8780951190805b",
+      "record": "target/lab-state/actual-program-run-397.json",
+      "directory": "/var/lib/vprouter-v2-lab/task8b2-38027",
+      "capture_files": 6,
+      "packet_records": 112,
+      "forbidden_markers": 0,
+      "kernel_drops": 0,
+      "real_client_acceptance": "NOT_RUN",
+      "evidence_scope": "isolated Starting/observer/daemon component only"
+    },
+    "admission_markers_absent": true,
+    "exact202current_archive_git_inputs_equal": true,
+    "new_bootstrap_native_acceptance": "NOT_RUN",
+    "arm64_runtime_this_snapshot": "NOT_RUN",
+    "independent_current_regression_review": "PASS_SCOPED_NO_OPEN_FINDINGS",
+    "runtime_benchmarks": "NOT_RUN",
+    "real_client_acceptance": "NOT_RUN",
+    "release_ready": false,
+    "first_current_build": "FAIL_ARM64_E0425_PRESERVED",
+    "arm64_fix": "libc SYS_newfstatat exact unchanged ABI",
+    "successful_build_log": "target/task8b2-coherent-build-20261029-fix1.log",
+    "performance_tool_unit_tests": 84,
+    "native_role_tests_after_fix": 12,
+    "evidence_sha256": {
+      "target/lab-state/actual-program-run-397.json": "d3d756c812fbf770c3b19906fa130cc9c13f07db7c6f7775764dfef8f8b6c0d6",
+      "target/continuation-20261029T122356Z/task8b2-current-20261029/captures.json": "7255714419911ed506ad3dbc2103628cc0d86dbc042fa9dadc67176b9cd407b4",
+      "target/task8b2-workspace-final-20261029.log": "a0408cf7b42908732829835c15d5652d4c9939caace2e0f610fe83a0150a201e",
+      "target/task8b2-clippy-final-20261029.log": "e35a3a4fea07c7ac49c304d07c7c54bc19b619896316482cea87380828ad9c4a",
+      "target/task8b2-performance-tools-20261029.log": "a6ddc1bb265f2a59f383b9a8c205fd8b3d787682034995e877e82eb6705d84ea"
+    },
+    "final_workspace_tests": {
+      "passed": 393,
+      "failed": 0,
+      "ignored": 2
+    },
+    "final_workspace_strict_clippy": "PASS",
+    "independent_current_regression_report": ".superpowers/sdd/rust-v2/task-8b2-current-regression-review-2026-10-29.md",
+    "platform_hashes": {
+      "amd64": {
+        "artifact_sha256": "7383d330350bdf445f2a77d95229955de38060426aa6ec7f8df17d7d2fb8d21b",
+        "context_sha256": "1170bc2a5980ab5adfb140e81bd91ed8fd28b6d2d7c2d58da91dff22119032e7"
+      },
+      "arm64": {
+        "artifact_sha256": "a6404d4f15124558fbef98f4156a5bcf57ee8f3d375c69a581fcb651bf4a4676",
+        "context_sha256": "64e82ba3b9332e5c97cedd146dbc5cdf276b957863df0b14860ace19807ccd94"
+      }
+    }
+  }
 }

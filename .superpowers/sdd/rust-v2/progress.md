@@ -600,3 +600,13 @@ versus '..' dev22/ino2/040755, cgroup2 mountroot'/' confirms false selfparent
 predicate under currenthostmount view. No originalowner executed-return trace
 claimed. Soleimplementer completing readonlypredicate inventory/nextfixproposal;
 no newsourcechange or identicalnative retry authorized. Full8c remainsACTIVE.
+
+401failure milestone e986cfd remote-confirmed. Readonlydiagnosis a5d3b382 identifies
+invalid root-self-parent edge in both process/native-role ancestry; root current
+VM reverse-edge oracle confirms system.slice/'..'==originalroot and exactgateway
+PID/start/membership/Dockerscope preserved, notoriginalexecutedreturnproof.
+Authorized soleimplementer narrow3file ancestry brief at e986cfd: replace false
+edge with actualinternalreverseedge and changeonly firstexactstatFD; preserveall
+originalroot/forwardedge/cgroup2/identity/confinementchecks. RealFD sharedcore and
+actualAncestry-generated filter regressions required; old13+approved6 untouched.
+No newnative action untilreview/coherentbinding; full8cACTIVE.

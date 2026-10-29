@@ -60,7 +60,8 @@ not private profile material. No source changed during this audit.
 ## Public399 evidence binding
 
 `docs/rust-v2/task8c-bootstrap-attempt399.json` SHA256:
-`6ee984c1cb75985a2a1016ec0d6cf20ef413ab5351c6f0afe67a0eaff1f538a7`.
+`29f245f52cd6b8ee26a606a5b807cd375d86c70c6ab8e8b73e23bbb150f2bfa4`
+(including the subsequently reviewed metadata and preservation addenda below).
 
 It independently matches original raw
 `target/lab-state/actual-program-run-399.json` SHA256
@@ -172,3 +173,31 @@ fixed public selector names. It does not repair Interrupted, expose its original
 masked error, authorize unchanged-payload retry, adopt live-HOST fields or grant
 cleanup/member/removal/runtime/READY/client/release authority. Full8c remains
 ACTIVE and both original failures remain preserved.
+
+## Subsequent Root execution and metadata addenda
+
+After the independent approval above, Root executed the unchanged archiver.
+The local completion receipt
+`target/lab-state/secret-bootstrap-selector-archive-run-399.json`, SHA256
+`d749dc610b78c9081a7cbd9fd34b88ad7b6da96c2fd341c6bd81e04822474fbf`,
+binds the same raw399 hash and complete source binding. I independently checked
+its exact six ordered `399-failed-<name>` destinations, all within the same
+original synthetic-input directory, the exact reviewed owner identity, retained
+container/profiles/canonical/mount resources, no private profile reads and no
+signals/unmounts. The public subsequent_preservation addendum matches this
+receipt. This is verification of Root-collected completion evidence; the auditor
+did not execute archival or perform a new live VM inspection. The original
+selectors_retained=6 remains the at-failure observation; the later addendum
+records their archival without rewriting the original result.
+
+I also independently extracted the metadata-only bootstrap_queries field from
+the same already reviewed inspection (SHA256 cb1e24de27678537f8e037fc0f06b7c22f1ab1f7a0b55e1b9fa4b9b310f1ccc3).
+It has three slots: slot0 is BootstrapHostRecheck intent with birth, facts and
+verified_at all null; slots1 and2 are null. The public
+subsequent_canonical_metadata values match exactly. Its bootstrap_queries=3
+means three slots, not three executed or successful queries. No query completion,
+successful scope policy, semantic cause or native acceptance follows.
+
+Both scoped PASS verdicts remain valid for the current public JSON hash above.
+Current source and inspector/archiver hashes still equal the reviewed values;
+`git diff --check` passes.

@@ -126,5 +126,6 @@
     "private_profile_contents_read": false,
     "signals_or_unmounts": false,
     "exact_owner_and_original_gateway_reverified": true
-  }
+  },
+  "evidence_qualification": "Canonical disk fields prove durable proposal/write only; parent process-local ACK is not established by this inspection."
 }

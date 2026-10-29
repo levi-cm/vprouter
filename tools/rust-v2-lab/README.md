@@ -2,7 +2,7 @@
 
 This byte-for-byte archive saves the controller and evidence-validation programs
 that were developed under ignored `target/` paths. The source manifest records
-all 290 original relative paths, sizes and SHA256 hashes. Private keys, profiles,
+all 291 original relative paths, sizes and SHA256 hashes. Private keys, profiles,
 VM disks, image contexts, raw traces, captures and identity state are excluded.
 
 These are development/test implementations, including historical variants.

@@ -1740,6 +1740,12 @@
       "archive_path": "tools/rust-v2-lab/target/author-host-baseline-preserving398.py",
       "sha256": "85735e9f2b57fdfeb5827268145b1f7a13a578c23c01b14e6d70beddc4f30c3a",
       "bytes": 5906
+    },
+    {
+      "source_path": "target/author-host-baseline-after-bootstrap.py",
+      "archive_path": "tools/rust-v2-lab/target/author-host-baseline-after-bootstrap.py",
+      "sha256": "4bfa6ea18191e64ac3a9b004de9c20358846b0343e19924e14440b371883f9b0",
+      "bytes": 6750
     }
   ]
 }

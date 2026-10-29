@@ -365,10 +365,20 @@ impl Native {
                     .service_mut()?
                     .poll_inspection_intent(&self.query)?
                 {
+                    #[cfg(test)]
+                    lab_phase("bootstrap.query_intent", true);
+                    #[cfg(test)]
+                    lab_phase("bootstrap.query_spawn", false);
                     self.query_child = Some(kernel::docker_query::spawn(self.query.clone(), i)?);
+                    #[cfg(test)]
+                    lab_phase("bootstrap.query_spawn", true);
+                    #[cfg(test)]
+                    lab_phase("bootstrap.query_birth_queue", false);
                     self.input.service_mut()?.start_inspection_birth(
                         self.query_child.as_ref().ok_or(Error::Interrupted)?,
                     )?;
+                    #[cfg(test)]
+                    lab_phase("bootstrap.query_birth_queue", true);
                     self.step = Step::QueryBirth;
                 }
             }
@@ -709,7 +719,27 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
                     .native
                     .as_mut()
                     .ok_or(Error::Interrupted)?;
-                let request = n.request.as_ref().ok_or(Error::Interrupted)?.clone();
+                let step = match n.step {
+                    Step::QueryIntent => "query_intent",
+                    Step::QueryBirth => "query_birth",
+                    Step::QueryReading => "query_reading",
+                    Step::QueryResult => "query_result",
+                    Step::Intent => "intent",
+                    Step::Birth => "birth",
+                    Step::Reading => "reading",
+                    Step::Result => "result",
+                    Step::Next => "next",
+                    Step::Complete => "complete",
+                };
+                eprintln!(
+                    "LAB_SECRET_BOOTSTRAP_POLL_FAILURE step={step} reason={error:?} request_present={} query_child_present={}",
+                    n.request.is_some(),
+                    n.query_child.is_some()
+                );
+                let Some(request) = n.request.as_ref() else {
+                    return Err(error);
+                };
+                let request = request.clone();
                 eprintln!(
                     "LAB_SECRET_BOOTSTRAP_FAILURE scope={:?} reason={error:?} requested_at={} deadline={} now={}",
                     request.scope(),

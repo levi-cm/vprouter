@@ -502,3 +502,31 @@ archiver then freshchecksPASS+6selectorsarchived into originalprotectedinputdir;
 allother resources retained/no signals/unmounts. Native399remainsFAIL; no retry.
 Provenlabmaskingbug planned next: preserve originalpre-policyquery error instead
 of replacing it withInterrupted; no guessed enforcementfix.
+
+Diagnostic milestone ce41a0a remote-confirmed fork/rust/v2 plus exactsource73a35260
+remote tag rust-v2-test-20261029T125748Z. Late independent canonical/preservation
+report addendum retained for nextcheckpoint. Production read-only active.
+Original sole implementer authorized ONEFILE operational/bootstrap.rs laberror
+preservation and fixed QueryIntent/spawn/birthqueue phases, no enforcementfix.
+Root generic baseline successor preserves original398helper bytes/provenance and
+adds nextfailed-run directorybinding/outerexactendpoint checks; narrowreviewpending.
+
+Evidence correction400diagnosis: on-disk bootstrap_queries[0] proves durable
+proposal/write, NOT parent process-local ACK. Earlier Root399 wording saying
+Intentacknowledged is overstrong; the present/absent field observations stand.
+Samequalification applies to398disk-only result/verified fields; foreign endpoint
+preservation remains bound to originalcanonicalproposal+exactouter observation,
+with no membership/removal authority. Native399marked host/handoffgroups provide
+separate source-level completion evidence, never rawdiskalone. Original rawdata
+unchanged. Readonlysource trace finds pending-state conflict in bootstrap progress:
+input.context historicalSource receipt rejects shared.pending before original
+Server can advance that same querywriter. Narrowtypedprogress fix under design;
+globalpending rejection mustremain, no enforcementrelaxation authorized.
+
+Onefile querydiagnostics independently spec/qualityPASS; Root sourcefbfa3bbc
+coherent202inputs/bothstaticELF+contexts/fmt/diff/focusedstrictClippyPASS. Native400
+FAILzero cases exposes OwnershipMismatch/query_intent/no policyrequest/querychild,
+no IntentOK/spawnmarkers,88writerinventorypairs. Public/rawfailure retained.
+Content/exact6selectorpreservation independentPASS; unchangedarchiver freshgates
+PASS and6selectorsarchived, allotherfixture resources retained/no signals/unmounts.
+No identicalretry. Full8cACTIVE; next narrowtypedpendingprogressfix underdesign.

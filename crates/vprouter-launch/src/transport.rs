@@ -225,6 +225,24 @@ impl ObservationAudit<'_> {
         self.stage = Stage::Offline;
         self.policy()
     }
+    /// Report only the policy read back through retained namespace sockets.
+    /// The serializable receipt itself grants no policy transition authority.
+    pub(super) fn policy_receipt(
+        &mut self,
+        binding: &vprouter_core::health::Binding,
+    ) -> Result<vprouter_worker::operation::PolicyReceipt> {
+        self.policy()?;
+        use vprouter_worker::operation::{PolicyReceipt, PolicyState};
+        let state = match self.stage {
+            Stage::Offline => PolicyState::Offline,
+            Stage::Bootstrap => PolicyState::Bootstrap,
+            Stage::Ready => PolicyState::Ready,
+        };
+        Ok(PolicyReceipt {
+            binding: binding.clone(),
+            state,
+        })
+    }
     pub(super) fn expiry(
         &self,
         transaction: &Transaction,
@@ -253,11 +271,13 @@ impl ObservationAudit<'_> {
         executors: &mut super::expiry::Executors,
         transaction: &Transaction,
         spec: &LaunchSpec,
-        state: vprouter_core::state::HealthState,
+        snapshot: &vprouter_core::health::Snapshot,
     ) -> Result<()> {
+        use vprouter_worker::operation::PolicyState;
+        let state = PolicyState::publication(snapshot);
         let result = (|| {
             executors.check(transaction, spec)?;
-            if state == vprouter_core::state::HealthState::Ready {
+            if state == PolicyState::Ready {
                 self.host_evidence()?;
                 let mut lease = executors.ready(transaction, spec)?;
                 lease.check()?;
@@ -269,15 +289,17 @@ impl ObservationAudit<'_> {
                 self.policy()?;
                 self.host_evidence()?;
                 lease.check()?;
-            } else {
+            } else if state == PolicyState::Bootstrap {
                 self.enforcement
                     .bootstrap()
                     .map_err(|_| Error::NetworkPolicy)?;
                 self.stage = Stage::Bootstrap;
                 self.policy()?;
+            } else {
+                self.offline()?;
             }
             executors.check(transaction, spec)?;
-            if state == vprouter_core::state::HealthState::Ready {
+            if state == PolicyState::Ready {
                 self.host_evidence()?;
             }
             Ok(())
@@ -297,7 +319,7 @@ impl ObservationAudit<'_> {
         if snapshot.state != vprouter_core::state::HealthState::Ready {
             return Err(Error::DescriptorPolicy);
         }
-        self.apply_health(executors, transaction, spec, snapshot.state)?;
+        self.apply_health(executors, transaction, spec, snapshot)?;
         let mut lease = executors.ready(transaction, spec)?;
         lease.check()?;
         let proof = ReadyPublication {

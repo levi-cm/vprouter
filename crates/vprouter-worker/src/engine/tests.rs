@@ -111,6 +111,22 @@ fn count(e: &Engine<Script>, event: &str) -> usize {
         .filter(|(s, _)| s == &event)
         .count()
 }
+fn operational_receipt(state: crate::operation::PolicyState) -> crate::operation::PolicyReceipt {
+    crate::operation::PolicyReceipt {
+        binding: vprouter_core::health::Binding {
+            deployment_id: "test".into(),
+            exit_id: "one".into(),
+            mode: ExitMode::Mullvad,
+            generation: 1,
+            display_name: "test-exit".into(),
+            expected_server: Some("de-fra-wg-404".into()),
+            node_id: "n123".into(),
+            config_fingerprint: "a".repeat(64),
+            boot_id: "01234567-1234-1234-1234-0123456789ab".into(),
+        },
+        state,
+    }
+}
 #[tokio::test(start_paused = true)]
 async fn one_retry_has_actual_one_second_delay_and_fresh_structure_each_side() {
     for error in [Error::HttpTransient, Error::Transport, Error::Deadline] {
@@ -677,7 +693,10 @@ async fn operational_failure_waits_for_quarantine_ack_before_withdrawal_and_bind
                     (0, Request::Prepare { message, .. }) => {
                         assert_eq!(message.snapshot.unwrap().state, HealthState::Blocked);
                         seen.store(true, std::sync::atomic::Ordering::SeqCst);
-                        Reply::Prepared { frame }
+                        Reply::Prepared {
+                            frame,
+                            policy: operational_receipt(crate::operation::PolicyState::Offline),
+                        }
                     }
                     (
                         1,
@@ -694,6 +713,7 @@ async fn operational_failure_waits_for_quarantine_ack_before_withdrawal_and_bind
                         },
                     ) => Reply::Enforced {
                         frame,
+                        policy: operational_receipt(crate::operation::PolicyState::Offline),
                         state: if wrong_commit {
                             HealthState::Ready
                         } else {
@@ -733,6 +753,174 @@ async fn operational_failure_waits_for_quarantine_ack_before_withdrawal_and_bind
         assert_eq!(count(&engine, "withdraw"), 1);
         peer.join().unwrap();
     }
+}
+
+#[tokio::test]
+async fn operational_failure_requires_bound_offline_receipts_and_returns_original_error_last() {
+    use crate::operation::{Channel, PolicyState, Reply, Request};
+    use vprouter_core::health::{HealthMessage, Snapshot, boot_seconds};
+    // Each peer uses the real length-delimited channel. Wrong preparation
+    // receipts must stop BEFORE withdrawal; wrong commits override the sample
+    // error because its safe completion has not been acknowledged.
+    for fault in 0..=9 {
+        let mut engine = engine();
+        engine.machine.block(Reason::ProviderFailure);
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        engine.inputs.faults.borrow_mut().guard_seen = Some(seen.clone());
+        let now = boot_seconds();
+        let snapshot = Snapshot::from_machine(
+            operational_receipt(PolicyState::Offline).binding,
+            1,
+            now,
+            &engine.machine,
+        )
+        .unwrap();
+        let (client, mut server) = std::os::unix::net::UnixStream::pair().unwrap();
+        let peer = std::thread::spawn(move || {
+            for stage in 0..3 {
+                let Ok(request): std::result::Result<Request, _> =
+                    crate::bootstrap::read_message(&mut server)
+                else {
+                    return;
+                };
+                let frame = request.frame().clone();
+                let mut policy = operational_receipt(PolicyState::Offline);
+                if stage == 0 {
+                    match fault {
+                        1 => policy.state = PolicyState::Bootstrap,
+                        2 => policy.state = PolicyState::Ready,
+                        3 => policy.binding.generation += 1,
+                        4 => policy.binding.exit_id = "foreign".into(),
+                        // Historical health-only ACK cannot prove quarantine.
+                        9 => {
+                            let reply = serde_json::json!({"disposition":"prepared","frame":frame});
+                            crate::bootstrap::write_message(&mut server, &reply).unwrap();
+                            return;
+                        }
+                        _ => (),
+                    }
+                } else if stage == 2 {
+                    match fault {
+                        5 => policy.state = PolicyState::Bootstrap,
+                        6 => policy.state = PolicyState::Ready,
+                        7 => policy.binding.generation += 1,
+                        _ => (),
+                    }
+                }
+                let reply = match request {
+                    Request::Prepare { .. } if stage == 0 => {
+                        seen.store(true, std::sync::atomic::Ordering::SeqCst);
+                        Reply::Prepared { frame, policy }
+                    }
+                    Request::Persist {
+                        snapshot_sequence: 1,
+                        ..
+                    } if stage == 1 => Reply::Persisted { frame },
+                    Request::Commit {
+                        snapshot_sequence: 1,
+                        ..
+                    } if stage == 2 => Reply::Enforced {
+                        frame,
+                        state: if fault == 8 {
+                            HealthState::Ready
+                        } else {
+                            HealthState::Blocked
+                        },
+                        policy,
+                    },
+                    _ => panic!("unexpected failure publication phase"),
+                };
+                crate::bootstrap::write_message(&mut server, &reply).unwrap();
+            }
+        });
+        let channel = Rc::new(tokio::sync::Mutex::new(
+            Channel::new(client, "a".repeat(64)).unwrap(),
+        ));
+        let result = operational_complete(
+            &channel,
+            HealthMessage {
+                version: 1,
+                lifecycle: "a".repeat(64),
+                sequence: 1,
+                sent_at: now,
+                snapshot: Some(snapshot),
+            },
+            &mut engine.inputs,
+            Err(Error::ProviderNegative),
+        )
+        .await;
+        assert_eq!(
+            result,
+            Err(if fault == 0 {
+                Error::ProviderNegative
+            } else if fault == 9 {
+                Error::Malformed
+            } else {
+                Error::GuardUnavailable
+            }),
+            "fault {fault}"
+        );
+        assert_eq!(
+            count(&engine, "withdraw"),
+            usize::from(!matches!(fault, 1..=4 | 9))
+        );
+        assert_eq!(count(&engine, "provider"), 0);
+        drop(channel);
+        peer.join().unwrap();
+    }
+}
+
+#[test]
+fn actual_failure_and_fresh_recovery_snapshots_have_distinct_policy_expectations() {
+    use crate::operation::PolicyState;
+    use vprouter_core::health::{Snapshot, boot_seconds};
+    let binding = operational_receipt(PolicyState::Offline).binding;
+    let mut machine = HealthMachine::new(ExitMode::Mullvad, Some("de-fra-wg-404"), "n123").unwrap();
+    let now = boot_seconds();
+    let policy = |machine: &HealthMachine, sequence, at| {
+        PolicyState::publication(
+            &Snapshot::from_machine(binding.clone(), sequence, at, machine).unwrap(),
+        )
+    };
+    assert_eq!(policy(&machine, 1, now - 5.), PolicyState::Bootstrap);
+    machine.block(Reason::ProviderFailure);
+    assert_eq!(policy(&machine, 2, now - 4.), PolicyState::Offline);
+    for sample in 1..=4 {
+        let at = now - 4. + sample as f64;
+        machine
+            .observe(
+                at,
+                Evidence {
+                    provider_ok: true,
+                    structural_ok: true,
+                    provider_at: at,
+                    structural_at: at,
+                    heartbeat_at: at,
+                    handshake_age_seconds: Some(1.),
+                    online: true,
+                    policy_approved: true,
+                    server: Some("de-fra-wg-404".into()),
+                    node_id: Some("n123".into()),
+                    egress: Some("1.2.3.4".parse().unwrap()),
+                    verified_at: Some(at),
+                    dns: VerificationResult::NotTested,
+                    ipv6: VerificationResult::NotTested,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            policy(&machine, sample + 2, at),
+            if sample == 4 {
+                PolicyState::Ready
+            } else {
+                PolicyState::Bootstrap
+            }
+        );
+    }
+    machine.stop();
+    assert_eq!(policy(&machine, 7, now), PolicyState::Offline);
+    machine.fail(Reason::StructuralFailure);
+    assert_eq!(policy(&machine, 8, now), PolicyState::Offline);
 }
 
 struct ChannelInputs {
@@ -852,7 +1040,7 @@ impl Inputs for RacingInputs {
 }
 
 #[tokio::test]
-async fn ordinary_failure_during_heartbeat_reply_publishes_blocked_and_recovers_same_lifecycle() {
+async fn ordinary_failure_during_heartbeat_reply_preserves_channel_and_scripted_fresh_samples() {
     use crate::operation::{Channel, Reply, Request, StructuralEvidence};
     use vprouter_core::health::{Binding, HealthMessage, Snapshot, boot_seconds};
     for local_failure in [false, true] {
@@ -889,12 +1077,29 @@ async fn ordinary_failure_during_heartbeat_reply_publishes_blocked_and_recovers_
                     }
                     Request::Prepare { message, .. } => {
                         state = message.snapshot.unwrap().state;
-                        Reply::Prepared { frame }
+                        Reply::Prepared {
+                            frame,
+                            policy: operational_receipt(if state == HealthState::Ready {
+                                crate::operation::PolicyState::Bootstrap
+                            } else {
+                                crate::operation::PolicyState::Offline
+                            }),
+                        }
                     }
                     Request::Persist { .. } => Reply::Persisted { frame },
                     Request::Commit { .. } => {
                         published.push(state);
-                        Reply::Enforced { frame, state }
+                        Reply::Enforced {
+                            frame,
+                            state,
+                            policy: operational_receipt(if state == HealthState::Ready {
+                                crate::operation::PolicyState::Ready
+                            } else if published.len() == 1 {
+                                crate::operation::PolicyState::Offline
+                            } else {
+                                crate::operation::PolicyState::Bootstrap
+                            }),
+                        }
                     }
                 };
                 crate::bootstrap::write_message(&mut server, &reply).unwrap();
@@ -1147,13 +1352,17 @@ async fn fresh_commit_frame_cannot_accept_expired_original_host_structure() {
             let request: Request = crate::bootstrap::read_message(&mut server).unwrap();
             let frame = request.frame().clone();
             let reply = match stage {
-                0 => Reply::Prepared { frame },
+                0 => Reply::Prepared {
+                    frame,
+                    policy: operational_receipt(crate::operation::PolicyState::Bootstrap),
+                },
                 1 => Reply::Persisted { frame },
                 _ => {
                     std::thread::sleep(Duration::from_millis(250));
                     Reply::Enforced {
                         frame,
                         state: HealthState::Ready,
+                        policy: operational_receipt(crate::operation::PolicyState::Ready),
                     }
                 }
             };

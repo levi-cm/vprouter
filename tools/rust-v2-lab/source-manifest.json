@@ -1710,6 +1710,18 @@
       "archive_path": "tools/rust-v2-lab/target/platform-lab/switch-void-nft-backend.py",
       "sha256": "6a716ac1f7557f68808e239b0913a79228f947348b66f7550cff05f1c5a3a8ff",
       "bytes": 2357
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-secret-bootstrap.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-bootstrap.py",
+      "sha256": "565ecefd0472be62e53c927bb6875519440fb95b4516749386501c11cc52eb8c",
+      "bytes": 10050
+    },
+    {
+      "source_path": "target/platform-lab/secret-bootstrap.guest.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/secret-bootstrap.guest.py",
+      "sha256": "12a4d66ec4284a6d5de06bb3ac9fa6387514b94a4d7f3b78d9d8f525b86548a1",
+      "bytes": 22319
     }
   ]
 }

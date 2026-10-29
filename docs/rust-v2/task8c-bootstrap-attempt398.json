@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "scope": "local task8c preparation; failed prior-source Bootstrap fixture, not task8c.1 runtime qualification",
+  "run": 398,
+  "result": "FAIL",
+  "exit_code": 1,
+  "wall_seconds": 14.175,
+  "completed_cases": 0,
+  "failure": "secret_bootstrap_lab: ownership_mismatch",
+  "failure_stage": "UNLOCALIZED",
+  "record_sha256": "6fb3bacc8b02f913b8ae2e90f2d8d0ceb3801a7a217b09a88533de2e0f74e34a",
+  "source_binding": {
+    "source_commit": "b51b5d7dd7a127d88a6e770f0b8780951190805b",
+    "source_archive_sha256": "efd893b6b136e2f0bae55cadcea6cfe1823ecd0129bef32fe76093271201d98d",
+    "tracked_build_inputs_verified": 202,
+    "source_aggregate_sha256": "0ce0488bee605e94f7aaf6fa4df915cc1284227efa3d773d78b6130bbfd06fe6"
+  },
+  "artifact_sha256": "7383d330350bdf445f2a77d95229955de38060426aa6ec7f8df17d7d2fb8d21b",
+  "runner_sha256": "565ecefd0472be62e53c927bb6875519440fb95b4516749386501c11cc52eb8c",
+  "guest_sha256": "12a4d66ec4284a6d5de06bb3ac9fa6387514b94a4d7f3b78d9d8f525b86548a1",
+  "outer_controller_observations": {
+    "prior_host_links_addresses_routes_rules_static_neighbors_preserved": true,
+    "original_inert_gateway_retained": true,
+    "one_exact_down_host_endpoint_retained": true,
+    "owner_unit_and_cgroup_absent_afterward": true,
+    "six_fixed_selectors_retained": true
+  },
+  "cleanup_performed": false,
+  "identical_payload_retried": false,
+  "native_bootstrap_accepted": false,
+  "real_client_acceptance": "NOT_RUN",
+  "production_changes": false
+}

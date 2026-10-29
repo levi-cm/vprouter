@@ -449,9 +449,17 @@ async fn operational_publish<I: Inputs>(
     inputs: &mut I,
     withdraw: bool,
 ) -> Result<()> {
-    use crate::operation::{Reply, Request};
+    use crate::operation::{PolicyState, Reply, Request};
     let snapshot_sequence = message.snapshot.as_ref().ok_or(Error::Storage)?.sequence;
     let expected_state = message.snapshot.as_ref().ok_or(Error::Storage)?.state;
+    let binding = message
+        .snapshot
+        .as_ref()
+        .ok_or(Error::Storage)?
+        .binding
+        .clone();
+    let expected_policy =
+        PolicyState::publication(message.snapshot.as_ref().ok_or(Error::Storage)?);
     // Retain the guard-matched earliest structural anchor BEFORE moving the
     // message. BOOTTIME includes suspend; fresh per-phase frames and Instant
     // budgets cannot rejuvenate this original host evidence.
@@ -489,7 +497,18 @@ async fn operational_publish<I: Inputs>(
         })
         .await?
     {
-        Reply::Prepared { .. } => (),
+        Reply::Prepared { policy, .. } => {
+            // A worker health state or a successful write is not quarantine.
+            // Require the exact exit/generation and actually read-back policy
+            // before any advertisement withdrawal can occur.
+            if expected_state != HealthState::Ready {
+                policy.validate(&binding, PolicyState::Offline)?;
+            } else if policy.binding != binding
+                || !matches!(policy.state, PolicyState::Bootstrap | PolicyState::Ready)
+            {
+                return Err(Error::GuardUnavailable);
+            }
+        }
         _ => return Err(Error::GuardUnavailable),
     }
     check_host()?;
@@ -517,7 +536,9 @@ async fn operational_publish<I: Inputs>(
         })
         .await?
     {
-        Reply::Enforced { state, .. } if state == expected_state => (),
+        Reply::Enforced { state, policy, .. } if state == expected_state => {
+            policy.validate(&binding, expected_policy)?;
+        }
         _ => return Err(Error::GuardUnavailable),
     }
     check_host()?;
@@ -558,6 +579,19 @@ async fn operational_sample<I: Inputs>(
             }
         }
     }
+}
+async fn operational_complete<I: Inputs>(
+    channel: &Rc<tokio::sync::Mutex<crate::operation::Channel>>,
+    message: vprouter_core::health::HealthMessage,
+    inputs: &mut I,
+    sample: Result<()>,
+) -> Result<()> {
+    operational_publish(channel, message, inputs, sample.is_err()).await?;
+    // Full Offline blocks namespace health traffic. Do not silently reopen
+    // Bootstrap or issue doomed provider requests; a fresh host-authorized
+    // recovery lifecycle is required. Preserve the original sample failure
+    // only after its quarantine transaction has completed successfully.
+    sample
 }
 pub(crate) fn run_operational(
     admission: crate::bootstrap::MonitorAdmission,
@@ -629,7 +663,7 @@ pub(crate) fn run_operational(
             let now = boot_seconds();
             let snapshot = Snapshot::from_machine(binding.clone(), sequence, now, &engine.machine)
                 .map_err(|_| Error::Storage)?;
-            operational_publish(
+            operational_complete(
                 &channel,
                 HealthMessage {
                     version: 1,
@@ -639,7 +673,7 @@ pub(crate) fn run_operational(
                     snapshot: Some(snapshot),
                 },
                 &mut engine.inputs,
-                result.is_err(),
+                result,
             )
             .await?;
         }

@@ -1145,13 +1145,14 @@ impl<'g> Handoff<'g> {
                         &self.admission.spec,
                         &message,
                     )?;
+                    let policy = self.audit.policy_receipt(&snapshot.binding)?;
                     pending = Some(Pending {
                         message: *message,
                         persisted: false,
                         proof: None,
                         end: publication_end,
                     });
-                    Reply::Prepared { frame }
+                    Reply::Prepared { frame, policy }
                 }
                 Request::Persist {
                     snapshot_sequence, ..
@@ -1238,7 +1239,7 @@ impl<'g> Handoff<'g> {
                         self.executors.as_mut().ok_or(Error::Interrupted)?,
                         self.transaction,
                         &self.admission.spec,
-                        snapshot.state,
+                        snapshot,
                     )?;
                     operational_check(end)?;
                     if let Some(proof) = &p.proof {
@@ -1248,6 +1249,7 @@ impl<'g> Handoff<'g> {
                     Reply::Enforced {
                         frame,
                         state: snapshot.state,
+                        policy: self.audit.policy_receipt(&snapshot.binding)?,
                     }
                 }
             };
@@ -1431,6 +1433,20 @@ mod tests {
             Reply::Enforced {
                 frame: operation_frame(),
                 state: vprouter_core::state::HealthState::Ready,
+                policy: vprouter_worker::operation::PolicyReceipt {
+                    binding: vprouter_core::health::Binding {
+                        deployment_id: "test".into(),
+                        exit_id: "one".into(),
+                        mode: vprouter_core::config::ExitMode::Mullvad,
+                        generation: 1,
+                        display_name: "test-exit".into(),
+                        expected_server: Some("de-fra-wg-404".into()),
+                        node_id: "n123".into(),
+                        config_fingerprint: "a".repeat(64),
+                        boot_id: "01234567-1234-1234-1234-0123456789ab".into(),
+                    },
+                    state: vprouter_worker::operation::PolicyState::Ready,
+                },
             },
         ] {
             let (mut writer, mut reader) = std::os::unix::net::UnixStream::pair().unwrap();

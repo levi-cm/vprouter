@@ -1,0 +1,42 @@
+{
+  "binding": {
+    "source_commit": "5a224c16a79c1e90f0d720e41cdbbc2e816d9580",
+    "source_archive_sha256": "8338b7b0f7ba7c10fb87716f1bd3a059ffff024349c6a15edbec96b5e460973e",
+    "tracked_build_inputs_verified": 202,
+    "source_aggregate_sha256": "8fc6f85b3b9ceb20c0942117e845ad127f920730d70245f50e48ede305c9af22"
+  },
+  "current_source_matches": true,
+  "platforms": {
+    "amd64": {
+      "manifest_sha256": "7b2e35435b3c21e6de8aeee53bdd54001d23cafae29fa77af99600deb9a49f6a",
+      "context_sha256": "18cc5dedb0104215b397414e35b0fe8282cb6bf27c40853671f9daafa1bbeea2",
+      "payload_sha256": "9c55d3c89a2585591d713a08f9cb68435882537447e1d7c0fbfa4cfb20bfa30d",
+      "verified_context_files": 7,
+      "static_elf": true,
+      "retained_context": "target/continuation-20261029T124811Z/amd64.context.tar"
+    },
+    "arm64": {
+      "manifest_sha256": "03c9ebbdf9c3bfd203df329ac90bd2ae406b4672842230c5dba9fa8f49f90bf9",
+      "context_sha256": "09e3e0bafa975c4998fc3da9d1d9fe5e54c82a0d75b6e23b2f4a55d4b7219d07",
+      "payload_sha256": "ea86ea3144f5651feb4fa545bc8d3074ba067316e1c0e78fd9bba53acbe3212b",
+      "verified_context_files": 7,
+      "static_elf": true,
+      "retained_context": "target/continuation-20261029T124811Z/arm64.context.tar"
+    }
+  },
+  "amd64_filter_preflight": "PASS",
+  "arm64_runtime": "NOT_RUN",
+  "native_receipt_runtime": "NOT_RUN",
+  "release_ready": false,
+  "root_verification_sha256": "ae2abcfa870523623c7ddcaf5ccc75cec9f6fff8a047a8e5137b6a74c5f98746",
+  "scope": "task8c.1 coherent local component/source/static freeze; runtime acceptance remains open",
+  "focused_tests": {
+    "launch": 147,
+    "worker": 62,
+    "failed": 0,
+    "clippy": "PASS",
+    "format": "PASS"
+  },
+  "spec_review": "PASS",
+  "quality_review": "PASS"
+}

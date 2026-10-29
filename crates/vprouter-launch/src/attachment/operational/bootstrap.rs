@@ -634,6 +634,7 @@ const LAB_LABELS: [&str; 7] = [
 ];
 #[cfg(test)]
 pub(crate) fn lab_run(fault: u8) -> Result<()> {
+    use lab_diagnostics::{Counters, Helper, Measurements};
     use std::time::Duration;
     let label = *LAB_LABELS.get(fault as usize).ok_or(Error::InvalidSpec)?;
     let mut handoff = super::lab_handoff(fault)?;
@@ -649,6 +650,7 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
     let mut own_intent = None;
     let mut own_query_intent = None;
     let mut query_source = None;
+    let mut query_queued = false;
     let mut query_held = 0usize;
     let mut query_negatives = 0usize;
     let mut query_released = false;
@@ -657,6 +659,32 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
     let mut own_held = 0usize;
     let mut own_negatives = 0usize;
     let mut own_released = false;
+    let mut measurements = Measurements::new();
+    macro_rules! measured {
+        ($helper:ident, $native:expr, $call:expr) => {{
+            let started = std::time::Instant::now();
+            let result = $call;
+            measurements.record(Helper::$helper, started.elapsed());
+            if let Err(error) = &result {
+                measurements.failure(
+                    Helper::$helper,
+                    *error,
+                    $native,
+                    Counters {
+                        query_queued,
+                        query_held,
+                        query_negatives,
+                        query_released,
+                        own_queued,
+                        own_held,
+                        own_negatives,
+                        own_released,
+                    },
+                );
+            }
+            result
+        }};
+    }
     if !matches!(fault, 4 | 5) {
         pending = Some(PendingBootstrap::new(&mut handoff.owner)?);
         bootstrap_anchor = Some(Rc::downgrade(
@@ -677,30 +705,59 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
                 .ok_or(Error::Interrupted)?;
             if n.completed.is_empty() && matches!(n.step, Step::QueryIntent) && !query_released {
                 if query_source.is_none() {
-                    query_source = Some(n.input.context()?.source.clone());
-                    n.input.lab_hold_query_intent(&n.query)?;
+                    query_source = Some(measured!(
+                        QuerySource,
+                        Some(&*n),
+                        n.input.context().map(|context| context.source.clone())
+                    )?);
+                    measured!(
+                        QueryHold,
+                        Some(&*n),
+                        n.input.lab_hold_query_intent(&n.query)
+                    )?;
+                    query_queued = true;
                 }
-                if n.input.lab_query_intent_checkpoint(&n.query)? {
-                    let writer = n
-                        .input
-                        .lab_query_intent_writer(&n.query)?
-                        .ok_or(Error::OwnershipMismatch)?;
-                    if query_writer.is_some_and(|original| original != writer)
-                        || !matches!(n.input.context(), Err(Error::OwnershipMismatch))
-                        || !matches!(
-                            query_source
-                                .as_ref()
-                                .ok_or(Error::Interrupted)?
-                                .verify_acknowledged_history(),
-                            Err(Error::OwnershipMismatch)
-                        )
-                    {
-                        return Err(Error::OwnershipMismatch);
-                    }
+                if measured!(
+                    QueryCheckpoint,
+                    Some(&*n),
+                    n.input.lab_query_intent_checkpoint(&n.query)
+                )? {
+                    let writer = measured!(
+                        QueryIdentity,
+                        Some(&*n),
+                        (|| {
+                            n.input
+                                .lab_query_intent_writer(&n.query)?
+                                .ok_or(Error::OwnershipMismatch)
+                        })()
+                    )?;
+                    measured!(
+                        QueryHeldNegatives,
+                        Some(&*n),
+                        (|| {
+                            if query_writer.is_some_and(|original| original != writer)
+                                || !matches!(n.input.context(), Err(Error::OwnershipMismatch))
+                                || !matches!(
+                                    query_source
+                                        .as_ref()
+                                        .ok_or(Error::Interrupted)?
+                                        .verify_acknowledged_history(),
+                                    Err(Error::OwnershipMismatch)
+                                )
+                            {
+                                return Err(Error::OwnershipMismatch);
+                            }
+                            Ok(())
+                        })()
+                    )?;
                     query_writer = Some(writer);
                     query_negatives += 2;
                     if query_held >= 2 {
-                        n.input.lab_release_query_intent(&n.query)?;
+                        measured!(
+                            QueryRelease,
+                            Some(&*n),
+                            n.input.lab_release_query_intent(&n.query)
+                        )?;
                         query_released = true;
                         own_query_intent = Some(
                             serde_json::json!({"index":writer.0,"pid":writer.1,"start":writer.2,"queued_polls":1,"held_pending_polls":query_held,"negative_checks":query_negatives,"released":true}),
@@ -713,20 +770,41 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
             if n.completed.is_empty() && matches!(n.step, Step::Intent) && !own_released {
                 let r = n.request.as_ref().ok_or(Error::Interrupted)?.clone();
                 if !own_queued {
-                    n.input.lab_hold_policy_intent(&r)?;
-                    own_negatives += n.input.lab_policy_intent_negatives(&r)?;
+                    measured!(PolicyHold, Some(&*n), n.input.lab_hold_policy_intent(&r))?;
+                    own_negatives += measured!(
+                        PolicyQueuedNegatives,
+                        Some(&*n),
+                        n.input.lab_policy_intent_negatives(&r)
+                    )?;
                     own_queued = true;
                 }
-                if n.input.lab_policy_intent_checkpoint(&r)? {
+                if measured!(
+                    PolicyCheckpoint,
+                    Some(&*n),
+                    n.input.lab_policy_intent_checkpoint(&r)
+                )? {
                     if own_held == 0 {
-                        own_negatives += n.input.lab_policy_intent_negatives(&r)?;
+                        own_negatives += measured!(
+                            PolicyHeldNegatives,
+                            Some(&*n),
+                            n.input.lab_policy_intent_negatives(&r)
+                        )?;
                     }
-                    let writer = n
-                        .input
-                        .lab_policy_intent_writer(&r)?
-                        .ok_or(Error::OwnershipMismatch)?;
+                    let writer = measured!(
+                        PolicyIdentity,
+                        Some(&*n),
+                        (|| {
+                            n.input
+                                .lab_policy_intent_writer(&r)?
+                                .ok_or(Error::OwnershipMismatch)
+                        })()
+                    )?;
                     if own_held >= 2 {
-                        n.input.lab_release_policy_intent(&r)?;
+                        measured!(
+                            PolicyRelease,
+                            Some(&*n),
+                            n.input.lab_release_policy_intent(&r)
+                        )?;
                         own_released = true;
                         own_intent = Some(
                             serde_json::json!({"index":writer.0,"pid":writer.1,"start":writer.2,"queued_polls":1,"held_pending_polls":own_held,"negative_checks":own_negatives,"released":true}),
@@ -757,7 +835,11 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
                 result_held = true;
                 n.fail(Error::ChildFailed);
             }
-            match pending.as_mut().ok_or(Error::Interrupted)?.poll() {
+            match measured!(
+                NativePoll,
+                pending.as_ref().and_then(|p| p.native.as_deref()),
+                (|| pending.as_mut().ok_or(Error::Interrupted)?.poll())()
+            ) {
                 Ok(Some(value)) => break Ok(value),
                 Ok(None) => std::thread::sleep(Duration::from_millis(1)),
                 Err(error) => break Err(error),
@@ -1180,4 +1262,147 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
     println!("{}", serde_json::json!({"case":label,"result":"PASS"}));
     println!("LAB_SECRET_BOOTSTRAP {witness}");
     Ok(())
+}
+
+#[cfg(test)]
+mod lab_diagnostics {
+    use super::{Error, Native, Step};
+    use std::io::Write;
+    use std::time::Duration;
+
+    #[derive(Clone, Copy)]
+    pub(super) enum Helper {
+        QuerySource,
+        QueryHold,
+        QueryCheckpoint,
+        QueryIdentity,
+        QueryHeldNegatives,
+        QueryRelease,
+        PolicyHold,
+        PolicyQueuedNegatives,
+        PolicyCheckpoint,
+        PolicyHeldNegatives,
+        PolicyIdentity,
+        PolicyRelease,
+        NativePoll,
+    }
+    const HELPERS: [Helper; 13] = [
+        Helper::QuerySource,
+        Helper::QueryHold,
+        Helper::QueryCheckpoint,
+        Helper::QueryIdentity,
+        Helper::QueryHeldNegatives,
+        Helper::QueryRelease,
+        Helper::PolicyHold,
+        Helper::PolicyQueuedNegatives,
+        Helper::PolicyCheckpoint,
+        Helper::PolicyHeldNegatives,
+        Helper::PolicyIdentity,
+        Helper::PolicyRelease,
+        Helper::NativePoll,
+    ];
+    impl Helper {
+        fn label(self) -> &'static str {
+            match self {
+                Self::QuerySource => "query_source",
+                Self::QueryHold => "query_hold",
+                Self::QueryCheckpoint => "query_checkpoint",
+                Self::QueryIdentity => "query_identity",
+                Self::QueryHeldNegatives => "query_held_negatives",
+                Self::QueryRelease => "query_release",
+                Self::PolicyHold => "policy_hold",
+                Self::PolicyQueuedNegatives => "policy_queued_negatives",
+                Self::PolicyCheckpoint => "policy_checkpoint",
+                Self::PolicyHeldNegatives => "policy_held_negatives",
+                Self::PolicyIdentity => "policy_identity",
+                Self::PolicyRelease => "policy_release",
+                Self::NativePoll => "native_poll",
+            }
+        }
+    }
+    pub(super) struct Counters {
+        pub query_queued: bool,
+        pub query_held: usize,
+        pub query_negatives: usize,
+        pub query_released: bool,
+        pub own_queued: bool,
+        pub own_held: usize,
+        pub own_negatives: usize,
+        pub own_released: bool,
+    }
+    pub(super) struct Measurements {
+        totals: [(u64, Duration); HELPERS.len()],
+        emitted: bool,
+    }
+    impl Measurements {
+        pub(super) fn new() -> Self {
+            Self {
+                totals: [(0, Duration::ZERO); HELPERS.len()],
+                emitted: false,
+            }
+        }
+        pub(super) fn record(&mut self, helper: Helper, elapsed: Duration) {
+            let (calls, duration) = &mut self.totals[helper as usize];
+            *calls = calls.saturating_add(1);
+            *duration = duration.saturating_add(elapsed);
+        }
+        pub(super) fn failure(
+            &mut self,
+            helper: Helper,
+            error: Error,
+            native: Option<&Native>,
+            counters: Counters,
+        ) {
+            if self.emitted {
+                return;
+            }
+            self.emitted = true;
+            // Read only retained scalars: logging must not revalidate or mask the error.
+            let step = native.map_or("absent", |n| match n.step {
+                Step::QueryIntent => "query_intent",
+                Step::QueryBirth => "query_birth",
+                Step::QueryReading => "query_reading",
+                Step::QueryResult => "query_result",
+                Step::Intent => "intent",
+                Step::Birth => "birth",
+                Step::Reading => "reading",
+                Step::Result => "result",
+                Step::Next => "next",
+                Step::Complete => "complete",
+            });
+            let requested_at = native.map(|n| n.query.requested_at());
+            let deadline = native.map(|n| n.query.deadline());
+            let now = vprouter_core::health::boot_seconds();
+            // Best-effort output cannot replace the original error with an IO error/panic.
+            let mut stderr = std::io::stderr().lock();
+            let _ = writeln!(
+                stderr,
+                "LAB_SECRET_BOOTSTRAP_BOUNDARY_FAILURE helper={} step={step} reason={error:?} query_present={} query_child_present={} query_accepted_present={} policy_present={} query_queued={} query_held={} query_negatives={} query_released={} own_queued={} own_held={} own_negatives={} own_released={} original_requested_at={requested_at:?} original_deadline={deadline:?} observed_boot_now={now}",
+                helper.label(),
+                native.is_some(),
+                native.is_some_and(|n| n.query_child.is_some()),
+                native.is_some_and(|n| n.query_accepted.is_some()),
+                native.is_some_and(|n| n.request.is_some()),
+                counters.query_queued,
+                counters.query_held,
+                counters.query_negatives,
+                counters.query_released,
+                counters.own_queued,
+                counters.own_held,
+                counters.own_negatives,
+                counters.own_released,
+            );
+            // Fixed-size, first-error prefix totals, including nested validation/IO.
+            // Instant measures elapsed wrapper time only; it grants no deadline authority.
+            for helper in HELPERS {
+                let (calls, duration) = self.totals[helper as usize];
+                let _ = writeln!(
+                    stderr,
+                    "LAB_SECRET_BOOTSTRAP_WRAPPER_TOTAL helper={} calls={calls} elapsed_ns={} measurement=wrapper_elapsed_including_nested_validation",
+                    helper.label(),
+                    duration.as_nanos(),
+                );
+            }
+        }
+    }
 }

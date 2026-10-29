@@ -22,7 +22,7 @@
       "static_elf": true
     }
   },
-  "native_bootstrap": "NOT_RUN",
+  "native_bootstrap": "FAIL_ATTEMPT401",
   "arm64_runtime": "NOT_RUN",
   "release_ready": false,
   "scope": "bounded original-owner query/policy pending-progress repair; no new runtime or forwarding authority",

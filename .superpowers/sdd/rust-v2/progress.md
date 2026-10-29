@@ -578,3 +578,25 @@ exactfullmultisets equal, order-only alignment. Finalbaseline/template reference
 and protectedmodes independentlyPASS; no baseline membership/removal/activation
 or nativeBootstrap acceptance inferred. Source/component/static milestone ready
 for explicit checkpoint before frozen nativeBootstrap execution; full8cACTIVE.
+
+Pending-progress source milestone ca061fc remote-confirmed fork/rust/v2; exact
+cc0081ba source tag rust-v2-test-20261029T134857Z remote-confirmed. Exact review
+.diff retained ignored with its original reviewedhash (diffcontext spaces trigger
+Git whitespace checks); source and allsafe Markdown/publicevidence committed.
+Native ownedDebian401FAILexit1/12.485s zero cases, query_result CgroupMismatch.
+Queryintent/spawn/birthqueue markers reached; no successfulBootstrap witness.
+Root exactreadonlyinspectionPASS; sixselectors/allfixtures retained, original
+inertgateway and priorforeignnetwork preserved plusexactoneDOWN endpoint. First
+querydiskrecord birth/facts/verified_at aredurablefields, notparentACK proof.
+No identicalretry/cleanup. Soleimplementer readonlydiagnosis; independent401
+preservationreview pending beforeauditedselectorarchive. Full8cACTIVE, broader
+gatesOPEN and release_readyfalse. Original398/399/400 remainretainedFAIL.
+
+Native401 independent preservationreviewPASS; unchanged exactarchiver freshgates
+PASS and sixselectors archived intooriginalprotectedinputs. Allotherfixture/
+canonical/profile/mount/gateway resources retained; no signals/unmounts.
+Root boundreadonlycurrentVM mountroot oracle: /sys/fs/cgroup dev27/ino1/040555
+versus '..' dev22/ino2/040755, cgroup2 mountroot'/' confirms false selfparent
+predicate under currenthostmount view. No originalowner executed-return trace
+claimed. Soleimplementer completing readonlypredicate inventory/nextfixproposal;
+no newsourcechange or identicalnative retry authorized. Full8c remainsACTIVE.

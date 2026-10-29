@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "scope": "local bounded original-owner pending-progress candidate; retained failed native attempt",
+  "run": 401,
+  "result": "FAIL",
+  "exit_code": 1,
+  "wall_seconds": 12.485,
+  "completed_cases": 0,
+  "record_sha256": "40a6ca6c3dc9b430a87e5dba11a4b4446f9ee71a6f825aea2a514d5b2d6e9bc7",
+  "source_binding": {
+    "source_commit": "cc0081baeb14caaa15fd4577258f6d01cc6de8bc",
+    "source_archive_sha256": "1c2ece5f0707a41d7de8a28ac9d59c4dbe20a3cd5c32af8c3c767f45502a5d67",
+    "tracked_build_inputs_verified": 202,
+    "source_aggregate_sha256": "ac3db8ba5dc32abaf8bef7d63a0736cef4319f2b81212329f020bc813b848fad"
+  },
+  "artifact_sha256": "f8e6c9b1fc0669b1fe937ff543a7773d3d072bf65ffebb7d2c0c33404b1f83c1",
+  "runner_sha256": "565ecefd0472be62e53c927bb6875519440fb95b4516749386501c11cc52eb8c",
+  "guest_sha256": "12a4d66ec4284a6d5de06bb3ac9fa6387514b94a4d7f3b78d9d8f525b86548a1",
+  "failure": "CgroupMismatch",
+  "failure_step": "query_result",
+  "policy_request_present": false,
+  "query_child_present": true,
+  "bootstrap_phase_marker_lines": 73,
+  "journal_inventory_pairs": 90,
+  "canonical_query_fields_present": {
+    "birth": true,
+    "facts": true,
+    "verified_at": true
+  },
+  "selectors_retained": 6,
+  "resource_cleanup_performed": false,
+  "native_bootstrap_accepted": false,
+  "real_client_acceptance": "NOT_RUN",
+  "production_changes": false,
+  "outer_preservation": {
+    "harness_exit_code": 1,
+    "owner_unit_absent": true,
+    "host_links_and_stable_routes_unchanged": false,
+    "host_single_down_link_added": true,
+    "host_addresses_routes_rules_preserved": true,
+    "host_stable_neighbors_preserved": true,
+    "host_allowed_index": 1243536425,
+    "host_allowed_name": "vh7828b913cc58",
+    "inert_gateway_retained": true,
+    "original_gateway_native_identity_unchanged": true,
+    "synthetic_only": true,
+    "native_transport_operations_requested": true,
+    "canonical_and_mount_resources_retained": true
+  },
+  "inspection_sha256": "cd82789829434e0b8f15ccdd36391c7b01d86b2cd1e3867f6f98ae27b49c9e7d",
+  "evidence_qualification": "Canonical disk fields prove durable write only; parent process-local ACK is not established by this inspection. No completed native case or acceptance witness.",
+  "subsequent_preservation": {
+    "selectors_archived": 6,
+    "archive_receipt_sha256": "d2c09a7c46822c1d48e79a7b233070a6addf47164d61ded56b908a081c658d8a",
+    "independent_review": "PASS",
+    "resources_retained": true,
+    "private_profile_contents_read": false,
+    "signals_or_unmounts": false,
+    "exact_owner_and_original_gateway_reverified": true
+  },
+  "read_only_diagnosis_oracle": {
+    "sha256": "c8d0d7e1117ef9c3029db1e09b5f46a44247086d2b592701f039b9aec347db93",
+    "current_namespace_only": true,
+    "cgroup_mount_root_equals_dotdot": false,
+    "original_owner_return_trace_proven": false
+  }
+}

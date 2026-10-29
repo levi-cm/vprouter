@@ -797,3 +797,22 @@ independentPASS/no findings. Root407/0/2+fmt/strictalltargetsClippy corroborated
 public provenance/baselineflags PASS, nativecost/Bootstrap/ARMNOT_RUN/releasefalse.
 Finalimmutablepublicaudit precedes explicit source/checkpoint/tag push and next
 ownedlocalVMexperiment. No claimed nativebudget/performance or acceptance fix.
+
+Allocationcomparison milestonebf3247b and exact05238109 tag rust-v2-test-20261029T164255Z
+remote-confirmed fork/rust/v2. OwnedDebian405FAILexit1/11.728s zero cases;
+HOSTnative_poll/result/Deadline, query+policyheld2/negatives6+12/releasedtrue.
+Original2s unchanged; post-error observation6.191181ms past end, not innerclock.
+Root unchanged exactreadonlyinspection+closedmetadata parserPASS; exactly6
+selectors/allotherresources retained pending independent preservation review.
+13wrapperelapsed total1953713909ns; queryretained4292/346400525ns, policy4324/
+327523870ns; nestedcategories overlap, notCPU or controllednativeA/B.
+Comparison change has not made Bootstrap pass; source remains frozen. Sole
+implementer readonly405diagnosis/retained-inner proposal; no unchangedretry,
+deadlineextension or removal of livechecks. Full8cACTIVE/release_readyfalse.
+
+405 independent provenance/preservation/exact-six archival prerequisitePASS. Root
+unchangedarchiver e36a8e8c freshoriginalowner/gateway/selector gatesPASS; exact6
+selectors archived with exclusive receipt, allotherresources retained/no profile
+reads/signals/unmounts. OriginalFAIL/zero cases and diagnostic limits retained.
+Completion/publicscope immutable audit pending before failuremilestone push.
+Production read-only freshlyactive; full8cACTIVE/release_readyfalse.

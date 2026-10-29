@@ -1,0 +1,335 @@
+{
+  "schema_version": 1,
+  "scope": "local native allocation-comparison experiment; retained failed attempt with cfg(test) elapsed diagnostics",
+  "run": 405,
+  "result": "FAIL",
+  "exit_code": 1,
+  "wall_seconds": 11.728,
+  "completed_cases": 0,
+  "record_sha256": "426dfae8b336943c7dcefe3e2bbae3b945568a44bf0d04f07f5869fdaf62ba1a",
+  "source_binding": {
+    "source_commit": "05238109d41e8ba4376e27c16aaa1bd41caffede",
+    "source_archive_sha256": "c32d6c1bf51d888f89fb16fc34a66e7356d073ef263d357f64151a8ab0b644ed",
+    "tracked_build_inputs_verified": 203,
+    "source_aggregate_sha256": "4386b3a9d46ec99dee76c7dafb7cac6a04923c428bc60b0126af8576e3fdf43a"
+  },
+  "artifact_sha256": "4435526772afaf82ca584adde1ceadbdad4c710106bcac99c525580c21dcdce9",
+  "runner_sha256": "565ecefd0472be62e53c927bb6875519440fb95b4516749386501c11cc52eb8c",
+  "guest_sha256": "12a4d66ec4284a6d5de06bb3ac9fa6387514b94a4d7f3b78d9d8f525b86548a1",
+  "failure": "Deadline",
+  "failure_step": "result",
+  "failure_helper": "native_poll",
+  "boundary": {
+    "helper": "native_poll",
+    "step": "result",
+    "reason": "Deadline",
+    "query_present": true,
+    "query_child_present": true,
+    "query_accepted_present": true,
+    "policy_present": true,
+    "query_queued": true,
+    "query_held": 2,
+    "query_negatives": 6,
+    "query_released": true,
+    "own_queued": true,
+    "own_held": 2,
+    "own_negatives": 12,
+    "own_released": true,
+    "original_requested_at": 201349.774675338,
+    "original_deadline": 201351.774675338,
+    "observed_boot_now": 201351.780866519
+  },
+  "wrappers": [
+    {
+      "helper": "query_source",
+      "calls": 1,
+      "elapsed_ns": 15658830
+    },
+    {
+      "helper": "query_hold",
+      "calls": 1,
+      "elapsed_ns": 43615803
+    },
+    {
+      "helper": "query_checkpoint",
+      "calls": 4,
+      "elapsed_ns": 163154784
+    },
+    {
+      "helper": "query_identity",
+      "calls": 3,
+      "elapsed_ns": 79616829
+    },
+    {
+      "helper": "query_held_negatives",
+      "calls": 3,
+      "elapsed_ns": 45876626
+    },
+    {
+      "helper": "query_release",
+      "calls": 1,
+      "elapsed_ns": 38566179
+    },
+    {
+      "helper": "policy_hold",
+      "calls": 1,
+      "elapsed_ns": 39944525
+    },
+    {
+      "helper": "policy_queued_negatives",
+      "calls": 1,
+      "elapsed_ns": 30258435
+    },
+    {
+      "helper": "policy_checkpoint",
+      "calls": 4,
+      "elapsed_ns": 160595147
+    },
+    {
+      "helper": "policy_held_negatives",
+      "calls": 1,
+      "elapsed_ns": 46667234
+    },
+    {
+      "helper": "policy_identity",
+      "calls": 3,
+      "elapsed_ns": 81692265
+    },
+    {
+      "helper": "policy_release",
+      "calls": 1,
+      "elapsed_ns": 43346899
+    },
+    {
+      "helper": "native_poll",
+      "calls": 19,
+      "elapsed_ns": 1164720353
+    }
+  ],
+  "nested": [
+    {
+      "family": "query",
+      "category": "allocation_anchor_memory",
+      "calls": 2153,
+      "elapsed_ns": 39655354
+    },
+    {
+      "family": "query",
+      "category": "binding_service_custody",
+      "calls": 283,
+      "elapsed_ns": 65394571
+    },
+    {
+      "family": "query",
+      "category": "binding_retained",
+      "calls": 4292,
+      "elapsed_ns": 346400525
+    },
+    {
+      "family": "query",
+      "category": "owned_progress",
+      "calls": 25,
+      "elapsed_ns": 9563045
+    },
+    {
+      "family": "query",
+      "category": "typed_bootstrap_progress",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "query",
+      "category": "original_proof",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "query",
+      "category": "record_json_encode",
+      "calls": 116,
+      "elapsed_ns": 10519942
+    },
+    {
+      "family": "query",
+      "category": "expected_record_json_encode",
+      "calls": 25,
+      "elapsed_ns": 2624263
+    },
+    {
+      "family": "query",
+      "category": "record_sha256",
+      "calls": 66,
+      "elapsed_ns": 680142
+    },
+    {
+      "family": "query",
+      "category": "journal_advance",
+      "calls": 8,
+      "elapsed_ns": 6743810
+    },
+    {
+      "family": "policy",
+      "category": "allocation_anchor_memory",
+      "calls": 2020,
+      "elapsed_ns": 35297447
+    },
+    {
+      "family": "policy",
+      "category": "binding_service_custody",
+      "calls": 254,
+      "elapsed_ns": 53207456
+    },
+    {
+      "family": "policy",
+      "category": "binding_retained",
+      "calls": 4324,
+      "elapsed_ns": 327523870
+    },
+    {
+      "family": "policy",
+      "category": "owned_progress",
+      "calls": 129,
+      "elapsed_ns": 47321471
+    },
+    {
+      "family": "policy",
+      "category": "typed_bootstrap_progress",
+      "calls": 31,
+      "elapsed_ns": 117334864
+    },
+    {
+      "family": "policy",
+      "category": "original_proof",
+      "calls": 93,
+      "elapsed_ns": 35109194
+    },
+    {
+      "family": "policy",
+      "category": "record_json_encode",
+      "calls": 473,
+      "elapsed_ns": 40462592
+    },
+    {
+      "family": "policy",
+      "category": "expected_record_json_encode",
+      "calls": 129,
+      "elapsed_ns": 11491304
+    },
+    {
+      "family": "policy",
+      "category": "record_sha256",
+      "calls": 219,
+      "elapsed_ns": 2239983
+    },
+    {
+      "family": "policy",
+      "category": "journal_advance",
+      "calls": 6,
+      "elapsed_ns": 4586406
+    },
+    {
+      "family": "other",
+      "category": "allocation_anchor_memory",
+      "calls": 226,
+      "elapsed_ns": 3867348
+    },
+    {
+      "family": "other",
+      "category": "binding_service_custody",
+      "calls": 30,
+      "elapsed_ns": 7061799
+    },
+    {
+      "family": "other",
+      "category": "binding_retained",
+      "calls": 442,
+      "elapsed_ns": 34338248
+    },
+    {
+      "family": "other",
+      "category": "owned_progress",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "typed_bootstrap_progress",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "original_proof",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "record_json_encode",
+      "calls": 1,
+      "elapsed_ns": 89080
+    },
+    {
+      "family": "other",
+      "category": "expected_record_json_encode",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "record_sha256",
+      "calls": 1,
+      "elapsed_ns": 9520
+    },
+    {
+      "family": "other",
+      "category": "journal_advance",
+      "calls": 0,
+      "elapsed_ns": 0
+    }
+  ],
+  "total_measured_wrapper_elapsed_ns": 1953713909,
+  "observation_after_deadline_seconds": 0.0061911809898447245,
+  "measurement_scope": "Closed fixed labels and bounded values only; inclusive nested rows overlap and are not summed. No CPU, inner-predicate or performance-fix attribution.",
+  "canonical_query_fields_present": {
+    "birth": true,
+    "facts": true,
+    "verified_at": true
+  },
+  "canonical_bootstrap_history_count": 1,
+  "native_bootstrap_accepted": false,
+  "real_client_acceptance": "NOT_RUN",
+  "production_changes": false,
+  "provider_profiles_used": false,
+  "outer_preservation": {
+    "harness_exit_code": 1,
+    "owner_unit_absent": true,
+    "host_links_and_stable_routes_unchanged": false,
+    "host_single_down_link_added": true,
+    "host_addresses_routes_rules_preserved": true,
+    "host_stable_neighbors_preserved": true,
+    "host_allowed_index": 1758018966,
+    "host_allowed_name": "vh1725555785a4",
+    "inert_gateway_retained": true,
+    "original_gateway_native_identity_unchanged": true,
+    "synthetic_only": true,
+    "native_transport_operations_requested": true,
+    "canonical_and_mount_resources_retained": true
+  },
+  "inspection_sha256": "891951dab0260c7e61d0419b1f30424bca13f281ba8fc8d4ca16d9d121948fc0",
+  "closed_metadata_sha256": "f743c668eaefc61a3681dbcf94f2c8e269d6d69bb8c8f26f690aa1fe24c039e3",
+  "closed_parser_sha256": "31e70538076ea97538ad4ab09aa8126a74543985e92e6727ad7d0f84d1d3a5d7",
+  "selectors_retained": 0,
+  "resource_cleanup_performed": false,
+  "evidence_qualification": "No successful Bootstrap or complete HOST scope. Counts differ from404; no controlled native A/B effect, exact inner failing clock, CPU attribution or sufficient-budget proof. Inclusive categories overlap and are not summed. The comparison change has not made Bootstrap pass.",
+  "selectors_archived": 6,
+  "selector_archival": {
+    "result": "PASS",
+    "receipt_sha256": "be9621acfe7ff32de3b6c0ffa1011c91bf8b665e3468a8d14f33b9c2d211cd3e",
+    "fresh_original_owner_absence_and_gateway_identity_verified": true,
+    "exact_selector_identity_and_destination_checks": true,
+    "all_other_fixture_resources_retained": true,
+    "signals_or_unmounts": false
+  },
+  "preservation_review": "PASS"
+}

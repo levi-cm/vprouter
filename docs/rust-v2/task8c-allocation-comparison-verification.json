@@ -24,8 +24,8 @@
   },
   "arm64_runtime": "NOT_RUN",
   "release_ready": false,
-  "native_bootstrap": "NOT_RUN",
-  "runtime_cost_effect": "NOT_RUN",
+  "native_bootstrap": "FAIL_ATTEMPT405",
+  "runtime_cost_effect": "UNPROVED_ATTEMPT405_FAILED",
   "scope": "one-file pure allocation comparison; exact old Result/UTF8/raw-path identity, all original live checks retained",
   "source_review": {
     "spec": "PASS",
@@ -62,5 +62,5 @@
     ".superpowers/sdd/rust-v2/task-8c-allocation-comparison-review.md": "7968a825aa6cbe321cad4fe2578b1c688146b3a1ad3a0add36d9bc4500e4e80a",
     "target/task8c-allocation-comparison-root-20261029/root-coherent-build.log": "8ed87d20ee3df1d7389b055a9aac69ed6031a996b70b4ee7ce9531368f6b1a97"
   },
-  "performance_limit": "Host pure-comparison experiment establishes a local mechanism only; actual native allocation cost share, speedup and fit within the original two seconds remain unproved."
+  "performance_limit": "Host pure-comparison experiment establishes a local mechanism only. Native405 failed at HOST native_poll/result/Deadline with zero completed cases; counts differ from404, so native cost share, speedup and fit within the original two seconds remain unproved."
 }

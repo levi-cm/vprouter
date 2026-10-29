@@ -1734,6 +1734,12 @@
       "archive_path": "tools/rust-v2-lab/target/archive-secret-bootstrap-selectors.py",
       "sha256": "e36a8e8c122663d9adc36ab8827f2923bd01147601efd248823f9cff0c62b9c0",
       "bytes": 5242
+    },
+    {
+      "source_path": "target/author-host-baseline-preserving398.py",
+      "archive_path": "tools/rust-v2-lab/target/author-host-baseline-preserving398.py",
+      "sha256": "85735e9f2b57fdfeb5827268145b1f7a13a578c23c01b14e6d70beddc4f30c3a",
+      "bytes": 5906
     }
   ]
 }

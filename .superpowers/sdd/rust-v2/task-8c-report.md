@@ -128,3 +128,12 @@ verified. Exact AMD64 filter preflight passed. Both contexts copied into the
 immutable candidate directory `target/continuation-20261029T124811Z`. See
 `docs/rust-v2/task8c-slice1-verification.json` for public hashes. ARM64 execution,
 new native receipts and integrated runtime/client gates remain NOT_RUN.
+
+Root prerequisite update: diagnostic source73a35260 passed scoped spec/quality
+review and coherent botharch freeze. Owned local attempt399FAIL after all
+marked host/exact20/constructor groups; firstHost queryIntent acknowledged,
+birth/facts/verification absent. Lab errorhandler masks originalpollerror as
+Interrupted; source correction to diagnostics only is next. Both398/399 remain
+failed, all fixture resources retained; selectors independently reviewed and
+archived exactly, no signals/unmounts. See task-8c-bootstrap399-diagnosis.md and
+public attempt399 report. Full8c/runtime/client qualification remainsOPEN.

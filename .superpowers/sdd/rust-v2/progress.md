@@ -471,3 +471,34 @@ fresh unitabsence+gatewaypidfd/start/netns+selectorinode/hash/mode checks. All p
 canonical,mount,network and inertgateway resources retained; no signals/unmounts.
 Reference target/lab-state/secret-bootstrap-selector-archive-run-398.json. Original
 raw398 unchanged. Two controller sources added safe archive, now289hash entries.
+
+Task8c diagnostic-only3file increment independently specPASS/qualityPASS/no findings;
+fixed cfg(test) stage markers preserve predicates/errors/clocks/custody. Root coherent
+offline botharchbuilds and AMD64filterpreflightPASS; source73a35260 archive/current/
+Git202inputsequal, bothstaticELF/payloads+strict7filecontexts verified/copied immutable.
+Fmt/diff/focusedstrictClippyPASS. Initial inline Root proof had Python whitespace
+SyntaxError; shell continued to existing self-verifying read-only projector+baseline
+authoring, bothPASS. Corrected full Root proof thenPASS; no mutating native test ran.
+Baseline helper review found .py references incompatible with JSON-only template
+contract and missing reconciliation fields; fixed, independently narrowed re-review
+PASS plus6pure multiset/duplicate/namespace checks. Authored51link expected foreign
+baseline from old50+exact398canonicalDOWN endpoint; current frozen projection equality
+PASS. Final candidate/template provenance review pending before diagnostic invocation.
+No baseline ownership/removal/activation authority granted. New helper safely archived,
+source manifest290entries. Original398FAIL remains unchanged; full8cACTIVE.
+
+Diagnostic399 finalsource/baseline independentlyPASS; ownedDebiannative399FAILexit1,
+zero cases,88journalinventorypairs. All instrumented hostpostchecks, exact20handoff,
+fiveretirements/preparationequal and initialBootstrapconstructor/queue/return markers
+OK. FirstBootstrapquerywriter starts then fixture reportsInterrupted, masking its
+original polling error because failurehandler requires absentpolicyrequest. This
+is a differentfailure, NOT a proven398fix. Raw399/source/artifacts/outerpreservation
+and6selectors retained; public docs/rust-v2/task8c-bootstrap-attempt399.json. Root
+readonlyinspector399PASS; no nextnativecase/cleanup/identicalretry. Original sole
+implementer examining diagnosticerror-preservation fix; full8c remainsACTIVE.
+
+Diagnostic399 content and exact6selectorpreservation independentlyPASS. Unchanged
+archiver then freshchecksPASS+6selectorsarchived into originalprotectedinputdir;
+allother resources retained/no signals/unmounts. Native399remainsFAIL; no retry.
+Provenlabmaskingbug planned next: preserve originalpre-policyquery error instead
+of replacing it withInterrupted; no guessed enforcementfix.

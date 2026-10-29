@@ -1,0 +1,505 @@
+Base: da6672ba14477edff0d3a775423d7f6a0dc93041
+
+{
+  "crates/vprouter-launch/src/attachment/host_addition/operation.rs": "cf912fadb68570280a64ea27459b8f8f7312c2a5b0a5b051498fe5cd65e2fd56",
+  "crates/vprouter-launch/src/attachment/operational.rs": "91045ec0fdae02ad9953ba470652160aa5a1793f7598f48309b5957b4896ccaa",
+  "crates/vprouter-launch/src/attachment/operational/bootstrap.rs": "0e5f1f870a8451e4a0747b3d2da1b2151d305c95ec41df9a6c8007753b9d5fc9"
+}
+ .../src/attachment/host_addition/operation.rs      | 30 +++++++++++++---
+ .../vprouter-launch/src/attachment/operational.rs  | 40 ++++++++++++++++++++++
+ .../src/attachment/operational/bootstrap.rs        | 31 ++++++++++++++++-
+ 3 files changed, 96 insertions(+), 5 deletions(-)
+
+diff --git a/crates/vprouter-launch/src/attachment/host_addition/operation.rs b/crates/vprouter-launch/src/attachment/host_addition/operation.rs
+index 7db8d89..a0dd743 100644
+--- a/crates/vprouter-launch/src/attachment/host_addition/operation.rs
++++ b/crates/vprouter-launch/src/attachment/host_addition/operation.rs
+@@ -1,12 +1,14 @@
+ //! Closed canonical operations over the original generation admission.
+ use super::super::super::owned::preparation::Server;
++#[cfg(test)]
++use super::super::operational::lab_phase;
+ use super::*;
+ use serde::{Deserialize, Serialize};
+ use sha2::Digest;
+ use std::os::fd::BorrowedFd;
+ fn hash(bytes: &[u8]) -> [u8; 32] {
+     sha2::Sha256::digest(bytes).into()
+ }
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(rename_all = "snake_case")]
+ pub(crate) enum Kind {
+@@ -866,20 +868,21 @@ fn lab_build(
+                     .same_original(&charge)?;
+                 retained_result_writer.as_mut().ok_or(Error::Interrupted)?["charge_retained_after_retries"] =
+                     serde_json::json!(true);
+             }
+             failure_retry = Some(
+                 serde_json::json!({"polls":2,"native_births_before":births,"native_births_after":kernel::lab_native_births(),
+                 "charges_before":charges,"charges_after":lab_charges(),"same_original_request":true,"same_step":true,"original_error_retained":true,"generation_reuse_refused":true}),
+             );
+         }
+     }
++    lab_phase("host.writer_summary", false);
+     let n = if let Some(c) = complete.as_mut() {
+         c.original.native.as_mut().ok_or(Error::Interrupted)?
+     } else {
+         lab_owner(&mut pending)?
+     };
+     let mut operations = n
+         .previous
+         .iter_mut()
+         .map(kernel::host_link::Verified::lab_evidence)
+         .collect::<Result<Vec<_>>>()?;
+@@ -909,55 +912,65 @@ fn lab_build(
+         || preparation["service_reserved"] != true
+         || preparation["member_native_jobs_collected"] != false
+         || preparation["entry_phase"] != "creating"
+         || preparation["entry_links_absent"] != true
+         || preparation["entry_attempt_absent"] != true
+         || preparation["entry_terminal_absent"] != true
+         || preparation["entry_producer_absent"] != false
+     {
+         return Err(Error::OwnershipMismatch);
+     }
++    lab_phase("host.writer_summary", true);
++    lab_phase("host.prefix_histories", false);
+     for key in [
+         "wireguard",
+         "netfilter",
+         "producer_creation",
+         "producer_binding",
+         "producer_binding_query",
+         "producer_query",
+         "quarantine_query",
+         "movement_query",
+         "inspection",
+         "attachment",
+         "fresh_transport",
+     ] {
+         if preparation[key] != prefix["preparation"][key] {
+             return Err(Error::OwnershipMismatch);
+         }
+     }
++    lab_phase("host.prefix_histories", true);
++    lab_phase("host.intent_oracle", false);
+     if queued_polls != 1 || held_polls != 3 || negative_checks != 12 || !intent_released {
+         return Err(Error::OwnershipMismatch);
+     }
++    lab_phase("host.intent_oracle", true);
++    lab_phase("host.first_writer", false);
+     let (wi, pid, start) = first_writer.ok_or(Error::OwnershipMismatch)?;
+     if wi != 75
+         || writers[wi]["pid"] != pid
+         || writers[wi]["start"] != start
+         || writers[wi]["actual_wait_status"] != 0
+         || writers[wi]["verified_at"].is_null()
+     {
+         return Err(Error::OwnershipMismatch);
+     }
++    lab_phase("host.first_writer", true);
++    lab_phase("host.operation_summary", false);
+     let history = preparation["host_link"]
+         .as_array()
+         .ok_or(Error::OwnershipMismatch)?;
+     if history.len() != 4 || operations.len() != if matches!(fault, 1 | 3) { 3 } else { 4 } {
+         return Err(Error::OwnershipMismatch);
+     }
++    lab_phase("host.operation_summary", true);
++    lab_phase("host.operation_receipts", false);
+     for (index, op) in operations.iter().enumerate() {
+         let h = &history[index];
+         if op["request"] != h["request"]
+             || op["birth"] != h["birth"]
+             || op["actual_wait_status"] != 0
+             || op["eof"] != true
+             || op["original_registration_slots_verified"] != true
+             || op["durable_birth_released"] != true
+             || op["borrowed_registration_count"] != [0, 2, 0, 4][index]
+         {
+@@ -1010,37 +1023,41 @@ fn lab_build(
+                 return Err(Error::OwnershipMismatch);
+             }
+         } else if c["native_born"] != false
+             || !c["original_pid"].is_null()
+             || !c["actual_wait_status"].is_null()
+             || c["native_job_state"] != "prepared"
+         {
+             return Err(Error::OwnershipMismatch);
+         }
+     }
++    lab_phase("host.operation_receipts", true);
++    lab_phase("host.writer_receipts", false);
+     for (index, w) in writers.iter().enumerate().skip(75) {
+         let op = &history[(index - 75) / 3];
+         let phase = ["host_link_intent", "host_link_birth", "host_link_result"][(index - 75) % 3];
+         if w["phase"] != phase
+             || w["io_deadline"] != op["deadline"]
+             || w["parent_deadline"] != op["deadline"]
+         {
+             return Err(Error::OwnershipMismatch);
+         }
+         if fault == 2 && index == 86 {
+             if w["actual_wait_status"] != 9 || !w["verified_at"].is_null() {
+                 return Err(Error::OwnershipMismatch);
+             }
+         } else if w["actual_wait_status"] != 0 || w["verified_at"].is_null() {
+             return Err(Error::OwnershipMismatch);
+         }
+     }
++    lab_phase("host.writer_receipts", true);
++    lab_phase("host.inventory", false);
+     if matches!(fault, 0 | 2) {
+         let op = &operations[3];
+         let actual = &op["host_observation"];
+         for key in ["namespace", "addresses", "routes", "rules"] {
+             if actual[key] != declaration[key] {
+                 return Err(Error::OwnershipMismatch);
+             }
+         }
+         let links = actual["links"].as_array().ok_or(Error::OwnershipMismatch)?;
+         let prior = declaration["links"]
+@@ -1049,52 +1066,57 @@ fn lab_build(
+         let added = &op["result"]["host"];
+         if links.len() != prior.len() + 1
+             || !links.contains(added)
+             || prior.iter().any(|v| !links.contains(v))
+             || added["index"] != planned_index
+             || added["up"] != false
+         {
+             return Err(Error::OwnershipMismatch);
+         }
+     }
++    lab_phase("host.inventory", true);
++    lab_phase("host.schema_oracle", false);
+     let canonical_negative_checks = if fault == 0 {
+         n.service()?.lab_host_schema_checks()?
+     } else {
+         0
+     };
++    lab_phase("host.schema_oracle", true);
++    lab_phase("host.charges", false);
+     let before_drop = lab_charges();
+     let expected = match fault {
+         2 => [6, 5],
+         3 => [4, 4],
+         _ => [5, 5],
+     };
+     if before_drop != expected {
+         return Err(Error::OwnershipMismatch);
+     }
++    lab_phase("host.charges", true);
+     let mut witness = serde_json::json!({"schema":1,"fault":fault,"producer_binding":prefix,"preparation":preparation,"admission":admission,
+         "operations":operations,"failed_constructor":failed_constructor,"planned_host_link_index":planned_index,"canonical_negative_checks":canonical_negative_checks,
+         "own_intent_polling":{"index":wi,"pid":pid,"start":start,"queued_polls":queued_polls,"held_pending_polls":held_polls-1,"negative_checks":negative_checks,"released":intent_released},
+         "charges_before":before,"charges_before_drop":before_drop,"failure_retry":failure_retry,"retained_result_writer":retained_result_writer,
+         "result_writer_held":result_held,"isolated_pair_creation_observed":true,"single_down_host_addition_observed":matches!(fault,0|2),
+         "canonical_host_addition_acknowledged":fault==0,"unacknowledged_host_addition_retained":fault==2,
+         "host_addresses_routes_rules_preserved":matches!(fault,0|2),"host_neighbor_mutation_authorized":false,
+         "whole_chain_retained_after_drop":false,"original_six_contexts_retained_after_drop":false,"baseline_context_retained_after_drop":false,
+         "generation_context_retained_after_drop":false,"host_link_context_retained_after_drop":false,
+         "parent_pristine":vprouter_core::secret_boundary::pristine(),"placement_authorized":false,"up_authorized":false,"health_ready_authorized":false,
+         "resource_cleanup_authorized":false,"multi_exit_runtime_proven":false,"requirement8_complete":false});
+     witness["continued_original_context"] = serde_json::json!(continuation);
+     witness["charges_after_drop"] = serde_json::Value::Null;
+     if continuation {
+-        return Ok((
+-            Some(complete.take().ok_or(Error::OwnershipMismatch)?),
+-            witness,
+-        ));
++        lab_phase("host.return", false);
++        let complete = complete.take().ok_or(Error::OwnershipMismatch)?;
++        lab_phase("host.return", true);
++        return Ok((Some(complete), witness));
+     }
+     drop(complete);
+     drop(pending);
+     drop(slot);
+     if old_anchors.len() != 6
+         || old_anchors.iter().any(|w| w.upgrade().is_none())
+         || baseline_anchor.upgrade().is_none()
+         || link_anchor.upgrade().is_none()
+         || generation_anchor.upgrade().is_none()
+         || lab_charges() != before_drop
+diff --git a/crates/vprouter-launch/src/attachment/operational.rs b/crates/vprouter-launch/src/attachment/operational.rs
+index 1bb9bb6..c40038a 100644
+--- a/crates/vprouter-launch/src/attachment/operational.rs
++++ b/crates/vprouter-launch/src/attachment/operational.rs
+@@ -83,22 +83,30 @@ impl OperationalOwner {
+                 plan: Vec::new(),
+                 reservation: None,
+                 retired: 0,
+                 complete: false,
+                 failure: None,
+                 #[cfg(test)]
+                 anchor: std::rc::Rc::new(()),
+             })),
+         };
+         let n = value.native.as_mut().ok_or(Error::Interrupted)?;
++        #[cfg(test)]
++        lab_phase("handoff.plan", false);
+         n.plan = n.original.operational_plan()?;
++        #[cfg(test)]
++        lab_phase("handoff.plan", true);
++        #[cfg(test)]
++        lab_phase("handoff.reserve", false);
+         n.reservation = Some(n.original.reserve_operational_extension(&n.plan)?);
++        #[cfg(test)]
++        lab_phase("handoff.reserve", true);
+         Ok(value)
+     }
+     pub(super) fn poll(&mut self) -> Result<bool> {
+         let n = self.native.as_mut().ok_or(Error::Interrupted)?;
+         if n.creator != std::process::id() {
+             return Err(Error::OwnershipMismatch);
+         }
+         if let Some(error) = n.failure {
+             n.original.collect();
+             return Err(error);
+@@ -213,40 +221,59 @@ impl OperationalOwner {
+ }
+
+ #[cfg(test)]
+ fn lab_charges() -> [usize; 2] {
+     [
+         super::super::kernel::lab_live_child_capacity(),
+         vprouter_native_role::lab_live_child_capacity(),
+     ]
+ }
+ #[cfg(test)]
++pub(super) fn lab_phase(stage: &'static str, complete: bool) {
++    let event = if complete { "ok" } else { "begin" };
++    eprintln!("LAB_SECRET_BOOTSTRAP_PHASE stage={stage} event={event}");
++}
++#[cfg(test)]
++fn lab_retirement_phase(complete: bool, retired: usize) {
++    let event = if complete { "ok" } else { "begin" };
++    let retired = retired.min(5);
++    eprintln!("LAB_SECRET_BOOTSTRAP_PHASE stage=handoff.retire event={event} retired={retired}");
++}
++#[cfg(test)]
+ pub(super) struct LabHandoff {
+     pub(super) owner: Option<OperationalOwner>,
+     pub(super) host: serde_json::Value,
+     pub(super) evidence: serde_json::Value,
+     pub(super) original_anchors: super::host_addition::LabAnchors,
+     pub(super) anchor: std::rc::Weak<()>,
+ }
+ #[cfg(test)]
+ pub(super) fn lab_handoff(fault: u8) -> Result<LabHandoff> {
++    lab_phase("handoff.host", false);
+     let (input, host) = super::host_addition::lab_added()?;
++    lab_phase("handoff.host", true);
++    lab_phase("handoff.anchors", false);
+     let original_anchors = input.lab_anchors()?;
++    lab_phase("handoff.anchors", true);
++    lab_phase("handoff.host_witness", false);
+     if host["fault"] != 0
+         || host["continued_original_context"] != true
+         || !host["charges_after_drop"].is_null()
+         || lab_charges() != [5, 5]
+     {
+         return Err(Error::OwnershipMismatch);
+     }
++    lab_phase("handoff.host_witness", true);
+     let mut slot = Some(input);
++    lab_phase("handoff.construct", false);
+     let mut owner = OperationalOwner::new(&mut slot)?;
++    lab_phase("handoff.construct", true);
+     let anchor = std::rc::Rc::downgrade(&owner.native.as_ref().ok_or(Error::Interrupted)?.anchor);
+     let before = lab_charges();
+     let mut duplicate = None;
+     if fault == 6 {
+         let n = owner.native.as_ref().ok_or(Error::Interrupted)?;
+         let first = lab_charges();
+         if n.original.reserve_operational_extension(&n.plan).is_ok() || first != lab_charges() {
+             return Err(Error::OwnershipMismatch);
+         }
+         duplicate = Some(serde_json::json!({"before":first,"after":lab_charges(),"refused":true}));
+@@ -268,68 +295,81 @@ pub(super) fn lab_handoff(fault: u8) -> Result<LabHandoff> {
+                     || owner.context().is_ok()
+                 {
+                     return Err(Error::OwnershipMismatch);
+                 }
+             }
+             fence_counts =
+                 Some(serde_json::json!({"before":counts,"after":lab_charges(),"refused_polls":2}));
+             break;
+         }
+         let retired = owner.native.as_ref().ok_or(Error::Interrupted)?.retired;
++        lab_retirement_phase(false, retired);
+         let complete = owner.poll()?;
+         let n = owner.native.as_mut().ok_or(Error::Interrupted)?;
+         if n.retired != retired + 1 {
+             return Err(Error::OwnershipMismatch);
+         }
+         let counts = lab_charges();
+         if n.plan[retired].retire_capacity().is_ok() || lab_charges() != counts {
+             return Err(Error::OwnershipMismatch);
+         }
++        lab_retirement_phase(true, n.retired);
+         repeats += 1;
+         if complete {
+             break;
+         }
+     }
++    lab_phase("handoff.final_counts", false);
+     let after = lab_charges();
+     let n = owner.native.as_ref().ok_or(Error::Interrupted)?;
+     let expected = match fault {
+         4 => 0,
+         5 => 1,
+         _ => 5,
+     };
+     if n.retired != expected
+         || after != [5 - expected, 5 - expected]
+         || n.complete != (expected == 5)
+         || n.failure.is_some() != matches!(fault, 4 | 5)
+         || !n.original.children_reaped()
+     {
+         return Err(Error::OwnershipMismatch);
+     }
++    lab_phase("handoff.final_counts", true);
++    lab_phase("handoff.resource_evidence", false);
+     let resources = n
+         .plan
+         .iter()
+         .map(ResourceTransfer::lab_evidence)
+         .collect::<Result<Vec<_>>>()?;
++    lab_phase("handoff.resource_evidence", true);
++    lab_phase("handoff.reservation_evidence", false);
+     let reservation = n
+         .reservation
+         .as_ref()
+         .ok_or(Error::OwnershipMismatch)?
+         .lab_evidence()?;
++    lab_phase("handoff.reservation_evidence", true);
++    lab_phase("handoff.preparation_read", false);
+     let preparation = owner.lab_preparation()?;
++    lab_phase("handoff.preparation_read", true);
++    lab_phase("handoff.preparation_equal", false);
+     let mut prior = host["preparation"].clone();
+     prior["mutation_fenced"] = serde_json::json!(matches!(fault, 4 | 5));
+     if preparation != prior {
+         return Err(Error::OwnershipMismatch);
+     }
++    lab_phase("handoff.preparation_equal", true);
+     let evidence = serde_json::json!({"resources":resources,"reservation":reservation,
+         "charges_before":before,"charges_after":after,"retired_suffix_jobs":expected,"repeat_retirement_refusals":repeats,
+         "duplicate_reservation":duplicate,"fence_counts":fence_counts,"preparation":preparation,
+         "historical_original_jobs":15,"complete_original_job_set":20,"complete":expected==5,
+         "resources_collected":false,"global_child_capacity_limit":64});
++    lab_phase("handoff.return", true);
+     Ok(LabHandoff {
+         owner: Some(owner),
+         host,
+         evidence,
+         original_anchors,
+         anchor,
+     })
+ }
+diff --git a/crates/vprouter-launch/src/attachment/operational/bootstrap.rs b/crates/vprouter-launch/src/attachment/operational/bootstrap.rs
+index f21c890..8b64da8 100644
+--- a/crates/vprouter-launch/src/attachment/operational/bootstrap.rs
++++ b/crates/vprouter-launch/src/attachment/operational/bootstrap.rs
+@@ -1,20 +1,22 @@
+ //! Original, scope-specific Bootstrap request. Its Source and exact20 owner are
+ //! native custody; public histories alone cannot construct this request.
+ use super::super::super::{
+     kernel,
+     owned::{
+         Identity,
+         preparation::{Server, quarantine::Binding},
+     },
+ };
+ use super::super::{Error, Result, quarantine::Scope};
++#[cfg(test)]
++use super::lab_phase;
+ use super::{OperationalOwner, producer::Pins};
+ use std::rc::Rc;
+ pub(crate) struct Request {
+     creator: u32,
+     binding: Rc<Binding>,
+     source: Rc<kernel::producer_creation::Source>,
+     query: Rc<kernel::docker_query::Accepted>,
+     pins: Pins,
+     identities: [(u64, u64, u32); 8],
+     group: Identity,
+@@ -462,24 +464,38 @@ impl Native {
+                     self.step = Step::Next;
+                 }
+             }
+             Step::Next | Step::Complete => (),
+         }
+         self.query.check_deadline()
+     }
+ }
+ impl PendingBootstrap {
+     pub(crate) fn new(slot: &mut Option<OperationalOwner>) -> Result<Self> {
++        #[cfg(test)]
++        lab_phase("bootstrap.complete", false);
+         let input = slot.as_ref().ok_or(Error::Interrupted)?;
+         input.require_complete()?;
++        #[cfg(test)]
++        lab_phase("bootstrap.complete", true);
++        #[cfg(test)]
++        lab_phase("bootstrap.context", false);
+         let binding = input.context()?.binding;
++        #[cfg(test)]
++        lab_phase("bootstrap.context", true);
++        #[cfg(test)]
++        lab_phase("bootstrap.query", false);
+         let query = InspectionRequest::for_bootstrap(input, QueryKind::BootstrapHostRecheck)?;
++        #[cfg(test)]
++        lab_phase("bootstrap.query", true);
++        #[cfg(test)]
++        lab_phase("bootstrap.retain", false);
+         let mut value = Self {
+             native: Some(Box::new(Native {
+                 creator: std::process::id(),
+                 input: slot.take().ok_or(Error::Interrupted)?,
+                 binding,
+                 query,
+                 completed: Vec::with_capacity(3),
+                 query_child: None,
+                 query_verified: None,
+                 query_accepted: None,
+@@ -490,24 +506,37 @@ impl PendingBootstrap {
+                 failure: None,
+                 #[cfg(test)]
+                 anchor: Rc::new(()),
+                 #[cfg(test)]
+                 final_verified_at: None,
+                 #[cfg(test)]
+                 process_verified_at: Vec::with_capacity(3),
+             })),
+         };
+         let n = value.native.as_mut().ok_or(Error::Interrupted)?;
+-        if let Err(e) = n.input.service_mut()?.start_inspection(&n.query) {
++        #[cfg(test)]
++        lab_phase("bootstrap.retain", true);
++        #[cfg(test)]
++        lab_phase("bootstrap.service", false);
++        let service = n.input.service_mut()?;
++        #[cfg(test)]
++        lab_phase("bootstrap.service", true);
++        #[cfg(test)]
++        lab_phase("bootstrap.queue", false);
++        if let Err(e) = service.start_inspection(&n.query) {
+             n.fail(e);
+             return Err(e);
+         }
++        #[cfg(test)]
++        lab_phase("bootstrap.queue", true);
++        #[cfg(test)]
++        lab_phase("bootstrap.return", true);
+         Ok(value)
+     }
+     pub(crate) fn poll(&mut self) -> Result<Option<BootstrappedOwner>> {
+         let n = self.native.as_mut().ok_or(Error::Interrupted)?;
+         if n.creator != std::process::id() {
+             return Err(Error::OwnershipMismatch);
+         }
+         if let Some(e) = n.failure {
+             n.collect();
+             return Err(e);

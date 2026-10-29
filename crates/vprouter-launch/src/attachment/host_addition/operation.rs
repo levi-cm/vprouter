@@ -1,5 +1,7 @@
 //! Closed canonical operations over the original generation admission.
 use super::super::super::owned::preparation::Server;
+#[cfg(test)]
+use super::super::operational::lab_phase;
 use super::*;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
@@ -873,6 +875,7 @@ fn lab_build(
             );
         }
     }
+    lab_phase("host.writer_summary", false);
     let n = if let Some(c) = complete.as_mut() {
         c.original.native.as_mut().ok_or(Error::Interrupted)?
     } else {
@@ -916,6 +919,8 @@ fn lab_build(
     {
         return Err(Error::OwnershipMismatch);
     }
+    lab_phase("host.writer_summary", true);
+    lab_phase("host.prefix_histories", false);
     for key in [
         "wireguard",
         "netfilter",
@@ -933,9 +938,13 @@ fn lab_build(
             return Err(Error::OwnershipMismatch);
         }
     }
+    lab_phase("host.prefix_histories", true);
+    lab_phase("host.intent_oracle", false);
     if queued_polls != 1 || held_polls != 3 || negative_checks != 12 || !intent_released {
         return Err(Error::OwnershipMismatch);
     }
+    lab_phase("host.intent_oracle", true);
+    lab_phase("host.first_writer", false);
     let (wi, pid, start) = first_writer.ok_or(Error::OwnershipMismatch)?;
     if wi != 75
         || writers[wi]["pid"] != pid
@@ -945,12 +954,16 @@ fn lab_build(
     {
         return Err(Error::OwnershipMismatch);
     }
+    lab_phase("host.first_writer", true);
+    lab_phase("host.operation_summary", false);
     let history = preparation["host_link"]
         .as_array()
         .ok_or(Error::OwnershipMismatch)?;
     if history.len() != 4 || operations.len() != if matches!(fault, 1 | 3) { 3 } else { 4 } {
         return Err(Error::OwnershipMismatch);
     }
+    lab_phase("host.operation_summary", true);
+    lab_phase("host.operation_receipts", false);
     for (index, op) in operations.iter().enumerate() {
         let h = &history[index];
         if op["request"] != h["request"]
@@ -1017,6 +1030,8 @@ fn lab_build(
             return Err(Error::OwnershipMismatch);
         }
     }
+    lab_phase("host.operation_receipts", true);
+    lab_phase("host.writer_receipts", false);
     for (index, w) in writers.iter().enumerate().skip(75) {
         let op = &history[(index - 75) / 3];
         let phase = ["host_link_intent", "host_link_birth", "host_link_result"][(index - 75) % 3];
@@ -1034,6 +1049,8 @@ fn lab_build(
             return Err(Error::OwnershipMismatch);
         }
     }
+    lab_phase("host.writer_receipts", true);
+    lab_phase("host.inventory", false);
     if matches!(fault, 0 | 2) {
         let op = &operations[3];
         let actual = &op["host_observation"];
@@ -1056,11 +1073,15 @@ fn lab_build(
             return Err(Error::OwnershipMismatch);
         }
     }
+    lab_phase("host.inventory", true);
+    lab_phase("host.schema_oracle", false);
     let canonical_negative_checks = if fault == 0 {
         n.service()?.lab_host_schema_checks()?
     } else {
         0
     };
+    lab_phase("host.schema_oracle", true);
+    lab_phase("host.charges", false);
     let before_drop = lab_charges();
     let expected = match fault {
         2 => [6, 5],
@@ -1070,6 +1091,7 @@ fn lab_build(
     if before_drop != expected {
         return Err(Error::OwnershipMismatch);
     }
+    lab_phase("host.charges", true);
     let mut witness = serde_json::json!({"schema":1,"fault":fault,"producer_binding":prefix,"preparation":preparation,"admission":admission,
         "operations":operations,"failed_constructor":failed_constructor,"planned_host_link_index":planned_index,"canonical_negative_checks":canonical_negative_checks,
         "own_intent_polling":{"index":wi,"pid":pid,"start":start,"queued_polls":queued_polls,"held_pending_polls":held_polls-1,"negative_checks":negative_checks,"released":intent_released},
@@ -1084,10 +1106,10 @@ fn lab_build(
     witness["continued_original_context"] = serde_json::json!(continuation);
     witness["charges_after_drop"] = serde_json::Value::Null;
     if continuation {
-        return Ok((
-            Some(complete.take().ok_or(Error::OwnershipMismatch)?),
-            witness,
-        ));
+        lab_phase("host.return", false);
+        let complete = complete.take().ok_or(Error::OwnershipMismatch)?;
+        lab_phase("host.return", true);
+        return Ok((Some(complete), witness));
     }
     drop(complete);
     drop(pending);

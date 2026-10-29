@@ -876,3 +876,19 @@ archiver freshowner/gateway/selector gatesPASS; exact6 archived with exclusive
 receipt/allotherresources retained/no signals/unmounts/profile reads. Public
 originalFAIL/zerocases and24rowoverlap/observerlimits retained. Completion/public
 audit pending before failuremilestone push. Source frozen/full8cACTIVE/releasefalse.
+
+406failure milestoneb58231e remote-confirmed fork/rust/v2. Diagnosis e37a5160,
+digestexperiment a4d7f6a9 and conditionalonefilebrief independently diagnosis/
+requirements/experimentSPEC+QUALITY+EVIDENCEPASS review120050bf. Offlineactual
+workerpublicdigestoracle before/after299inputs+2knownvectors/8450hexchecksPASS;
+7alternatingbatches/28pairedsamples retained, no timingrerun. HostGNUopt3/noLTO
+median actual/proposed ns owner45B768.282/61.992, allocation623B1000.822/274.531;
+notnativecostshare/CPU/savedbudget/2sfit or releaseperformance. Root rechecked203
+currentinputs unchanged; experiment179Rust+10configunchanged corroborated.
+Ruling: accept exactonefile sharedSHA256 lowercasehex representation-work removal
+under reviewed brief, preserving hash/input/output/calls/livechecks/identities.
+Costifwrong: equivalence/native experiment and rework, never identity recreation
+or deadline/ownership relaxation. Soleimplementer may edit only workerbootstrap
+helper/tests after this mechanismcheckpoint push; sourcefreeze/freshreview/
+coherentartifacts/authored59baseline/checkpoint precede nextnativeVMrun. Full8c
+ACTIVE/release_readyfalse; original398-406 failures preserved.

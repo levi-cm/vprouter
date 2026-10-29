@@ -668,3 +668,21 @@ provenance/baselineflags finalizedPASS; cfgtest-onlydiagnostic/nativeNOT_RUN,
 ARMNOT_RUN/releasefalse retained. Source/runtimeauthority unchanged. Explicit
 milestonecheckpoint and newdiagnostic nativeinvocation followfinalpublicaudit;
 full8cACTIVE, original402andearlierfailurespreserved.
+
+Diagnostic milestoneb459edf and exactc6f3tag rust-v2-test-20261029T153856Z remote-
+confirmed fork/rust/v2. OwnedDebian403FAILexit1/13.92s zero cases/91journalpairs.
+Newprocess-local boundary=native_poll/intent/Deadline: firstqueryaccepted/policy
+present, queryheld2/negative6/released, policyheld2/negative12/notreleased.
+13closedwrapperelapsed rows total1959655450ns, nativepoll13calls923556681ns;
+querywrappers722550398ns/policy313548371ns inclnestedwork/IO/scheduling, notCPU.
+Postfailedcallclock7.374366ms beyondoriginal2send, notexactinnerpredicateclock
+or retrospective402helperproof. Root exactreadonlyinspection+closedmetadata
+parserPASS; sixselectors/allresourcesretained pendingindependentpreservation
+review. Soleimplementer readonlycost/optimizationproposal; no source/deadline/
+enforcement/testweakening or identicalretry. Full8cACTIVE/release_readyfalse.
+
+403 independent failure/provenance/preservation/exactsix prerequisite review PASS;
+Root unchanged archiver e36a8e8c fresh originalowner/gateway/selector gates PASS,
+exclusive receipt retained, exact6 selectors archived/all other resources retained,
+no signals/unmounts or profile reads. Public originalFAIL and bounded diagnostic
+limits retained; completion/publicscope audit pending before milestone push.

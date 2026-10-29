@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "scope": "local cfg(test) helper boundary and elapsed-wrapper diagnostic; retained failed native attempt",
+  "run": 403,
+  "result": "FAIL",
+  "exit_code": 1,
+  "wall_seconds": 13.92,
+  "completed_cases": 0,
+  "record_sha256": "8e63c00123fca75a1fbf8347566fd226e794cfd214a87c0e1b7f085654901241",
+  "source_binding": {
+    "source_commit": "c6f3c5e8917f81ee7b4b9070388ee3c524531b8b",
+    "source_archive_sha256": "56c1c02b4806c4d490100b098b9e9c1ac7dca4d42bd4fec7b047a7fc6844d633",
+    "tracked_build_inputs_verified": 202,
+    "source_aggregate_sha256": "f1a84685bb540b74b23f1a6393470b4a845b9ed11523a21f1f1ec8d65c54b57a"
+  },
+  "artifact_sha256": "9486d7e15faeaa6c855ca72bd465d68f285a27e5e55e8bc8f0dcecc1314c5a86",
+  "runner_sha256": "565ecefd0472be62e53c927bb6875519440fb95b4516749386501c11cc52eb8c",
+  "guest_sha256": "12a4d66ec4284a6d5de06bb3ac9fa6387514b94a4d7f3b78d9d8f525b86548a1",
+  "failure": "Deadline",
+  "failure_step": "intent",
+  "failure_helper": "native_poll",
+  "poll_failure_marker_present": true,
+  "journal_inventory_pairs": 91,
+  "boundary": {
+    "helper": "native_poll",
+    "step": "intent",
+    "reason": "Deadline",
+    "query_present": true,
+    "query_child_present": true,
+    "query_accepted_present": true,
+    "policy_present": true,
+    "query_queued": true,
+    "query_released": true,
+    "own_queued": true,
+    "own_released": false,
+    "query_held": 2,
+    "query_negatives": 6,
+    "own_held": 2,
+    "own_negatives": 12,
+    "original_requested_at": 197538.988574814,
+    "original_deadline": 197540.988574814,
+    "observed_boot_now": 197540.99594918
+  },
+  "wrappers": [
+    {
+      "helper": "query_source",
+      "calls": 1,
+      "elapsed_ns": 15984562
+    },
+    {
+      "helper": "query_hold",
+      "calls": 1,
+      "elapsed_ns": 37325416
+    },
+    {
+      "helper": "query_checkpoint",
+      "calls": 4,
+      "elapsed_ns": 502650387
+    },
+    {
+      "helper": "query_identity",
+      "calls": 3,
+      "elapsed_ns": 78430660
+    },
+    {
+      "helper": "query_held_negatives",
+      "calls": 3,
+      "elapsed_ns": 50120254
+    },
+    {
+      "helper": "query_release",
+      "calls": 1,
+      "elapsed_ns": 38039119
+    },
+    {
+      "helper": "policy_hold",
+      "calls": 1,
+      "elapsed_ns": 44260971
+    },
+    {
+      "helper": "policy_queued_negatives",
+      "calls": 1,
+      "elapsed_ns": 32587417
+    },
+    {
+      "helper": "policy_checkpoint",
+      "calls": 3,
+      "elapsed_ns": 127978111
+    },
+    {
+      "helper": "policy_held_negatives",
+      "calls": 1,
+      "elapsed_ns": 51625076
+    },
+    {
+      "helper": "policy_identity",
+      "calls": 2,
+      "elapsed_ns": 57096796
+    },
+    {
+      "helper": "policy_release",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "helper": "native_poll",
+      "calls": 13,
+      "elapsed_ns": 923556681
+    }
+  ],
+  "total_measured_wrapper_elapsed_ns": 1959655450,
+  "observation_after_deadline_seconds": 0.007374366017756984,
+  "measurement_scope": "first-error measured wrapper elapsed including nested validation, IO and scheduling; not individual predicate CPU or exact predicate clock",
+  "canonical_query_fields_present": {
+    "birth": true,
+    "facts": true,
+    "verified_at": true
+  },
+  "native_bootstrap_accepted": false,
+  "real_client_acceptance": "NOT_RUN",
+  "production_changes": false,
+  "outer_preservation": {
+    "harness_exit_code": 1,
+    "owner_unit_absent": true,
+    "host_links_and_stable_routes_unchanged": false,
+    "host_single_down_link_added": true,
+    "host_addresses_routes_rules_preserved": true,
+    "host_stable_neighbors_preserved": true,
+    "host_allowed_index": 1542016454,
+    "host_allowed_name": "vh7bd6c60869d0",
+    "inert_gateway_retained": true,
+    "original_gateway_native_identity_unchanged": true,
+    "synthetic_only": true,
+    "native_transport_operations_requested": true,
+    "canonical_and_mount_resources_retained": true
+  },
+  "inspection_sha256": "80ad66bd3d10804cdde2b3adea39ba925332cf1ca6ea4832c73075f1fca05431",
+  "closed_metadata_sha256": "19c6cc36f7e6b51d160392d0431625e35441239ca7755bf76f4fb356335d7360",
+  "selectors_retained": 0,
+  "resource_cleanup_performed": false,
+  "evidence_qualification": "Failure boundary, cached presence/counters and wrapper elapsed totals are process-local diagnostics. They do not identify the exact inner deadline predicate, measure its CPU cost, or reidentify run402. Canonical disk bytes alone do not prove parent ACK. No completed native case or acceptance witness.",
+  "selectors_archived": 6,
+  "selector_archival": {
+    "result": "PASS",
+    "receipt_sha256": "1899f4010aa7b68e339d0864768eef1b73b32c5fa8e74a38a981ac86b44d3a32",
+    "fresh_original_owner_absence_and_gateway_identity_verified": true,
+    "exact_selector_identity_and_destination_checks": true,
+    "all_other_fixture_resources_retained": true,
+    "signals_or_unmounts": false
+  },
+  "preservation_review": "PASS"
+}

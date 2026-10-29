@@ -22,7 +22,7 @@
       "static_elf": true
     }
   },
-  "native_bootstrap": "NOT_RUN",
+  "native_bootstrap": "FAIL_ATTEMPT403",
   "arm64_runtime": "NOT_RUN",
   "release_ready": false,
   "scope": "one-file cfg(test) original-error boundary and measured wrapper diagnostics; no enforcement fix",

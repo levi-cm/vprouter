@@ -29,5 +29,13 @@
   "identical_payload_retried": false,
   "native_bootstrap_accepted": false,
   "real_client_acceptance": "NOT_RUN",
-  "production_changes": false
+  "production_changes": false,
+  "subsequent_preservation": {
+    "selectors_archived": 6,
+    "independent_review": "PASS",
+    "resources_retained": true,
+    "private_profile_contents_read": false,
+    "signals_or_unmounts": false,
+    "exact_owner_and_original_gateway_reverified": true
+  }
 }

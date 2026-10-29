@@ -1722,6 +1722,18 @@
       "archive_path": "tools/rust-v2-lab/target/platform-lab/secret-bootstrap.guest.py",
       "sha256": "12a4d66ec4284a6d5de06bb3ac9fa6387514b94a4d7f3b78d9d8f525b86548a1",
       "bytes": 22319
+    },
+    {
+      "source_path": "target/inspect-secret-bootstrap-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-secret-bootstrap-failure.py",
+      "sha256": "64537a9d291d7e4df754e7cd194ac3bd6375f61ed538da0b1d8023e0cd879411",
+      "bytes": 6736
+    },
+    {
+      "source_path": "target/archive-secret-bootstrap-selectors.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-secret-bootstrap-selectors.py",
+      "sha256": "e36a8e8c122663d9adc36ab8827f2923bd01147601efd248823f9cff0c62b9c0",
+      "bytes": 5242
     }
   ]
 }

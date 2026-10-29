@@ -458,3 +458,16 @@ Publication scope reviewPASS; refreshed manifest-only hashes/sizes add no author
 Task8c.1 complete bounded source/component/static milestone; native receipts and
 full8c/runtime/client acceptance remainOPEN. Publicverification hashes recorded
 in docs/rust-v2/task8c-slice1-verification.json. Commit/push follows review.
+
+Task8c.1 milestone b318eac remote-confirmed fork/rust/v2; exact source5a224c16
+remote-confirmed tag rust-v2-test-20261029T124811Z. Production read-only active.
+Task8c prerequisite398 read-only diagnosis narrowed to post-host assertions,
+exact20 handoff or Bootstrap constructor; all4canonical host results acknowledged.
+No exact failing predicate/semanticfix established. Diagnostic-only3file increment
+authorized to existing sole implementer, fixed cfg(test) stages/error classes only.
+Root new metadata inspector/source-family adaptation audited independently; exact
+6selectors archived by hardlink/unlink into original root0700 input directory after
+fresh unitabsence+gatewaypidfd/start/netns+selectorinode/hash/mode checks. All profile,
+canonical,mount,network and inertgateway resources retained; no signals/unmounts.
+Reference target/lab-state/secret-bootstrap-selector-archive-run-398.json. Original
+raw398 unchanged. Two controller sources added safe archive, now289hash entries.

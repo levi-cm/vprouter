@@ -39,6 +39,8 @@ impl Binding {
         self.verify_service_custody(server)
     }
     pub(super) fn verify_service_custody(&self, server: &Server) -> Result<()> {
+        #[cfg(test)]
+        let _cost = super::lab_cost::Timer::new(super::lab_cost::Key::BindingServiceCustody);
         server.verify_transport_custody(&self.transport)?;
         let n = server.native.as_ref().ok_or(Error::Interrupted)?;
         n.require_creator()?;
@@ -52,6 +54,8 @@ impl Binding {
         self.verify_retained()
     }
     pub(crate) fn verify_retained(&self) -> Result<()> {
+        #[cfg(test)]
+        let _cost = super::lab_cost::Timer::new(super::lab_cost::Key::BindingRetained);
         if self.public.creator != std::process::id() || !vprouter_core::secret_boundary::pristine()
         {
             return Err(Error::OwnershipMismatch);
@@ -1061,11 +1065,17 @@ impl Native {
         phase: &'static str,
         started: f64,
     ) -> Result<()> {
+        #[cfg(test)]
+        let _cost = super::lab_cost::Timer::new(super::lab_cost::Key::OwnedProgress);
         self.require_creator()?;
         original_frame(started, vprouter_core::health::boot_seconds())?;
         let shared = &self.transaction.shared;
         let c = self.continuation.as_ref().ok_or(Error::OwnershipMismatch)?;
+        #[cfg(test)]
+        let expected_cost = super::lab_cost::Timer::new(super::lab_cost::Key::ExpectedRecordEncode);
         let expected_bytes = encode_record(expected)?;
+        #[cfg(test)]
+        drop(expected_cost);
         if self.failure.is_some()
             || !self.result_issued
             || shared.fenced.get()

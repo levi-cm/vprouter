@@ -694,3 +694,20 @@ no dominant mechanism; cost if wrong is one diagnostic build/experiment, with
 no ownership or deadline relaxation. Sole implementer authorized cfg(test)-only
 six-path task-8c-bootstrap-nested-cost-brief.md; original2s/all calls/negatives/
 held-polls/errors remain exact. Full8c ACTIVE; all acceptance gates unchanged.
+
+Nestedcost diagnostic ruling: allow COW-private child counter accumulation, never
+exported/merged as parent metrics. Journal child record_digest executes under a
+filter allowing clock_gettime but denying getpid; per-entry creator syscalls or
+new fork/filter hooks would exceed diagnostic scope. Creator checks remain only
+at unrestricted lab arm/stop/snapshot; fixed timer entry/drop uses no getpid.
+Cost if wrong: child diagnostic overhead can perturb scheduling/parent elapsed,
+so report it explicitly and do not infer isolated CPU or exact predicate costs.
+Original child kernel::die/no-unwind and no child emission must be reviewed.
+
+Nestedcost brief interpretation: one cfg(test) infallible cached-Step family hook
+at existing lab-loop entry is allowed within operational/bootstrap.rs, to split
+fixed3x10 rows into query/policy/other. Timer captures entry family; a poll may
+transition, so grouping is lab-loop-entry Step family, not inner phase/CPU.
+Initial family explicit before PendingBootstrap construction; no new fallible
+getter, clock check, authority or original call/order change. Cost if wrong is
+misattributed diagnostic grouping, bounded by labels and independent review.

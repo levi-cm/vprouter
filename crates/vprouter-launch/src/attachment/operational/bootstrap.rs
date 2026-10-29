@@ -660,6 +660,9 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
     let mut own_negatives = 0usize;
     let mut own_released = false;
     let mut measurements = Measurements::new();
+    let _nested_cost = super::super::super::owned::preparation::lab_cost::arm(
+        super::super::super::owned::preparation::lab_cost::Family::Other,
+    );
     macro_rules! measured {
         ($helper:ident, $native:expr, $call:expr) => {{
             let started = std::time::Instant::now();
@@ -703,6 +706,17 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
                 .native
                 .as_mut()
                 .ok_or(Error::Interrupted)?;
+            super::super::super::owned::preparation::lab_cost::set_family(match n.step {
+                Step::QueryIntent | Step::QueryBirth | Step::QueryReading | Step::QueryResult => {
+                    super::super::super::owned::preparation::lab_cost::Family::Query
+                }
+                Step::Intent | Step::Birth | Step::Reading | Step::Result => {
+                    super::super::super::owned::preparation::lab_cost::Family::Policy
+                }
+                Step::Next | Step::Complete => {
+                    super::super::super::owned::preparation::lab_cost::Family::Other
+                }
+            });
             if n.completed.is_empty() && matches!(n.step, Step::QueryIntent) && !query_released {
                 if query_source.is_none() {
                     query_source = Some(measured!(
@@ -1357,6 +1371,7 @@ mod lab_diagnostics {
                 return;
             }
             self.emitted = true;
+            let nested = super::super::super::super::owned::preparation::lab_cost::stop_snapshot();
             // Read only retained scalars: logging must not revalidate or mask the error.
             let step = native.map_or("absent", |n| match n.step {
                 Step::QueryIntent => "query_intent",
@@ -1402,6 +1417,9 @@ mod lab_diagnostics {
                     helper.label(),
                     duration.as_nanos(),
                 );
+            }
+            if let Some(snapshot) = nested {
+                snapshot.emit(&mut stderr);
             }
         }
     }

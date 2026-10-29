@@ -629,3 +629,14 @@ review remainsPASS/all19protectedfilesunchanged; publicchecks399/0/2+fmt/clippy,
 source/staticcomponentmilestone only. Nativeforab20 remainsNOT_RUN, ARM runtime
 NOT_RUN/full8cACTIVE. Finalpublicscope audit/explicitcheckpoint follows before
 newnativeBootstrap invocation; no original401failure rewritten.
+
+Ancestry source milestone fdf1d89 and exactab20 tag rust-v2-test-20261029T141400Z
+remote-confirmed fork/rust/v2. NativeownedDebian402FAILexit1/17.65s zero cases,
+finalDeadline/noPOLL_FAILURE,73phaselines/91journalinventorypairs. Root readonly
+inspectionPASS; firstquerydurablebirth/facts/verifiedfields, observation1.294765s
+inside original2swindow; notparentACK or failedclocktrace. Soleimplementerreadonly
+localizes production versus lab-control boundary; no deadlineweakening/retry.
+Independent402preservationgatePASS; unchangedarchiverfreshgatesPASS andexact6
+selectorsarchived/allotherfixturesretained/no signals/unmounts. Root finalpost-
+manifest workspace399/0/2ignored+strictalltargetClippyPASS. Full8cACTIVE,402andall
+priorfailuresretained; noBootstrap/native/releaseacceptance promotion.

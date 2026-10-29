@@ -22,7 +22,7 @@
       "static_elf": true
     }
   },
-  "native_bootstrap": "NOT_RUN",
+  "native_bootstrap": "FAIL_ATTEMPT402",
   "arm64_runtime": "NOT_RUN",
   "release_ready": false,
   "scope": "bounded cgroup internal-parent edge correction; no new runtime or forwarding authority",
@@ -41,7 +41,10 @@
     "strict_workspace_clippy": "PASS",
     "both_architecture_static_builds": "PASS",
     "amd64_static_filter_and_pending_core_preflight": "PASS",
-    "read_only_debian_projection": "PASS"
+    "read_only_debian_projection": "PASS",
+    "post_manifest_workspace_passed": 399,
+    "post_manifest_workspace_failed": 0,
+    "post_manifest_strict_workspace_clippy": "PASS"
   },
   "evidence_hashes": {
     "target/continuation-20261029T141400Z/root-verification.json": "404f3e78d05537a9f531f73f67d15cc1db4e53febf7357fcac852ad575f72493",

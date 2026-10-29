@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "scope": "local cgroup ancestry correction candidate; retained failed native attempt",
+  "run": 402,
+  "result": "FAIL",
+  "exit_code": 1,
+  "wall_seconds": 17.65,
+  "completed_cases": 0,
+  "record_sha256": "21cbaeefd26ce18bf4474066fb49ece9556b1d796d196fd1028ff3c626da5269",
+  "source_binding": {
+    "source_commit": "ab20f1d7ce5f366da327c7b0193a489810cb67a8",
+    "source_archive_sha256": "7e284b0dbd88a935cc55cee9a0328588541c15647b6e8ffe855fae7b5a542ffb",
+    "tracked_build_inputs_verified": 202,
+    "source_aggregate_sha256": "e7bf990e30d3c36c3cfd3f25eb110692f62a6c4b5d1b3bc9ef08e2dc9c62c6f3"
+  },
+  "artifact_sha256": "82e0e3b644794540798a9a050dc404b5d7aad8627a2f17320e42fb4357703199",
+  "runner_sha256": "565ecefd0472be62e53c927bb6875519440fb95b4516749386501c11cc52eb8c",
+  "guest_sha256": "12a4d66ec4284a6d5de06bb3ac9fa6387514b94a4d7f3b78d9d8f525b86548a1",
+  "failure": "Deadline",
+  "failure_step": "UNLOCALIZED",
+  "poll_failure_marker_present": false,
+  "bootstrap_phase_marker_lines": 73,
+  "journal_inventory_pairs": 91,
+  "canonical_query_fields_present": {
+    "birth": true,
+    "facts": true,
+    "verified_at": true
+  },
+  "canonical_query_observation_seconds": 1.294764723017579,
+  "first_query_window_seconds": 2.0,
+  "native_bootstrap_accepted": false,
+  "real_client_acceptance": "NOT_RUN",
+  "production_changes": false,
+  "outer_preservation": {
+    "harness_exit_code": 1,
+    "owner_unit_absent": true,
+    "host_links_and_stable_routes_unchanged": false,
+    "host_single_down_link_added": true,
+    "host_addresses_routes_rules_preserved": true,
+    "host_stable_neighbors_preserved": true,
+    "host_allowed_index": 471245627,
+    "host_allowed_name": "vhc66e2a752f54",
+    "inert_gateway_retained": true,
+    "original_gateway_native_identity_unchanged": true,
+    "synthetic_only": true,
+    "native_transport_operations_requested": true,
+    "canonical_and_mount_resources_retained": true
+  },
+  "inspection_sha256": "6a9725ab70be368518d7f8f0a4eb734bd76471c40dc638dc7469d0de277ad681",
+  "subsequent_preservation": {
+    "selectors_archived": 6,
+    "archive_receipt_sha256": "69ddd861c3141b25ce2b1a9f43638a68c52ff23828fd8b546c3d54fab8553347",
+    "independent_pre_archival_review": "PASS",
+    "resources_retained": true,
+    "private_profile_contents_read": false,
+    "signals_or_unmounts": false,
+    "exact_owner_and_original_gateway_reverified": true
+  },
+  "evidence_qualification": "Canonical disk fields are durable write evidence, not proof of parent ACK. No completed native case, failed-clock trace or per-phase cost attribution is established."
+}

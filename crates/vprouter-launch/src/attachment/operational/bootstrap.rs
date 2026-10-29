@@ -8,6 +8,8 @@ use super::super::super::{
     },
 };
 use super::super::{Error, Result, quarantine::Scope};
+#[cfg(test)]
+use super::lab_phase;
 use super::{OperationalOwner, producer::Pins};
 use std::rc::Rc;
 pub(crate) struct Request {
@@ -469,10 +471,24 @@ impl Native {
 }
 impl PendingBootstrap {
     pub(crate) fn new(slot: &mut Option<OperationalOwner>) -> Result<Self> {
+        #[cfg(test)]
+        lab_phase("bootstrap.complete", false);
         let input = slot.as_ref().ok_or(Error::Interrupted)?;
         input.require_complete()?;
+        #[cfg(test)]
+        lab_phase("bootstrap.complete", true);
+        #[cfg(test)]
+        lab_phase("bootstrap.context", false);
         let binding = input.context()?.binding;
+        #[cfg(test)]
+        lab_phase("bootstrap.context", true);
+        #[cfg(test)]
+        lab_phase("bootstrap.query", false);
         let query = InspectionRequest::for_bootstrap(input, QueryKind::BootstrapHostRecheck)?;
+        #[cfg(test)]
+        lab_phase("bootstrap.query", true);
+        #[cfg(test)]
+        lab_phase("bootstrap.retain", false);
         let mut value = Self {
             native: Some(Box::new(Native {
                 creator: std::process::id(),
@@ -497,10 +513,23 @@ impl PendingBootstrap {
             })),
         };
         let n = value.native.as_mut().ok_or(Error::Interrupted)?;
-        if let Err(e) = n.input.service_mut()?.start_inspection(&n.query) {
+        #[cfg(test)]
+        lab_phase("bootstrap.retain", true);
+        #[cfg(test)]
+        lab_phase("bootstrap.service", false);
+        let service = n.input.service_mut()?;
+        #[cfg(test)]
+        lab_phase("bootstrap.service", true);
+        #[cfg(test)]
+        lab_phase("bootstrap.queue", false);
+        if let Err(e) = service.start_inspection(&n.query) {
             n.fail(e);
             return Err(e);
         }
+        #[cfg(test)]
+        lab_phase("bootstrap.queue", true);
+        #[cfg(test)]
+        lab_phase("bootstrap.return", true);
         Ok(value)
     }
     pub(crate) fn poll(&mut self) -> Result<Option<BootstrappedOwner>> {

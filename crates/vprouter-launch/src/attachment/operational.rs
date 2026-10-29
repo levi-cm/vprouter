@@ -90,8 +90,16 @@ impl OperationalOwner {
             })),
         };
         let n = value.native.as_mut().ok_or(Error::Interrupted)?;
+        #[cfg(test)]
+        lab_phase("handoff.plan", false);
         n.plan = n.original.operational_plan()?;
+        #[cfg(test)]
+        lab_phase("handoff.plan", true);
+        #[cfg(test)]
+        lab_phase("handoff.reserve", false);
         n.reservation = Some(n.original.reserve_operational_extension(&n.plan)?);
+        #[cfg(test)]
+        lab_phase("handoff.reserve", true);
         Ok(value)
     }
     pub(super) fn poll(&mut self) -> Result<bool> {
@@ -220,6 +228,17 @@ fn lab_charges() -> [usize; 2] {
     ]
 }
 #[cfg(test)]
+pub(super) fn lab_phase(stage: &'static str, complete: bool) {
+    let event = if complete { "ok" } else { "begin" };
+    eprintln!("LAB_SECRET_BOOTSTRAP_PHASE stage={stage} event={event}");
+}
+#[cfg(test)]
+fn lab_retirement_phase(complete: bool, retired: usize) {
+    let event = if complete { "ok" } else { "begin" };
+    let retired = retired.min(5);
+    eprintln!("LAB_SECRET_BOOTSTRAP_PHASE stage=handoff.retire event={event} retired={retired}");
+}
+#[cfg(test)]
 pub(super) struct LabHandoff {
     pub(super) owner: Option<OperationalOwner>,
     pub(super) host: serde_json::Value,
@@ -229,8 +248,13 @@ pub(super) struct LabHandoff {
 }
 #[cfg(test)]
 pub(super) fn lab_handoff(fault: u8) -> Result<LabHandoff> {
+    lab_phase("handoff.host", false);
     let (input, host) = super::host_addition::lab_added()?;
+    lab_phase("handoff.host", true);
+    lab_phase("handoff.anchors", false);
     let original_anchors = input.lab_anchors()?;
+    lab_phase("handoff.anchors", true);
+    lab_phase("handoff.host_witness", false);
     if host["fault"] != 0
         || host["continued_original_context"] != true
         || !host["charges_after_drop"].is_null()
@@ -238,8 +262,11 @@ pub(super) fn lab_handoff(fault: u8) -> Result<LabHandoff> {
     {
         return Err(Error::OwnershipMismatch);
     }
+    lab_phase("handoff.host_witness", true);
     let mut slot = Some(input);
+    lab_phase("handoff.construct", false);
     let mut owner = OperationalOwner::new(&mut slot)?;
+    lab_phase("handoff.construct", true);
     let anchor = std::rc::Rc::downgrade(&owner.native.as_ref().ok_or(Error::Interrupted)?.anchor);
     let before = lab_charges();
     let mut duplicate = None;
@@ -275,6 +302,7 @@ pub(super) fn lab_handoff(fault: u8) -> Result<LabHandoff> {
             break;
         }
         let retired = owner.native.as_ref().ok_or(Error::Interrupted)?.retired;
+        lab_retirement_phase(false, retired);
         let complete = owner.poll()?;
         let n = owner.native.as_mut().ok_or(Error::Interrupted)?;
         if n.retired != retired + 1 {
@@ -284,11 +312,13 @@ pub(super) fn lab_handoff(fault: u8) -> Result<LabHandoff> {
         if n.plan[retired].retire_capacity().is_ok() || lab_charges() != counts {
             return Err(Error::OwnershipMismatch);
         }
+        lab_retirement_phase(true, n.retired);
         repeats += 1;
         if complete {
             break;
         }
     }
+    lab_phase("handoff.final_counts", false);
     let after = lab_charges();
     let n = owner.native.as_ref().ok_or(Error::Interrupted)?;
     let expected = match fault {
@@ -304,27 +334,37 @@ pub(super) fn lab_handoff(fault: u8) -> Result<LabHandoff> {
     {
         return Err(Error::OwnershipMismatch);
     }
+    lab_phase("handoff.final_counts", true);
+    lab_phase("handoff.resource_evidence", false);
     let resources = n
         .plan
         .iter()
         .map(ResourceTransfer::lab_evidence)
         .collect::<Result<Vec<_>>>()?;
+    lab_phase("handoff.resource_evidence", true);
+    lab_phase("handoff.reservation_evidence", false);
     let reservation = n
         .reservation
         .as_ref()
         .ok_or(Error::OwnershipMismatch)?
         .lab_evidence()?;
+    lab_phase("handoff.reservation_evidence", true);
+    lab_phase("handoff.preparation_read", false);
     let preparation = owner.lab_preparation()?;
+    lab_phase("handoff.preparation_read", true);
+    lab_phase("handoff.preparation_equal", false);
     let mut prior = host["preparation"].clone();
     prior["mutation_fenced"] = serde_json::json!(matches!(fault, 4 | 5));
     if preparation != prior {
         return Err(Error::OwnershipMismatch);
     }
+    lab_phase("handoff.preparation_equal", true);
     let evidence = serde_json::json!({"resources":resources,"reservation":reservation,
         "charges_before":before,"charges_after":after,"retired_suffix_jobs":expected,"repeat_retirement_refusals":repeats,
         "duplicate_reservation":duplicate,"fence_counts":fence_counts,"preparation":preparation,
         "historical_original_jobs":15,"complete_original_job_set":20,"complete":expected==5,
         "resources_collected":false,"global_child_capacity_limit":64});
+    lab_phase("handoff.return", true);
     Ok(LabHandoff {
         owner: Some(owner),
         host,

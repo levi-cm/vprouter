@@ -1,0 +1,80 @@
+{
+  "binding": {
+    "source_commit": "4d9658fce6d206161023ec3487409680a30f4c23",
+    "source_archive_sha256": "86619f5d49cbfac7bae6a73d1c1d118734f62d4a2617d05d90e32c336a49d901",
+    "tracked_build_inputs_verified": 203,
+    "source_aggregate_sha256": "f33ab8a6dc390fd63626eed25353f9f649d5e40ab4120d3cf516ed594637cc4f"
+  },
+  "current_source_matches": true,
+  "platforms": {
+    "amd64": {
+      "manifest_sha256": "cd6a283df0bb1703fb12c0ba13b5e54069f49408d0c14cec3af17b35e0b7ab0d",
+      "context_sha256": "cd73f32df6db96f8a8c091abab7c0796a3e88e54be09e0c73d7b074abc7b1e48",
+      "payload_sha256": "732133c8ceebe17f95054d2c00229c4fc869e00df94ac83027a3dfd9535fa615",
+      "verified_context_files": 7,
+      "static_elf": true
+    },
+    "arm64": {
+      "manifest_sha256": "49ada75c283e52ba3b229778a91153b78a1775660732452d913c4d90cdece267",
+      "context_sha256": "bcdd948c2236defd91e54a133f668c1ecab55bc0ad7a5e0ee4e476ec93d6a4fa",
+      "payload_sha256": "0b8dc776fc88239f1b1901f9bf444b4fa155b40a0ab8af922900dbe8069811c2",
+      "verified_context_files": 7,
+      "static_elf": true
+    }
+  },
+  "native_bootstrap": "NOT_RUN",
+  "arm64_runtime": "NOT_RUN",
+  "release_ready": false,
+  "scope": "two-file cfg(test) owner-inner elapsed diagnostics; original calls, errors, short circuits, deadlines and live checks preserved",
+  "runtime_cost_effect": "NOT_RUN",
+  "source_review": {
+    "spec": "PASS",
+    "quality": "PASS",
+    "sensitivity": "PASS",
+    "blocking_findings": 0
+  },
+  "candidate_provenance_review": "PASS",
+  "preservation_baseline_review": "PASS",
+  "checks": {
+    "workspace_passed": 418,
+    "workspace_failed": 0,
+    "workspace_ignored": 2,
+    "launch_library_passed": 164,
+    "fmt": "PASS",
+    "strict_workspace_all_targets_clippy": "PASS",
+    "both_architecture_static_builds": "PASS",
+    "amd64_static_filter_and_pending_core_preflight": "PASS",
+    "read_only_debian_projection": "PASS",
+    "all_177_unowned_rust_sources_unchanged": true,
+    "original_supervision_source_reconstructed": "PASS",
+    "unchanged_normal_program_manifests_and_contexts": true,
+    "original_wrapper_rows": 13,
+    "original_nested_rows": 30,
+    "original_retained_rows": 24,
+    "added_owner_rows": 15
+  },
+  "baseline": {
+    "links": 60,
+    "addresses": 51,
+    "routes": 154,
+    "rules": 5,
+    "template_sha256": "d9e0944abe56a938e4bffb3bd41a1ef53e64cb38b5ce246f07dbc371a4a52b6a",
+    "reconciliation_sha256": "a625f99c6ebd9c4a77663bd27d7e319f939a7f94cad7f9a4004d2e248d6fc66f",
+    "host_authority_granted": false
+  },
+  "performance_limit": "Inclusive elapsed owner boundaries overlap prior measurements and cannot establish exclusive wall/CPU, failed inner predicate, native speedup, saved budget or original two-second fit. Observer overhead and scheduling may perturb them. Original398-407 failures retained; full8c remains ACTIVE.",
+  "evidence_hashes": {
+    "target/continuation-20261029T181111Z/root-verification.json": "0338485f424fb459dd0bf064f384d4ce2302178c596733a5f3168ca7bd376925",
+    "target/continuation-20261029T181111Z/candidate.json": "ac6569440c476745bf6e7f5689177594412211eb41ae71682dd755c2eab489c1",
+    "target/continuation-20261029T181111Z/host-projection-debian-clean-x86_64/record.json": "9900b8bfb9ebc3e5a97a5e41c8a64d53fe73235352a09366bff63e6bf68f0f7b",
+    ".superpowers/sdd/rust-v2/task-8c-owner-cost-report.md": "336af09e1e8d3b04f4f493a00528a927d5dcddfe70cb91e5e42b59db8172fa00",
+    ".superpowers/sdd/rust-v2/task-8c-owner-cost-source-review.md": "a44a19207e5313926ceb601a1e1000348394e271c0e0ac4808fffea7f66a0710",
+    ".superpowers/sdd/rust-v2/task-8c-bootstrap407-cadence-audit.md": "b3102e368ec9c1b187716778915efe39f884a24f776fbbd0392547107bdffaa0",
+    "target/task8c-owner-cost-root-20261029/workspace-tests.log": "94e5b2cd4b376daba4fe6ae9e6f64913969cfebcad716cc0aad98a9538ed42e8",
+    "target/task8c-owner-cost-root-20261029/workspace-summary.json": "b23098848f46623080ecfcc75e08e09d68bcd6b78a64166025e9768d96ac7841",
+    "target/task8c-owner-cost-root-20261029/fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/task8c-owner-cost-root-20261029/clippy.log": "9a01ccb2dbfb077c8c4400d173f2346403907b18bca0c1700f08d7b95897806b",
+    "target/task8c-owner-cost-root-20261029/root-coherent-build.log": "ced319cf5eb57de977295f75b85e4eb0994b9cfb7f6eba3cf9f325d3e09a7373",
+    "target/task8c-owner-cost-root-20261029/root-reader-compatibility.json": "1a7ffdb8a70234c735fa3b46b55967b2fa432ce1fd36ab4523708fd0cb0f75c3"
+  }
+}

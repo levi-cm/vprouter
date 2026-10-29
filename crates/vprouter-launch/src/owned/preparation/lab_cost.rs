@@ -103,6 +103,33 @@ impl RetainedKey {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) enum OwnerKey {
+    HostPreflight,
+    RecordValidate,
+    NamespaceIdentities,
+    CurrentIdentityChain,
+    RecordClone,
+}
+const OWNER_KEYS: [OwnerKey; 5] = [
+    OwnerKey::HostPreflight,
+    OwnerKey::RecordValidate,
+    OwnerKey::NamespaceIdentities,
+    OwnerKey::CurrentIdentityChain,
+    OwnerKey::RecordClone,
+];
+impl OwnerKey {
+    fn label(self) -> &'static str {
+        match self {
+            Self::HostPreflight => "owner_host_preflight",
+            Self::RecordValidate => "owner_record_validate",
+            Self::NamespaceIdentities => "owner_namespace_identities",
+            Self::CurrentIdentityChain => "owner_current_identity_chain",
+            Self::RecordClone => "owner_record_clone",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 struct Total {
     calls: u64,
     elapsed_ns: u128,
@@ -113,6 +140,7 @@ const ZERO: Total = Total {
 };
 const ROWS: usize = FAMILIES.len() * KEYS.len();
 const RETAINED_ROWS: usize = FAMILIES.len() * RETAINED_KEYS.len();
+const OWNER_ROWS: usize = FAMILIES.len() * OWNER_KEYS.len();
 
 #[derive(Clone, Copy)]
 struct Token {
@@ -173,6 +201,7 @@ impl State {
         permitted.then_some(Snapshot {
             totals: self.totals,
             retained_totals: [ZERO; RETAINED_ROWS],
+            owner_totals: [ZERO; OWNER_ROWS],
         })
     }
 }
@@ -208,10 +237,41 @@ impl RetainedTotals {
         std::array::from_fn(|index| self.rows[index].get())
     }
 }
+// Keep owner rows separate from both old tables. Entry/drop touches one row;
+// only the stopped parent snapshot copies the full owner table.
+struct OwnerTotals {
+    rows: [Cell<Total>; OWNER_ROWS],
+}
+impl OwnerTotals {
+    const fn new() -> Self {
+        Self {
+            rows: [const { Cell::new(ZERO) }; OWNER_ROWS],
+        }
+    }
+    fn reset(&self) {
+        for row in &self.rows {
+            row.set(ZERO);
+        }
+    }
+    fn record(&self, state: &State, token: Token, key: OwnerKey, elapsed_ns: u128) {
+        if !state.accepts(token) {
+            return;
+        }
+        let row = &self.rows[token.family as usize * OWNER_KEYS.len() + key as usize];
+        let mut total = row.get();
+        total.calls = total.calls.saturating_add(1);
+        total.elapsed_ns = total.elapsed_ns.saturating_add(elapsed_ns);
+        row.set(total);
+    }
+    fn snapshot(&self) -> [Total; OWNER_ROWS] {
+        std::array::from_fn(|index| self.rows[index].get())
+    }
+}
 thread_local! {
     static STATE: Cell<State> = const { Cell::new(State::inactive()) };
     // Fork copies stay private; no child totals are merged or exported.
     static RETAINED: RetainedTotals = const { RetainedTotals::new() };
+    static OWNER: OwnerTotals = const { OwnerTotals::new() };
 }
 
 pub(crate) struct Session {
@@ -225,6 +285,7 @@ pub(crate) fn arm(family: Family) -> Session {
         let mut state = cell.get();
         let token = state.begin(creator, family);
         RETAINED.with(RetainedTotals::reset);
+        OWNER.with(OwnerTotals::reset);
         cell.set(state);
         token
     });
@@ -319,6 +380,35 @@ impl Drop for RetainedTimer {
         }
     }
 }
+pub(crate) struct OwnerTimer {
+    entry: Option<(Token, OwnerKey, Instant)>,
+    _thread: PhantomData<Rc<()>>,
+}
+impl OwnerTimer {
+    pub(crate) fn new(key: OwnerKey) -> Self {
+        // No getpid, allocation or borrow across measured work. Fork copies
+        // remain COW-private and the original stop boundary controls export.
+        let token = STATE.with(|cell| cell.get().token());
+        Self {
+            entry: token.map(|token| (token, key, Instant::now())),
+            _thread: PhantomData,
+        }
+    }
+}
+impl Drop for OwnerTimer {
+    fn drop(&mut self) {
+        if let Some((token, key, started)) = self.entry {
+            STATE.with(|cell| {
+                let state = cell.get();
+                if state.accepts(token) {
+                    OWNER.with(|totals| {
+                        totals.record(&state, token, key, started.elapsed().as_nanos());
+                    });
+                }
+            });
+        }
+    }
+}
 pub(crate) fn count_entry(key: RetainedKey) {
     // Count-only entry paths do not observe time, even when active.
     if !key.count_only() {
@@ -335,6 +425,7 @@ pub(crate) fn count_entry(key: RetainedKey) {
 pub(crate) struct Snapshot {
     totals: [Total; ROWS],
     retained_totals: [Total; RETAINED_ROWS],
+    owner_totals: [Total; OWNER_ROWS],
 }
 pub(crate) fn stop_snapshot() -> Option<Snapshot> {
     let creator = std::process::id();
@@ -345,6 +436,7 @@ pub(crate) fn stop_snapshot() -> Option<Snapshot> {
         // Collection is disabled and creator checked before copying added rows.
         snapshot.map(|mut snapshot| {
             snapshot.retained_totals = RETAINED.with(RetainedTotals::snapshot);
+            snapshot.owner_totals = OWNER.with(OwnerTotals::snapshot);
             snapshot
         })
     })
@@ -380,12 +472,294 @@ impl Snapshot {
                 );
             }
         }
+        // Inclusive owner method rows may include non-Binding callers and early
+        // errors. Fixed byte bounds do not bound output blocking time.
+        for family in FAMILIES {
+            for key in OWNER_KEYS {
+                let total = self.owner_totals[family as usize * OWNER_KEYS.len() + key as usize];
+                let _ = writeln!(
+                    output,
+                    "LAB_SECRET_BOOTSTRAP_OWNER_TOTAL family={} category={} calls={} elapsed_ns={} measurement=inclusive_owner_elapsed grouping=lab_loop_entry_step_family",
+                    family.label(),
+                    key.label(),
+                    total.calls,
+                    total.elapsed_ns,
+                );
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owner_output_appends_only_closed_rows_after_existing_tables() {
+        let _session = arm(Family::Query);
+        let snapshot = stop_snapshot().unwrap();
+        let mut output = Vec::new();
+        snapshot.emit(&mut output);
+        let text = String::from_utf8(output).unwrap();
+        let lines: Vec<_> = text.lines().collect();
+        assert_eq!(lines.len(), 69);
+        assert!(
+            lines[..30]
+                .iter()
+                .all(|line| line.starts_with("LAB_SECRET_BOOTSTRAP_NESTED_TOTAL "))
+        );
+        assert!(
+            lines[30..54]
+                .iter()
+                .all(|line| line.starts_with("LAB_SECRET_BOOTSTRAP_RETAINED_TOTAL "))
+        );
+        let mut rows = lines[54..].iter();
+        for family in ["query", "policy", "other"] {
+            for category in [
+                "owner_host_preflight",
+                "owner_record_validate",
+                "owner_namespace_identities",
+                "owner_current_identity_chain",
+                "owner_record_clone",
+            ] {
+                assert_eq!(
+                    *rows.next().unwrap(),
+                    format!(
+                        "LAB_SECRET_BOOTSTRAP_OWNER_TOTAL family={family} category={category} calls=0 elapsed_ns=0 measurement=inclusive_owner_elapsed grouping=lab_loop_entry_step_family"
+                    )
+                );
+            }
+        }
+        assert!(rows.next().is_none());
+    }
+
+    fn owner_nested_result(outcome: Result<(), ()>) -> Result<(), ()> {
+        let _outer = OwnerTimer::new(OwnerKey::HostPreflight);
+        let _inner = OwnerTimer::new(OwnerKey::RecordValidate);
+        outcome?;
+        Ok(())
+    }
+
+    fn owner_row(family: Family, key: OwnerKey) -> usize {
+        family as usize * OWNER_KEYS.len() + key as usize
+    }
+
+    #[test]
+    fn owner_nested_error_entries_capture_family_and_stop_before_export() {
+        let _ = stop_snapshot();
+        drop(OwnerTimer::new(OwnerKey::RecordClone));
+        assert!(stop_snapshot().is_none());
+        let session = arm(Family::Query);
+        assert_eq!(owner_nested_result(Err(())), Err(()));
+        let query_timer = OwnerTimer::new(OwnerKey::NamespaceIdentities);
+        set_family(Family::Policy);
+        drop(query_timer);
+        drop(OwnerTimer::new(OwnerKey::RecordClone));
+        let stopped = OwnerTimer::new(OwnerKey::CurrentIdentityChain);
+        let snapshot = stop_snapshot().unwrap();
+        drop(stopped);
+        drop(session);
+        assert!(stop_snapshot().is_none());
+        for key in [
+            OwnerKey::HostPreflight,
+            OwnerKey::RecordValidate,
+            OwnerKey::NamespaceIdentities,
+        ] {
+            assert_eq!(
+                snapshot.owner_totals[owner_row(Family::Query, key)].calls,
+                1
+            );
+        }
+        assert_eq!(
+            snapshot.owner_totals[owner_row(Family::Policy, OwnerKey::NamespaceIdentities)].calls,
+            0
+        );
+        assert_eq!(
+            snapshot.owner_totals[owner_row(Family::Policy, OwnerKey::RecordClone)].calls,
+            1
+        );
+        assert_eq!(
+            snapshot.owner_totals[owner_row(Family::Policy, OwnerKey::CurrentIdentityChain)].calls,
+            0
+        );
+    }
+
+    #[test]
+    fn owner_reset_stale_sessions_foreign_stop_and_exhausted_epoch_cannot_leak() {
+        let first = arm(Family::Query);
+        drop(OwnerTimer::new(OwnerKey::RecordValidate));
+        let old_timer = OwnerTimer::new(OwnerKey::HostPreflight);
+        let second = arm(Family::Policy);
+        drop(first);
+        drop(old_timer);
+        drop(OwnerTimer::new(OwnerKey::RecordClone));
+        let snapshot = stop_snapshot().unwrap();
+        assert_eq!(
+            snapshot.owner_totals[owner_row(Family::Query, OwnerKey::RecordValidate)].calls,
+            0
+        );
+        assert_eq!(
+            snapshot.owner_totals[owner_row(Family::Query, OwnerKey::HostPreflight)].calls,
+            0
+        );
+        assert_eq!(
+            snapshot.owner_totals[owner_row(Family::Policy, OwnerKey::RecordClone)].calls,
+            1
+        );
+        drop(second);
+        let session = arm(Family::Other);
+        drop(OwnerTimer::new(OwnerKey::HostPreflight));
+        drop(session);
+        drop(OwnerTimer::new(OwnerKey::HostPreflight));
+        assert!(stop_snapshot().is_none());
+        let foreign = arm(Family::Other);
+        drop(OwnerTimer::new(OwnerKey::RecordValidate));
+        STATE.with(|cell| {
+            let mut state = cell.get();
+            state.creator = state.creator.wrapping_add(1);
+            cell.set(state);
+        });
+        assert!(stop_snapshot().is_none());
+        drop(OwnerTimer::new(OwnerKey::RecordValidate));
+        assert!(!STATE.with(|cell| cell.get().active));
+        drop(foreign);
+        let _fresh = arm(Family::Other);
+        assert!(
+            stop_snapshot()
+                .unwrap()
+                .owner_totals
+                .iter()
+                .all(|total| total.calls == 0 && total.elapsed_ns == 0)
+        );
+        let exhausted = arm(Family::Query);
+        drop(OwnerTimer::new(OwnerKey::RecordClone));
+        STATE.with(|cell| {
+            let mut state = cell.get();
+            state.epoch = u64::MAX;
+            cell.set(state);
+        });
+        let disabled = arm(Family::Query);
+        assert!(disabled.token.is_none());
+        assert!(stop_snapshot().is_none());
+        OWNER.with(|totals| {
+            assert!(
+                totals
+                    .snapshot()
+                    .iter()
+                    .all(|total| total.calls == 0 && total.elapsed_ns == 0)
+            )
+        });
+        drop(exhausted);
+        drop(disabled);
+        // Restore this test thread's exhausted diagnostic state for later tests.
+        STATE.with(|cell| cell.set(State::inactive()));
+    }
+
+    #[test]
+    fn owner_selected_rows_saturate_and_copied_child_accounting_stays_private() {
+        let mut parent = State::inactive();
+        let token = parent.begin(7, Family::Query).unwrap();
+        let totals = OwnerTotals::new();
+        let row = owner_row(Family::Query, OwnerKey::RecordValidate);
+        totals.rows[row].set(Total {
+            calls: u64::MAX,
+            elapsed_ns: u128::MAX - 1,
+        });
+        totals.record(&parent, token, OwnerKey::RecordValidate, 5);
+        assert_eq!(totals.rows[row].get().calls, u64::MAX);
+        assert_eq!(totals.rows[row].get().elapsed_ns, u128::MAX);
+        totals.record(&parent, token, OwnerKey::RecordClone, 11);
+        let child_totals = OwnerTotals::new();
+        for (cell, total) in child_totals.rows.iter().zip(totals.snapshot()) {
+            cell.set(total);
+        }
+        let mut child = parent;
+        child_totals.record(&child, token, OwnerKey::RecordClone, 99);
+        assert!(child.stop_snapshot(8).is_none());
+        child_totals.record(&child, token, OwnerKey::HostPreflight, 13);
+        assert_eq!(
+            child_totals.rows[owner_row(Family::Query, OwnerKey::RecordClone)]
+                .get()
+                .calls,
+            2
+        );
+        assert_eq!(
+            child_totals.rows[owner_row(Family::Query, OwnerKey::RecordClone)]
+                .get()
+                .elapsed_ns,
+            110
+        );
+        assert_eq!(
+            child_totals.rows[owner_row(Family::Query, OwnerKey::HostPreflight)]
+                .get()
+                .calls,
+            0
+        );
+        let snapshot = parent.stop_snapshot(7).unwrap();
+        assert!(!parent.active);
+        assert!(snapshot.owner_totals.iter().all(|total| total.calls == 0));
+        assert_eq!(
+            totals.rows[owner_row(Family::Query, OwnerKey::RecordClone)]
+                .get()
+                .calls,
+            1
+        );
+        assert_eq!(
+            totals.rows[owner_row(Family::Query, OwnerKey::RecordClone)]
+                .get()
+                .elapsed_ns,
+            11
+        );
+        totals.record(&parent, token, OwnerKey::RecordClone, 17);
+        assert_eq!(
+            totals.rows[owner_row(Family::Query, OwnerKey::RecordClone)]
+                .get()
+                .calls,
+            1
+        );
+        totals.reset();
+        assert!(
+            totals
+                .snapshot()
+                .iter()
+                .all(|total| total.calls == 0 && total.elapsed_ns == 0)
+        );
+    }
+
+    #[test]
+    fn owner_maximum_output_is_bounded_and_writer_failure_is_ignored() {
+        let _session = arm(Family::Other);
+        let mut snapshot = stop_snapshot().unwrap();
+        snapshot.owner_totals = [Total {
+            calls: u64::MAX,
+            elapsed_ns: u128::MAX,
+        }; OWNER_ROWS];
+        let mut output = Vec::new();
+        snapshot.emit(&mut output);
+        let text = String::from_utf8(output).unwrap();
+        let owner_lines: Vec<_> = text.lines().skip(54).collect();
+        assert_eq!(owner_lines.len(), 15);
+        assert_eq!(
+            owner_lines.iter().map(|line| line.len() + 1).sum::<usize>(),
+            3434
+        );
+        assert_eq!(
+            owner_lines.iter().map(|line| line.len() + 1).max(),
+            Some(235)
+        );
+        struct Fails;
+        impl std::io::Write for Fails {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let _session = arm(Family::Query);
+        stop_snapshot().unwrap().emit(&mut Fails);
+        assert!(!STATE.with(|cell| cell.get().active));
+    }
 
     fn retained_nested_result(outcome: Result<(), ()>) -> Result<(), ()> {
         let _outer = RetainedTimer::new(RetainedKey::RetainedHistory);

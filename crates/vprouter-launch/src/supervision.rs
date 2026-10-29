@@ -2,6 +2,8 @@
 //! Native service-manager placement for exact, still-gated lifecycle children.
 //! No public path/PID constructor, and no scope kill or cleanup on Drop.
 use super::owned::Identity;
+#[cfg(test)]
+use super::owned::preparation::lab_cost::{OwnerKey, OwnerTimer};
 use super::{Error, Result};
 use rustix::fs::{self, FileType, Mode, OFlags};
 use std::{
@@ -123,25 +125,47 @@ impl OwnerDomain {
         Ok(value)
     }
     pub(super) fn verify(&self, domains: &Domains) -> Result<()> {
-        super::process::host_preflight()?;
-        self.record.validate(domains)?;
-        if host_namespace_identities()? != self.namespaces {
+        {
+            #[cfg(test)]
+            let _owner_timer = OwnerTimer::new(OwnerKey::HostPreflight);
+            super::process::host_preflight()?;
+        }
+        {
+            #[cfg(test)]
+            let _owner_timer = OwnerTimer::new(OwnerKey::RecordValidate);
+            self.record.validate(domains)?;
+        }
+        if {
+            #[cfg(test)]
+            let _owner_timer = OwnerTimer::new(OwnerKey::NamespaceIdentities);
+            host_namespace_identities()?
+        } != self.namespaces
+        {
             return Err(Error::NamespaceMismatch);
         }
-        if super::kernel::current_process_identity()? != (self.record.pid, self.record.start)
-            || boot_id()? != self.record.boot
-            || Identity::of(&self.group)? != self.record.cgroup
-            || Identity::of(group(&self.record.unit)?)? != self.record.cgroup
-            || std::fs::read_to_string("/proc/self/cgroup").map_err(|_| Error::CgroupMismatch)?
-                != format!("0::/system.slice/{}\n", self.record.unit)
-        {
+        #[cfg_attr(test, allow(clippy::blocks_in_conditions))]
+        if {
+            #[cfg(test)]
+            let _owner_timer = OwnerTimer::new(OwnerKey::CurrentIdentityChain);
+            super::kernel::current_process_identity()? != (self.record.pid, self.record.start)
+                || boot_id()? != self.record.boot
+                || Identity::of(&self.group)? != self.record.cgroup
+                || Identity::of(group(&self.record.unit)?)? != self.record.cgroup
+                || std::fs::read_to_string("/proc/self/cgroup")
+                    .map_err(|_| Error::CgroupMismatch)?
+                    != format!("0::/system.slice/{}\n", self.record.unit)
+        } {
             return Err(Error::OwnershipMismatch);
         }
         Ok(())
     }
     pub(super) fn record(&self, domains: &Domains) -> Result<OwnerDomainRecord> {
         self.verify(domains)?;
-        Ok(self.record.clone())
+        Ok({
+            #[cfg(test)]
+            let _owner_timer = OwnerTimer::new(OwnerKey::RecordClone);
+            self.record.clone()
+        })
     }
 }
 fn host_namespace_identities() -> Result<[Identity; 4]> {

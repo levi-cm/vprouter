@@ -1,7 +1,45 @@
 //! Authenticated operational messages. Wire data is never placement authority.
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
-use vprouter_core::health::{Binding, HealthMessage};
+use vprouter_core::health::{Binding, HealthMessage, Snapshot};
+
+/// Observational wire values, never native policy or readiness authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyState {
+    Offline,
+    Bootstrap,
+    Ready,
+}
+impl PolicyState {
+    /// Expected policy after a validated publication, not permission to apply it.
+    /// A failed sample has no recovery evidence and must remain fully offline.
+    pub fn publication(snapshot: &Snapshot) -> Self {
+        use vprouter_core::state::HealthState;
+        match snapshot.state {
+            HealthState::Ready => Self::Ready,
+            HealthState::Stopping | HealthState::Failed => Self::Offline,
+            HealthState::Blocked if snapshot.evidence.is_none() || snapshot.reason.is_some() => {
+                Self::Offline
+            }
+            _ => Self::Bootstrap,
+        }
+    }
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyReceipt {
+    pub binding: Binding,
+    pub state: PolicyState,
+}
+impl PolicyReceipt {
+    pub(crate) fn validate(&self, binding: &Binding, state: PolicyState) -> Result<()> {
+        if &self.binding != binding || self.state != state {
+            return Err(Error::GuardUnavailable);
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -213,6 +251,7 @@ pub enum Reply {
     },
     Prepared {
         frame: Frame,
+        policy: PolicyReceipt,
     },
     Persisted {
         frame: Frame,
@@ -220,6 +259,7 @@ pub enum Reply {
     Enforced {
         frame: Frame,
         state: vprouter_core::state::HealthState,
+        policy: PolicyReceipt,
     },
 }
 impl Reply {
@@ -227,7 +267,7 @@ impl Reply {
         match self {
             Self::Structure { frame, .. }
             | Self::Alive { frame }
-            | Self::Prepared { frame }
+            | Self::Prepared { frame, .. }
             | Self::Persisted { frame }
             | Self::Enforced { frame, .. } => frame,
         }

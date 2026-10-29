@@ -78,6 +78,11 @@ fn observe_original(
         return Err(Error::Deadline);
     }
     if let Some(snapshot) = &message.snapshot {
+        if matches!(machine.state(), HealthState::Stopping | HealthState::Failed)
+            && snapshot.state != machine.state()
+        {
+            return Err(Error::DescriptorPolicy);
+        }
         if let Some(evidence) = &snapshot.evidence {
             let observed = machine
                 .observe(now, evidence.clone())
@@ -87,6 +92,13 @@ fn observe_original(
             }
         } else if snapshot.state == HealthState::Blocked {
             machine.block(snapshot.reason.ok_or(Error::DescriptorPolicy)?);
+        } else if snapshot.state == HealthState::Stopping {
+            if snapshot.reason != Some(vprouter_core::reason::Reason::Stopping) {
+                return Err(Error::DescriptorPolicy);
+            }
+            machine.stop();
+        } else if snapshot.state == HealthState::Failed {
+            machine.fail(snapshot.reason.ok_or(Error::DescriptorPolicy)?);
         } else if snapshot.state != HealthState::Starting
             || machine.state() != HealthState::Starting
         {
@@ -1349,6 +1361,63 @@ mod tests {
         let mut next = msg;
         next.sequence = 2;
         assert!(clock.accept(&next, 101.).is_err());
+    }
+    #[test]
+    fn terminal_publication_is_evidence_free_reason_bound_and_cannot_revive_authority() {
+        use vprouter_core::{
+            health::Snapshot,
+            reason::Reason,
+            state::{HealthMachine, HealthState},
+        };
+        for failed in [false, true] {
+            let binding = binding();
+            let make = || {
+                HealthMachine::new(
+                    binding.mode,
+                    binding.expected_server.as_deref(),
+                    &binding.node_id,
+                )
+                .unwrap()
+            };
+            let mut worker = make();
+            if failed {
+                worker.fail(Reason::ProviderFailure);
+            } else {
+                worker.stop();
+            }
+            let snapshot = Snapshot::from_machine(binding.clone(), 1, 101., &worker).unwrap();
+            let message = HealthMessage {
+                version: 1,
+                lifecycle: "a".repeat(64),
+                sequence: 1,
+                sent_at: 101.,
+                snapshot: Some(snapshot),
+            };
+            let mut guard = make();
+            assert_eq!(
+                observe_original(&mut guard, &message, 101.).unwrap(),
+                worker.state()
+            );
+            for state in [
+                HealthState::Starting,
+                HealthState::Blocked,
+                HealthState::Recovering,
+                HealthState::Ready,
+            ] {
+                let mut changed = message.clone();
+                changed.snapshot.as_mut().unwrap().state = state;
+                assert!(observe_original(&mut guard, &changed, 101.).is_err());
+                assert_eq!(guard.state(), worker.state());
+            }
+            let mut missing = message.clone();
+            missing.snapshot.as_mut().unwrap().reason = None;
+            assert!(observe_original(&mut make(), &missing, 101.).is_err());
+            if !failed {
+                let mut wrong = message;
+                wrong.snapshot.as_mut().unwrap().reason = Some(Reason::ProviderFailure);
+                assert!(observe_original(&mut make(), &wrong, 101.).is_err());
+            }
+        }
     }
     #[test]
     fn malformed_channel_data_and_closed_endpoint_are_terminal_errors() {

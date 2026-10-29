@@ -412,3 +412,40 @@ Task8b2: complete bounded actual-program component (base836210a..reviewed90a7dcc
 2026-10-29 current-source milestone: after remote-confirmed review checkpoint21955a3, first coherent buildFAILARM64E0425 SYS_fstatat (original log retained). Focused fix_arm64_filter changed only nonexistent ARM constant to pinned SYS_newfstatat (ARM79/x86262), preserved exact FD/name/flags restrictions;12native tests+ARMtestscheck+fmtPASS, Root independently confirmed constants/source and strictclippy. Coherent fix1freeze b51b5d7 (target/continuation-20261029T122356Z)202current/archive/commit inputs equal, bothstaticELF/payloads/strictcontextsPASS. Actual397 ownedlocalDebPASS17, independent6captures112records0forbidden0drops/markersabsent/allresourcesretained.84performance-tool unittestsPASS; benchmarksNOT_RUN. Current regression review separate from task8b2 original90approval. NewBootstrap native/runtime/client/platform/migration/performance/24h release gatesOPEN. Publish exact testsource tag plus source/manifests/reports checkpoint after review.
 
 Current b51b5d7 scoped regression independently PASS/0open findings; task-8b2-current-regression-review-2026-10-29.md verifies33inputdelta/ARMABI fix and exact397 capture evidence. Final current workspace393/0/2ignored and strictalltargetworkspaceclippyPASS after regenerated manifests. Task8b2 source/runtime checkpoint verified; newBootstrap native/ARMcurrentruntime remainNOT_RUN, all broader task8c/client/migration/performance/release gates unchanged. Source/test tag rust-v2-test-20261029T122356Z and final milestone commit are to be remote-confirmed on fork/rust/v2.
+
+
+Task8c ACTIVE 2026-10-29, baseb678e7bf98e0c311109ce82a3893b40127ef0825,
+implementer /root/autonomous_guard. Existing task8a/task8b2 independent approvals
+and exactb51 actual397 proof remain bounded prerequisites; production unavailable.
+Ruling: implement8c in coherent slices:8c.1 private authenticated policy receipts
+and quarantine-first failure semantics;8c.2 consuming native Bootstrap custody,
+independently scheduled guard/runtime/recovery and integrated fault/client gates.
+A received HealthState is not proof of actual policy. Prepare must read back
+Offline before worker withdrawal; failure Blocked(reason/noevidence),Stopping,
+Failed commits stay Offline. Worker returns original sample error after bounded
+failure publication rather than continuing provider queries behind full quarantine.
+Healthy verification recovery may use producer-only Bootstrap; failure recovery
+must have a separate independent withdrawal/rebootstrap observation. Costifwrong:
+additional explicit recovery transition/restart work, never premature forwarding.
+No component slice can complete full8c or authorize task9/multi/direct/migration.
+Root alone handles all privileged localVM/profile/identity work; no remote tests,
+production mutation/enrollment/state clones or boundedretry weakening. User's
+milestone checkpoint/push instruction persists for all safe source/docs/tools.
+
+Task8c.1 stable six-file source independently hash-matched to slice report; Root
+local offline worker+launch library tests209/0, fmt/diffcheck and focused strict
+ClippyPASS. Fresh review_task8c_slice1 independently checks spec+quality against
+b678e7b. No runtime promotion; old manifests not regenerated for this delta yet.
+Root archived exact two independently audited Bootstrap controllers, preserving
+all285 originals: source-manifest now287 entries, every archived hash verified.
+
+Task8c prerequisite native attempt398 on OLD frozenb51 source FAILexit1/14.175s,
+zero completed cases, secret_bootstrap_lab ownership_mismatch stillUNLOCALIZED.
+Initial attachment phases and inventory checks succeed; no Bootstrap witness.
+Outer controller verified prior foreign host network and original inert gateway
+preserved, one exact DOWN endpoint retained; owner unit/cgroup absent afterward.
+All six fixed selectors retained; no resource cleanup or identical-payload retry.
+Raw target/lab-state/actual-program-run-398.json and candidate-local controller
+snapshots preserved; public redacted docs/rust-v2/task8c-bootstrap-attempt398.json.
+Original implementer performing read-only localization while slice1 is frozen.
+Full8c remainsACTIVE and nativeBootstrap/runtime/client/release gates remainOPEN.

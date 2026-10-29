@@ -61,6 +61,48 @@ impl Key {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) enum RetainedKey {
+    RetainedTransport,
+    RetainedData,
+    RetainedOwnerRecord,
+    RetainedHistory,
+    HistoryAllocationDigest,
+    CreatedGroupNative,
+    SourceIdentityEntries,
+    NativeSourceEntries,
+}
+const RETAINED_KEYS: [RetainedKey; 8] = [
+    RetainedKey::RetainedTransport,
+    RetainedKey::RetainedData,
+    RetainedKey::RetainedOwnerRecord,
+    RetainedKey::RetainedHistory,
+    RetainedKey::HistoryAllocationDigest,
+    RetainedKey::CreatedGroupNative,
+    RetainedKey::SourceIdentityEntries,
+    RetainedKey::NativeSourceEntries,
+];
+impl RetainedKey {
+    fn label(self) -> &'static str {
+        match self {
+            Self::RetainedTransport => "retained_transport",
+            Self::RetainedData => "retained_data",
+            Self::RetainedOwnerRecord => "retained_owner_record",
+            Self::RetainedHistory => "retained_history",
+            Self::HistoryAllocationDigest => "history_allocation_digest",
+            Self::CreatedGroupNative => "created_group_native",
+            Self::SourceIdentityEntries => "source_identity_entries",
+            Self::NativeSourceEntries => "native_source_entries",
+        }
+    }
+    fn count_only(self) -> bool {
+        matches!(
+            self,
+            Self::SourceIdentityEntries | Self::NativeSourceEntries
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
 struct Total {
     calls: u64,
     elapsed_ns: u128,
@@ -70,6 +112,7 @@ const ZERO: Total = Total {
     elapsed_ns: 0,
 };
 const ROWS: usize = FAMILIES.len() * KEYS.len();
+const RETAINED_ROWS: usize = FAMILIES.len() * RETAINED_KEYS.len();
 
 #[derive(Clone, Copy)]
 struct Token {
@@ -129,11 +172,46 @@ impl State {
         self.active = false;
         permitted.then_some(Snapshot {
             totals: self.totals,
+            retained_totals: [ZERO; RETAINED_ROWS],
         })
+    }
+}
+// Separate selected-row cells leave State and every existing timer's table
+// copy unchanged. No borrow or lock spans instrumented work.
+struct RetainedTotals {
+    rows: [Cell<Total>; RETAINED_ROWS],
+}
+impl RetainedTotals {
+    const fn new() -> Self {
+        Self {
+            rows: [const { Cell::new(ZERO) }; RETAINED_ROWS],
+        }
+    }
+    fn reset(&self) {
+        for row in &self.rows {
+            row.set(ZERO);
+        }
+    }
+    fn record(&self, state: &State, token: Token, key: RetainedKey, elapsed_ns: u128) {
+        if !state.accepts(token) {
+            return;
+        }
+        let row = &self.rows[token.family as usize * RETAINED_KEYS.len() + key as usize];
+        let mut total = row.get();
+        total.calls = total.calls.saturating_add(1);
+        if !key.count_only() {
+            total.elapsed_ns = total.elapsed_ns.saturating_add(elapsed_ns);
+        }
+        row.set(total);
+    }
+    fn snapshot(&self) -> [Total; RETAINED_ROWS] {
+        std::array::from_fn(|index| self.rows[index].get())
     }
 }
 thread_local! {
     static STATE: Cell<State> = const { Cell::new(State::inactive()) };
+    // Fork copies stay private; no child totals are merged or exported.
+    static RETAINED: RetainedTotals = const { RetainedTotals::new() };
 }
 
 pub(crate) struct Session {
@@ -146,6 +224,7 @@ pub(crate) fn arm(family: Family) -> Session {
     let token = STATE.with(|cell| {
         let mut state = cell.get();
         let token = state.begin(creator, family);
+        RETAINED.with(RetainedTotals::reset);
         cell.set(state);
         token
     });
@@ -207,8 +286,55 @@ impl Drop for Timer {
     }
 }
 
+pub(crate) struct RetainedTimer {
+    entry: Option<(Token, RetainedKey, Instant)>,
+    _thread: PhantomData<Rc<()>>,
+}
+impl RetainedTimer {
+    pub(crate) fn new(key: RetainedKey) -> Self {
+        // No getpid here or in count_entry/drop: restricted child filters remain
+        // unchanged, and all writes use their COW-private metadata and rows.
+        let token = if key.count_only() {
+            None
+        } else {
+            STATE.with(|cell| cell.get().token())
+        };
+        Self {
+            entry: token.map(|token| (token, key, Instant::now())),
+            _thread: PhantomData,
+        }
+    }
+}
+impl Drop for RetainedTimer {
+    fn drop(&mut self) {
+        if let Some((token, key, started)) = self.entry {
+            STATE.with(|cell| {
+                let state = cell.get();
+                if state.accepts(token) {
+                    RETAINED.with(|totals| {
+                        totals.record(&state, token, key, started.elapsed().as_nanos());
+                    });
+                }
+            });
+        }
+    }
+}
+pub(crate) fn count_entry(key: RetainedKey) {
+    // Count-only entry paths do not observe time, even when active.
+    if !key.count_only() {
+        return;
+    }
+    STATE.with(|cell| {
+        let state = cell.get();
+        if let Some(token) = state.token() {
+            RETAINED.with(|totals| totals.record(&state, token, key, 0));
+        }
+    });
+}
+
 pub(crate) struct Snapshot {
     totals: [Total; ROWS],
+    retained_totals: [Total; RETAINED_ROWS],
 }
 pub(crate) fn stop_snapshot() -> Option<Snapshot> {
     let creator = std::process::id();
@@ -216,7 +342,11 @@ pub(crate) fn stop_snapshot() -> Option<Snapshot> {
         let mut state = cell.get();
         let snapshot = state.stop_snapshot(creator);
         cell.set(state);
-        snapshot
+        // Collection is disabled and creator checked before copying added rows.
+        snapshot.map(|mut snapshot| {
+            snapshot.retained_totals = RETAINED.with(RetainedTotals::snapshot);
+            snapshot
+        })
     })
 }
 impl Snapshot {
@@ -236,12 +366,197 @@ impl Snapshot {
                 );
             }
         }
+        for family in FAMILIES {
+            for key in RETAINED_KEYS {
+                let total =
+                    self.retained_totals[family as usize * RETAINED_KEYS.len() + key as usize];
+                let _ = writeln!(
+                    output,
+                    "LAB_SECRET_BOOTSTRAP_RETAINED_TOTAL family={} category={} calls={} elapsed_ns={} measurement=inclusive_retained_elapsed grouping=lab_loop_entry_step_family",
+                    family.label(),
+                    key.label(),
+                    total.calls,
+                    total.elapsed_ns,
+                );
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn retained_nested_result(outcome: Result<(), ()>) -> Result<(), ()> {
+        let _outer = RetainedTimer::new(RetainedKey::RetainedHistory);
+        let _inner = RetainedTimer::new(RetainedKey::HistoryAllocationDigest);
+        count_entry(RetainedKey::NativeSourceEntries);
+        outcome?;
+        Ok(())
+    }
+
+    fn retained_row(family: Family, key: RetainedKey) -> usize {
+        family as usize * RETAINED_KEYS.len() + key as usize
+    }
+
+    #[test]
+    fn retained_regions_count_errors_and_capture_family_without_escaping_session() {
+        let _ = stop_snapshot();
+        drop(RetainedTimer::new(RetainedKey::RetainedHistory));
+        count_entry(RetainedKey::NativeSourceEntries);
+        assert!(stop_snapshot().is_none());
+        let _session = arm(Family::Query);
+        assert_eq!(retained_nested_result(Err(())), Err(()));
+        count_entry(RetainedKey::SourceIdentityEntries);
+        let query_timer = RetainedTimer::new(RetainedKey::RetainedOwnerRecord);
+        set_family(Family::Policy);
+        count_entry(RetainedKey::SourceIdentityEntries);
+        drop(query_timer);
+        let stopped = RetainedTimer::new(RetainedKey::RetainedData);
+        let snapshot = stop_snapshot().unwrap();
+        drop(stopped);
+        assert!(stop_snapshot().is_none());
+        for key in [
+            RetainedKey::RetainedHistory,
+            RetainedKey::HistoryAllocationDigest,
+            RetainedKey::RetainedOwnerRecord,
+            RetainedKey::NativeSourceEntries,
+            RetainedKey::SourceIdentityEntries,
+        ] {
+            assert_eq!(
+                snapshot.retained_totals[retained_row(Family::Query, key)].calls,
+                1
+            );
+        }
+        for family in FAMILIES {
+            for key in [
+                RetainedKey::SourceIdentityEntries,
+                RetainedKey::NativeSourceEntries,
+            ] {
+                assert_eq!(
+                    snapshot.retained_totals[retained_row(family, key)].elapsed_ns,
+                    0
+                );
+            }
+        }
+        assert_eq!(
+            snapshot.retained_totals
+                [retained_row(Family::Policy, RetainedKey::SourceIdentityEntries)]
+            .calls,
+            1
+        );
+        assert_eq!(
+            snapshot.retained_totals[retained_row(Family::Policy, RetainedKey::RetainedData)].calls,
+            0
+        );
+    }
+
+    #[test]
+    fn retained_selected_rows_saturate_and_copied_child_totals_remain_private() {
+        let mut parent = State::inactive();
+        let token = parent.begin(7, Family::Query).unwrap();
+        let totals = RetainedTotals::new();
+        let row = retained_row(Family::Query, RetainedKey::RetainedHistory);
+        totals.rows[row].set(Total {
+            calls: u64::MAX,
+            elapsed_ns: u128::MAX - 1,
+        });
+        totals.record(&parent, token, RetainedKey::RetainedHistory, 5);
+        assert_eq!(totals.rows[row].get().calls, u64::MAX);
+        assert_eq!(totals.rows[row].get().elapsed_ns, u128::MAX);
+        totals.record(&parent, token, RetainedKey::NativeSourceEntries, 99);
+        assert_eq!(
+            totals.rows[retained_row(Family::Query, RetainedKey::NativeSourceEntries)]
+                .get()
+                .elapsed_ns,
+            0
+        );
+        let child_totals = RetainedTotals::new();
+        for (cell, total) in child_totals.rows.iter().zip(totals.snapshot()) {
+            cell.set(total);
+        }
+        let mut child = parent;
+        child_totals.record(&child, token, RetainedKey::NativeSourceEntries, 0);
+        assert!(child.stop_snapshot(8).is_none());
+        assert_eq!(
+            child_totals.rows[retained_row(Family::Query, RetainedKey::NativeSourceEntries)]
+                .get()
+                .calls,
+            2
+        );
+        assert_eq!(
+            totals.rows[retained_row(Family::Query, RetainedKey::NativeSourceEntries)]
+                .get()
+                .calls,
+            1
+        );
+        let before = child_totals.snapshot();
+        child_totals.record(&child, token, RetainedKey::RetainedData, 10);
+        assert_eq!(
+            child_totals.rows[retained_row(Family::Query, RetainedKey::RetainedData)]
+                .get()
+                .calls,
+            0
+        );
+        assert_eq!(
+            before[retained_row(Family::Query, RetainedKey::NativeSourceEntries)].calls,
+            2
+        );
+        totals.reset();
+        assert!(
+            totals
+                .snapshot()
+                .iter()
+                .all(|total| total.calls == 0 && total.elapsed_ns == 0)
+        );
+    }
+
+    #[test]
+    fn retained_reset_stale_epochs_and_foreign_stop_cannot_publish_new_rows() {
+        let first = arm(Family::Query);
+        count_entry(RetainedKey::SourceIdentityEntries);
+        let old_timer = RetainedTimer::new(RetainedKey::RetainedTransport);
+        let second = arm(Family::Policy);
+        drop(first);
+        drop(old_timer);
+        assert_eq!(retained_nested_result(Ok(())), Ok(()));
+        let snapshot = stop_snapshot().unwrap();
+        assert_eq!(
+            snapshot.retained_totals
+                [retained_row(Family::Query, RetainedKey::SourceIdentityEntries)]
+            .calls,
+            0
+        );
+        assert_eq!(
+            snapshot.retained_totals[retained_row(Family::Query, RetainedKey::RetainedTransport)]
+                .calls,
+            0
+        );
+        assert_eq!(
+            snapshot.retained_totals[retained_row(Family::Policy, RetainedKey::RetainedHistory)]
+                .calls,
+            1
+        );
+        drop(second);
+        let _session = arm(Family::Other);
+        count_entry(RetainedKey::NativeSourceEntries);
+        STATE.with(|cell| {
+            let mut state = cell.get();
+            state.creator = state.creator.wrapping_add(1);
+            cell.set(state);
+        });
+        assert!(stop_snapshot().is_none());
+        count_entry(RetainedKey::NativeSourceEntries);
+        assert!(!STATE.with(|cell| cell.get().active));
+        let _new = arm(Family::Other);
+        let snapshot = stop_snapshot().unwrap();
+        assert!(
+            snapshot
+                .retained_totals
+                .iter()
+                .all(|total| total.calls == 0 && total.elapsed_ns == 0)
+        );
+    }
 
     fn nested_result(outcome: Result<(), ()>) -> Result<(), ()> {
         let _outer = Timer::new(Key::OwnedProgress);

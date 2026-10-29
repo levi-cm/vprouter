@@ -105,6 +105,10 @@ impl Native {
         Ok(())
     }
     fn source(&self) -> Result<&Received> {
+        #[cfg(test)]
+        super::super::owned::preparation::lab_cost::count_entry(
+            super::super::owned::preparation::lab_cost::RetainedKey::NativeSourceEntries,
+        );
         self.creator()?;
         if !self.packet || self.received.len() != 1 {
             return Err(Error::DescriptorPolicy);
@@ -366,6 +370,10 @@ impl Source {
         n.birth.clone().ok_or(Error::OwnershipMismatch)
     }
     pub(crate) fn identity(&self) -> Result<Identity> {
+        #[cfg(test)]
+        super::super::owned::preparation::lab_cost::count_entry(
+            super::super::owned::preparation::lab_cost::RetainedKey::SourceIdentityEntries,
+        );
         self.verify_retained()?;
         Identity::of(&self.native.as_ref().ok_or(Error::Interrupted)?.source()?.fd)
     }

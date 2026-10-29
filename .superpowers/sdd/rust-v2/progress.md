@@ -502,3 +502,11 @@ archiver then freshchecksPASS+6selectorsarchived into originalprotectedinputdir;
 allother resources retained/no signals/unmounts. Native399remainsFAIL; no retry.
 Provenlabmaskingbug planned next: preserve originalpre-policyquery error instead
 of replacing it withInterrupted; no guessed enforcementfix.
+
+Diagnostic milestone ce41a0a remote-confirmed fork/rust/v2 plus exactsource73a35260
+remote tag rust-v2-test-20261029T125748Z. Late independent canonical/preservation
+report addendum retained for nextcheckpoint. Production read-only active.
+Original sole implementer authorized ONEFILE operational/bootstrap.rs laberror
+preservation and fixed QueryIntent/spawn/birthqueue phases, no enforcementfix.
+Root generic baseline successor preserves original398helper bytes/provenance and
+adds nextfailed-run directorybinding/outerexactendpoint checks; narrowreviewpending.

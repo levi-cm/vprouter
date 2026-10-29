@@ -1,0 +1,573 @@
+{
+  "schema_version": 1,
+  "scope": "local native two-file cfg(test) owner-inner diagnostic; retained failed attempt with inclusive metrics",
+  "run": 408,
+  "result": "FAIL",
+  "exit_code": 1,
+  "wall_seconds": 12.618,
+  "completed_cases": 0,
+  "record_sha256": "d102dbdb315bd00ab43de263f286136a13b378406c72ce178b497fa4ea1f61db",
+  "source_binding": {
+    "source_commit": "4d9658fce6d206161023ec3487409680a30f4c23",
+    "source_archive_sha256": "86619f5d49cbfac7bae6a73d1c1d118734f62d4a2617d05d90e32c336a49d901",
+    "tracked_build_inputs_verified": 203,
+    "source_aggregate_sha256": "f33ab8a6dc390fd63626eed25353f9f649d5e40ab4120d3cf516ed594637cc4f"
+  },
+  "artifact_sha256": "732133c8ceebe17f95054d2c00229c4fc869e00df94ac83027a3dfd9535fa615",
+  "runner_sha256": "565ecefd0472be62e53c927bb6875519440fb95b4516749386501c11cc52eb8c",
+  "guest_sha256": "12a4d66ec4284a6d5de06bb3ac9fa6387514b94a4d7f3b78d9d8f525b86548a1",
+  "failure": "Deadline",
+  "failure_step": "result",
+  "failure_helper": "native_poll",
+  "boundary": {
+    "helper": "native_poll",
+    "step": "result",
+    "reason": "Deadline",
+    "query_present": true,
+    "query_child_present": true,
+    "query_accepted_present": true,
+    "policy_present": true,
+    "query_queued": true,
+    "query_held": 2,
+    "query_negatives": 6,
+    "query_released": true,
+    "own_queued": true,
+    "own_held": 2,
+    "own_negatives": 12,
+    "own_released": true,
+    "original_requested_at": 206716.420116665,
+    "original_deadline": 206718.420116665,
+    "observed_boot_now": 206718.444920353
+  },
+  "wrappers": [
+    {
+      "helper": "query_source",
+      "calls": 1,
+      "elapsed_ns": 15757442
+    },
+    {
+      "helper": "query_hold",
+      "calls": 1,
+      "elapsed_ns": 40039224
+    },
+    {
+      "helper": "query_checkpoint",
+      "calls": 4,
+      "elapsed_ns": 151748455
+    },
+    {
+      "helper": "query_identity",
+      "calls": 3,
+      "elapsed_ns": 76080084
+    },
+    {
+      "helper": "query_held_negatives",
+      "calls": 3,
+      "elapsed_ns": 47332924
+    },
+    {
+      "helper": "query_release",
+      "calls": 1,
+      "elapsed_ns": 36601183
+    },
+    {
+      "helper": "policy_hold",
+      "calls": 1,
+      "elapsed_ns": 40082644
+    },
+    {
+      "helper": "policy_queued_negatives",
+      "calls": 1,
+      "elapsed_ns": 31417963
+    },
+    {
+      "helper": "policy_checkpoint",
+      "calls": 4,
+      "elapsed_ns": 162353496
+    },
+    {
+      "helper": "policy_held_negatives",
+      "calls": 1,
+      "elapsed_ns": 48657235
+    },
+    {
+      "helper": "policy_identity",
+      "calls": 3,
+      "elapsed_ns": 82745278
+    },
+    {
+      "helper": "policy_release",
+      "calls": 1,
+      "elapsed_ns": 40984515
+    },
+    {
+      "helper": "native_poll",
+      "calls": 19,
+      "elapsed_ns": 1196050831
+    }
+  ],
+  "nested": [
+    {
+      "family": "query",
+      "category": "allocation_anchor_memory",
+      "calls": 2153,
+      "elapsed_ns": 28093218
+    },
+    {
+      "family": "query",
+      "category": "binding_service_custody",
+      "calls": 283,
+      "elapsed_ns": 56811515
+    },
+    {
+      "family": "query",
+      "category": "binding_retained",
+      "calls": 4292,
+      "elapsed_ns": 329610087
+    },
+    {
+      "family": "query",
+      "category": "owned_progress",
+      "calls": 25,
+      "elapsed_ns": 10326095
+    },
+    {
+      "family": "query",
+      "category": "typed_bootstrap_progress",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "query",
+      "category": "original_proof",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "query",
+      "category": "record_json_encode",
+      "calls": 116,
+      "elapsed_ns": 11035640
+    },
+    {
+      "family": "query",
+      "category": "expected_record_json_encode",
+      "calls": 25,
+      "elapsed_ns": 2703786
+    },
+    {
+      "family": "query",
+      "category": "record_sha256",
+      "calls": 66,
+      "elapsed_ns": 650475
+    },
+    {
+      "family": "query",
+      "category": "journal_advance",
+      "calls": 8,
+      "elapsed_ns": 6470402
+    },
+    {
+      "family": "policy",
+      "category": "allocation_anchor_memory",
+      "calls": 2087,
+      "elapsed_ns": 27661181
+    },
+    {
+      "family": "policy",
+      "category": "binding_service_custody",
+      "calls": 262,
+      "elapsed_ns": 51347097
+    },
+    {
+      "family": "policy",
+      "category": "binding_retained",
+      "calls": 4465,
+      "elapsed_ns": 336335320
+    },
+    {
+      "family": "policy",
+      "category": "owned_progress",
+      "calls": 136,
+      "elapsed_ns": 51993898
+    },
+    {
+      "family": "policy",
+      "category": "typed_bootstrap_progress",
+      "calls": 32,
+      "elapsed_ns": 125078180
+    },
+    {
+      "family": "policy",
+      "category": "original_proof",
+      "calls": 99,
+      "elapsed_ns": 38269673
+    },
+    {
+      "family": "policy",
+      "category": "record_json_encode",
+      "calls": 494,
+      "elapsed_ns": 45499306
+    },
+    {
+      "family": "policy",
+      "category": "expected_record_json_encode",
+      "calls": 136,
+      "elapsed_ns": 13483448
+    },
+    {
+      "family": "policy",
+      "category": "record_sha256",
+      "calls": 226,
+      "elapsed_ns": 2267233
+    },
+    {
+      "family": "policy",
+      "category": "journal_advance",
+      "calls": 6,
+      "elapsed_ns": 4301648
+    },
+    {
+      "family": "other",
+      "category": "allocation_anchor_memory",
+      "calls": 226,
+      "elapsed_ns": 2850677
+    },
+    {
+      "family": "other",
+      "category": "binding_service_custody",
+      "calls": 30,
+      "elapsed_ns": 5592389
+    },
+    {
+      "family": "other",
+      "category": "binding_retained",
+      "calls": 442,
+      "elapsed_ns": 31487150
+    },
+    {
+      "family": "other",
+      "category": "owned_progress",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "typed_bootstrap_progress",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "original_proof",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "record_json_encode",
+      "calls": 1,
+      "elapsed_ns": 106190
+    },
+    {
+      "family": "other",
+      "category": "expected_record_json_encode",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "record_sha256",
+      "calls": 1,
+      "elapsed_ns": 9600
+    },
+    {
+      "family": "other",
+      "category": "journal_advance",
+      "calls": 0,
+      "elapsed_ns": 0
+    }
+  ],
+  "retained": [
+    {
+      "family": "query",
+      "category": "retained_transport",
+      "calls": 4292,
+      "elapsed_ns": 45334959
+    },
+    {
+      "family": "query",
+      "category": "retained_data",
+      "calls": 4292,
+      "elapsed_ns": 24757284
+    },
+    {
+      "family": "query",
+      "category": "retained_owner_record",
+      "calls": 4292,
+      "elapsed_ns": 218649273
+    },
+    {
+      "family": "query",
+      "category": "retained_history",
+      "calls": 4292,
+      "elapsed_ns": 28116435
+    },
+    {
+      "family": "query",
+      "category": "history_allocation_digest",
+      "calls": 6522,
+      "elapsed_ns": 12470271
+    },
+    {
+      "family": "query",
+      "category": "created_group_native",
+      "calls": 1755,
+      "elapsed_ns": 16155223
+    },
+    {
+      "family": "query",
+      "category": "source_identity_entries",
+      "calls": 579,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "query",
+      "category": "native_source_entries",
+      "calls": 1755,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "policy",
+      "category": "retained_transport",
+      "calls": 4465,
+      "elapsed_ns": 45786929
+    },
+    {
+      "family": "policy",
+      "category": "retained_data",
+      "calls": 4465,
+      "elapsed_ns": 26075091
+    },
+    {
+      "family": "policy",
+      "category": "retained_owner_record",
+      "calls": 4465,
+      "elapsed_ns": 222484016
+    },
+    {
+      "family": "policy",
+      "category": "retained_history",
+      "calls": 4465,
+      "elapsed_ns": 29646026
+    },
+    {
+      "family": "policy",
+      "category": "history_allocation_digest",
+      "calls": 6621,
+      "elapsed_ns": 12770970
+    },
+    {
+      "family": "policy",
+      "category": "created_group_native",
+      "calls": 2114,
+      "elapsed_ns": 20338356
+    },
+    {
+      "family": "policy",
+      "category": "source_identity_entries",
+      "calls": 701,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "policy",
+      "category": "native_source_entries",
+      "calls": 2114,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "retained_transport",
+      "calls": 442,
+      "elapsed_ns": 4227945
+    },
+    {
+      "family": "other",
+      "category": "retained_data",
+      "calls": 442,
+      "elapsed_ns": 2460944
+    },
+    {
+      "family": "other",
+      "category": "retained_owner_record",
+      "calls": 442,
+      "elapsed_ns": 20765826
+    },
+    {
+      "family": "other",
+      "category": "retained_history",
+      "calls": 442,
+      "elapsed_ns": 2820018
+    },
+    {
+      "family": "other",
+      "category": "history_allocation_digest",
+      "calls": 675,
+      "elapsed_ns": 1238805
+    },
+    {
+      "family": "other",
+      "category": "created_group_native",
+      "calls": 205,
+      "elapsed_ns": 1814005
+    },
+    {
+      "family": "other",
+      "category": "source_identity_entries",
+      "calls": 67,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "native_source_entries",
+      "calls": 205,
+      "elapsed_ns": 0
+    }
+  ],
+  "owner": [
+    {
+      "family": "query",
+      "category": "owner_host_preflight",
+      "calls": 4577,
+      "elapsed_ns": 104160254
+    },
+    {
+      "family": "query",
+      "category": "owner_record_validate",
+      "calls": 4577,
+      "elapsed_ns": 3033698
+    },
+    {
+      "family": "query",
+      "category": "owner_namespace_identities",
+      "calls": 4577,
+      "elapsed_ns": 59777043
+    },
+    {
+      "family": "query",
+      "category": "owner_current_identity_chain",
+      "calls": 4577,
+      "elapsed_ns": 62628717
+    },
+    {
+      "family": "query",
+      "category": "owner_record_clone",
+      "calls": 4577,
+      "elapsed_ns": 774841
+    },
+    {
+      "family": "policy",
+      "category": "owner_host_preflight",
+      "calls": 4731,
+      "elapsed_ns": 105537400
+    },
+    {
+      "family": "policy",
+      "category": "owner_record_validate",
+      "calls": 4731,
+      "elapsed_ns": 3320276
+    },
+    {
+      "family": "policy",
+      "category": "owner_namespace_identities",
+      "calls": 4731,
+      "elapsed_ns": 59659576
+    },
+    {
+      "family": "policy",
+      "category": "owner_current_identity_chain",
+      "calls": 4731,
+      "elapsed_ns": 63283881
+    },
+    {
+      "family": "policy",
+      "category": "owner_record_clone",
+      "calls": 4731,
+      "elapsed_ns": 810635
+    },
+    {
+      "family": "other",
+      "category": "owner_host_preflight",
+      "calls": 472,
+      "elapsed_ns": 9725899
+    },
+    {
+      "family": "other",
+      "category": "owner_record_validate",
+      "calls": 472,
+      "elapsed_ns": 283740
+    },
+    {
+      "family": "other",
+      "category": "owner_namespace_identities",
+      "calls": 472,
+      "elapsed_ns": 5669226
+    },
+    {
+      "family": "other",
+      "category": "owner_current_identity_chain",
+      "calls": 472,
+      "elapsed_ns": 6027531
+    },
+    {
+      "family": "other",
+      "category": "owner_record_clone",
+      "calls": 472,
+      "elapsed_ns": 72208
+    }
+  ],
+  "total_measured_wrapper_elapsed_ns": 1969851274,
+  "observation_after_deadline_seconds": 0.02480368802207522,
+  "measurement_scope": "Closed fixed labels and bounded values only; inclusive nested rows overlap and are not summed. No CPU, inner-predicate or performance-fix attribution.",
+  "canonical_query_fields_present": {
+    "birth": true,
+    "facts": true,
+    "verified_at": true
+  },
+  "canonical_bootstrap_history_count": 1,
+  "native_bootstrap_accepted": false,
+  "real_client_acceptance": "NOT_RUN",
+  "production_changes": false,
+  "provider_profiles_used": false,
+  "outer_preservation": {
+    "harness_exit_code": 1,
+    "owner_unit_absent": true,
+    "host_links_and_stable_routes_unchanged": false,
+    "host_single_down_link_added": true,
+    "host_addresses_routes_rules_preserved": true,
+    "host_stable_neighbors_preserved": true,
+    "host_allowed_index": 131424847,
+    "host_allowed_name": "vhd7472bb9e550",
+    "inert_gateway_retained": true,
+    "original_gateway_native_identity_unchanged": true,
+    "synthetic_only": true,
+    "native_transport_operations_requested": true,
+    "canonical_and_mount_resources_retained": true
+  },
+  "inspection_sha256": "8054ec9ef306bfc23795513173cdd931ab5f61bc8430c3b0bcc88eab07cb4279",
+  "closed_metadata_sha256": "2bdb9551e9950564c2c565aa78b62f6c64b4e4af347e3ab340a9f92a45d13208",
+  "closed_parser_sha256": "4392b39327f3f9c518b5eeb8e0bacbe1eb76d4779e00b45fd2addc84ee6bcd67",
+  "selectors_retained": 0,
+  "resource_cleanup_performed": false,
+  "evidence_qualification": "No completed HOST scope or Bootstrap acceptance. Owner rows measure global methods and counts differ from Binding retained-owner calls. Native host-preflight/namespace/current-identity elapsed exceeds record-validation/clone elapsed, but overlaps prior rows and includes observer/scheduling effects. No subtraction into exclusive cost, exact inner failing clock, causal speedup, saved budget or original two-second fit is established. This diagnostic does not fix Bootstrap.",
+  "selector_archival": {
+    "result": "PASS",
+    "receipt_sha256": "b198e6369a8f5d5b5b0ad96f91cc0ee8bb9aedffe072a6519105ebb416062c83",
+    "fresh_original_owner_absence_and_gateway_identity_verified": true,
+    "exact_selector_identity_and_destination_checks": true,
+    "all_other_fixture_resources_retained": true,
+    "signals_or_unmounts": false
+  },
+  "preservation_review": "PASS",
+  "selectors_archived": 6
+}

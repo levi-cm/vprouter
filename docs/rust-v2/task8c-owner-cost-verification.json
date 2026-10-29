@@ -22,11 +22,11 @@
       "static_elf": true
     }
   },
-  "native_bootstrap": "NOT_RUN",
+  "native_bootstrap": "FAIL_ATTEMPT408",
   "arm64_runtime": "NOT_RUN",
   "release_ready": false,
   "scope": "two-file cfg(test) owner-inner elapsed diagnostics; original calls, errors, short circuits, deadlines and live checks preserved",
-  "runtime_cost_effect": "NOT_RUN",
+  "runtime_cost_effect": "MEASURED_INCLUSIVE_ONLY_ATTEMPT408_FAILED",
   "source_review": {
     "spec": "PASS",
     "quality": "PASS",
@@ -62,7 +62,7 @@
     "reconciliation_sha256": "a625f99c6ebd9c4a77663bd27d7e319f939a7f94cad7f9a4004d2e248d6fc66f",
     "host_authority_granted": false
   },
-  "performance_limit": "Inclusive elapsed owner boundaries overlap prior measurements and cannot establish exclusive wall/CPU, failed inner predicate, native speedup, saved budget or original two-second fit. Observer overhead and scheduling may perturb them. Original398-407 failures retained; full8c remains ACTIVE.",
+  "performance_limit": "Native408 failed HOST native_poll/result/Deadline with zero completed cases. Fifteen owner rows are present, with global owner-call counts differing from retained Binding calls; live-check boundaries exceed pure validate/clone elapsed. Overlap, observer effects and scheduling preclude exclusive CPU/wall attribution, exact failed inner clock, causal speedup, saved budget or original two-second fit. No Bootstrap or release performance is proved.",
   "evidence_hashes": {
     "target/continuation-20261029T181111Z/root-verification.json": "0338485f424fb459dd0bf064f384d4ce2302178c596733a5f3168ca7bd376925",
     "target/continuation-20261029T181111Z/candidate.json": "ac6569440c476745bf6e7f5689177594412211eb41ae71682dd755c2eab489c1",

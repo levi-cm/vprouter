@@ -981,3 +981,24 @@ finalizedPASS; cfgtestdiagnostic only/nativeowner/Bootstrap/ARMNOT_RUN/releasefa
 Finalimmutablepublicaudit precedes source/checkpoint and exact4d9658fctag push,
 then nextownedlocalVMexperiment. No optimizer/causalnativecost/exclusiveCPU/
 savedbudget/original2sfit/acceptanceclaim; original398-407FAIL remain retained.
+
+Ownercostsource milestonebfbf99d and exact4d9658fctag rust-v2-test-20261029T181111Z
+remote-confirmed fork/rust/v2. OwnedDebian408FAILexit1/12.618s/zerocases, HOST
+native_poll/result/Deadline after query+policyheld2/negatives6+12/releasestrue.
+Original2s unchanged; posterrorboundaryobservation24.803688ms late, notinnerclock.
+Root unchanged exactreadonlyinspection+closed13+30+24+15metadataparsePASS. Owner
+query4577calls:preflight104.160254ms/validate3.033698ms/namespaces59.777043ms/
+identitychain62.628717ms/clone0.774841ms; policy4731calls and Bindingcounts differ.
+Globalinclusiveboundaries overlap earlierrows, no exclusiveCPU/nativeimprovement/
+savedbudget/2sfit proof. Exactly6selectors/allotherresources retained pending
+independent408preservationreview. Source frozen; no unchangedretry/cache/check
+removal/deadlineextension. Full8cACTIVE/release_readyfalse/ARMNOT_RUN, all earlier
+FAIL preserved. Soleimplementer may produce read-only408diagnosis/proposal only.
+
+408independent failure/provenance/preservation/exactsix prerequisitePASS/no findings
+review9df71d6e. Root unchangedarchiver freshoriginalowner/gateway/selector gates
+PASS; exact6archivedwith exclusive receipt/allotherresources retained/no profile
+contents/signals/unmounts. PublicoriginalFAIL/zerocases/2sdeadline/globalowner/
+overlap/observerlimits preserved. Finalcompletion/publicaudit pending before
+failuremilestonepush. Sourcefrozen/full8cACTIVE/release_readyfalse/allbroader
+runtime/client/migration/platform/performance/soakgates OPEN.

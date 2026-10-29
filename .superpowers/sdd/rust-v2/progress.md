@@ -948,3 +948,13 @@ after checkpointpush; original13+30+24rows/calls/shortcircuit/error/clocks uncha
 or optimizer authorized. Reader-onlyextension separately assigned; sourcefreeze/
 review/coherentartifacts/authored60baseline/checkpoint precede nextownedVMrun.
 Full8cACTIVE/release_readyfalse/original398-407FAIL preserved.
+
+Ownerreader parser4392b393/report94d822d9 independent SPEC+QUALITY+sensitivity
+PASS/no findings review54ef3bf2. Root freshAST+actual405/407 byteequalityPASS,
+priorf743c668/2a61b8c7 exact. Retained6validsynthetic/104malformedrefusals and
+exclusivebytes+modechecks independentlyverified; optional15closedownerrows are
+never summed, old13+30+24 constraints preserved. Readerauthor203appinputcheck
+was at itsfreeze; concurrent2Rustownerdiagnostic edits are separate/inprogress
+and excluded from this parser/docs checkpoint. README describes exactoptional
+tables. Alltarget/privatechecks excluded; nonativeownermetric/2sfit/Bootstrap
+acceptance established; full8cACTIVE/release_readyfalse.

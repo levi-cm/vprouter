@@ -16,9 +16,9 @@ all test procedures or evidence. Source and runtime acceptance remain separate.
 
 `parse-bootstrap-cost-diagnostics.py` is a separate maintained, read-only reader
 for failed `secret_bootstrap_success` records with the fixed Deadline diagnostic.
-It validates closed boundary fields, all13 wrapper rows, all30 nested rows and
-the optional exact24 retained-cost rows, then exclusively creates bounded
-metadata at its second argument. Nested rows
+It validates closed boundary fields, all13 wrapper rows, all30 nested rows,
+the optional exact24 retained-cost rows and optional exact15 owner-cost rows,
+then exclusively creates bounded metadata at its second argument. Nested rows
 overlap and are never summed. It does not contact a VM or grant state authority.
 This reader is outside the293-file historical archive manifest.
 

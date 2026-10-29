@@ -24,6 +24,11 @@ RETAINED_CATEGORIES = (
     'retained_history', 'history_allocation_digest', 'created_group_native',
     'source_identity_entries', 'native_source_entries',
 )
+OWNER_CATEGORIES = (
+    'owner_host_preflight', 'owner_record_validate',
+    'owner_namespace_identities', 'owner_current_identity_chain',
+    'owner_record_clone',
+)
 STEPS = (
     'absent', 'query_intent', 'query_birth', 'query_reading', 'query_result',
     'intent', 'birth', 'reading', 'result', 'next', 'complete',
@@ -168,6 +173,26 @@ def main():
                 == tuple((family, key) for family in ('query', 'policy', 'other')
                          for key in RETAINED_CATEGORIES))
 
+    owner = []
+    owner_marker = 'LAB_SECRET_BOOTSTRAP_OWNER_TOTAL'
+    for line in lines:
+        # A malformed occurrence must not silently look like an absent extension.
+        if owner_marker not in line:
+            continue
+        row = fields(line, owner_marker + ' ')
+        require(set(row) == {'family', 'category', 'calls', 'elapsed_ns',
+                             'measurement', 'grouping'}
+                and row.pop('measurement') == 'inclusive_owner_elapsed'
+                and row.pop('grouping') == 'lab_loop_entry_step_family')
+        row['calls'] = integer(row['calls'], 64)
+        row['elapsed_ns'] = integer(row['elapsed_ns'], 128)
+        require(row['calls'] > 0 or row['elapsed_ns'] == 0)
+        owner.append(row)
+    if owner:
+        require(tuple((row['family'], row['category']) for row in owner)
+                == tuple((family, key) for family in ('query', 'policy', 'other')
+                         for key in OWNER_CATEGORIES))
+
     output = dict(
         record_sha256=hashlib.sha256(raw).hexdigest(),
         source_binding=binding, boundary=boundary,
@@ -177,6 +202,8 @@ def main():
     )
     if retained:
         output['retained'] = retained
+    if owner:
+        output['owner'] = owner
     with destination.open('x') as stream:
         json.dump(output, stream, indent=2, allow_nan=False)
         stream.write('\n')

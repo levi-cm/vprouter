@@ -686,3 +686,11 @@ Root unchanged archiver e36a8e8c fresh originalowner/gateway/selector gates PASS
 exclusive receipt retained, exact6 selectors archived/all other resources retained,
 no signals/unmounts or profile reads. Public originalFAIL and bounded diagnostic
 limits retained; completion/publicscope audit pending before milestone push.
+
+403failure milestone46239ec remote-confirmed fork/rust/v2; production read-only
+active. Ruling: measure nested allocation/custody/encoding/proof/journal cost
+before optimizing immutable expected-record encoding—wrapper totals establish
+no dominant mechanism; cost if wrong is one diagnostic build/experiment, with
+no ownership or deadline relaxation. Sole implementer authorized cfg(test)-only
+six-path task-8c-bootstrap-nested-cost-brief.md; original2s/all calls/negatives/
+held-polls/errors remain exact. Full8c ACTIVE; all acceptance gates unchanged.

@@ -137,3 +137,27 @@ Interrupted; source correction to diagnostics only is next. Both398/399 remain
 failed, all fixture resources retained; selectors independently reviewed and
 archived exactly, no signals/unmounts. See task-8c-bootstrap399-diagnosis.md and
 public attempt399 report. Full8c/runtime/client qualification remainsOPEN.
+
+
+## Continuation through attempt403
+
+The earlier399 paragraph's “queryIntent acknowledged” is too strong for saved
+canonical bytes alone. Durable fields establish persisted proposal/history;
+parent ACK needs separate process-local or completed-case evidence. The ledger
+retains this correction and every original failure without rewriting raw data.
+
+Original-writer query/policy progress and the cgroup ancestry repair passed
+independent source reviews and Root component/static verification. Native400-403
+remain failed prerequisite experiments. Latest403 uses frozen c6f3c5e8 and
+records native_poll/intent/Deadline, zero completed cases, after query release
+and the required two held policy polls/twelve negatives. The original2s window
+is unchanged. Its13 measured wrapper totals include nested validation, IO and
+scheduling; they do not identify predicate CPU cost or the inner failing clock.
+See docs/rust-v2/task8c-bootstrap-attempt403.json and the403 preservation review.
+
+Root's unchanged archiver passed fresh original-owner/gateway/exact-selector
+checks and archived only403's six selectors; all other fixture resources remain.
+Failure milestone46239ec is remote-confirmed on fork/rust/v2. No current native
+Bootstrap family, autonomous runtime, real-client or release gate is complete.
+The next bounded increment measures inclusive nested costs only; no immutable
+record cache or other semantic optimization is authorized from wrapper totals.

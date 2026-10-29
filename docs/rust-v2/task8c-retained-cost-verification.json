@@ -24,9 +24,9 @@
   },
   "arm64_runtime": "NOT_RUN",
   "release_ready": false,
-  "native_bootstrap": "NOT_RUN",
+  "native_bootstrap": "FAIL_ATTEMPT406",
   "scope": "five-file cfg(test) retained-validation inclusive elapsed/count diagnostics; no semantic optimizer or new runtime authority",
-  "runtime_cost_effect": "NOT_RUN",
+  "runtime_cost_effect": "UNPROVED_ATTEMPT406_FAILED",
   "source_review": {
     "spec": "PASS",
     "quality": "PASS",
@@ -64,5 +64,5 @@
     ".superpowers/sdd/rust-v2/task-8c-bootstrap-retained-cost-review.md": "95c8555457c937da461b02fd87bdd85665b53f020702eb21a86a839cbcb66fbc",
     "target/task8c-retained-cost-root-20261029/root-coherent-build.log": "ee718e2f64c32e0999a5e37464c8f382bab9d443b05e43ddc36fc414f12ad684"
   },
-  "performance_limit": "Inclusive rows overlap and include observer/scheduling effects, errors and partial work; they are not CPU, exclusive wall cost, successful ACK counts, native optimization or original two-second fit. Original398-405 remain failed. No retained-cost native witness yet."
+  "performance_limit": "Native406 captured all24 closed retained-cost rows but failed HOST native_poll/reading/Deadline with zero cases. Inclusive rows overlap and counts/work reached differ from prior attempts; no CPU, exclusive wall cost, exact inner predicate, optimization effect or original two-second fit is established."
 }

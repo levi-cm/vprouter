@@ -858,3 +858,21 @@ Public candidate/baselinereviewflags finalizedPASS; cfgtestdiagnostics only,
 nativecost/Bootstrap/ARMNOT_RUN/releasefalse remain. Exactsource17c914f4 and
 source/checkpoint push follow finalimmutablepublicaudit before newownedVMrun.
 No livecheck/deadline/authority changed or nativeoptimization claim established.
+
+Retainedcost source milestone1188b26 and exact17c914f4 tagrust-v2-test-20261029T170915Z
+remote-confirmed fork/rust/v2. OwnedDebian406FAILexit1/12.889s/zerocases, HOST
+native_poll/reading/Deadline after query+policyheld2/negatives6+12/releasestrue.
+Original2s unchanged; post-error observation0.797276ms late, notinnerfailedclock.
+Root unchanged exactreadonlyinspectionPASS;13wrapper+30nested+24retained closed
+metadataparsePASS. Same-count Binding ownerquery4292/221134431ns, policy4171/
+202379170ns; fullhistory4292/35636127ns,4171/33933759ns. Inclusivecategories
+overlap; digestcountsdiffer, noCPU/exclusivewall/optimizationeffect/2sfit proof.
+Exactly6selectors/allotherresources retained pending independent406preservation
+review. Source frozen; soleimplementer readonlymechanism/proposal, no identical
+retry/checkremoval/deadlineextension. Full8cACTIVE/release_readyfalse.
+
+406 independent preservation/provenance/exactsix prerequisitePASS. Root unchanged
+archiver freshowner/gateway/selector gatesPASS; exact6 archived with exclusive
+receipt/allotherresources retained/no signals/unmounts/profile reads. Public
+originalFAIL/zerocases and24rowoverlap/observerlimits retained. Completion/public
+audit pending before failuremilestone push. Source frozen/full8cACTIVE/releasefalse.

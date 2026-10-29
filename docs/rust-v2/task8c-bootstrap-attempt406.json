@@ -1,0 +1,481 @@
+{
+  "schema_version": 1,
+  "scope": "local cfg(test) retained-validation diagnostic; retained failed native attempt",
+  "run": 406,
+  "result": "FAIL",
+  "exit_code": 1,
+  "wall_seconds": 12.889,
+  "completed_cases": 0,
+  "record_sha256": "e1b62ae23e6f7eedaaf40ebb99b9bf7692f9d6c2acd54cdfa483439e02eda693",
+  "source_binding": {
+    "source_commit": "17c914f4d0d0bab8b206b71f843b8a7e0af784f8",
+    "source_archive_sha256": "c022151af9eb96ca0d28f9ec7081a6149b24e0b55aa0698d92a5194db8687820",
+    "tracked_build_inputs_verified": 203,
+    "source_aggregate_sha256": "c2e1052c7a52bb9e4d506380914a0c459299b16e1a16ba833d6c26686c4c559c"
+  },
+  "artifact_sha256": "90998682a45eca26370efd1c2d828da5b07c04ef1e729ddb0636cc11307482a5",
+  "runner_sha256": "565ecefd0472be62e53c927bb6875519440fb95b4516749386501c11cc52eb8c",
+  "guest_sha256": "12a4d66ec4284a6d5de06bb3ac9fa6387514b94a4d7f3b78d9d8f525b86548a1",
+  "failure": "Deadline",
+  "failure_step": "reading",
+  "failure_helper": "native_poll",
+  "boundary": {
+    "helper": "native_poll",
+    "step": "reading",
+    "reason": "Deadline",
+    "query_present": true,
+    "query_child_present": true,
+    "query_accepted_present": true,
+    "policy_present": true,
+    "query_queued": true,
+    "query_held": 2,
+    "query_negatives": 6,
+    "query_released": true,
+    "own_queued": true,
+    "own_held": 2,
+    "own_negatives": 12,
+    "own_released": true,
+    "original_requested_at": 202918.478448727,
+    "original_deadline": 202920.478448727,
+    "observed_boot_now": 202920.479246003
+  },
+  "wrappers": [
+    {
+      "helper": "query_source",
+      "calls": 1,
+      "elapsed_ns": 15803678
+    },
+    {
+      "helper": "query_hold",
+      "calls": 1,
+      "elapsed_ns": 41104240
+    },
+    {
+      "helper": "query_checkpoint",
+      "calls": 4,
+      "elapsed_ns": 155276477
+    },
+    {
+      "helper": "query_identity",
+      "calls": 3,
+      "elapsed_ns": 75618287
+    },
+    {
+      "helper": "query_held_negatives",
+      "calls": 3,
+      "elapsed_ns": 48052256
+    },
+    {
+      "helper": "query_release",
+      "calls": 1,
+      "elapsed_ns": 39013193
+    },
+    {
+      "helper": "policy_hold",
+      "calls": 1,
+      "elapsed_ns": 41433072
+    },
+    {
+      "helper": "policy_queued_negatives",
+      "calls": 1,
+      "elapsed_ns": 31651097
+    },
+    {
+      "helper": "policy_checkpoint",
+      "calls": 4,
+      "elapsed_ns": 167467544
+    },
+    {
+      "helper": "policy_held_negatives",
+      "calls": 1,
+      "elapsed_ns": 54146883
+    },
+    {
+      "helper": "policy_identity",
+      "calls": 3,
+      "elapsed_ns": 85189054
+    },
+    {
+      "helper": "policy_release",
+      "calls": 1,
+      "elapsed_ns": 40989187
+    },
+    {
+      "helper": "native_poll",
+      "calls": 18,
+      "elapsed_ns": 1148978728
+    }
+  ],
+  "nested": [
+    {
+      "family": "query",
+      "category": "allocation_anchor_memory",
+      "calls": 2153,
+      "elapsed_ns": 39686912
+    },
+    {
+      "family": "query",
+      "category": "binding_service_custody",
+      "calls": 283,
+      "elapsed_ns": 64357569
+    },
+    {
+      "family": "query",
+      "category": "binding_retained",
+      "calls": 4292,
+      "elapsed_ns": 338622386
+    },
+    {
+      "family": "query",
+      "category": "owned_progress",
+      "calls": 25,
+      "elapsed_ns": 10595109
+    },
+    {
+      "family": "query",
+      "category": "typed_bootstrap_progress",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "query",
+      "category": "original_proof",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "query",
+      "category": "record_json_encode",
+      "calls": 116,
+      "elapsed_ns": 11249946
+    },
+    {
+      "family": "query",
+      "category": "expected_record_json_encode",
+      "calls": 25,
+      "elapsed_ns": 2627049
+    },
+    {
+      "family": "query",
+      "category": "record_sha256",
+      "calls": 66,
+      "elapsed_ns": 648786
+    },
+    {
+      "family": "query",
+      "category": "journal_advance",
+      "calls": 8,
+      "elapsed_ns": 6036210
+    },
+    {
+      "family": "policy",
+      "category": "allocation_anchor_memory",
+      "calls": 1955,
+      "elapsed_ns": 35370365
+    },
+    {
+      "family": "policy",
+      "category": "binding_service_custody",
+      "calls": 246,
+      "elapsed_ns": 54671183
+    },
+    {
+      "family": "policy",
+      "category": "binding_retained",
+      "calls": 4171,
+      "elapsed_ns": 312191422
+    },
+    {
+      "family": "policy",
+      "category": "owned_progress",
+      "calls": 122,
+      "elapsed_ns": 48815775
+    },
+    {
+      "family": "policy",
+      "category": "typed_bootstrap_progress",
+      "calls": 29,
+      "elapsed_ns": 114093835
+    },
+    {
+      "family": "policy",
+      "category": "original_proof",
+      "calls": 87,
+      "elapsed_ns": 35489990
+    },
+    {
+      "family": "policy",
+      "category": "record_json_encode",
+      "calls": 451,
+      "elapsed_ns": 42740155
+    },
+    {
+      "family": "policy",
+      "category": "expected_record_json_encode",
+      "calls": 122,
+      "elapsed_ns": 12298025
+    },
+    {
+      "family": "policy",
+      "category": "record_sha256",
+      "calls": 211,
+      "elapsed_ns": 2113311
+    },
+    {
+      "family": "policy",
+      "category": "journal_advance",
+      "calls": 6,
+      "elapsed_ns": 3910190
+    },
+    {
+      "family": "other",
+      "category": "allocation_anchor_memory",
+      "calls": 226,
+      "elapsed_ns": 4180926
+    },
+    {
+      "family": "other",
+      "category": "binding_service_custody",
+      "calls": 30,
+      "elapsed_ns": 6722580
+    },
+    {
+      "family": "other",
+      "category": "binding_retained",
+      "calls": 442,
+      "elapsed_ns": 36115399
+    },
+    {
+      "family": "other",
+      "category": "owned_progress",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "typed_bootstrap_progress",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "original_proof",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "record_json_encode",
+      "calls": 1,
+      "elapsed_ns": 112721
+    },
+    {
+      "family": "other",
+      "category": "expected_record_json_encode",
+      "calls": 0,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "record_sha256",
+      "calls": 1,
+      "elapsed_ns": 9520
+    },
+    {
+      "family": "other",
+      "category": "journal_advance",
+      "calls": 0,
+      "elapsed_ns": 0
+    }
+  ],
+  "retained": [
+    {
+      "family": "query",
+      "category": "retained_transport",
+      "calls": 4292,
+      "elapsed_ns": 44532479
+    },
+    {
+      "family": "query",
+      "category": "retained_data",
+      "calls": 4292,
+      "elapsed_ns": 25089241
+    },
+    {
+      "family": "query",
+      "category": "retained_owner_record",
+      "calls": 4292,
+      "elapsed_ns": 221134431
+    },
+    {
+      "family": "query",
+      "category": "retained_history",
+      "calls": 4292,
+      "elapsed_ns": 35636127
+    },
+    {
+      "family": "query",
+      "category": "history_allocation_digest",
+      "calls": 6522,
+      "elapsed_ns": 24420007
+    },
+    {
+      "family": "query",
+      "category": "created_group_native",
+      "calls": 1755,
+      "elapsed_ns": 16008054
+    },
+    {
+      "family": "query",
+      "category": "source_identity_entries",
+      "calls": 579,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "query",
+      "category": "native_source_entries",
+      "calls": 1755,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "policy",
+      "category": "retained_transport",
+      "calls": 4171,
+      "elapsed_ns": 41387570
+    },
+    {
+      "family": "policy",
+      "category": "retained_data",
+      "calls": 4171,
+      "elapsed_ns": 23430590
+    },
+    {
+      "family": "policy",
+      "category": "retained_owner_record",
+      "calls": 4171,
+      "elapsed_ns": 202379170
+    },
+    {
+      "family": "policy",
+      "category": "retained_history",
+      "calls": 4171,
+      "elapsed_ns": 33933759
+    },
+    {
+      "family": "policy",
+      "category": "history_allocation_digest",
+      "calls": 6190,
+      "elapsed_ns": 22913468
+    },
+    {
+      "family": "policy",
+      "category": "created_group_native",
+      "calls": 1961,
+      "elapsed_ns": 16456091
+    },
+    {
+      "family": "policy",
+      "category": "source_identity_entries",
+      "calls": 650,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "policy",
+      "category": "native_source_entries",
+      "calls": 1961,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "retained_transport",
+      "calls": 442,
+      "elapsed_ns": 4761092
+    },
+    {
+      "family": "other",
+      "category": "retained_data",
+      "calls": 442,
+      "elapsed_ns": 2573221
+    },
+    {
+      "family": "other",
+      "category": "retained_owner_record",
+      "calls": 442,
+      "elapsed_ns": 23555016
+    },
+    {
+      "family": "other",
+      "category": "retained_history",
+      "calls": 442,
+      "elapsed_ns": 3842452
+    },
+    {
+      "family": "other",
+      "category": "history_allocation_digest",
+      "calls": 675,
+      "elapsed_ns": 2653982
+    },
+    {
+      "family": "other",
+      "category": "created_group_native",
+      "calls": 205,
+      "elapsed_ns": 2003567
+    },
+    {
+      "family": "other",
+      "category": "source_identity_entries",
+      "calls": 67,
+      "elapsed_ns": 0
+    },
+    {
+      "family": "other",
+      "category": "native_source_entries",
+      "calls": 205,
+      "elapsed_ns": 0
+    }
+  ],
+  "total_measured_wrapper_elapsed_ns": 1944723696,
+  "observation_after_deadline_seconds": 0.0007972760067787021,
+  "measurement_scope": "Closed fixed labels and bounded values only; inclusive nested rows overlap and are not summed. No CPU, inner-predicate or performance-fix attribution.",
+  "canonical_query_fields_present": {
+    "birth": true,
+    "facts": true,
+    "verified_at": true
+  },
+  "canonical_bootstrap_history_count": 1,
+  "native_bootstrap_accepted": false,
+  "real_client_acceptance": "NOT_RUN",
+  "production_changes": false,
+  "provider_profiles_used": false,
+  "outer_preservation": {
+    "harness_exit_code": 1,
+    "owner_unit_absent": true,
+    "host_links_and_stable_routes_unchanged": false,
+    "host_single_down_link_added": true,
+    "host_addresses_routes_rules_preserved": true,
+    "host_stable_neighbors_preserved": true,
+    "host_allowed_index": 855633355,
+    "host_allowed_name": "vhc8a5b0f824c8",
+    "inert_gateway_retained": true,
+    "original_gateway_native_identity_unchanged": true,
+    "synthetic_only": true,
+    "native_transport_operations_requested": true,
+    "canonical_and_mount_resources_retained": true
+  },
+  "inspection_sha256": "2b0eeb02ffe56dc810e2f03f3133d4d42ccef91640c01bd370b670aa04c7d2d7",
+  "closed_metadata_sha256": "509714ea99b53586428ac313a698d8eeb051c8537a4193d0802779e6991f323d",
+  "closed_parser_sha256": "4309e4881c9aaeb27191ca35957a23f215a9764d37f5afdb00820aafd0518206",
+  "selectors_retained": 0,
+  "resource_cleanup_performed": false,
+  "evidence_qualification": "No completed HOST scope or Bootstrap acceptance. Counts and work reached differ from prior runs. Inclusive rows overlap; count-only rows have zero durations, and entry counts include errors. No CPU/exclusive wall attribution, exact inner failing clock, optimization effect or two-second fit proof.",
+  "selectors_archived": 6,
+  "selector_archival": {
+    "result": "PASS",
+    "receipt_sha256": "cbcfc37280d48f5d70eff8f3884d8950a6d47e921e959b298fa7746c3a60a1c0",
+    "fresh_original_owner_absence_and_gateway_identity_verified": true,
+    "exact_selector_identity_and_destination_checks": true,
+    "all_other_fixture_resources_retained": true,
+    "signals_or_unmounts": false
+  },
+  "preservation_review": "PASS"
+}

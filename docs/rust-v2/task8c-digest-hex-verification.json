@@ -1,0 +1,72 @@
+{
+  "binding": {
+    "source_commit": "51c15016353936288067f5cd3e4c2a6715be1061",
+    "source_archive_sha256": "f5cecc2f3af90a7e638f9bfdcb1d2db3a70abb7666d678b2133fe88601d9aa7c",
+    "tracked_build_inputs_verified": 203,
+    "source_aggregate_sha256": "d9fe3200b57f73d8cf5c6e847277dbf463c5ab672559f208383c49f81de12167"
+  },
+  "current_source_matches": true,
+  "platforms": {
+    "amd64": {
+      "manifest_sha256": "cd6a283df0bb1703fb12c0ba13b5e54069f49408d0c14cec3af17b35e0b7ab0d",
+      "context_sha256": "cd73f32df6db96f8a8c091abab7c0796a3e88e54be09e0c73d7b074abc7b1e48",
+      "payload_sha256": "fe3567ab22819b05ecf0523ddcfb6dd14fea8869d6b6a6e7f77b9804b2a926d3",
+      "verified_context_files": 7,
+      "static_elf": true
+    },
+    "arm64": {
+      "manifest_sha256": "49ada75c283e52ba3b229778a91153b78a1775660732452d913c4d90cdece267",
+      "context_sha256": "bcdd948c2236defd91e54a133f668c1ecab55bc0ad7a5e0ee4e476ec93d6a4fa",
+      "payload_sha256": "8653ede4bcd30a594db2dbc5c32383e7065d8b64b7f0cfa8413df85b215bf825",
+      "verified_context_files": 7,
+      "static_elf": true
+    }
+  },
+  "arm64_runtime": "NOT_RUN",
+  "release_ready": false,
+  "native_bootstrap": "NOT_RUN",
+  "scope": "one-file shared SHA256 lowercase-hex representation change; identical hash/input/64lowercase output and unchanged call sites/live checks",
+  "runtime_cost_effect": "NOT_RUN",
+  "source_review": {
+    "spec": "PASS",
+    "quality": "PASS",
+    "blocking_findings": 0
+  },
+  "candidate_provenance_review": "PASS",
+  "preservation_baseline_review": "PASS",
+  "checks": {
+    "workspace_passed": 413,
+    "workspace_failed": 0,
+    "workspace_ignored": 2,
+    "worker_library_passed": 65,
+    "fmt": "PASS",
+    "strict_workspace_all_targets_clippy": "PASS",
+    "both_architecture_static_builds": "PASS",
+    "amd64_static_filter_and_pending_core_preflight": "PASS",
+    "read_only_debian_projection": "PASS",
+    "all_178_unowned_rust_sources_unchanged": true,
+    "all_other_original_worker_source_reconstructed": "PASS",
+    "old_formatter_input_cases": 299,
+    "known_vectors": 2,
+    "hex_encoder_cases": 8450,
+    "wrong_nibble_mutant_refused": true,
+    "program_manifest_changes_only_observer_and_monitor_hashes_and_sizes": true
+  },
+  "baseline": {
+    "links": 59,
+    "addresses": 51,
+    "routes": 154,
+    "rules": 5,
+    "template_sha256": "31e3fdd6b93ec330586c86c00b3dc64447a5b30ec3f733910c5d5b609ea69048",
+    "reconciliation_sha256": "028c76506f26b1047ad09b600ac19df14b4b640361063a0405790275ac113b8b",
+    "host_authority_granted": false
+  },
+  "evidence_hashes": {
+    "target/continuation-20261029T174000Z/root-verification.json": "6eb7f12d0dd3df3c98ef813ec360b74662e58bee6b09f7f3667994504152f90f",
+    ".superpowers/sdd/rust-v2/task-8c-digest-hex-implementation-report.md": "f81f347379246f0e8fc679523932490444d37a522280bf659434f3cd912ff69a",
+    ".superpowers/sdd/rust-v2/task-8c-digest-hex-implementation-review.md": "5222aa87c1192da00ead293bffda85cba798e3e34779154e821ec536a867f3a6",
+    "target/task8c-digest-hex-root-20261029/root-coherent-build.log": "f47188e57c051ba2d120ca147fe65e0c63e7a714b6622710c68fe0b33c435567",
+    "target/task8c-digest-hex-root-20261029/program-manifest-scope.json": "92195589cb3f157fa28c84820ba296943daf481ac2e9646d38e80fe316c24751"
+  },
+  "performance_limit": "Host actual-library experiment establishes only a local formatting mechanism. Native cost share, saved budget, speedup, original two-second fit, complete Bootstrap and release performance remain unproved; original398-406 failures preserved."
+}

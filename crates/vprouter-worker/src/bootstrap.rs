@@ -74,10 +74,16 @@ pub enum Permission {
     Operational,
 }
 pub fn digest(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    digest_hex(&Sha256::digest(bytes))
+}
+fn digest_hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(64);
+    for byte in bytes {
+        output.push(DIGITS[(byte >> 4) as usize] as char);
+        output.push(DIGITS[(byte & 15) as usize] as char);
+    }
+    output
 }
 fn hash(s: &str) -> bool {
     s.len() == 64
@@ -716,6 +722,117 @@ pub fn observe() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn assert_old_digest_equivalent(input: &[u8]) {
+        let old: String = Sha256::digest(input)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(digest(input), old, "input length {}", input.len());
+    }
+
+    #[test]
+    fn digest_matches_known_sha256_vectors() {
+        assert_eq!(
+            digest(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            digest(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            digest(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn digest_matches_old_formatter_for_public_inputs_and_binary_boundaries() {
+        for byte in 0..=255u8 {
+            assert_old_digest_equivalent(&[byte]);
+        }
+        for length in [
+            0usize, 1, 2, 3, 15, 31, 32, 33, 55, 56, 63, 64, 65, 127, 128, 129, 255, 256, 257, 511,
+            512, 513, 1023, 1024, 4095, 4096, 8192, 65535, 65536,
+        ] {
+            let input: Vec<_> = (0..length)
+                .map(|i| (i.wrapping_mul(37) ^ (i >> 3) ^ 0xa5) as u8)
+                .collect();
+            assert_old_digest_equivalent(&input);
+        }
+        for repeats in [1, 2, 16, 256] {
+            let input: Vec<_> = (0..repeats).flat_map(|_| 0..=255u8).collect();
+            assert_old_digest_equivalent(&input);
+        }
+        for text in [
+            "",
+            "abc",
+            "é",
+            "e\u{301}",
+            "💾",
+            "\0",
+            "\n\r\t\"\\\0é",
+            "vprouter-v2-deployment-owner-v1:hexlab-public",
+        ] {
+            assert_old_digest_equivalent(text.as_bytes());
+        }
+        assert_old_digest_equivalent("💾".repeat(16384).as_bytes());
+        let exit = |id: &str, mode, wireguard_interface| ExitAllocation {
+            exit_id: id.into(),
+            mode,
+            state_dir: format!("/synthetic/hexlab/{id}").into(),
+            data_namespace: format!("vr-data-{id}"),
+            transport_namespace: format!("vr-trans-{id}"),
+            nft_table: format!("vr_{id}"),
+            host_interface: format!("vh{id}"),
+            data_interface: format!("vd{id}"),
+            wireguard_interface,
+            transport_subnet: "10.202.1.0/30".into(),
+        };
+        let public = AllocationRecord {
+            schema_version: 2,
+            deployment_id: "hexlab-public".into(),
+            generation: 7,
+            exits: vec![
+                exit(
+                    "one",
+                    vprouter_core::config::ExitMode::Mullvad,
+                    Some("wgone".into()),
+                ),
+                exit("two", vprouter_core::config::ExitMode::Direct, None),
+            ],
+        };
+        assert_old_digest_equivalent(&serde_json::to_vec(&public).unwrap());
+    }
+
+    #[test]
+    fn digest_hex_preserves_every_byte_case_leading_zero_and_order() {
+        let ordered: [u8; 32] = std::array::from_fn(|i| i as u8);
+        assert_eq!(
+            digest_hex(&ordered),
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        );
+        let check = |bytes: &[u8; 32]| {
+            let old: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            assert_eq!(digest_hex(bytes), old);
+        };
+        for byte in 0..=255u8 {
+            for position in 0..32 {
+                let mut bytes = [0; 32];
+                bytes[position] = byte;
+                check(&bytes);
+            }
+        }
+        for seed in 0..=255u8 {
+            check(&std::array::from_fn(|i| {
+                seed.wrapping_mul(17)
+                    .wrapping_add((i as u8).wrapping_mul(13))
+            }));
+        }
+        check(&[0; 32]);
+        check(&[255; 32]);
+    }
+
     #[test]
     fn decoding_cannot_complete_a_frame_after_its_absolute_deadline() {
         struct Slow;

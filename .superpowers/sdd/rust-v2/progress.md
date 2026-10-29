@@ -1002,3 +1002,27 @@ contents/signals/unmounts. PublicoriginalFAIL/zerocases/2sdeadline/globalowner/
 overlap/observerlimits preserved. Finalcompletion/publicaudit pending before
 failuremilestonepush. Sourcefrozen/full8cACTIVE/release_readyfalse/allbroader
 runtime/client/migration/platform/performance/soakgates OPEN.
+
+408failure milestone04fa954 remote-confirmed fork/rust/v2. Diagnosis ffe0996c
+finds processlocalResult but no durableHOSTpolicyresult, no functional source
+remedy justified. Proposed drivercost brief07bd8a06 independent review3ee3cb53
+allscopedverdictsPASS with mediumM1 incompleteCPU/allcallwall attribution gap.
+Root corrected only interpretation paragraph: revisedbriefd7e6584e allows helper
+CPU/wall attribution solely complete unsaturatedsamples; absent/incomplete notzero.
+Scopedrereview and readerbrief readiness pending before dispatch/checkpoint.
+Ruling: after finalrequirementsPASS and this mechanismcheckpointpush, authorize
+one driveronlycfgtest CPU/existingsleep/postconstructor measurement under exact
+brief, because408globalownernativeelapsed gives no CPU/offCPU/sleep attribution.
+Costifwrong: boundedobserver experiment/rework, never deadlines/custody/held
+negative/livecheck/resource relaxation. No observer-off control or optimizer.
+Readeronly optionalclosed15rowextension separately assigned first; no overlapping
+implementationagents. SoleRustimplementer only operational/bootstrap.rs after
+readerfreeze; sourcefreeze/review/coherentartifacts/authored61baseline/push gates
+precede any nextownedVMrun. Original398-408FAIL/full8cACTIVE/releasefalse remain.
+
+Drivercost plan scopedrereviewf19571fb PASS/M1addressed/no remainingblockers;
+exactoneparagraphfix reconstructed oldbrief, readerrequirements and5docpublic
+scope/sensitivityPASS. Root fresh203applicationinputmatch rechecked. Conditional
+mechanismruling now readyfor checkpointpush, then separate reader/source dispatch;
+no source/native changes or observeroff/optimizer authorization. All398-408FAIL,
+full8cACTIVE/release_readyfalse remain. Finalimmutableledger/publicaudit next.

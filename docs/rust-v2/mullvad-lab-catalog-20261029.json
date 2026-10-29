@@ -1,0 +1,35 @@
+{
+  "observed_at_utc": "2026-10-29T16:32:41.585877+00:00",
+  "source": "https://api.mullvad.net/www/relays/all/",
+  "read_only_public_catalog": true,
+  "servers": [
+    {
+      "hostname": "de-fra-wg-402",
+      "catalog_present": true,
+      "catalog_active": false
+    },
+    {
+      "hostname": "de-dus-wg-102",
+      "catalog_present": true,
+      "catalog_active": true
+    },
+    {
+      "hostname": "de-fra-wg-003",
+      "catalog_present": true,
+      "catalog_active": true
+    },
+    {
+      "hostname": "de-ber-wg-102",
+      "catalog_present": true,
+      "catalog_active": true
+    },
+    {
+      "hostname": "de-ber-wg-002",
+      "catalog_present": true,
+      "catalog_active": true
+    }
+  ],
+  "tunnel_reachability": "NOT_RUN",
+  "profile_or_identity_changes": false,
+  "scope": "Catalog active flag only; no WireGuard handshake/provider/tunnel runtime proof."
+}

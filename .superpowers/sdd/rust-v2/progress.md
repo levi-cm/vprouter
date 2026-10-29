@@ -751,3 +751,25 @@ exact6 selectors archived/all other resources retained/no signals or unmounts.
 Public closedparser source retained separately from293historicalarchive; actual
 404parse+AST and4malformed duplicate/foreign/unknown/nonfinite cases refused
 withoutoutput PASS. Final parser/publicscope+completionaudit pending beforepush.
+
+User steering: some Mullvadservers down; may select another supplied labserver.
+Root boundedcertificateverified readonly publiccatalog16:32:41UTC: supplied
+ de-fra-wg-402 catalogactivefalse; de-dus-wg-102/de-fra-wg-003/de-ber-wg-102/
+ de-ber-wg-002 activeflags true. Catalogonly, actualtunnel/handshake/provider
+reachabilityNOT_RUN. Prefer active supplied profile for futurelive qualification,
+preserveexistingapproved Tailscaleidentity/state and credentials; no profile,
+identity or production mutation. Current404syntheticprovider_profiles_usedfalse;
+no evidence that a remote relay caused its original Bootstrap deadline.
+
+404diagnosis72744381 and allocationcomparisonbrief independent SPEC/QUALITY/
+EVIDENCE/requirementsPASS review30279b0d; two minor report wording/version fixes
+resolved. Offline publicshape purecomparison experiment PASS45oraclecases,
+7alternating batchesx20000; hostglibcopt3 medians primary592.396->19.568ns,
+twoexit963.732->37.422ns, mismatch567.924->18.085ns. Not nativeallocationcostshare,
+no2sfit/runtime/releaseperformanceclaim. Ruling: authorize exactonefile
+same_allocation representation-work removal under reviewed brief, preserving
+allcall sites/livechecks and originalResult/UTF8/rawpath/errorsemantics.
+Costifwrong: additional equivalence/native experiment, with no deadline or
+ownership relaxation; do not claim saved native budget from timerentrycounts.
+Soleimplementer must freezebenchmarkreport beforeappsourceedit and obtain fresh
+source review +coherentbinding/checkpoint before next ownedlocalVMtest.

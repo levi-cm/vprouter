@@ -20,3 +20,9 @@ It validates closed boundary fields, all13 wrapper rows and all30 nested rows,
 then exclusively creates bounded metadata at its second argument. Nested rows
 overlap and are never summed. It does not contact a VM or grant state authority.
 This reader is outside the293-file historical archive manifest.
+
+`allocation-comparison-cost.rs` preserves the separate offline pure-comparison
+experiment harness. It reads two allocation JSON fixtures supplied as arguments;
+private fixture values and binaries are excluded. Its host compiler/dependency
+bindings and results are recorded in the allocation-comparison cost report.
+This experiment does not measure native VM cost share or release performance.

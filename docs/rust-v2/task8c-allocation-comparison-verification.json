@@ -1,0 +1,66 @@
+{
+  "binding": {
+    "source_commit": "05238109d41e8ba4376e27c16aaa1bd41caffede",
+    "source_archive_sha256": "c32d6c1bf51d888f89fb16fc34a66e7356d073ef263d357f64151a8ab0b644ed",
+    "tracked_build_inputs_verified": 203,
+    "source_aggregate_sha256": "4386b3a9d46ec99dee76c7dafb7cac6a04923c428bc60b0126af8576e3fdf43a"
+  },
+  "current_source_matches": true,
+  "platforms": {
+    "amd64": {
+      "manifest_sha256": "20b80264a521c030c52af56ba8645b232b22c035ba46f3b71653cb1f7480f65a",
+      "context_sha256": "f95434ea47702d720772ce10f5b23237c00f4e93837f8ddbcfb9d61711d7b9bc",
+      "payload_sha256": "4435526772afaf82ca584adde1ceadbdad4c710106bcac99c525580c21dcdce9",
+      "verified_context_files": 7,
+      "static_elf": true
+    },
+    "arm64": {
+      "manifest_sha256": "4d266ef01b48e33bc38ca3e49c94af9bb97d604fc640bf081bc4005432c9ff1b",
+      "context_sha256": "faf493db1398d974b1c806ea1750c241387650d1f47777ddc424d0d451bff992",
+      "payload_sha256": "b8477ef81ff2e854c43a2a0cd10a29ba2911ee2bfa484bb4d8e43cbd87e1b90c",
+      "verified_context_files": 7,
+      "static_elf": true
+    }
+  },
+  "arm64_runtime": "NOT_RUN",
+  "release_ready": false,
+  "native_bootstrap": "NOT_RUN",
+  "runtime_cost_effect": "NOT_RUN",
+  "scope": "one-file pure allocation comparison; exact old Result/UTF8/raw-path identity, all original live checks retained",
+  "source_review": {
+    "spec": "PASS",
+    "quality": "PASS",
+    "blocking_findings": 0
+  },
+  "candidate_provenance_review": "PASS",
+  "preservation_baseline_review": "PASS",
+  "checks": {
+    "workspace_passed": 407,
+    "workspace_failed": 0,
+    "workspace_ignored": 2,
+    "launch_library_passed": 156,
+    "differential_oracle_input_pairs": 80,
+    "incorrect_path_and_missing_utf8_mutants_refused": true,
+    "fmt": "PASS",
+    "strict_workspace_all_targets_clippy": "PASS",
+    "both_architecture_static_builds": "PASS",
+    "amd64_static_filter_and_pending_core_preflight": "PASS",
+    "read_only_debian_projection": "PASS"
+  },
+  "baseline": {
+    "links": 57,
+    "addresses": 51,
+    "routes": 154,
+    "rules": 5,
+    "template_sha256": "e7c41cd08192d10a56b9b8a9774ab26a4afbe8a4cb919a9281997c5d4b0d949f",
+    "reconciliation_sha256": "7ec60d8c491097dcbc0041eba3f65254cd31e8980f57d31cfb829dffce546cb8",
+    "host_authority_granted": false
+  },
+  "evidence_hashes": {
+    "target/continuation-20261029T164255Z/root-verification.json": "e32aa29a829ccbc0966dab2abe47d51747a4ae9dd8a0e8dcade274d35b0abee1",
+    ".superpowers/sdd/rust-v2/task-8c-allocation-comparison-report.md": "940b40b64a6b8d3a298368c14a113a0a9013927d4cd14c40f938b750e4320d70",
+    ".superpowers/sdd/rust-v2/task-8c-allocation-comparison-review.md": "7968a825aa6cbe321cad4fe2578b1c688146b3a1ad3a0add36d9bc4500e4e80a",
+    "target/task8c-allocation-comparison-root-20261029/root-coherent-build.log": "8ed87d20ee3df1d7389b055a9aac69ed6031a996b70b4ee7ce9531368f6b1a97"
+  },
+  "performance_limit": "Host pure-comparison experiment establishes a local mechanism only; actual native allocation cost share, speedup and fit within the original two seconds remain unproved."
+}

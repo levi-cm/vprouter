@@ -773,3 +773,27 @@ Costifwrong: additional equivalence/native experiment, with no deadline or
 ownership relaxation; do not claim saved native budget from timerentrycounts.
 Soleimplementer must freezebenchmarkreport beforeappsourceedit and obtain fresh
 source review +coherentbinding/checkpoint before next ownedlocalVMtest.
+
+Mechanism/catalog/docs milestone446845b remote-confirmed fork/rust/v2. Onefile
+allocationcomparison frozen owned b1490090/report940b40b6/diff87b0f288: 80actual
+Result oraclepairs/4tests PASS; two deliberately incorrect path/precheckmutants
+failed as intended and restored. Root fresh workspace407/0/2ignored, fmt and
+strictworkspacealltargetsClippy PASS; all178unowned Rust inputs unchanged.
+Fresh independent source review pending; nativeeffect/2sfit unproved,404FAIL
+retained. Botharch coherentbuild next, no new VMfixture before remaining gates.
+
+Fresh review_allocation_comparison SPEC+QUALITYPASS/no findings review7968a825;
+onefileResult/equivalence/import+helper+tests reconstruction and178unowned hashes
+independently verified. Botharch coherent freeze05238109/203inputs/archivec32d6c1b/
+aggregate4386b3a9; Root current/archive/Git +staticELF/strict7filecontexts/exact
+AMD64filterpreflight PASS. Normal manifests/contexts unchanged. OwnedDebian
+readonly projection and unchangedv2helper expected57/51/154/5 from404canonical
+DOWNendpoint+prior56baseline fullmultiset/orderonlyalignment PASS. Independent
+finalcandidate/baseline/publicscope audit pending; no nativecosteffect witness.
+
+Allocationcomparison final203input/artifact/staticELF/strictcontext/preflight/
+Rootproof and expected57link fullmultiset/orderonlybaseline/ref/helper/404receipt
+independentPASS/no findings. Root407/0/2+fmt/strictalltargetsClippy corroborated;
+public provenance/baselineflags PASS, nativecost/Bootstrap/ARMNOT_RUN/releasefalse.
+Finalimmutablepublicaudit precedes explicit source/checkpoint/tag push and next
+ownedlocalVMexperiment. No claimed nativebudget/performance or acceptance fix.

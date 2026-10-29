@@ -1,0 +1,68 @@
+{
+  "binding": {
+    "source_commit": "17c914f4d0d0bab8b206b71f843b8a7e0af784f8",
+    "source_archive_sha256": "c022151af9eb96ca0d28f9ec7081a6149b24e0b55aa0698d92a5194db8687820",
+    "tracked_build_inputs_verified": 203,
+    "source_aggregate_sha256": "c2e1052c7a52bb9e4d506380914a0c459299b16e1a16ba833d6c26686c4c559c"
+  },
+  "current_source_matches": true,
+  "platforms": {
+    "amd64": {
+      "manifest_sha256": "20b80264a521c030c52af56ba8645b232b22c035ba46f3b71653cb1f7480f65a",
+      "context_sha256": "f95434ea47702d720772ce10f5b23237c00f4e93837f8ddbcfb9d61711d7b9bc",
+      "payload_sha256": "90998682a45eca26370efd1c2d828da5b07c04ef1e729ddb0636cc11307482a5",
+      "verified_context_files": 7,
+      "static_elf": true
+    },
+    "arm64": {
+      "manifest_sha256": "4d266ef01b48e33bc38ca3e49c94af9bb97d604fc640bf081bc4005432c9ff1b",
+      "context_sha256": "faf493db1398d974b1c806ea1750c241387650d1f47777ddc424d0d451bff992",
+      "payload_sha256": "392c108d0be63ecde1a18efd6c826027c68d2081531048d9dc28b22b0725d27b",
+      "verified_context_files": 7,
+      "static_elf": true
+    }
+  },
+  "arm64_runtime": "NOT_RUN",
+  "release_ready": false,
+  "native_bootstrap": "NOT_RUN",
+  "scope": "five-file cfg(test) retained-validation inclusive elapsed/count diagnostics; no semantic optimizer or new runtime authority",
+  "runtime_cost_effect": "NOT_RUN",
+  "source_review": {
+    "spec": "PASS",
+    "quality": "PASS",
+    "blocking_findings": 0
+  },
+  "candidate_provenance_review": "PASS",
+  "preservation_baseline_review": "PASS",
+  "checks": {
+    "workspace_passed": 410,
+    "workspace_failed": 0,
+    "workspace_ignored": 2,
+    "launch_library_passed": 159,
+    "fmt": "PASS",
+    "strict_workspace_all_targets_clippy": "PASS",
+    "both_architecture_static_builds": "PASS",
+    "amd64_static_filter_and_pending_core_preflight": "PASS",
+    "read_only_debian_projection": "PASS",
+    "old_thirteen_wrapper_and_thirty_nested_rows_preserved": true,
+    "new_closed_retained_rows": 24,
+    "all_174_unowned_rust_sources_unchanged": true,
+    "normal_build_source_reconstruction": "PASS"
+  },
+  "baseline": {
+    "links": 58,
+    "addresses": 51,
+    "routes": 154,
+    "rules": 5,
+    "template_sha256": "1286200c52685951f4d197b84b0e95d803cd4d569b4b35fa51c7f4b32bbf8c12",
+    "reconciliation_sha256": "716ffb9be9184532447f8aba72303f740060dcb65e0d3e3c2aded103d82fa9b5",
+    "host_authority_granted": false
+  },
+  "evidence_hashes": {
+    "target/continuation-20261029T170915Z/root-verification.json": "1ffa8c4cf58a2d27ab2488110bcb3dc1c3beced0c0762ae3fa24b67ec6b925c5",
+    ".superpowers/sdd/rust-v2/task-8c-bootstrap-retained-cost-report.md": "b806467156f42010c53cb39c258d5e589bdb91e17854f3ba8417206f22795893",
+    ".superpowers/sdd/rust-v2/task-8c-bootstrap-retained-cost-review.md": "95c8555457c937da461b02fd87bdd85665b53f020702eb21a86a839cbcb66fbc",
+    "target/task8c-retained-cost-root-20261029/root-coherent-build.log": "ee718e2f64c32e0999a5e37464c8f382bab9d443b05e43ddc36fc414f12ad684"
+  },
+  "performance_limit": "Inclusive rows overlap and include observer/scheduling effects, errors and partial work; they are not CPU, exclusive wall cost, successful ACK counts, native optimization or original two-second fit. Original398-405 remain failed. No retained-cost native witness yet."
+}

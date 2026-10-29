@@ -838,3 +838,23 @@ unchanged, no existing evidence rewritten. Reader arithmetic doesnot sumnew
 inclusiverows; syntheticparserchecks are notnativecost evidence. Explicit
 parser/docs checkpoint excludes in-progress5Rustpaths and allprivatetargetdata.
 Full8cACTIVE/releasefalse; nativeforretaineddiagnosticNOT_RUN.
+
+Retainedcost exactly5cfg(test)source/reportb8064671/diff941a4638 frozen; independent
+review_nested_cost SPEC+QUALITYPASS/no findings review95c85554. Root freshworkspace
+410/0/2ignored,fmt+strictalltargetsClippyPASS; all179afterhashesmatch/all174unowned
+unchanged. Normalreconstruction and oldState/Timer/13+30rows preserved. Coherent
+botharch freeze17c914f4/203inputs/archivec022151a/aggregatec2e1052c; Root current/
+archive/Git equality/staticELF/strict7filecontexts/exactAMD64preflightPASS. Normal
+program manifests/contexts unchanged. OwnedDebian readonlyprojectionPASS; unchanged
+v2helper reconstructsexpected58/51/154/5 from405canonicalDOWNendpoint+prior57
+authoredbaseline, exactmultiset/orderonlyalignmentPASS/no livefieldsubstitution.
+Finalcandidate/preservation/publicscope independent audit pending; nativecost
+witnessNOT_RUN/ARMNOT_RUN/full8cACTIVE/release_readyfalse.
+
+Retainedcost final203input/artifact/staticELF/strictcontexts/preflight/Rootproof
+and expected58link exactmultiset/orderonlybaseline/refs/405receipt independent
+PASS/no findings reviewce41945d. Root410/0/2+fmt/strictalltargetsClippy corroborated.
+Public candidate/baselinereviewflags finalizedPASS; cfgtestdiagnostics only,
+nativecost/Bootstrap/ARMNOT_RUN/releasefalse remain. Exactsource17c914f4 and
+source/checkpoint push follow finalimmutablepublicaudit before newownedVMrun.
+No livecheck/deadline/authority changed or nativeoptimization claim established.

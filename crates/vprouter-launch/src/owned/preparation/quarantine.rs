@@ -60,8 +60,19 @@ impl Binding {
         {
             return Err(Error::OwnershipMismatch);
         }
-        self.transport.verify_retained()?;
-        self.data().verify_retained()?;
+        {
+            #[cfg(test)]
+            let _retained_cost = super::lab_cost::RetainedTimer::new(
+                super::lab_cost::RetainedKey::RetainedTransport,
+            );
+            self.transport.verify_retained()?;
+        }
+        {
+            #[cfg(test)]
+            let _retained_cost =
+                super::lab_cost::RetainedTimer::new(super::lab_cost::RetainedKey::RetainedData);
+            self.data().verify_retained()?;
+        }
         let shared = &self.public.shared;
         let j = shared.journal.borrow();
         let spec = self.data().request().spec();
@@ -70,7 +81,13 @@ impl Binding {
             || j.record.primary_exit_id != self.public.member
             || j.record.entries.len() != 1
             || shared.services.borrow().len() != 1
-            || self.owner.record(&self.domains)? != self.public.owner
+            || {
+                #[cfg(test)]
+                let _retained_cost = super::lab_cost::RetainedTimer::new(
+                    super::lab_cost::RetainedKey::RetainedOwnerRecord,
+                );
+                self.owner.record(&self.domains)?
+            } != self.public.owner
         {
             return Err(Error::OwnershipMismatch);
         }
@@ -82,7 +99,12 @@ impl Binding {
         }
         let e = &j.record.entries[0];
         let p = e.preparation.as_ref().ok_or(Error::OwnershipMismatch)?;
-        p.validate(&j.record, e)?;
+        {
+            #[cfg(test)]
+            let _retained_cost =
+                super::lab_cost::RetainedTimer::new(super::lab_cost::RetainedKey::RetainedHistory);
+            p.validate(&j.record, e)?;
+        }
         if e.phase != Phase::Creating
             || e.terminal.is_some()
             || p.result.as_ref() != Some(&self.public.result)

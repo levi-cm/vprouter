@@ -153,6 +153,10 @@ pub(crate) fn parent_identity(fd: BorrowedFd<'_>) -> Result<Identity> {
 }
 pub(crate) fn verify_created_group(request: &Request, group: BorrowedFd<'_>) -> Result<Identity> {
     request.verify_retained()?;
+    #[cfg(test)]
+    let _retained_cost = super::super::super::owned::preparation::lab_cost::RetainedTimer::new(
+        super::super::super::owned::preparation::lab_cost::RetainedKey::CreatedGroupNative,
+    );
     let id = parent_identity(group)?;
     let st = fs::fstat(group).map_err(|_| Error::CgroupMismatch)?;
     let named = fs::statat(

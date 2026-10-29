@@ -89,11 +89,15 @@ impl History {
     }
     pub(super) fn validate(&self, record: &Record, entry: &Entry) -> Result<()> {
         if self.member != entry.exit_id
-            || self.allocation
-                != vprouter_worker::bootstrap::digest(
+            || self.allocation != {
+                #[cfg(test)]
+                let _retained_cost =
+                    lab_cost::RetainedTimer::new(lab_cost::RetainedKey::HistoryAllocationDigest);
+                vprouter_worker::bootstrap::digest(
                     &serde_json::to_vec(&record.allocation)
                         .map_err(|_| Error::AllocationMismatch)?,
                 )
+            }
             || record.owner_epoch.as_ref() != Some(&self.owner)
             || self.configuration == [0; 32]
             || !self.requested_at.is_finite()

@@ -200,7 +200,7 @@ pub struct ProducerAncestryDescriptors<'a> {
     pub container_id: &'a str,
     pub group_name: &'a str,
 }
-static ROOT_PARENT: &std::ffi::CStr = c"..";
+static SYSTEM_PARENT: &std::ffi::CStr = c"..";
 static SYSTEM_SLICE: &std::ffi::CStr = c"system.slice";
 pub(crate) struct Ancestry {
     pub(crate) root: Arc<OwnedFd>,
@@ -236,7 +236,7 @@ impl Ancestry {
     pub(crate) fn rules(&self, parent: BorrowedFd<'_>) -> [(i32, u64); 4] {
         use std::os::fd::AsRawFd;
         [
-            (self.root.as_raw_fd(), ROOT_PARENT.as_ptr() as u64),
+            (self.system_slice.as_raw_fd(), SYSTEM_PARENT.as_ptr() as u64),
             (self.root.as_raw_fd(), SYSTEM_SLICE.as_ptr() as u64),
             (
                 self.system_slice.as_raw_fd(),
@@ -261,7 +261,13 @@ impl Ancestry {
                 return Err(Error::Descriptor);
             }
         }
-        verify_link(self.root.as_fd(), ROOT_PARENT, self.root.as_fd())?;
+        self.verify_links(parent, group)
+    }
+    // Named-edge comparisons alone cannot construct a confined role. The
+    // production caller first checks every original cgroup2/trusted descriptor.
+    fn verify_links(&self, parent: BorrowedFd<'_>, group: BorrowedFd<'_>) -> Result<()> {
+        use std::os::fd::AsFd;
+        verify_link(self.system_slice.as_fd(), SYSTEM_PARENT, self.root.as_fd())?;
         verify_link(self.root.as_fd(), SYSTEM_SLICE, self.system_slice.as_fd())?;
         verify_link(self.system_slice.as_fd(), &self.container, parent)?;
         verify_link(parent, &self.group, group)
@@ -328,9 +334,124 @@ impl ConfinedProducerGroup {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::os::fd::AsFd;
+    pub(crate) fn internal_parent_name() -> &'static std::ffi::CStr {
+        SYSTEM_PARENT
+    }
+    pub(crate) struct AncestryFixture {
+        pub(crate) path: std::path::PathBuf,
+        pub(crate) root: std::fs::File,
+        pub(crate) system: std::fs::File,
+        pub(crate) parent: std::fs::File,
+        pub(crate) group: std::fs::File,
+        pub(crate) container: String,
+    }
+    impl AncestryFixture {
+        pub(crate) fn new(label: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "vprouter-native-ancestry-{label}-{}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&path).unwrap();
+            let container = "a".repeat(64);
+            let scope = path
+                .join("system.slice")
+                .join(format!("docker-{container}.scope"));
+            std::fs::create_dir_all(scope.join("health")).unwrap();
+            Self {
+                root: std::fs::File::open(&path).unwrap(),
+                system: std::fs::File::open(path.join("system.slice")).unwrap(),
+                parent: std::fs::File::open(&scope).unwrap(),
+                group: std::fs::File::open(scope.join("health")).unwrap(),
+                path,
+                container,
+            }
+        }
+        pub(crate) fn ancestry(&self) -> Ancestry {
+            // Merely duplicates real directory pins and names. Full cgroup2
+            // verification remains required before confined role construction.
+            Ancestry::prepare(ProducerAncestryDescriptors {
+                root: self.root.as_fd(),
+                system_slice: self.system.as_fd(),
+                container_id: &self.container,
+                group_name: "health",
+            })
+            .unwrap()
+        }
+    }
+    impl Drop for AncestryFixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.path).unwrap();
+        }
+    }
+    #[test]
+    fn original_ancestry_uses_internal_parent_and_refuses_foreign_or_replaced_edges() {
+        let f = AncestryFixture::new("edges");
+        let a = f.ancestry();
+        let verify = || a.verify_links(f.parent.as_fd(), f.group.as_fd());
+        let external = std::fs::File::open(f.path.parent().unwrap()).unwrap();
+        assert_ne!(
+            rustix::fs::fstat(&external).unwrap().st_ino,
+            rustix::fs::fstat(&f.root).unwrap().st_ino
+        );
+        verify().unwrap();
+        for (root, system) in [
+            (external.as_fd(), f.system.as_fd()),
+            (f.root.as_fd(), f.parent.as_fd()),
+        ] {
+            let foreign = Ancestry::prepare(ProducerAncestryDescriptors {
+                root,
+                system_slice: system,
+                container_id: &f.container,
+                group_name: "health",
+            })
+            .unwrap();
+            assert_eq!(
+                foreign.verify_links(f.parent.as_fd(), f.group.as_fd()),
+                Err(Error::Descriptor)
+            );
+        }
+        assert_eq!(
+            a.verify_links(f.group.as_fd(), f.group.as_fd()),
+            Err(Error::Descriptor)
+        );
+        assert_eq!(
+            a.verify_links(f.parent.as_fd(), f.root.as_fd()),
+            Err(Error::Descriptor)
+        );
+        let system = f.path.join("system.slice");
+        let scope = system.join(format!("docker-{}.scope", f.container));
+        let group = scope.join("health");
+        std::fs::rename(&group, scope.join("old.health")).unwrap();
+        assert_eq!(verify(), Err(Error::Descriptor));
+        std::fs::create_dir(&group).unwrap();
+        assert_eq!(verify(), Err(Error::Descriptor));
+        std::fs::remove_dir(&group).unwrap();
+        std::os::unix::fs::symlink("old.health", &group).unwrap();
+        assert_eq!(verify(), Err(Error::Descriptor));
+        std::fs::remove_file(&group).unwrap();
+        std::fs::rename(scope.join("old.health"), &group).unwrap();
+        verify().unwrap();
+        std::fs::rename(&scope, system.join("old.scope")).unwrap();
+        assert_eq!(verify(), Err(Error::Descriptor));
+        std::fs::create_dir(&scope).unwrap();
+        assert_eq!(verify(), Err(Error::Descriptor));
+        std::fs::remove_dir(&scope).unwrap();
+        std::os::unix::fs::symlink("old.scope", &scope).unwrap();
+        assert_eq!(verify(), Err(Error::Descriptor));
+        std::fs::remove_file(&scope).unwrap();
+        std::fs::rename(system.join("old.scope"), &scope).unwrap();
+        verify().unwrap();
+        std::fs::rename(&system, f.path.join("old.slice")).unwrap();
+        assert_eq!(verify(), Err(Error::Descriptor));
+        std::fs::create_dir(&system).unwrap();
+        assert_eq!(verify(), Err(Error::Descriptor));
+        std::fs::remove_dir(&system).unwrap();
+        std::os::unix::fs::symlink("old.slice", &system).unwrap();
+        assert_eq!(verify(), Err(Error::Descriptor));
+    }
     #[test]
     fn retained_directory_inode_does_not_authorize_renamed_ancestry() {
         // Real filesystem relation test, not cgroup or confined-child proof.

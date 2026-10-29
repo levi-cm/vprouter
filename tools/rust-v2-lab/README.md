@@ -13,3 +13,10 @@ privileged local VM tests after verifying the exact frozen source and artifacts.
 
 The checkpoint preserves progress; archived scripts are not an approval of
 all test procedures or evidence. Source and runtime acceptance remain separate.
+
+`parse-bootstrap-cost-diagnostics.py` is a separate maintained, read-only reader
+for failed `secret_bootstrap_success` records with the fixed Deadline diagnostic.
+It validates closed boundary fields, all13 wrapper rows and all30 nested rows,
+then exclusively creates bounded metadata at its second argument. Nested rows
+overlap and are never summed. It does not contact a VM or grant state authority.
+This reader is outside the293-file historical archive manifest.

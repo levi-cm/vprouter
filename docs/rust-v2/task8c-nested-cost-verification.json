@@ -24,7 +24,7 @@
   },
   "arm64_runtime": "NOT_RUN",
   "release_ready": false,
-  "native_bootstrap": "NOT_RUN",
+  "native_bootstrap": "FAIL_ATTEMPT404",
   "scope": "six-path cfg(test) inclusive nested elapsed-cost diagnostic; no semantic optimization",
   "source_review": {
     "spec": "PASS",

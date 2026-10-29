@@ -733,3 +733,21 @@ PASS/no findings. Root152/0/fmt/clippy corroborated. Final public provenance and
 baseline flags PASS; cfgtest-only diagnostic/nativeNOT_RUN/ARMNOT_RUN/releasefalse
 retained. No semantic optimization or runtime authority changed. Explicit reviewed
 milestone push plus exactsource tag precedes next local nativecost experiment.
+
+Nestedcost milestone0af1b9f and exact4451tag rust-v2-test-20261029T161134Z remote-
+confirmed fork/rust/v2. OwnedDebian404FAILexit1/8.69s zero cases; native_poll/result/
+Deadline, query+policyheld2/negatives6+12/releasedtrue, original2s unchanged.
+Root unchanged exactinspection PASS; sixselectors/allotherresources retained.
+Closedpublic-reader parsed13wrapper+30inclusive nestedrows; expectedencoding
+query2.747405ms/policy13.715089ms, Bindingretained4292/4396calls with335.094473/
+339.254664ms. Categories overlap, not CPU or exactinnerclock; laterphase doesnot
+prove performanceimprovement or completeHOSTscope. Independent404preservation
+review pending; soleimplementer readonlymechanismproposal, no sourcefix/retry.
+Full8cACTIVE/releasefalse; all earlier failures preserved.
+
+404 independent preservation/exact6 archival prerequisite PASS. Root unchanged
+archiver freshowner/gateway/selector gates PASS, exclusive receipt retained,
+exact6 selectors archived/all other resources retained/no signals or unmounts.
+Public closedparser source retained separately from293historicalarchive; actual
+404parse+AST and4malformed duplicate/foreign/unknown/nonfinite cases refused
+withoutoutput PASS. Final parser/publicscope+completionaudit pending beforepush.

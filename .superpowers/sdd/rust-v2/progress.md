@@ -530,3 +530,13 @@ no IntentOK/spawnmarkers,88writerinventorypairs. Public/rawfailure retained.
 Content/exact6selectorpreservation independentPASS; unchangedarchiver freshgates
 PASS and6selectorsarchived, allotherfixture resources retained/no signals/unmounts.
 No identicalretry. Full8cACTIVE; next narrowtypedpendingprogressfix underdesign.
+
+Error-preservation milestone ae8450c and exactfbfa3bbc source tag remote-confirmed
+fork/rust/v2. Source-established pending-state conflict documented independently
+from the runtime-fit inference; no captured localflag/exactreturn proof overstated.
+Ruling: nextfix must coherently cover exact original query AND policy writers,
+not just bypass first eagercontext call; globalhistory pendingrejection retained,
+progress-specific access only with closed originalServer/typedexpectedwriter proof.
+Costifwrong: broader internalcustody proof/review work, never arbitrarypending
+acceptance or newpolicy/UP/Ready authority. Original sole implementer authorized
+bounded pendingprogress increment; full8c/client/release remainACTIVE/OPEN.

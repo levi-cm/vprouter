@@ -1746,6 +1746,12 @@
       "archive_path": "tools/rust-v2-lab/target/author-host-baseline-after-bootstrap.py",
       "sha256": "4bfa6ea18191e64ac3a9b004de9c20358846b0343e19924e14440b371883f9b0",
       "bytes": 6750
+    },
+    {
+      "source_path": "target/author-host-baseline-after-bootstrap-v2.py",
+      "archive_path": "tools/rust-v2-lab/target/author-host-baseline-after-bootstrap-v2.py",
+      "sha256": "67421abe95c77c793332044a5ab2ca95a751f4dc0d175211519fd7eb47ab9958",
+      "bytes": 6745
     }
   ]
 }

@@ -1,0 +1,61 @@
+{
+  "binding": {
+    "source_commit": "4451c8a75bcedcc330d4b59087a85f0bb5dca342",
+    "source_archive_sha256": "4fc3b75ebc397c0857cdc83d9c20eb335f23ed23f1b648d6ce8b985a48f4abcf",
+    "tracked_build_inputs_verified": 203,
+    "source_aggregate_sha256": "4e28ac6571e0be8928ecc476aaf310120ba953b859b1c2c1f741763601f581e3"
+  },
+  "current_source_matches": true,
+  "platforms": {
+    "amd64": {
+      "manifest_sha256": "20b80264a521c030c52af56ba8645b232b22c035ba46f3b71653cb1f7480f65a",
+      "context_sha256": "f95434ea47702d720772ce10f5b23237c00f4e93837f8ddbcfb9d61711d7b9bc",
+      "payload_sha256": "649ab51fbafc89b58b783a41fc468d3f31c20288cfdd4712fd75d4ddfeaba860",
+      "verified_context_files": 7,
+      "static_elf": true
+    },
+    "arm64": {
+      "manifest_sha256": "4d266ef01b48e33bc38ca3e49c94af9bb97d604fc640bf081bc4005432c9ff1b",
+      "context_sha256": "faf493db1398d974b1c806ea1750c241387650d1f47777ddc424d0d451bff992",
+      "payload_sha256": "3e7bc79ddd96258f6cc1188676c3a86d38dd23670d6833260a015d063f1be35a",
+      "verified_context_files": 7,
+      "static_elf": true
+    }
+  },
+  "arm64_runtime": "NOT_RUN",
+  "release_ready": false,
+  "native_bootstrap": "NOT_RUN",
+  "scope": "six-path cfg(test) inclusive nested elapsed-cost diagnostic; no semantic optimization",
+  "source_review": {
+    "spec": "PASS",
+    "quality": "PASS",
+    "blocking_findings": 0
+  },
+  "candidate_provenance_review": "PASS",
+  "preservation_baseline_review": "PASS",
+  "checks": {
+    "launch_library_passed": 152,
+    "launch_library_failed": 0,
+    "fmt": "PASS",
+    "strict_launch_lib_tests_clippy": "PASS",
+    "both_architecture_static_builds": "PASS",
+    "amd64_static_filter_and_pending_core_preflight": "PASS",
+    "read_only_debian_projection": "PASS"
+  },
+  "baseline": {
+    "links": 56,
+    "addresses": 51,
+    "routes": 154,
+    "rules": 5,
+    "template_sha256": "fcef34276439e5df3e7426cc9122a0a8f7930bc0d8fd68c64af2f3a22210bb4e",
+    "reconciliation_sha256": "8fd30944cf82311c5782ec04b7109aea7cb490f40f47820e95676abad73b1de8",
+    "host_authority_granted": false
+  },
+  "evidence_hashes": {
+    "target/continuation-20261029T161134Z/root-verification.json": "f11fb103fdc646a0ee93077f2cb9f5ed0e879ae7573a14f4063519e7e0cb9ad0",
+    ".superpowers/sdd/rust-v2/task-8c-bootstrap-nested-cost-report.md": "bcd7e6f0aa4afbb4111dc41ea5c7bb364502bd5bed033d687d3528d3a471b3a3",
+    ".superpowers/sdd/rust-v2/task-8c-bootstrap-nested-cost-review.md": "fa70e3e59b07465e7252d74f4f9d6523e9faa8a5f79bff3b18d551d944316862",
+    "target/task8c-nested-cost-root-20261029/root-coherent-build.log": "5cd3a90f6509dd1041ccb3c48bff33a0aafef4bc15e812e8f90eaf5a0ab4b810"
+  },
+  "measurement_limits": "Inclusive categories overlap; lab-loop-entry family is not exact inner phase. Parent and COW-private child instrumentation may perturb elapsed times. No exact CPU, speedup or dominant mechanism established."
+}

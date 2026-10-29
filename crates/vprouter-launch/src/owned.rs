@@ -1554,6 +1554,8 @@ impl Transaction {
         })
     }
     fn require_allocation_memory(&self) -> Result<()> {
+        #[cfg(test)]
+        let _cost = preparation::lab_cost::Timer::new(preparation::lab_cost::Key::AllocationMemory);
         if self.remote.is_some() {
             return Err(Error::OwnershipMismatch);
         }
@@ -2151,6 +2153,8 @@ impl MutationQueue {
     }
 }
 fn encode_record(record: &Record) -> Result<Vec<u8>> {
+    #[cfg(test)]
+    let _cost = preparation::lab_cost::Timer::new(preparation::lab_cost::Key::RecordEncode);
     let bytes = serde_json::to_vec(record).map_err(|_| Error::OwnershipMismatch)?;
     if bytes.len() > 262144 {
         return Err(Error::TooLarge);
@@ -2158,6 +2162,8 @@ fn encode_record(record: &Record) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 fn record_digest(bytes: &[u8]) -> [u8; 32] {
+    #[cfg(test)]
+    let _cost = preparation::lab_cost::Timer::new(preparation::lab_cost::Key::RecordSha256);
     use sha2::Digest;
     sha2::Sha256::digest(bytes).into()
 }

@@ -493,6 +493,8 @@ pub(super) fn lab_pending_write_core(
 }
 impl OriginalWrite<'_> {
     fn verify_origin(&self, shared: &Rc<SharedJournal>, member: &str) -> Result<()> {
+        #[cfg(test)]
+        let _cost = lab_cost::Timer::new(lab_cost::Key::OriginalProof);
         let n = self.server.native.as_ref().ok_or(Error::Interrupted)?;
         if !Rc::ptr_eq(shared, &n.transaction.shared) || member != n.history.member {
             return Err(Error::OwnershipMismatch);
@@ -1065,6 +1067,8 @@ impl Native {
         }
     }
     fn advance(&mut self) -> Result<bool> {
+        #[cfg(test)]
+        let _cost = lab_cost::Timer::new(lab_cost::Key::JournalAdvance);
         kernel::owner_admission_permitted()?;
         // Every preparation writer is a new fork, including continuations
         // between polls. A previously pristine constructor is not a waiver for
@@ -1877,3 +1881,6 @@ impl Server {
         Ok(())
     }
 }
+
+#[cfg(test)]
+pub(crate) mod lab_cost;

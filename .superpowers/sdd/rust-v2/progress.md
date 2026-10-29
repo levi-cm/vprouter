@@ -694,3 +694,42 @@ no dominant mechanism; cost if wrong is one diagnostic build/experiment, with
 no ownership or deadline relaxation. Sole implementer authorized cfg(test)-only
 six-path task-8c-bootstrap-nested-cost-brief.md; original2s/all calls/negatives/
 held-polls/errors remain exact. Full8c ACTIVE; all acceptance gates unchanged.
+
+Nestedcost diagnostic ruling: allow COW-private child counter accumulation, never
+exported/merged as parent metrics. Journal child record_digest executes under a
+filter allowing clock_gettime but denying getpid; per-entry creator syscalls or
+new fork/filter hooks would exceed diagnostic scope. Creator checks remain only
+at unrestricted lab arm/stop/snapshot; fixed timer entry/drop uses no getpid.
+Cost if wrong: child diagnostic overhead can perturb scheduling/parent elapsed,
+so report it explicitly and do not infer isolated CPU or exact predicate costs.
+Original child kernel::die/no-unwind and no child emission must be reviewed.
+
+Nestedcost brief interpretation: one cfg(test) infallible cached-Step family hook
+at existing lab-loop entry is allowed within operational/bootstrap.rs, to split
+fixed3x10 rows into query/policy/other. Timer captures entry family; a poll may
+transition, so grouping is lab-loop-entry Step family, not inner phase/CPU.
+Initial family explicit before PendingBootstrap construction; no new fallible
+getter, clock check, authority or original call/order change. Cost if wrong is
+misattributed diagnostic grouping, bounded by labels and independent review.
+
+Nestedcost sixpath source/report bcd7e6f0 frozen, independent fresh review pending.
+Root fresh152launch/0failed/fmt/strictlaunchClippy+179sourcehash/exclusion PASS.
+Botharch coherent freeze4451c8a/203inputs/archive4fc3b75e/aggregate4e28ac65,
+Root current/archive/Git equality+staticELF+strict7filecontexts PASS; exactAMD64
+filter/pendingcorepreflight PASS. Normal program manifests/contexts unchanged.
+OwnedDebian readonly marker/selectors/capacitypreflight PASS; no newBootstrap
+fixture run yet. Nativecost witnessNOT_RUN/ARMNOT_RUN/full8cACTIVE/releasefalse.
+
+Fresh review_nested_cost SPEC+QUALITYPASS/no findings reviewfa70e3e5; sixpath
+cfgtest/normalbytes/173unowned Rust preservation independently verified. Root
+ownedDebian readonly projection PASS; unchangedv2helper reconstructs expected
+56/51/154/5 from403 exactcanonicalDOWNendpoint+prior55 authoredbaseline and
+requires fullmultiset equality/order-onlyalignment PASS, no livefieldadoption.
+Final candidate/provenance/baseline/publicscope audit pending; nativecostNOT_RUN.
+
+Nestedcost final203input/artifact/staticELF/strictcontext/preflight/rootproof and
+protected56link projection/fullmultiset/orderonlybaseline/refs/modes independent
+PASS/no findings. Root152/0/fmt/clippy corroborated. Final public provenance and
+baseline flags PASS; cfgtest-only diagnostic/nativeNOT_RUN/ARMNOT_RUN/releasefalse
+retained. No semantic optimization or runtime authority changed. Explicit reviewed
+milestone push plus exactsource tag precedes next local nativecost experiment.

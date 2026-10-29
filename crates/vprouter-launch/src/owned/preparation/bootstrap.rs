@@ -660,6 +660,8 @@ impl quarantine::Binding {
         request: &Rc<Request>,
         stage: Progress<'_>,
     ) -> Result<()> {
+        #[cfg(test)]
+        let _cost = super::lab_cost::Timer::new(super::lab_cost::Key::TypedBootstrapProgress);
         self.verify_service_custody(server)?;
         request.check()?;
         if !Rc::ptr_eq(self, request.binding()) {

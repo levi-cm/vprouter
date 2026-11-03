@@ -7,8 +7,8 @@
     {
       "role": "worker_observer",
       "path": "/usr/local/bin/vprouter-worker-observe",
-      "sha256": "b0053c37b784280243ba943793f001045eba95af23328805e78b6cffccd78a7a",
-      "bytes": 3299624,
+      "sha256": "0ed6eccb1825d30a81048391303326fdc24d187679cac9726a17849fa6489ec7",
+      "bytes": 3299544,
       "policy": "observation-only-zero-caps-private-root-v2"
     },
     {
@@ -28,8 +28,8 @@
     {
       "role": "worker_monitor",
       "path": "/usr/local/bin/vprouter-worker-monitor",
-      "sha256": "5dad21adc4c192425158b70777d2ac87fbca1db7afa592702f1ada8fd298e833",
-      "bytes": 4813712,
+      "sha256": "43ff9662baf0909f88a7c11c379fd6d7860b3125ca987c9e5d729b818e372883",
+      "bytes": 4814272,
       "policy": "guard-bound-monitor-zero-caps-private-root-v1"
     }
   ]

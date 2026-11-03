@@ -1038,3 +1038,14 @@ tests/fmt/strict Clippy PASS; independent source review PASS, no findings.
 ARM64 compile NOT_RUN (missing aarch64 cross C compiler for ring). No native/VM
 run; run409 blocked on restoring or rebuilding lab state. All 398-408 FAIL,
 full 8c ACTIVE, release_ready=false remain.
+
+2026-11-03 cross-compile check. Restored the lost target/ Zig wrapper outside the
+repo: ~/.local/share/zig-cross/bin/{x86_64,aarch64}-linux-musl-{gcc,ar} (zig 0.17.0
+in ~/.local/share/ziglang-venv; strips cc-rs --target=, adds -fno-sanitize=undefined),
+CC_/AR_<target>, CARGO_TARGET_<T>_LINKER=rust-lld, RUSTFLAGS -C relocation-model=static.
+ARM64 test build exposed a pre-existing (>=90a7dcc) test-only compile error:
+libc::SYS_fork is undefined on aarch64 in kernel.rs filter test; now x86_64-gated
+like the two existing sites. Results: release workspace both musl targets PASS
+(static ELF); workspace tests host 425 pass/2 ignored and x86_64-musl 425/2 PASS;
+aarch64 tests build+link PASS, not executed (no qemu); fmt, strict Clippy host
+and aarch64 PASS. Logs target/task8c-cross-check/. No native/VM run.

@@ -9340,7 +9340,6 @@ mod policy_tests {
         for nr in [
             libc::SYS_pread64,
             libc::SYS_read,
-            libc::SYS_fork,
             libc::SYS_clone,
             libc::SYS_clone3,
             libc::SYS_execve,
@@ -9349,6 +9348,12 @@ mod policy_tests {
         ] {
             assert_ne!(verdict_args(&f, arch, nr as u32, [4, 0, 0, 0, 0, 0]), allow);
         }
+        // ARM64 has no fork syscall; libc only defines SYS_fork on x86_64.
+        #[cfg(target_arch = "x86_64")]
+        assert_ne!(
+            verdict_args(&f, arch, libc::SYS_fork as u32, [4, 0, 0, 0, 0, 0]),
+            allow
+        );
         assert_ne!(
             verdict_args(
                 &f,

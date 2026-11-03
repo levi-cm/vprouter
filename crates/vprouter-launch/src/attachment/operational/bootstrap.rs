@@ -665,9 +665,14 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
     );
     macro_rules! measured {
         ($helper:ident, $native:expr, $call:expr) => {{
+            let cpu_started = lab_diagnostics::thread_cpu();
             let started = std::time::Instant::now();
             let result = $call;
             measurements.record(Helper::$helper, started.elapsed());
+            let cpu_finished = lab_diagnostics::thread_cpu();
+            measurements
+                .driver
+                .cpu(Helper::$helper, cpu_started, cpu_finished);
             if let Err(error) = &result {
                 measurements.failure(
                     Helper::$helper,
@@ -719,6 +724,9 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
             });
             if n.completed.is_empty() && matches!(n.step, Step::QueryIntent) && !query_released {
                 if query_source.is_none() {
+                    measurements
+                        .driver
+                        .constructor(|| (lab_diagnostics::boot_time(), n.query.requested_at()));
                     query_source = Some(measured!(
                         QuerySource,
                         Some(&*n),
@@ -855,7 +863,11 @@ pub(crate) fn lab_run(fault: u8) -> Result<()> {
                 (|| pending.as_mut().ok_or(Error::Interrupted)?.poll())()
             ) {
                 Ok(Some(value)) => break Ok(value),
-                Ok(None) => std::thread::sleep(Duration::from_millis(1)),
+                Ok(None) => {
+                    let sleep_started = std::time::Instant::now();
+                    std::thread::sleep(Duration::from_millis(1));
+                    measurements.driver.sleep(sleep_started.elapsed());
+                }
                 Err(error) => break Err(error),
             }
         };
@@ -1334,6 +1346,140 @@ mod lab_diagnostics {
             }
         }
     }
+    // Optional clocks grant no deadline authority and never carry OS error text.
+    fn clock(id: rustix::time::DynamicClockId<'_>) -> Option<u128> {
+        rustix::time::clock_gettime_dynamic(id)
+            .ok()
+            .and_then(timespec_ns)
+    }
+    fn timespec_ns(value: rustix::time::Timespec) -> Option<u128> {
+        let seconds = u128::try_from(value.tv_sec).ok()?;
+        let nanos = u128::try_from(value.tv_nsec).ok()?;
+        if nanos >= 1_000_000_000 {
+            return None;
+        }
+        seconds.checked_mul(1_000_000_000)?.checked_add(nanos)
+    }
+    pub(super) fn thread_cpu() -> Option<u128> {
+        clock(rustix::time::DynamicClockId::Known(
+            rustix::time::ClockId::ThreadCPUTime,
+        ))
+    }
+    pub(super) fn boot_time() -> Option<u128> {
+        clock(rustix::time::DynamicClockId::Boottime)
+    }
+    // The retained f64 scalar already has clock/conversion precision limits.
+    // Reject the exclusive u128 upper bound before Rust's saturating float cast.
+    fn requested_ns(seconds: f64) -> Option<u128> {
+        let nanos = seconds * 1_000_000_000.;
+        if !seconds.is_finite() || seconds < 0. || !nanos.is_finite() || nanos >= 2_f64.powi(128) {
+            return None;
+        }
+        Some(nanos as u128)
+    }
+    #[derive(Clone, Copy, Default)]
+    struct Cpu {
+        calls: u64,
+        samples: u64,
+        cpu_ns: u128,
+        sample_errors: u64,
+    }
+    pub(super) struct Driver {
+        cpu: [Cpu; 13],
+        sleep_calls: u64,
+        sleep_requested: u128,
+        sleep_elapsed: u128,
+        constructor_attempted: bool,
+        constructor_elapsed: Option<u128>,
+        creator: u32,
+        stopped: bool,
+        exportable: bool,
+        // Neither Send nor Sync; fork copies remain private.
+        _local: std::marker::PhantomData<std::rc::Rc<()>>,
+    }
+    impl Driver {
+        fn new() -> Self {
+            Self {
+                cpu: [Cpu::default(); 13],
+                sleep_calls: 0,
+                sleep_requested: 0,
+                sleep_elapsed: 0,
+                constructor_attempted: false,
+                constructor_elapsed: None,
+                creator: std::process::id(),
+                stopped: false,
+                exportable: false,
+                _local: std::marker::PhantomData,
+            }
+        }
+        pub(super) fn cpu(&mut self, helper: Helper, start: Option<u128>, end: Option<u128>) {
+            if self.stopped {
+                return;
+            }
+            let row = &mut self.cpu[helper as usize];
+            row.calls = row.calls.saturating_add(1);
+            if let Some(delta) = start.zip(end).and_then(|(a, b)| b.checked_sub(a)) {
+                row.samples = row.samples.saturating_add(1);
+                row.cpu_ns = row.cpu_ns.saturating_add(delta);
+            } else {
+                row.sample_errors = row.sample_errors.saturating_add(1);
+            }
+        }
+        pub(super) fn sleep(&mut self, elapsed: Duration) {
+            if self.stopped {
+                return;
+            }
+            self.sleep_calls = self.sleep_calls.saturating_add(1);
+            self.sleep_requested = self.sleep_requested.saturating_add(1_000_000);
+            self.sleep_elapsed = self.sleep_elapsed.saturating_add(elapsed.as_nanos());
+        }
+        pub(super) fn constructor(&mut self, sample: impl FnOnce() -> (Option<u128>, f64)) {
+            if self.stopped || self.constructor_attempted {
+                return;
+            }
+            self.constructor_attempted = true;
+            let (now, requested) = sample();
+            self.constructor_elapsed = now
+                .zip(requested_ns(requested))
+                .and_then(|(now, requested)| now.checked_sub(requested));
+        }
+        fn stop(&mut self, creator: u32) {
+            if !self.stopped {
+                self.stopped = true;
+                self.exportable = self.creator == creator;
+            }
+        }
+        fn emit(&self, out: &mut impl Write) -> std::io::Result<()> {
+            if !self.stopped || !self.exportable {
+                return Ok(());
+            }
+            for helper in HELPERS {
+                let Cpu {
+                    calls,
+                    samples,
+                    cpu_ns,
+                    sample_errors,
+                } = self.cpu[helper as usize];
+                writeln!(
+                    out,
+                    "LAB_SECRET_BOOTSTRAP_DRIVER_CPU helper={} calls={calls} samples={samples} cpu_ns={cpu_ns} sample_errors={sample_errors} measurement=bracketing_parent_thread_cpu grouping=wrapper_helper",
+                    helper.label()
+                )?;
+            }
+            writeln!(
+                out,
+                "LAB_SECRET_BOOTSTRAP_DRIVER_SLEEP calls={} requested_ns={} elapsed_ns={} measurement=existing_sleep_elapsed grouping=driver_loop",
+                self.sleep_calls, self.sleep_requested, self.sleep_elapsed
+            )?;
+            writeln!(
+                out,
+                "LAB_SECRET_BOOTSTRAP_DRIVER_CONSTRUCTOR samples={} elapsed_ns={} sample_errors={} measurement=original_request_to_first_wrapper grouping=driver_once",
+                u8::from(self.constructor_elapsed.is_some()),
+                self.constructor_elapsed.unwrap_or(0),
+                u8::from(self.constructor_attempted && self.constructor_elapsed.is_none())
+            )
+        }
+    }
     pub(super) struct Counters {
         pub query_queued: bool,
         pub query_held: usize,
@@ -1347,12 +1493,14 @@ mod lab_diagnostics {
     pub(super) struct Measurements {
         totals: [(u64, Duration); HELPERS.len()],
         emitted: bool,
+        pub(super) driver: Driver,
     }
     impl Measurements {
         pub(super) fn new() -> Self {
             Self {
                 totals: [(0, Duration::ZERO); HELPERS.len()],
                 emitted: false,
+                driver: Driver::new(),
             }
         }
         pub(super) fn record(&mut self, helper: Helper, elapsed: Duration) {
@@ -1372,6 +1520,7 @@ mod lab_diagnostics {
             }
             self.emitted = true;
             let nested = super::super::super::super::owned::preparation::lab_cost::stop_snapshot();
+            self.driver.stop(std::process::id());
             // Read only retained scalars: logging must not revalidate or mask the error.
             let step = native.map_or("absent", |n| match n.step {
                 Step::QueryIntent => "query_intent",
@@ -1421,6 +1570,182 @@ mod lab_diagnostics {
             if let Some(snapshot) = nested {
                 snapshot.emit(&mut stderr);
             }
+            let _ = self.driver.emit(&mut stderr);
+        }
+    }
+    #[cfg(test)]
+    mod driver_tests {
+        use super::*;
+        #[test]
+        fn pairs_and_helper_attribution() {
+            let mut d = Driver::new();
+            for helper in HELPERS {
+                d.cpu(helper, Some(7), Some(12));
+                d.cpu(helper, Some(12), Some(12));
+                for pair in [
+                    (None, Some(1)),
+                    (Some(1), None),
+                    (None, None),
+                    (Some(2), Some(1)),
+                ] {
+                    d.cpu(helper, pair.0, pair.1);
+                }
+            }
+            for row in d.cpu {
+                assert_eq!(
+                    (row.calls, row.samples, row.cpu_ns, row.sample_errors),
+                    (6, 2, 5, 4)
+                );
+            }
+        }
+        #[test]
+        fn distinct_helper_counts_are_not_merged() {
+            let mut d = Driver::new();
+            for (index, helper) in HELPERS.into_iter().enumerate() {
+                for _ in 0..=index {
+                    d.cpu(helper, Some(10), Some(10 + index as u128));
+                }
+            }
+            for (index, row) in d.cpu.into_iter().enumerate() {
+                assert_eq!(row.calls, index as u64 + 1);
+                assert_eq!(row.samples, row.calls);
+                assert_eq!(row.cpu_ns, index as u128 * (index as u128 + 1));
+                assert_eq!(row.sample_errors, 0);
+            }
+        }
+        #[test]
+        fn clock_conversion_rejects_malformed_values() {
+            use rustix::time::Timespec;
+            assert_eq!(
+                timespec_ns(Timespec {
+                    tv_sec: 2,
+                    tv_nsec: 3
+                }),
+                Some(2_000_000_003)
+            );
+            for (tv_sec, tv_nsec) in [(-1, 0), (0, -1), (0, 1_000_000_000)] {
+                assert_eq!(timespec_ns(Timespec { tv_sec, tv_nsec }), None);
+            }
+            assert_eq!(requested_ns(1.5), Some(1_500_000_000));
+            for value in [
+                -1.,
+                f64::NAN,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::MAX,
+                2_f64.powi(128) / 1e9,
+            ] {
+                assert_eq!(requested_ns(value), None);
+            }
+        }
+        #[test]
+        fn constructor_attempts_once_including_errors() {
+            for (now, requested, expected) in [
+                (Some(1_500_000_007), 1.5, Some(7)),
+                (Some(1_500_000_000), 1.5, Some(0)),
+                (None, 1., None),
+                (Some(0), 1., None),
+                (Some(10), f64::NAN, None),
+                (Some(10), -1., None),
+                (Some(10), f64::MAX, None),
+            ] {
+                let mut d = Driver::new();
+                d.constructor(|| (now, requested));
+                d.constructor(|| panic!("constructor retried"));
+                assert!(d.constructor_attempted);
+                assert_eq!(d.constructor_elapsed, expected);
+            }
+        }
+        #[test]
+        fn counters_and_durations_saturate_independently() {
+            let mut d = Driver::new();
+            d.cpu[0] = Cpu {
+                calls: u64::MAX,
+                samples: u64::MAX,
+                cpu_ns: u128::MAX - 1,
+                sample_errors: u64::MAX,
+            };
+            d.cpu(Helper::QuerySource, Some(0), Some(2));
+            d.cpu(Helper::QuerySource, None, None);
+            let row = d.cpu[0];
+            assert_eq!(
+                (row.calls, row.samples, row.cpu_ns, row.sample_errors),
+                (u64::MAX, u64::MAX, u128::MAX, u64::MAX)
+            );
+            d.sleep(Duration::from_nanos(9));
+            assert_eq!(
+                (d.sleep_calls, d.sleep_requested, d.sleep_elapsed),
+                (1, 1_000_000, 9)
+            );
+            d.sleep_calls = u64::MAX;
+            d.sleep_requested = u128::MAX - 1;
+            d.sleep_elapsed = u128::MAX - 1;
+            d.sleep(Duration::from_nanos(2));
+            assert_eq!(
+                (d.sleep_calls, d.sleep_requested, d.sleep_elapsed),
+                (u64::MAX, u128::MAX, u128::MAX)
+            );
+        }
+        #[test]
+        fn export_requires_stop_and_creator_and_freezes_collection() {
+            let mut d = Driver::new();
+            let mut out = Vec::new();
+            d.emit(&mut out).unwrap();
+            assert!(out.is_empty());
+            d.stop(d.creator);
+            d.cpu(Helper::QuerySource, Some(0), Some(10));
+            d.sleep(Duration::from_nanos(10));
+            d.constructor(|| panic!("sample after stop"));
+            assert_eq!(d.cpu[0].calls, 0);
+            assert_eq!(d.sleep_calls, 0);
+            assert!(!d.constructor_attempted);
+            d.emit(&mut out).unwrap();
+            assert_eq!(out.iter().filter(|&&b| b == b'\n').count(), 15);
+            let mut foreign = Driver::new();
+            foreign.stop(foreign.creator.wrapping_add(1));
+            foreign.stop(foreign.creator);
+            let mut out = Vec::new();
+            foreign.emit(&mut out).unwrap();
+            assert!(out.is_empty());
+        }
+        #[test]
+        fn output_bound_and_writer_errors() {
+            let mut d = Driver::new();
+            d.cpu.fill(Cpu {
+                calls: u64::MAX,
+                samples: u64::MAX,
+                cpu_ns: u128::MAX,
+                sample_errors: u64::MAX,
+            });
+            d.sleep_calls = u64::MAX;
+            d.sleep_requested = u128::MAX;
+            d.sleep_elapsed = u128::MAX;
+            d.constructor_attempted = true;
+            d.constructor_elapsed = Some(u128::MAX);
+            d.stop(d.creator);
+            let mut out = Vec::new();
+            d.emit(&mut out).unwrap();
+            assert_eq!(out.len(), 3761);
+            assert_eq!(
+                out.split_inclusive(|&b| b == b'\n')
+                    .map(|line| line.len())
+                    .max(),
+                Some(266)
+            );
+            struct Broken;
+            impl Write for Broken {
+                fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                    Err(std::io::ErrorKind::BrokenPipe.into())
+                }
+                fn flush(&mut self) -> std::io::Result<()> {
+                    Ok(())
+                }
+            }
+            assert_eq!(
+                d.emit(&mut Broken).unwrap_err().kind(),
+                std::io::ErrorKind::BrokenPipe
+            );
+            assert_eq!(d.cpu[0].calls, u64::MAX);
         }
     }
 }

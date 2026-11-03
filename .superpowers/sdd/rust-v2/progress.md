@@ -1026,3 +1026,15 @@ scope/sensitivityPASS. Root fresh203applicationinputmatch rechecked. Conditional
 mechanismruling now readyfor checkpointpush, then separate reader/source dispatch;
 no source/native changes or observeroff/optimizer authorization. All398-408FAIL,
 full8cACTIVE/release_readyfalse remain. Finalimmutableledger/publicaudit next.
+
+2026-11-03 driver-cost measurement. Reader (parser+README) independent review: no
+parser/sensitivity defects, 34 valid/845 refused synthetic cases; verdict withheld
+full acceptance because target/ (raw 405/407/408 records, reader-local checks,
+lab-state) was absent from this worktree before the session, so historical
+byte-identity and 203-input freeze checks are NOT_RUN. Source: bootstrap.rs
+cfg(test) driver CPU/existing-sleep/constructor-prefix collector, da65fe12 ->
+ae7bf47c; one Rust path changed, normal source byte-identical, 171 launch lib
+tests/fmt/strict Clippy PASS; independent source review PASS, no findings.
+ARM64 compile NOT_RUN (missing aarch64 cross C compiler for ring). No native/VM
+run; run409 blocked on restoring or rebuilding lab state. All 398-408 FAIL,
+full 8c ACTIVE, release_ready=false remain.

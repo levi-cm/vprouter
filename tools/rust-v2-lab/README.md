@@ -18,7 +18,20 @@ all test procedures or evidence. Source and runtime acceptance remain separate.
 for failed `secret_bootstrap_success` records with the fixed Deadline diagnostic.
 It validates closed boundary fields, all13 wrapper rows, all30 nested rows,
 the optional exact24 retained-cost rows and optional exact15 owner-cost rows,
-then exclusively creates bounded metadata at its second argument. Nested rows
+plus an optional all-or-none driver extension: exactly13 ordered parent-thread
+CPU rows, one existing-sleep row and one constructor-prefix row. Driver fields,
+labels, order and canonical u64/u128 values are closed; CPU calls must match the
+wrapper calls and sample/error counts must saturating-sum to calls. Without a
+valid CPU or constructor sample, duration must be zero. Sleep requests equal calls times
+1,000,000ns before call-count saturation; at saturation the accumulated request
+may be larger. Complete driver rows append only `driver_cpu`, `driver_sleep`,
+`driver_constructor` and a fixed `driver_scope`; absence preserves historical
+metadata bytes. CPU brackets the parent thread, includes observer work and
+excludes children. CPU/wall attribution requires complete unsaturated helper
+rows; differing wall spans, clocks, observer effects, failed samples and original
+constructor scalar precision limit inference. No scheduling cause, off-CPU
+subtraction, exclusive sum or fit follows. The reader then exclusively creates
+bounded mode0600 metadata at its second argument. Nested rows
 overlap and are never summed. It does not contact a VM or grant state authority.
 This reader is outside the293-file historical archive manifest.
 

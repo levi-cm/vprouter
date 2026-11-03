@@ -193,6 +193,60 @@ def main():
                 == tuple((family, key) for family in ('query', 'policy', 'other')
                          for key in OWNER_CATEGORIES))
 
+    # Every driver marker occurrence belongs to one complete, ordered extension.
+    driver_lines = [line for line in record['stderr'].splitlines(keepends=True)
+                    if 'LAB_SECRET_BOOTSTRAP_DRIVER' in line]
+    driver_cpu = []
+    if driver_lines:
+        require(len(driver_lines) == 15
+                and all(line.endswith('\n') and '\r' not in line
+                        for line in driver_lines))
+        for line, wrapper in zip(driver_lines[:13], wrappers):
+            row = fields(line[:-1], 'LAB_SECRET_BOOTSTRAP_DRIVER_CPU ')
+            require(tuple(row) == ('helper', 'calls', 'samples', 'cpu_ns',
+                                   'sample_errors', 'measurement', 'grouping')
+                    and row.pop('measurement') == 'bracketing_parent_thread_cpu'
+                    and row.pop('grouping') == 'wrapper_helper'
+                    and row['helper'] == wrapper['helper'])
+            for key in ('calls', 'samples', 'sample_errors'):
+                row[key] = integer(row[key], 64)
+            row['cpu_ns'] = integer(row['cpu_ns'], 128)
+            require(row['calls'] == wrapper['calls']
+                    and min(row['samples'] + row['sample_errors'], 2 ** 64 - 1)
+                    == row['calls']
+                    and (row['samples'] > 0 or row['cpu_ns'] == 0))
+            driver_cpu.append(row)
+
+        driver_sleep = fields(driver_lines[13][:-1],
+                              'LAB_SECRET_BOOTSTRAP_DRIVER_SLEEP ')
+        require(tuple(driver_sleep) == ('calls', 'requested_ns', 'elapsed_ns',
+                                       'measurement', 'grouping')
+                and driver_sleep.pop('measurement') == 'existing_sleep_elapsed'
+                and driver_sleep.pop('grouping') == 'driver_loop')
+        driver_sleep['calls'] = integer(driver_sleep['calls'], 64)
+        for key in ('requested_ns', 'elapsed_ns'):
+            driver_sleep[key] = integer(driver_sleep[key], 128)
+        requested = driver_sleep['calls'] * 1000000
+        require((driver_sleep['requested_ns'] == requested
+                 if driver_sleep['calls'] < 2 ** 64 - 1
+                 else driver_sleep['requested_ns'] >= requested)
+                and (driver_sleep['calls'] > 0 or driver_sleep['elapsed_ns'] == 0))
+
+        driver_constructor = fields(driver_lines[14][:-1],
+                                    'LAB_SECRET_BOOTSTRAP_DRIVER_CONSTRUCTOR ')
+        require(tuple(driver_constructor) == ('samples', 'elapsed_ns',
+                                             'sample_errors', 'measurement',
+                                             'grouping')
+                and driver_constructor.pop('measurement')
+                == 'original_request_to_first_wrapper'
+                and driver_constructor.pop('grouping') == 'driver_once')
+        for key in ('samples', 'sample_errors'):
+            driver_constructor[key] = integer(driver_constructor[key], 64)
+        driver_constructor['elapsed_ns'] = integer(driver_constructor['elapsed_ns'], 128)
+        require(driver_constructor['samples'] + driver_constructor['sample_errors'] <= 1
+                and (driver_constructor['samples'] > 0
+                     or driver_constructor['elapsed_ns'] == 0))
+
     output = dict(
         record_sha256=hashlib.sha256(raw).hexdigest(),
         source_binding=binding, boundary=boundary,
@@ -204,6 +258,11 @@ def main():
         output['retained'] = retained
     if owner:
         output['owner'] = owner
+    if driver_lines:
+        output['driver_cpu'] = driver_cpu
+        output['driver_sleep'] = driver_sleep
+        output['driver_constructor'] = driver_constructor
+        output['driver_scope'] = 'CPU is parent-thread bracketing CPU, includes observer work and excludes child execution; it does not identify scheduling. CPU and wall spans differ. CPU/wall attribution requires complete unsaturated helper rows: samples=calls, sample_errors=0, all counts below u64 maximum and CPU/wall totals below u128 maximum. Incomplete or saturated rows are unattributable. Clock differences, observer effects, sampling failures and constructor scalar precision limit inference. No off-CPU subtraction, exclusive sum or fit claim.'
     with destination.open('x') as stream:
         json.dump(output, stream, indent=2, allow_nan=False)
         stream.write('\n')

@@ -22,3 +22,31 @@ in this new environment. It cannot establish a causal speedup over run408's
 accumulated 61-link state. Fixed deadlines, custody, held negatives, selector
 safety and all future current-identity checks remain mandatory. Full Task8c is
 ACTIVE and `release_ready=false`.
+
+## Forward disposition after consumed run 409 (2026-11-04)
+
+Run 409 is consumed (budget 0), failed before the measured Bootstrap loop, and
+must never be retried. Its original raw record, reservation generations,
+tombstones, claim, candidate, baseline and collected controller bytes remain
+unchanged. Its final read-only snapshot confirmed the original inert gateway
+identity and retained selectors/network state before clean guest poweroff.
+
+Selector archival A for 409 was **NOT_RUN** and is now **superseded by cold disk
+preservation**, not reported as successful selector archival. The overlay, seed,
+serial log, process/restart records, console host pin and original collected
+chain are read-only under `/DATA/vprouter-lab/preserved/run409-guest/`, with
+`SHA256SUMS` and README. The original relative known-hosts symlink is retained;
+its exact target bytes are separately preserved as `console-known_hosts`.
+Additional hash-verified original baseline references are in `reference-inputs/`.
+Never boot this overlay writable again. Shutdown preserves disk files but ends
+live process, pidfd, veth, namespace and cgroup identities; the final snapshot is
+the last live proof, not continuing liveness after shutdown.
+
+Run 410 has a different overlay, seed instance ID, console-pinned host key and
+guest boot, plus its own newly authored baseline/candidate and exclusive
+reservation/collector/inspector/controller paths. Its new three-link admission
+does not inherit 409 ownership, archival or runtime acceptance. Original 409
+checks can be replayed locally against its retained original controller/input
+bytes, rather than incorrectly comparing later helper revisions with old hashes.
+Run 410 execution and driver-cost results remain **NOT_RUN**; preparation and
+preflight do not qualify Bootstrap, ARM runtime or release acceptance.

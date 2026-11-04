@@ -20,6 +20,7 @@ if not __debug__:
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('architecture', choices=('amd64', 'arm64'))
+parser.add_argument('--report', type=pathlib.Path)
 parser.add_argument('--ssh-port', type=int, required=True)
 parser.add_argument('--ssh-key', type=pathlib.Path, required=True)
 parser.add_argument('--ssh-known-hosts', type=pathlib.Path, required=True)
@@ -96,5 +97,6 @@ print(json.dumps({'exact_owned_stopped_container_removed':True}))
 '''.replace('CID',repr(cid)).replace('IMAGE_ID',repr(meta['image_id'])).replace('IMAGE',repr(image))
 removed=subprocess.run([*ssh,'sudo python3 -'],input=cleanup,text=True,capture_output=True,check=True,timeout=12)
 report={'ssh_endpoint':{'host':'127.0.0.1','port':args.ssh_port,'user':'vprouterlab','key':str(args.ssh_key.resolve()),'known_hosts':str(args.ssh_known_hosts.resolve()),'known_hosts_sha256':hashlib.sha256(args.ssh_known_hosts.read_bytes()).hexdigest()},'schema_version':1,'tailscale_version':'1.102.5','source_index':'tailscale/tailscale@'+index_digest,'inventory_tool_sha256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),'platform':meta,'public_files':rows,'cleanup':json.loads(removed.stdout),'runtime_execution':'NOT_RUN','production_changes':False}
-(base/('tailscale-program-inventory-'+arch+'.json')).write_text(json.dumps(report,indent=2)+'\n')
+report_path=args.report or base/('tailscale-program-inventory-'+arch+'.json')
+with report_path.open('x') as output: output.write(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report,indent=2))

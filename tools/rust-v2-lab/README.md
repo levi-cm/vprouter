@@ -5,6 +5,22 @@ that were developed under ignored `target/` paths. The source manifest records
 all 293 original relative paths, sizes and SHA256 hashes. Private keys, profiles,
 VM disks, image contexts, raw traces, captures and identity state are excluded.
 
+Run 410 adds three separately named Bootstrap runner/failure-inspector/selector-
+archiver sources (296 manifest entries total). Its reservation, provenance,
+collector, state inspector and offline tests live alongside this README. They
+use `run-410-*` and `bootstrap410-driver-cost`; the consumed 409 reservation,
+claim and original controller paths are not reused. The 410 runner always
+requires its explicit reservation, including `--preflight-only`, and compiles
+all four remote Python programs before any claim. Collection preserves recursive
+baseline references as well as bound inputs. Full Bootstrap witness validation
+and runtime/release acceptance remain separate from preservation receipts.
+
+Run 409's cleanly powered-off overlay and original records are read-only in
+`/DATA/vprouter-lab/preserved/run409-guest/`; never boot that overlay writable.
+Its cold disk preservation supersedes selector archival, which was not run.
+The preparation report records the new guest/candidate/baseline and exact 410
+command. Preparation does not execute or authorize the experiment.
+
 These are development/test implementations, including historical variants.
 Many expect their original `target/` working-directory layout, local ephemeral
 VM ports and protected Root-owned lab markers. Do not execute this archive as

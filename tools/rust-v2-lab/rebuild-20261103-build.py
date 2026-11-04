@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fresh lab rebuild; ARM64 is compile-only. No VM, SSH or enrollment actions."""
 import datetime
+import argparse
 import hashlib
 import json
 import os
@@ -11,9 +12,12 @@ import tempfile
 if not __debug__:
     raise RuntimeError('optimized_python_refused')
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--name')
+args = parser.parse_args()
 root = pathlib.Path.cwd()
 stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-out = root / 'target/candidates' / ('rebuild-' + stamp)
+out = root / 'target/candidates' / (args.name or ('rebuild-' + stamp))
 out.mkdir(mode=0o700)
 print(json.dumps({'build_directory': str(out)}), flush=True)
 
@@ -35,7 +39,7 @@ for arch, triple in [('amd64', 'x86_64'), ('arm64', 'aarch64')]:
     env['AR_' + target.replace('-', '_')] = str(cross / (triple + '-linux-musl-ar'))
     env['CARGO_TARGET_' + target.replace('-', '_').upper() + '_RUSTFLAGS'] = '-C relocation-model=static'
     env['CARGO_TARGET_' + target.replace('-', '_').upper() + '_LINKER'] = 'rust-lld'
-    common = ['cargo', 'build', '--locked', '--release', '--target', target]
+    common = ['cargo', 'build', '--locked', '--release', '-j', '4', '--target', target]
     init_args = common + ['-p', 'vprouter-launch', '--bin', 'vprouter-gateway-init']
     run(common + ['-p', 'vprouter-worker', '--bin', 'vprouter-worker-observe', '--bin', 'vprouter-worker-monitor'], env)
     run(init_args, env)
@@ -52,7 +56,7 @@ for arch, triple in [('amd64', 'x86_64'), ('arm64', 'aarch64')]:
     run(init_args, env)
     init = next(x for x in manifest['programs'] if x['role'] == 'gateway_init')
     assert sha(root / 'target' / target / 'release/vprouter-gateway-init') == init['sha256']
-    build = run(['cargo', 'test', '--locked', '--release', '--target', target,
+    build = run(['cargo', 'test', '--locked', '--release', '-j', '4', '--target', target,
                  '-p', 'vprouter-launch', '--test', 'actual_lab', '--no-run',
                  '--message-format=json'], env, True)
     events = [json.loads(line) for line in build.splitlines() if line.startswith('{')]
@@ -93,22 +97,10 @@ for arch in ('amd64', 'arm64'):
     context = context_dir / 'context.tar'
     platforms[arch].update(context=str(context), context_sha256=sha(context))
 
-# Preserve the branch, index and existing unfinished work. The candidate is an
-# immutable local Git object/ref used solely to bind exact source to test bytes.
-with tempfile.TemporaryDirectory(dir=out) as temporary:
-    env = dict(os.environ, GIT_INDEX_FILE=str(pathlib.Path(temporary) / 'index'))
-    parent = run(['git', 'rev-parse', 'HEAD'], capture=True).strip()
-    run(['git', 'read-tree', parent], env)
-    run(['git', 'add', '-u'], env)
-    run(['git', 'add', '--', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'crates', 'examples/v2', 'docs/rust-v2/programs-amd64.json', 'docs/rust-v2/programs-arm64.json'], env)
-    tree = run(['git', 'write-tree'], env, True).strip()
-    identity = dict(os.environ, GIT_AUTHOR_NAME='Codex', GIT_AUTHOR_EMAIL='codex@localhost',
-                    GIT_COMMITTER_NAME='Codex', GIT_COMMITTER_EMAIL='codex@localhost')
-    source_commit = subprocess.check_output(['git', 'commit-tree', tree, '-p', parent], env=identity,
-                       input=('Local Rust v2 test candidate ' + stamp + '\n').encode()).decode().strip()
-    ref = 'refs/vprouter-test-candidates/' + stamp
-    run(['git', 'update-ref', ref, source_commit, '0' * 40])
-    (out / 'created-ref.json').write_text(json.dumps({'ref': ref, 'commit': source_commit}) + '\n')
+# Freeze directly from existing HEAD; no index, commit, object or ref writes.
+# Fail if generated manifests or any other build input differ from that commit.
+source_commit = run(['git', 'rev-parse', 'HEAD'], capture=True).strip()
+assert source_commit == 'da7556282d5fc828a9391a64ab47adab05a55510'
 source = out / 'source.tar'
 with source.open('xb') as stream:
     subprocess.run(['git', 'archive', '--format=tar', source_commit,

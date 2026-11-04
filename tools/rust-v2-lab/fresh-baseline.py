@@ -133,7 +133,7 @@ def stable(value):
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('action',choices=['collect','author','compare']);parser.add_argument('candidate',type=pathlib.Path);parser.add_argument('evidence',type=pathlib.Path);args=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--expected-boot-id',default='e14efc10-050b-41b0-89d8-1e946725098c');parser.add_argument('action',choices=['collect','author','compare']);parser.add_argument('candidate',type=pathlib.Path);parser.add_argument('evidence',type=pathlib.Path);args=parser.parse_args()
     c=json.loads(args.candidate.read_bytes());e=args.evidence;platform='debian-clean-x86_64'
     dump=e/'independent-netlink.json';admission=e/'admission.json'
     if args.action=='collect':
@@ -143,7 +143,7 @@ def main():
         assert r.returncode==0 and not r.stderr,r.stderr
         save(dump,json.loads(r.stdout));print(dump);return
     data=json.loads(dump.read_bytes());a=json.loads(admission.read_bytes());expected=decode(data);shape=shape_module();shape.validate_shape(expected)
-    assert data['boot_id']==a['boot_id']=='e14efc10-050b-41b0-89d8-1e946725098c'
+    assert data['boot_id']==a['boot_id']==args.expected_boot_id
     assert expected['namespace']==a['namespace']['/proc/1/ns/net']==a['namespace']['/proc/self/ns/net']
     assert {v['name']:v['index'] for v in expected['links']}=={'lo':1,'ens2':2,'docker0':3}
     assert len(expected['addresses'])==6 and len(expected['routes'])==19 and len(expected['rules'])==5

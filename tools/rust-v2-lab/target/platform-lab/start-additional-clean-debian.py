@@ -4,6 +4,8 @@ Use only the immutable cached original Debian base after exact checksum
 verification. Never copy a running overlay, enrollment or provider state.
 """
 import datetime
+import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -12,7 +14,19 @@ import socket
 import subprocess
 
 
+if not __debug__:
+    raise RuntimeError('optimized_python_refused')
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--instance-id', required=True)
+args = parser.parse_args()
+assert args.instance_id.startswith('vprouter-run410-') and len(args.instance_id) < 100
 repo = pathlib.Path.cwd()
+lock = (repo / 'target/lab-state/guest-lifecycle.lock').open('a')
+fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+for proc in pathlib.Path('/proc').glob('[0-9]*'):
+    try: raw = (proc / 'cmdline').read_bytes().split(b'\0')[0]
+    except FileNotFoundError: continue
+    assert not pathlib.PurePosixPath(raw.decode()).name.startswith('qemu-system-'), ('one_guest_only', proc.name)
 platform_root = repo / "target/platform-lab"
 state = platform_root / "debian-clean-x86_64"
 assert not state.exists(), "existing_state_requires_review"
@@ -26,7 +40,7 @@ matches = [line.split()[0] for line in checksum_file.read_text().splitlines()
 assert len(matches) == 1
 with image.open("rb") as stream:
     digest = hashlib.file_digest(stream, "sha512").hexdigest()
-assert digest == matches[0]
+assert digest == matches[0] == "16e0965312c56feb331049d45d2b1b5778f3f942a33d4300eedbb97527707f2bea87c0006f3e4cc7a25fadbff739c4e235a51fb9bcd1b66fd554f7f8e80ba45c"
 state.mkdir(mode=0o700)
 tools = repo / "target/lab-tools/root"
 env = dict(os.environ, LD_LIBRARY_PATH=str(tools / "usr/lib/x86_64-linux-gnu"),
@@ -46,7 +60,7 @@ config = {
                ["sh", "-c", "test -S /run/docker.sock && test -f /sys/fs/cgroup/cgroup.controllers && touch /var/lib/vprouter-v2-lab/bootstrap-complete"]],
 }
 (state / "user-data").write_text("#cloud-config\n" + json.dumps(config, indent=2) + "\n")
-(state / "meta-data").write_text(json.dumps({"instance-id": "vprouter-debian-clean-20261027", "local-hostname": "vprouter-debian-clean-lab"}) + "\n")
+(state / "meta-data").write_text(json.dumps({"instance-id": args.instance_id, "local-hostname": "vprouter-debian-clean-lab"}) + "\n")
 subprocess.run([str(tools / "usr/bin/genisoimage"), "-quiet", "-output", str(state / "seed.iso"),
                 "-volid", "cidata", "-joliet", "-rock", str(state / "user-data"), str(state / "meta-data")], env=env, check=True)
 disk = state / "guest.qcow2"
@@ -65,7 +79,7 @@ with (state / "qemu.log").open("xb") as log:
                                stderr=subprocess.STDOUT, start_new_session=True)
 raw = pathlib.Path("/proc", str(process.pid), "stat").read_text()
 start = int(raw[raw.rfind(")") + 2:].split()[19])
-record = dict(observed_at_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+record = dict(instance_id=args.instance_id, controller_boot_id=pathlib.Path("/proc/sys/kernel/random/boot_id").read_text().strip(), observed_at_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
               platform="debian-clean-x86_64", pid=process.pid, start_time=start, ssh_port=port, argv=argv,
               base_image=str(image), base_image_sha512=digest, checksum_manifest=str(checksum_file),
               test_status="BOOTING_NOT_VERIFIED", identities_imported=False, provider_credentials_imported=False,

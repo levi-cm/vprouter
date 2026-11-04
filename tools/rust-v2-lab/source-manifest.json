@@ -1690,8 +1690,8 @@
     {
       "source_path": "target/platform-lab/start-additional-clean-debian.py",
       "archive_path": "tools/rust-v2-lab/target/platform-lab/start-additional-clean-debian.py",
-      "sha256": "5db133313f666171adc5227972d681f3aae95b4db2c74e0f92b551ef13b43842",
-      "bytes": 4933
+      "sha256": "3d46cf45eb3678bdc19691485dc5143a1dec6eb57f433eb720f8a15e5e9854ec",
+      "bytes": 5868
     },
     {
       "source_path": "target/platform-lab/start-cloud-guests.py",
@@ -1758,6 +1758,24 @@
       "archive_path": "tools/rust-v2-lab/target/verify-continuation-candidate.py",
       "sha256": "303b231a16aa1d697434570d8c4a8cf898b15818439bffd08969ba5c792d7ae9",
       "bytes": 3766
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-secret-bootstrap410.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-bootstrap410.py",
+      "sha256": "1e770fd9124724b8e7b8f3a8cf34958c8cdc4312936982a148e81d96d7223cf5",
+      "bytes": 13410
+    },
+    {
+      "source_path": "target/inspect-secret-bootstrap410-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-secret-bootstrap410-failure.py",
+      "sha256": "26c962e407f648dea8bf79449054dfdc0a229286cf4bb9f65e543e6e830cdf55",
+      "bytes": 8046
+    },
+    {
+      "source_path": "target/archive-secret-bootstrap410-selectors.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-secret-bootstrap410-selectors.py",
+      "sha256": "ea79d25330df785be7c493fc40d4c6a216d6ee96f81f040cc06098831420a299",
+      "bytes": 6554
     }
   ]
 }

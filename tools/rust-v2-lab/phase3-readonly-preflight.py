@@ -6,6 +6,7 @@ Clock evidence is direct x86 syscall availability in the guest root process,
 not execution of the frozen Rust driver or ARM runtime evidence.
 """
 import hashlib
+import argparse
 import json
 import pathlib
 import subprocess
@@ -49,12 +50,12 @@ print(json.dumps(dict(boot_id=pathlib.Path('/proc/sys/kernel/random/boot_id').re
 
 
 def main():
-    output=pathlib.Path(sys.argv[1])
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('output',type=pathlib.Path);parser.add_argument('--expected-boot-id',default='e14efc10-050b-41b0-89d8-1e946725098c');args=parser.parse_args();output=args.output
     ssh=['ssh','-F','/dev/null','-o','GlobalKnownHostsFile=/dev/null','-o','IdentitiesOnly=yes','-o','IdentityAgent=none','-o','BatchMode=yes','-o','UpdateHostKeys=no','-i','target/lab-state/id_ed25519','-p22036','-o','UserKnownHostsFile=target/platform-lab/debian-clean-x86_64/known_hosts','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5','vprouterlab@127.0.0.1','sudo -n python3 -I -']
     r=subprocess.run(ssh,input=REMOTE,capture_output=True,text=True,timeout=30)
     with output.open('x') as f:json.dump(dict(argv=ssh,exit_code=r.returncode,stdout=r.stdout,stderr=r.stderr,helper_sha256=hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()),f,indent=2)
     assert r.returncode==0 and not r.stderr,r.stderr
-    data=json.loads(r.stdout);assert data['boot_id']=='e14efc10-050b-41b0-89d8-1e946725098c'
+    data=json.loads(r.stdout);assert data['boot_id']==args.expected_boot_id
     print(json.dumps(data,indent=2))
 
 

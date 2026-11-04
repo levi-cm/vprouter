@@ -93,8 +93,11 @@ def text(raw):
 
 def decode(data):
     result=dict(namespace=data['namespace'],links=[],addresses=[],routes=[],rules=[])
-    for group,rows in data['dumps'].items():
-        request=int(group.split('/')[0])
+    # JSON sort_keys puts family 10 before 2; decode in native request order.
+    groups=((18,0),(22,0),(26,2),(26,10),(34,2),(34,10))
+    assert set(data['dumps'])=={f'{request}/{family}' for request,family in groups},'fresh_lab_dump_groups'
+    for request,family in groups:
+        rows=data['dumps'][f'{request}/{family}']
         for row in rows:
             raw=bytes.fromhex(row)[16:]
             if request==18:
@@ -159,7 +162,8 @@ def main():
         template=dict(schema=1,platform=platform,source_binding=c['binding'],baseline=expected,baseline_sha256=review['baseline_sha256'],prior_evidence=refs,review_sha256=sha(review_path));shape.validate_template(template,c['binding'],platform);save(template_path,template)
         print(json.dumps(dict(template=str(template_path),review=str(review_path),counts=review['counts'])));return
     template=json.loads(template_path.read_bytes());shape.validate_template(template,c['binding'],platform)
-    assert canonical(expected)==canonical(template['baseline'])
+    # Full multisets: templates authored by the earlier decoder are IPv6-first.
+    assert canonical(stable(expected))==canonical(stable(template['baseline'])),'template_multiset_drift'
     projection_path=args.candidate.parent/('host-projection-'+platform)/'record.json';p=json.loads(projection_path.read_bytes())
     assert p['source_binding']==c['binding'] and p['artifact_sha256']==c['platforms']['amd64']['artifact_sha256'] and p['platform']==platform
     assert p['report']['read_only'] is True and p['report']['declaration_authority'] is p['report']['host_change_authority'] is False

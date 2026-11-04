@@ -1078,3 +1078,17 @@ reservation superseded twice (chain preserved, budget 1 unspent; live SHA 533cdb
 Re-review: implementation PASS, only gate left = checkpoint/push. Legacy smoke
 smoke-host-projection-controller.py fails on deleted historical fixture (not PASS).
 Full Bootstrap witness validation NOT_RUN. release_ready=false.
+
+2026-11-04 run409 + inventory oracle fix. Run409 executed once (16:13:48Z), exit1 at
+host.inventory "ownership_mismatch"; budget consumed. Post-run C (preserved,
+provenance valid), I (state captured), F (owner unit gone, cgroup absent) done; P
+correctly refused (no Deadline boundary); selector archival A NOT_RUN. Diagnosis:
+cfg(test) lab oracle in host_addition/operation.rs compared route/rule arrays in
+order; fresh baseline was IPv6-first (JSON sort_keys), native read IPv4-first;
+multisets identical, native multiset ownership checks had passed. 409 stopped
+BEFORE the measured Bootstrap loop: no driver-cost/speedup evidence. Fix: oracle
+now full-record multiset (namespace exact), 9 Rust regressions (old predicate fails
+5); fresh-baseline.py decodes in explicit family order, template check is multiset
+(review M1, fixed by orchestrator; 409 template accepted, tampering rejected).
+Review PASS. 181 musl tests, 34 Python tests, fmt, strict Clippy PASS; ARM64
+build/link only. Next: new candidate, clean guest (preserve 409 guest disk), run410.

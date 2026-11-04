@@ -650,6 +650,39 @@ pub(super) fn lab_added() -> Result<(HostAddedPrimary, serde_json::Value)> {
     Ok((value.ok_or(Error::OwnershipMismatch)?, witness))
 }
 #[cfg(test)]
+fn lab_inventory_preserved(
+    actual: &serde_json::Value,
+    declaration: &serde_json::Value,
+) -> Result<()> {
+    if actual["namespace"] != declaration["namespace"] {
+        return Err(Error::OwnershipMismatch);
+    }
+    // Sort complete canonical JSON records, retaining every field and duplicate.
+    // The production multiset helper is private to vprouter-network.
+    let sorted = |records: &[serde_json::Value]| {
+        let mut records: Vec<_> = records
+            .iter()
+            .cloned()
+            .map(|mut record| {
+                record.sort_all_objects();
+                record.to_string()
+            })
+            .collect();
+        records.sort_unstable();
+        records
+    };
+    for key in ["addresses", "routes", "rules"] {
+        let actual = actual[key].as_array().ok_or(Error::OwnershipMismatch)?;
+        let declared = declaration[key]
+            .as_array()
+            .ok_or(Error::OwnershipMismatch)?;
+        if actual.len() != declared.len() || sorted(actual) != sorted(declared) {
+            return Err(Error::OwnershipMismatch);
+        }
+    }
+    Ok(())
+}
+#[cfg(test)]
 fn lab_build(
     fault: u8,
     continuation: bool,
@@ -1066,11 +1099,7 @@ fn lab_build(
     if matches!(fault, 0 | 2) {
         let op = &operations[3];
         let actual = &op["host_observation"];
-        for key in ["namespace", "addresses", "routes", "rules"] {
-            if actual[key] != declaration[key] {
-                return Err(Error::OwnershipMismatch);
-            }
-        }
+        lab_inventory_preserved(actual, &declaration)?;
         let links = actual["links"].as_array().ok_or(Error::OwnershipMismatch)?;
         let prior = declaration["links"]
             .as_array()
@@ -1220,5 +1249,193 @@ impl HostLinkedAssembly {
             link: Rc::downgrade(&n.anchor),
             generation: Rc::downgrade(input.generation.as_ref().ok_or(Error::OwnershipMismatch)?),
         })
+    }
+}
+
+#[cfg(test)]
+mod inventory_oracle_tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    fn declaration() -> Value {
+        // Minimal representatives of 409's authored IPv6-first routes/rules.
+        // Synthetic namespace and addresses; no live lab state is loaded.
+        json!({
+            "namespace": [4, 99],
+            "addresses": [
+                {"broadcast": "192.0.2.255", "route_priority": null, "flags": 128,
+                 "index": 2, "address": "192.0.2.1", "prefix": 24, "scope": 0},
+                {"broadcast": null, "route_priority": 256, "flags": 128,
+                 "index": 2, "address": "fe80::1", "prefix": 64, "scope": 253}
+            ],
+            "routes": [
+                {"nexthop_id": null, "preference": 0, "destination": "fe80::",
+                 "prefix": 64, "table": 254, "output": 2, "source": null,
+                 "gateway": null, "kind": 1, "scope": 0, "protocol": 2,
+                 "metric": 256, "flags": 0},
+                {"nexthop_id": null, "preference": 0, "destination": "0.0.0.0",
+                 "prefix": 0, "table": 254, "output": 2, "source": "192.0.2.1",
+                 "gateway": "192.0.2.254", "kind": 1, "scope": 0, "protocol": 3,
+                 "metric": 0, "flags": 0}
+            ],
+            "rules": [
+                {"ipv6": true, "priority": 0, "table": 255, "action": 1,
+                 "flags": 0, "fwmark": null, "fwmask": null,
+                 "suppress_prefixlen": 4294967295_u32, "suppress_ifgroup": null,
+                 "goto": null, "realm": null, "protocol": 2},
+                {"ipv6": false, "priority": 32766, "table": 254, "action": 1,
+                 "flags": 0, "fwmark": null, "fwmask": null,
+                 "suppress_prefixlen": 4294967295_u32, "suppress_ifgroup": null,
+                 "goto": null, "realm": null, "protocol": 2}
+            ]
+        })
+    }
+
+    fn assert_mismatch(actual: &Value, declaration: &Value, case: &str) {
+        assert!(
+            matches!(
+                lab_inventory_preserved(actual, declaration),
+                Err(Error::OwnershipMismatch)
+            ),
+            "{case}"
+        );
+    }
+
+    fn assert_native_family_order(keys: &[&str]) {
+        let declaration = declaration();
+        // Match the native HostRead Routes4/Routes6 and Rules4/Rules6 phases.
+        let mut actual = declaration.clone();
+        for key in keys {
+            actual[*key].as_array_mut().unwrap().reverse();
+        }
+        assert!(
+            lab_inventory_preserved(&actual, &declaration).is_ok(),
+            "{keys:?}"
+        );
+    }
+
+    #[test]
+    fn routes_accept_native_ipv4_first_order() {
+        assert_native_family_order(&["routes"]);
+    }
+
+    #[test]
+    fn rules_accept_native_ipv4_first_order() {
+        assert_native_family_order(&["rules"]);
+    }
+
+    #[test]
+    fn routes_and_rules_accept_native_ipv4_first_order() {
+        assert_native_family_order(&["routes", "rules"]);
+    }
+
+    #[test]
+    fn addresses_accept_reordering() {
+        let declaration = declaration();
+        let mut actual = declaration.clone();
+        actual["addresses"].as_array_mut().unwrap().reverse();
+        assert!(lab_inventory_preserved(&actual, &declaration).is_ok());
+    }
+
+    #[test]
+    fn identical_and_empty_record_collections_match() {
+        let declaration = declaration();
+        assert!(lab_inventory_preserved(&declaration, &declaration).is_ok());
+        let empty = json!({"namespace": [4, 99], "addresses": [], "routes": [], "rules": []});
+        assert!(lab_inventory_preserved(&empty, &empty).is_ok());
+    }
+
+    #[test]
+    fn missing_extra_duplicated_and_replaced_records_fail() {
+        let declaration = declaration();
+        for key in ["addresses", "routes", "rules"] {
+            for change in ["missing", "extra", "duplicated", "replaced"] {
+                let mut actual = declaration.clone();
+                let records = actual[key].as_array_mut().unwrap();
+                match change {
+                    "missing" => {
+                        records.pop();
+                    }
+                    "extra" => records.push(json!({"unexpected": true})),
+                    "duplicated" => records.push(records[0].clone()),
+                    "replaced" => records[1] = records[0].clone(),
+                    _ => unreachable!(),
+                }
+                assert_mismatch(&actual, &declaration, &format!("{key}/{change}"));
+            }
+        }
+    }
+
+    #[test]
+    fn duplicate_multiplicity_is_preserved_even_with_equal_lengths_and_sets() {
+        for key in ["addresses", "routes", "rules"] {
+            let mut declaration = declaration();
+            let records = declaration[key].as_array_mut().unwrap();
+            records.push(records[0].clone()); // A, B, A
+            let mut actual = declaration.clone();
+            actual[key].as_array_mut().unwrap().rotate_left(1); // B, A, A
+            assert!(
+                lab_inventory_preserved(&actual, &declaration).is_ok(),
+                "{key}"
+            );
+            actual[key][2] = actual[key][0].clone(); // B, A, B: same set and length
+            assert_mismatch(&actual, &declaration, key);
+        }
+    }
+
+    #[test]
+    fn every_record_field_is_compared_including_metric_table_and_flags() {
+        let declaration = declaration();
+        for key in ["addresses", "routes", "rules"] {
+            for (index, record) in declaration[key].as_array().unwrap().iter().enumerate() {
+                for (field, value) in record.as_object().unwrap() {
+                    let replacement = match value {
+                        Value::Null => json!(1),
+                        Value::Bool(value) => json!(!value),
+                        Value::Number(value) => json!(value.as_u64().unwrap() + 1),
+                        Value::String(value) => json!(format!("{value}-changed")),
+                        _ => unreachable!("fixture fields are scalars"),
+                    };
+                    let mut actual = declaration.clone();
+                    actual[key][index][field] = replacement;
+                    assert_mismatch(&actual, &declaration, &format!("{key}/{index}/{field}"));
+                    let mut actual = declaration.clone();
+                    actual[key][index].as_object_mut().unwrap().remove(field);
+                    assert_mismatch(
+                        &actual,
+                        &declaration,
+                        &format!("{key}/{index}/missing/{field}"),
+                    );
+                }
+                let mut actual = declaration.clone();
+                actual[key][index]["unexpected"] = json!(true);
+                assert_mismatch(&actual, &declaration, &format!("{key}/{index}/extra-field"));
+            }
+        }
+    }
+
+    #[test]
+    fn namespace_identity_and_order_stay_exact() {
+        let declaration = declaration();
+        for namespace in [json!([5, 99]), json!([4, 100]), json!([99, 4])] {
+            let mut actual = declaration.clone();
+            actual["namespace"] = namespace;
+            assert_mismatch(&actual, &declaration, "namespace");
+        }
+    }
+
+    #[test]
+    fn missing_or_non_array_record_collections_fail() {
+        let declaration = declaration();
+        for key in ["addresses", "routes", "rules"] {
+            let mut actual = declaration.clone();
+            actual.as_object_mut().unwrap().remove(key);
+            assert_mismatch(&actual, &declaration, key);
+            for value in [Value::Null, json!({}), json!(0)] {
+                let mut actual = declaration.clone();
+                actual[key] = value;
+                assert_mismatch(&actual, &declaration, key);
+            }
+        }
     }
 }

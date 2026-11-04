@@ -6,6 +6,19 @@ assert record['exit_code']!=0 and record['component_test_mode'] in ('secret_boot
 assert binding['source_archive_sha256']==record['source_archive_sha256']and binding['artifact_sha256']==record['artifact_sha256']
 directory=pathlib.Path(sys.argv[2]).parent
 for key,name in [('runner_sha256','controller-runner.py'),('guest_sha256','controller-guest.py'),('context_checker_sha256','controller-context.py'),('host_declaration_builder_sha256','controller-host-declaration.py')]:assert hashlib.sha256((directory/name).read_bytes()).hexdigest()==record[key]
+import importlib.util
+spec=importlib.util.spec_from_file_location('fresh_provenance',pathlib.Path(__file__).with_name('quarantine_evidence_base.py'));fresh=importlib.util.module_from_spec(spec);spec.loader.exec_module(fresh)
+directory=pathlib.Path(sys.argv[2]).parent
+review_path=directory/'controller-baseline-reconciliation.json'
+review=json.loads(review_path.read_bytes())if review_path.exists()else{}
+fresh_record=fresh.requires_fresh_provenance(record,review,run)
+if fresh_record:
+ assert 'run_reservation'in record,'fresh_record_requires_reservation'
+ reservation=json.loads(pathlib.Path(record['run_reservation']['path']).read_bytes());candidate=json.loads(pathlib.Path(reservation['candidate']).read_bytes())
+ fresh.validate_fresh_provenance(json.loads((directory/'controller-authored-baseline.json').read_bytes()),review,candidate,record)
+ assert run==409
+else:
+ assert not fresh.requires_fresh_provenance(record,review,run),'fresh_identity_in_historical_fallback'
 rows=[]
 for line in record['stdout'].splitlines():
  try:rows.append(json.loads(line))
@@ -49,6 +62,8 @@ if GATEWAY:
  if r.returncode==0:out['gateway_state']=json.loads(r.stdout)
 print(json.dumps(out))
 '''.replace('NONCE',repr(nonce)).replace('MANIFEST',repr(manifest)).replace('HOST',repr(hosts[0])).replace('BASELINE',repr(baselines[0]if baselines else None)).replace('UNIT',repr(unit)).replace('GATEWAY',repr(gateways[0]if gateways else None))
+if fresh_record:script="import pathlib;assert pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()=="+repr(record['guest_boot_id'])+'\n'+script
+compile(script,'inspect-secret-bootstrap-failure.py-remote','exec')
 r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=script,capture_output=True,text=True,timeout=30);assert r.returncode==0,r.stderr
 out=json.loads(r.stdout);out.update(record=str(path),record_sha256=hashlib.sha256(raw).hexdigest(),source_binding=record['source_binding'],artifact_sha256=record['artifact_sha256'],platform=record['platform'],expected_owner_unit=unit,read_only=True,private_profile_contents_read=False,signals_unmount_or_cleanup=False)
 destination=pathlib.Path(f'target/lab-state/secret-bootstrap-failure-run-{run}.json')

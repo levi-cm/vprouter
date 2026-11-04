@@ -574,8 +574,8 @@
     {
       "source_path": "target/quarantine_evidence_base.py",
       "archive_path": "tools/rust-v2-lab/target/quarantine_evidence_base.py",
-      "sha256": "e8fce88abd163c129952372f97c96144795c34474f03bc13de4fa9325b5730fc",
-      "bytes": 29703
+      "sha256": "30c36c2ffe19afb891fe611fbc61b1a7a0fb59526f7e55b4ef92614ef04b61ce",
+      "bytes": 35725
     },
     {
       "source_path": "target/quarantine_history_schema.py",
@@ -1150,8 +1150,8 @@
     {
       "source_path": "target/platform-lab/run-native-inspection-preflight.py",
       "archive_path": "tools/rust-v2-lab/target/platform-lab/run-native-inspection-preflight.py",
-      "sha256": "3297bd13525ebdb1f0d49f515695f1e282816862e4aef23f8bd8fc0a621c8184",
-      "bytes": 6497
+      "sha256": "ef567b44c5547225152b14a380afcc3aadefad5cc06de784aae8212ece302c3d",
+      "bytes": 6607
     },
     {
       "source_path": "target/platform-lab/run-nsfs-fd-mount-probe.py",
@@ -1714,8 +1714,8 @@
     {
       "source_path": "target/platform-lab/run-frozen-secret-bootstrap.py",
       "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-bootstrap.py",
-      "sha256": "6ac51a1879688d1df7d7a1486cd4e51a0b9c8974284958acf82d59f97f9c0ea2",
-      "bytes": 10280
+      "sha256": "14de56585a2379ca1f3305916b295be1dbb050cf0bcae3dff7bb5fa9bffd4089",
+      "bytes": 13739
     },
     {
       "source_path": "target/platform-lab/secret-bootstrap.guest.py",
@@ -1726,14 +1726,14 @@
     {
       "source_path": "target/inspect-secret-bootstrap-failure.py",
       "archive_path": "tools/rust-v2-lab/target/inspect-secret-bootstrap-failure.py",
-      "sha256": "9a79e98c0e606566db6107538572afc77eee37eeafc8f547dae8f5c343b24608",
-      "bytes": 6851
+      "sha256": "2e0b68dfdd08a7c32eab8db2752d5d7126662bbdb16a51e526c7ef9a2afe409f",
+      "bytes": 8052
     },
     {
       "source_path": "target/archive-secret-bootstrap-selectors.py",
       "archive_path": "tools/rust-v2-lab/target/archive-secret-bootstrap-selectors.py",
-      "sha256": "e43e8cef7fa3f16347056ec61cb141cd62d7c105659ed699b8c5fc58771117a1",
-      "bytes": 5357
+      "sha256": "b5a6fdff7178cbfda2ad120e8a1c3783b2a9c7a9f9d3151793a3cd2044a500f7",
+      "bytes": 6560
     },
     {
       "source_path": "target/author-host-baseline-preserving398.py",

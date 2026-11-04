@@ -1061,3 +1061,20 @@ SSH confinement), fixes2 review PASS. BLOCKER: starting the nested KVM guest har
 resets debdev (00:21, 00:38, ~00:48 on 2026-11-04; last ~1 min after boot, no cargo).
 Lab PAUSED by user; guest down. Run409 needs the lab VM on the physical host, a
 nested-safe CPU config, or similar. No Bootstrap run. release_ready=false.
+
+2026-11-04 debdev crash root cause + rebuild phase 3. Crashes were L0-host OOM kills
+(pre-swap; Oct 21, Nov 3) and, on Nov 4, debdev kernel panics "Host injected async #PF
+in kernel mode" (pstore). User added no-kvmapf to debdev; lab guest restarted under KVM
+(boot e14efc10-...), 15-min soak OK. Phase 3: guest admission, historical-gap
+disposition (398-408 UNRECOVERABLE; fresh-lab route), fresh independently collected
+baseline (3 links/6 addr/19 routes/5 rules; historical_continuity=false) exactly
+matching the frozen projection, exclusive one-shot run409 reservation. Phase 3b:
+reservation-bound fresh-provenance branch for post-run collector/failure
+inspector/selector archiver (historical branch unchanged), new collector/inspector.
+Review FAIL/NO-GO (C1 mis-indented remote listing would burn the claim; I1 marker-
+deletion downgrade; M1 inspector timeout). Fixes: pre-claim compile gate for every
+remote program (also in --preflight-only), fresh identity enforced, timeout receipt;
+reservation superseded twice (chain preserved, budget 1 unspent; live SHA 533cdbe2...).
+Re-review: implementation PASS, only gate left = checkpoint/push. Legacy smoke
+smoke-host-projection-controller.py fails on deleted historical fixture (not PASS).
+Full Bootstrap witness validation NOT_RUN. release_ready=false.

@@ -24,6 +24,7 @@ validate_mechanics=mechanics_namespace['validate_mechanics']
 candidate_path = pathlib.Path(sys.argv[1])
 platform = sys.argv[2]
 choices = {
+    "debian-clean-x86_64": ("amd64", "x86_64", 22036, "target/platform-lab/debian-clean-x86_64/known_hosts"),
     "debian-x86_64": ("amd64", "x86_64", 22032, "target/lab-state/known_hosts"),
     "debian-arm64": ("arm64", "aarch64", 22034, "target/platform-lab/debian-arm64/known_hosts"),
     "arch-x86_64": ("amd64", "x86_64", 22033, "target/platform-lab/arch-x86_64/known_hosts"),

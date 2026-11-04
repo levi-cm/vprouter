@@ -5,6 +5,19 @@ run=int(sys.argv[1]);binding=json.loads(pathlib.Path(sys.argv[2]).read_text());p
 assert record['exit_code']!=0 and record['component_test_mode'] in ('secret_bootstrap_success', 'secret_bootstrap_postbirth_failure', 'secret_bootstrap_result_failure', 'secret_bootstrap_registration_failure', 'secret_bootstrap_handoff_fence', 'secret_bootstrap_handoff_partial', 'secret_bootstrap_handoff_duplicate')and reference['record_sha256']==hashlib.sha256(raw).hexdigest()and reference['source_binding']==record['source_binding']and reference['platform']==binding['platform']==record['platform']
 assert binding['record']==str(path)and binding['source_commit']==record['source_binding']['source_commit']and binding['source_archive_sha256']==record['source_archive_sha256']and binding['artifact_sha256']==record['artifact_sha256']
 assert reference['owner_unit']['LoadState']=='not-found'and reference['owner_cgroup_exists']is False
+import importlib.util
+spec=importlib.util.spec_from_file_location('fresh_provenance',pathlib.Path(__file__).with_name('quarantine_evidence_base.py'));fresh=importlib.util.module_from_spec(spec);spec.loader.exec_module(fresh)
+directory=pathlib.Path(sys.argv[2]).parent
+review_path=directory/'controller-baseline-reconciliation.json'
+review=json.loads(review_path.read_bytes())if review_path.exists()else{}
+fresh_record=fresh.requires_fresh_provenance(record,review,run)
+if fresh_record:
+ assert 'run_reservation'in record,'fresh_record_requires_reservation'
+ reservation=json.loads(pathlib.Path(record['run_reservation']['path']).read_bytes());candidate=json.loads(pathlib.Path(reservation['candidate']).read_bytes())
+ fresh.validate_fresh_provenance(json.loads((directory/'controller-authored-baseline.json').read_bytes()),review,candidate,record)
+ assert run==409
+else:
+ assert not fresh.requires_fresh_provenance(record,review,run),'fresh_identity_in_historical_fallback'
 rows=[]
 for line in record['stdout'].splitlines():
  try:rows.append(json.loads(line))
@@ -36,6 +49,8 @@ for directory in(root,inputs):
  fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY);os.fsync(fd);os.close(fd)
 print(json.dumps(dict(failed_run=RUN,exact_owner_unit_verified_absent=UNIT,selectors_archived=outputs,container_state_profiles_canonical_and_mounts_retained=True,private_profile_contents_read=False,signals_or_unmounts=False)))
 '''.replace('NONCE',repr(nonce)).replace('UNIT',repr(unit)).replace('SELECTORS',repr(reference['fixed_selectors'])).replace('RUN',str(run)).replace('GATEWAY',repr(gateway))
+if fresh_record:script="import pathlib;assert pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()=="+repr(record['guest_boot_id'])+'\n'+script
+compile(script,'archive-secret-bootstrap-selectors.py-remote','exec')
 r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=script,capture_output=True,text=True,timeout=30);assert r.returncode==0,r.stderr
 out=json.loads(r.stdout);out.update(record=str(path),record_sha256=hashlib.sha256(raw).hexdigest(),source_binding=record['source_binding'],platform=record['platform']);destination=pathlib.Path(f'target/lab-state/secret-bootstrap-selector-archive-run-{run}.json')
 with destination.open('x')as stream:json.dump(out,stream,indent=2);stream.write('\n')

@@ -35,7 +35,7 @@ def main():
         else:
             with retained.open("xb") as output, pathlib.Path(path).open("rb") as input_file:
                 shutil.copyfileobj(input_file, output)
-    opts = ["-i", str(base / "id_ed25519"), "-o", "IdentitiesOnly=yes",
+    opts = ['-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', "-i", str(base / "id_ed25519"), "-o", "IdentitiesOnly=yes",
             "-o", "UserKnownHostsFile=" + str(base / "known_hosts"),
             "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5"]
     ssh = ["ssh", *opts, "-p22032", "vprouterlab@127.0.0.1"]

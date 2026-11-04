@@ -162,7 +162,7 @@ result=dict(observed_at_utc=datetime.datetime.now(datetime.timezone.utc).isoform
 '''
 payload = "nonce=" + repr(nonce) + "\n" + guest
 (output / "guest.py").write_text(payload)
-command = ["ssh", "-i", "target/lab-state/id_ed25519", "-p" + str(port), "-o", "IdentitiesOnly=yes", "-o", "UserKnownHostsFile=" + known, "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5", "vprouterlab@127.0.0.1", "sudo -n python3 -I -"]
+command = ["ssh", '-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', "-i", "target/lab-state/id_ed25519", "-p" + str(port), "-o", "IdentitiesOnly=yes", "-o", "UserKnownHostsFile=" + known, "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5", "vprouterlab@127.0.0.1", "sudo -n python3 -I -"]
 result = subprocess.run(command, input=payload, capture_output=True, text=True, timeout=40)
 (output / "ssh.stdout").write_text(result.stdout)
 (output / "ssh.stderr").write_text(result.stderr)

@@ -29,7 +29,7 @@ for directory in (root,destination):
  fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY);os.fsync(fd);os.close(fd)
 print(json.dumps(dict(failed_run=RUN,exact_owner_unit_verified_absent=UNIT,selectors_archived=outputs,profile_journal_and_other_resources_retained=True,private_profile_contents_read=False)))
 '''.replace('NONCE',repr(nonce)).replace('UNIT',repr(unit)).replace('CONFIG_SHA',repr(reference['configuration_sha256'])).replace('RUN',str(run))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=s,capture_output=True,text=True,timeout=25);assert r.returncode==0,r.stderr
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=s,capture_output=True,text=True,timeout=25);assert r.returncode==0,r.stderr
 out=json.loads(r.stdout);out.update(source_binding=record['source_binding'],record=str(p),record_sha256=hashlib.sha256(raw).hexdigest(),platform=b['platform'])
 destination=pathlib.Path(f'target/lab-state/secret-preparation-selector-archive-run-{run}.json')
 with destination.open('x') as f:json.dump(out,f,indent=2);f.write('\n')

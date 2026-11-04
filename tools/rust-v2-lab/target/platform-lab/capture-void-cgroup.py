@@ -1,6 +1,6 @@
 import pathlib,subprocess,hashlib,json,shlex
 r=pathlib.Path.cwd();s=r/'target/platform-lab/void-x86_64';a=r/'target/continuation-20261026T130553Z/shared-leases/execution_probe';digest=hashlib.sha256(a.read_bytes()).hexdigest();assert digest=='b8d45ec031ab22989e2b4d42ae36ff167e5a6e3dfefade634ada3bd67f01f982'
-opts=['-i',str(r/'target/lab-state/id_ed25519'),'-o','UserKnownHostsFile='+str(s/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5'];ssh=['ssh',*opts,'-p22035','vprouterlab@127.0.0.1'];tmp='/home/vprouterlab/cgroup-shape-probe-'+digest
+opts=['-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i',str(r/'target/lab-state/id_ed25519'),'-o','UserKnownHostsFile='+str(s/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5'];ssh=['ssh',*opts,'-p22035','vprouterlab@127.0.0.1'];tmp='/home/vprouterlab/cgroup-shape-probe-'+digest
 subprocess.run(['scp','-q',*opts,'-P22035',str(a),'vprouterlab@127.0.0.1:'+tmp],check=True)
 code=r'''
 import pathlib,hashlib,subprocess,json,io,tarfile,os,stat

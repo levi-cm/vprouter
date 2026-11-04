@@ -1,6 +1,6 @@
 import pathlib,subprocess,json
 repo=pathlib.Path.cwd();base=repo/'target/lab-state'
-argv=['ssh','-i',str(base/'id_ed25519'),'-o','IdentitiesOnly=yes','-o','UserKnownHostsFile='+str(base/'known_hosts'),'-o','StrictHostKeyChecking=yes','-p22032','vprouterlab@127.0.0.1','sudo python3 -']
+argv=['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', '-i',str(base/'id_ed25519'),'-o','IdentitiesOnly=yes','-o','UserKnownHostsFile='+str(base/'known_hosts'),'-o','StrictHostKeyChecking=yes','-p22032','vprouterlab@127.0.0.1','sudo python3 -']
 guest=r'''
 import pathlib,subprocess,json,os,stat,tarfile,datetime,time
 root=pathlib.Path('/var/lib/vprouter-v2-lab');name='vprouter-v2-lab-primary-enrollment'

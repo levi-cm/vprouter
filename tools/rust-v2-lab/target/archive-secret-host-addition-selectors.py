@@ -36,7 +36,7 @@ for directory in(root,inputs):
  fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY);os.fsync(fd);os.close(fd)
 print(json.dumps(dict(failed_run=RUN,exact_owner_unit_verified_absent=UNIT,selectors_archived=outputs,container_state_profiles_canonical_and_mounts_retained=True,private_profile_contents_read=False,signals_or_unmounts=False)))
 '''.replace('NONCE',repr(nonce)).replace('UNIT',repr(unit)).replace('SELECTORS',repr(reference['fixed_selectors'])).replace('RUN',str(run)).replace('GATEWAY',repr(gateway))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=script,capture_output=True,text=True,timeout=30);assert r.returncode==0,r.stderr
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=script,capture_output=True,text=True,timeout=30);assert r.returncode==0,r.stderr
 out=json.loads(r.stdout);out.update(record=str(path),record_sha256=hashlib.sha256(raw).hexdigest(),source_binding=record['source_binding'],platform=record['platform']);destination=pathlib.Path(f'target/lab-state/secret-host-addition-selector-archive-run-{run}.json')
 with destination.open('x')as stream:json.dump(out,stream,indent=2);stream.write('\n')
 print(json.dumps(out))

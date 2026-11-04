@@ -45,7 +45,7 @@ assert not json.loads(call(['ip','-j','-4','route','show','185.65.134.88/32']))
 print(json.dumps({'observed_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'operation':'delete_exact_failed_attempt_synthetic_wan_veth_only','directory':str(directory),'verified_link_before':wan,'synthetic_endpoint_route_removed_with_link':True,'container_namespace_pins_cgroup_quarantines_retained':True,'production_changes':False}))
 '''.replace("EXPECTED", repr(expected))
 base = pathlib.Path("target/lab-state")
-ssh = ["ssh", "-i", str(base / "id_ed25519"), "-o", "IdentitiesOnly=yes",
+ssh = ["ssh", '-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', "-i", str(base / "id_ed25519"), "-o", "IdentitiesOnly=yes",
        "-o", "UserKnownHostsFile=" + str(base / "known_hosts"), "-o",
        "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5", "-p22032",
        "vprouterlab@127.0.0.1", "sudo python3 -"]

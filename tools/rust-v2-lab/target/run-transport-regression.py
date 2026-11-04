@@ -14,7 +14,7 @@ payload=pathlib.Path(next(e['executable'] for e in events if e.get('reason')=='c
  and e['target']['name']=='transport_lab' and e.get('executable')))
 artifact=out/'payload';artifact.write_bytes(payload.read_bytes());artifact.chmod(0o600)
 digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
-ssh=['ssh','-i',str(base/'id_ed25519'),'-o','IdentitiesOnly=yes','-o',
+ssh=['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', '-i',str(base/'id_ed25519'),'-o','IdentitiesOnly=yes','-o',
  'UserKnownHostsFile='+str(base/'known_hosts'),'-o','StrictHostKeyChecking=yes',
  '-o','ConnectTimeout=5','-p22032','vprouterlab@127.0.0.1','sudo python3 -']
 def guest(script):

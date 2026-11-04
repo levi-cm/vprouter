@@ -20,7 +20,7 @@ artifact=out/'payload';artifact.write_bytes(payload.read_bytes());artifact.chmod
 digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
 probe=out/'execution_probe';probe.write_bytes(pathlib.Path(next(e['executable'] for e in events if e.get('reason')=='compiler-artifact' and e['target']['name']=='execution_probe' and e.get('executable'))).read_bytes());probe.chmod(0o600)
 probe_digest=hashlib.sha256(probe.read_bytes()).hexdigest()
-opts=['-i',str(base/'id_ed25519'),'-o','IdentitiesOnly=yes','-o','UserKnownHostsFile='+str(base/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5']
+opts=['-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', '-i',str(base/'id_ed25519'),'-o','IdentitiesOnly=yes','-o','UserKnownHostsFile='+str(base/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5']
 probe_temporary='/home/vprouterlab/transport-execution-probe-'+probe_digest
 subprocess.run(['scp','-q',*opts,'-P22032',str(probe),'vprouterlab@127.0.0.1:'+probe_temporary],check=True,timeout=20)
 subprocess.run(['ssh',*opts,'-p22032','vprouterlab@127.0.0.1','sudo install -o root -g root -m 0555 '+probe_temporary+' /var/lib/vprouter-v2-lab/launch-execution-probe'],check=True,timeout=10)
@@ -28,7 +28,7 @@ subprocess.run(['ssh',*opts,'-p22032','vprouterlab@127.0.0.1','rm -- '+probe_tem
 runner_source=(root/'tools/guarded-transport-oracle.py').read_text();assert runner_source.count('808789d0d5d59b673c7f6fd55b306c3ecfc05ef0bbdd65731cff2ae7695bd828')==1
 runner=out/'runner.py';runner.write_text(runner_source.replace('808789d0d5d59b673c7f6fd55b306c3ecfc05ef0bbdd65731cff2ae7695bd828',probe_digest))
 (out/'frozen-probe-binding.json').write_text(json.dumps({'source_commit':candidate['source_commit'],'source_archive_sha256':candidate['source_sha256'],'probe_sha256':probe_digest,'runner_sha256':hashlib.sha256(runner.read_bytes()).hexdigest()},indent=2)+'\n')
-ssh=['ssh','-i',str(base/'id_ed25519'),'-o','IdentitiesOnly=yes','-o',
+ssh=['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', '-i',str(base/'id_ed25519'),'-o','IdentitiesOnly=yes','-o',
  'UserKnownHostsFile='+str(base/'known_hosts'),'-o','StrictHostKeyChecking=yes',
  '-o','ConnectTimeout=5','-p22032','vprouterlab@127.0.0.1','sudo python3 -']
 def guest(script):

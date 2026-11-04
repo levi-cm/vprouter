@@ -17,7 +17,7 @@ for scope,kind,key in [('host','h',None),('transport','t','transport'),('data','
  for fd in fds:os.close(fd)
 print(json.dumps(out))
 '''.replace('ENTRY',repr(entry)).replace('TASK',repr(binding['new_directories'][0]))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=25);assert r.returncode==0,r.stderr
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=25);assert r.returncode==0,r.stderr
 tables=json.loads(r.stdout);record={'failed_run':run,'operation':'readonly_exact_retained_terminal_tables','source_commit':reference['source_commit'],'tables':tables}
 with pathlib.Path(f'target/lab-state/terminal{run}-deny-reference.json').open('x') as stream:json.dump(record,stream,indent=2);stream.write('\n')
 print(json.dumps([{'scope':t['scope'],'table_exists':t['exit_code']==0,'drop_rules':sum('rule'in v and any('drop'in z for z in v['rule'].get('expr',[])) for v in (t['observed']or{}).get('nftables',[])),'stderr':t['stderr']} for t in tables],indent=2))

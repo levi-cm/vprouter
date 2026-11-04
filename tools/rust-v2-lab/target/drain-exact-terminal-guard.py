@@ -20,6 +20,6 @@ signal.pidfd_send_signal(fd,signal.SIGKILL,None,0);poll=select.poll();poll.regis
 print(json.dumps({'failed_run':RUN,'exact_guard':e,'signal':'SIGKILL','retained_pidfd_exit_readable':True,'resumed':False,'other_three_expiry_identities_and_cgroups_already_absent':True,'three_exact_terminal_tables_observed_before_kill':True,'namespace_policy_journal_container_resources_retained':True}))
 '''
 for key,value in [('GUARD',guard),('DIGEST',record['artifact_sha256']),('NONCE',nonce),('OTHERS',others),('RUN',run)]:script=script.replace(key,repr(value))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=20);assert r.returncode==0,r.stderr
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=20);assert r.returncode==0,r.stderr
 with pathlib.Path(f'target/lab-state/owner-actor-drain-run-{run}.json').open('x') as stream:stream.write(r.stdout)
 print(r.stdout)

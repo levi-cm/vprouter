@@ -58,7 +58,7 @@ out['journal_entries']=doc['entries'];out['journal_sha256']=hashlib.sha256(path.
 print(json.dumps(out))
 '''
 script = script.replace("NONCE", repr(nonce)).replace("EXPECTED", repr(intents))
-result = subprocess.run(["ssh", "-i", "target/lab-state/id_ed25519", "-p" + str(port), "-o", "UserKnownHostsFile=" + known, "-o", "StrictHostKeyChecking=yes", "vprouterlab@127.0.0.1", "sudo -n python3 -I -"], input=script, capture_output=True, text=True, timeout=30)
+result = subprocess.run(["ssh", '-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', "-i", "target/lab-state/id_ed25519", "-p" + str(port), "-o", "UserKnownHostsFile=" + known, "-o", "StrictHostKeyChecking=yes", "vprouterlab@127.0.0.1", "sudo -n python3 -I -"], input=script, capture_output=True, text=True, timeout=30)
 assert result.returncode == 0, result.stderr
 data = json.loads(result.stdout)
 data.update(source_commit=binding["source_commit"], artifact_sha256=record["artifact_sha256"], record=str(record_path), record_sha256=hashlib.sha256(raw).hexdigest(), platform=binding["platform"], nonce=nonce)

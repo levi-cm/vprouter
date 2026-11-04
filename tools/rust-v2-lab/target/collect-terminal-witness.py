@@ -15,7 +15,7 @@ for directory in [pathlib.Path('/var/lib/vprouter-v2-lab'),p]:
 p=p/'terminal-executor-witness.json';s=p.lstat();assert stat.S_ISREG(s.st_mode) and s.st_uid==s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o600 and s.st_size<=128*1024
 print(json.dumps(json.loads(p.read_text())))
 '''.replace('TASK',repr(task))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=15);assert r.returncode==0,r.stderr
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=15);assert r.returncode==0,r.stderr
 w=json.loads(r.stdout);assert w['lifecycle']==probes[0]['nonce'] and w['expired_actor_resumed'] is False and len(w['completions'])==3
 assert all(e['result']=='verified_before_deadline' and e['finished_at']<=e['deadline'] for e in w['completions'])
 x={'source_commit':cfg['source_commit'],'source_archive_sha256':cfg['source_sha256'],'artifact_sha256':record['artifact_sha256'],'platform':platform,'record':binding['record'],'witness':w}

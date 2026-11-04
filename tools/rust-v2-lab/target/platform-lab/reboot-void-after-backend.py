@@ -1,6 +1,6 @@
 import pathlib,subprocess,json,os,time
 r=pathlib.Path.cwd();s=r/'target/platform-lab/void-x86_64';p=json.loads((s/'process.json').read_text());pid=p['pid'];assert os.fsencode(str(s/'guest.qcow2'))in pathlib.Path(f'/proc/{pid}/cmdline').read_bytes();assert pathlib.Path(f'/proc/{pid}/stat').read_text().split(') ',1)[1][0]not in 'ZX'
-ssh=['ssh','-i',str(r/'target/lab-state/id_ed25519'),'-p22035','-o','UserKnownHostsFile='+str(s/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=2','vprouterlab@127.0.0.1']
+ssh=['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i',str(r/'target/lab-state/id_ed25519'),'-p22035','-o','UserKnownHostsFile='+str(s/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=2','vprouterlab@127.0.0.1']
 before=subprocess.run(ssh+['cat /proc/sys/kernel/random/boot_id'],capture_output=True,text=True,check=True,timeout=5).stdout.strip();q=subprocess.run(ssh+['sudo reboot'],capture_output=True,text=True,timeout=8)
 (s/'nft-backend-reboot-request.json').write_text(json.dumps({'qemu_pid':pid,'boot_id_before':before,'ssh_reboot_returncode':q.returncode,'owned_identity_free_guest':True,'production_changes':False},indent=2)+'\n');assert q.returncode in [0,255]
 code=r'''import pathlib,subprocess,json

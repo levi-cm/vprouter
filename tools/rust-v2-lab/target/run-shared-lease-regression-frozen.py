@@ -13,7 +13,7 @@ for line in r.stdout.splitlines():
  if e.get('reason')=='compiler-artifact' and e.get('executable') and e['target']['name'] in ['execution_probe','execution_lab','producer_lab']:
   name=e['target']['name'];p=out/name;p.write_bytes(pathlib.Path(e['executable']).read_bytes());p.chmod(0o600);artifacts[name]={'path':str(p),'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
 assert set(artifacts)=={'execution_probe','execution_lab','producer_lab'}
-opts=['-i',str(base/'id_ed25519'),'-o','IdentitiesOnly=yes','-o','UserKnownHostsFile='+str(base/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5'];ssh=['ssh',*opts,'-p22032','vprouterlab@127.0.0.1']
+opts=['-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', '-i',str(base/'id_ed25519'),'-o','IdentitiesOnly=yes','-o','UserKnownHostsFile='+str(base/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5'];ssh=['ssh',*opts,'-p22032','vprouterlab@127.0.0.1']
 probe=artifacts['execution_probe'];temporary='/home/vprouterlab/shared-lease-probe-'+probe['sha256'];destination='/var/lib/vprouter-v2-lab/launch-execution-probe'
 subprocess.run(['scp','-q',*opts,'-P22032',probe['path'],'vprouterlab@127.0.0.1:'+temporary],check=True)
 subprocess.run(ssh+['sudo install -o root -g root -m 0555 '+temporary+' '+destination],check=True)

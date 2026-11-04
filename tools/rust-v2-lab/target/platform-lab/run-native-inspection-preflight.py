@@ -85,7 +85,7 @@ assert hashlib.sha256(path.read_bytes()).hexdigest()==digest
 print(json.dumps(data))
 '''
 command = [
-    "ssh", "-i", "target/lab-state/id_ed25519", "-p" + str(port),
+    "ssh", '-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', "-i", "target/lab-state/id_ed25519", "-p" + str(port),
     "-o", "UserKnownHostsFile=" + known, "-o", "StrictHostKeyChecking=yes",
     "-o", "ConnectTimeout=5", "vprouterlab@127.0.0.1",
     "python3 -I -c " + shlex.quote(remote) + " " + shlex.quote(commit)

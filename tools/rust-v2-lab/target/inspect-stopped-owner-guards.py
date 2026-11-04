@@ -14,5 +14,5 @@ for e in EXPECTED:
  out.append({'expected':e,'actual_state':f[0],'actual_start':int(f[19]),'exe':exe,'exe_sha256':digest,'cgroup':(p/'cgroup').read_text().strip(),'scope_members':members,'scope_cgroup_inode':group.stat().st_ino})
 print(json.dumps(out))
 """.replace('EXPECTED',repr(intents))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=20);assert r.returncode==0,r.stderr
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=20);assert r.returncode==0,r.stderr
 a=json.loads(r.stdout);p=pathlib.Path(f'target/lab-state/owner-actor-inspect-run-{run}.json');assert not p.exists();p.write_text(json.dumps(a,indent=2)+'\n');print(json.dumps(a))

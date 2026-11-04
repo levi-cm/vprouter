@@ -17,7 +17,7 @@ if platform=='debian-clean-x86_64':
  assert mode=='actual' or mode.startswith('owner-');runner=('target/platform-lab/run-'+mode+'-debian-clean.py') if mode.startswith('owner-') else runner
 label=sys.argv[3] if len(sys.argv)>3 else platform+'-actual';assert re.fullmatch('[a-z0-9_-]+',label)
 out=p.parent/label;out.mkdir(mode=0o700)
-ssh=['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5','vprouterlab@127.0.0.1','sudo python3 -']
+ssh=['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5','vprouterlab@127.0.0.1','sudo python3 -']
 script="""import pathlib,stat,json,os,re
 root=pathlib.Path('/var/lib/vprouter-v2-lab');s=root.lstat();assert os.geteuid()==0 and s.st_uid==s.st_gid==0 and stat.S_IMODE(s.st_mode)==0o700
 out=[]

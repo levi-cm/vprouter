@@ -28,5 +28,5 @@ for e,fd in handles:
  out.append({'pid':e['pid'],'start_time':e['start_time'],'unit':e['unit'],'signal':'SIGKILL','retained_pidfd_exit_readable':True,'resumed':False});os.close(fd)
 print(json.dumps({'failed_run':RUN,'exact_owned_actors_drained':out,'namespace_policy_journal_container_resources_retained':True}))
 """.replace('EXPECTED',repr(e)).replace('DIGEST',repr(x['artifact_sha256'])).replace('RUN',str(run)).replace('NONCE',repr(nonce))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=s,capture_output=True,text=True,timeout=20);assert r.returncode==0,r.stderr
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=s,capture_output=True,text=True,timeout=20);assert r.returncode==0,r.stderr
 p=pathlib.Path(f'target/lab-state/owner-actor-drain-run-{run}.json');assert not p.exists();p.write_text(r.stdout);print(r.stdout)

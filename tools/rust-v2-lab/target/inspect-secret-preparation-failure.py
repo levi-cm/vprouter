@@ -36,7 +36,7 @@ if UNIT is not None:
  if group.exists():out['owner_cgroup_inode']=group.stat().st_ino;out['owner_cgroup_procs']=(group/'cgroup.procs').read_text()
 print(json.dumps(out))
 '''.replace('NONCE',repr(nonce)).replace('MANIFEST',repr(manifest)).replace('UNIT',repr(unit))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=s,capture_output=True,text=True,timeout=30);assert r.returncode==0,r.stderr
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=s,capture_output=True,text=True,timeout=30);assert r.returncode==0,r.stderr
 x=json.loads(r.stdout);x.update(record=str(p),record_sha256=hashlib.sha256(raw).hexdigest(),source_binding=record['source_binding'],artifact_sha256=record['artifact_sha256'],platform=binding['platform'],read_only=True,private_profile_contents_read=False)
 out=pathlib.Path(f'target/lab-state/secret-preparation-failure-run-{run}.json')
 with out.open('x') as f:json.dump(x,f,indent=2);f.write('\n')

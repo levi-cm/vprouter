@@ -23,7 +23,7 @@ for platform in ['arch-x86_64','debian-arm64']:
   if not scan.stdout:
    print(platform,'SSH_NOT_READY',flush=True);continue
   known.write_text(scan.stdout);known.chmod(0o600)
- argv=['ssh','-i',str(repo/'target/lab-state/id_ed25519'),'-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(known),'-o','ConnectTimeout=4','-p',str(row['ssh_port']),'vprouterlab@127.0.0.1','sudo python3 -']
+ argv=['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', '-i',str(repo/'target/lab-state/id_ed25519'),'-o','IdentitiesOnly=yes','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(known),'-o','ConnectTimeout=4','-p',str(row['ssh_port']),'vprouterlab@127.0.0.1','sudo python3 -']
  result=subprocess.run(argv,input=script,capture_output=True,text=True,timeout=20)
  if result.returncode:
   print(platform,'PROBE_FAILED',result.stderr[:500],flush=True);continue

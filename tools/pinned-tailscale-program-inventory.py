@@ -4,6 +4,7 @@ Creates only a fresh stopped, network-none, state-free container, copies a fixed
 public-file allowlist as tar streams, and removes that exact owned container.
 Never starts a process or accesses any enrolled identity/profile/state directory.
 """
+import argparse
 import hashlib
 import io
 import json
@@ -14,18 +15,35 @@ import subprocess
 import sys
 import tarfile
 
-assert len(sys.argv) == 2 and sys.argv[1] in ('amd64', 'arm64')
-arch = sys.argv[1]
+if not __debug__:
+    raise RuntimeError('optimized_python_refused')
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('architecture', choices=('amd64', 'arm64'))
+parser.add_argument('--ssh-port', type=int, required=True)
+parser.add_argument('--ssh-key', type=pathlib.Path, required=True)
+parser.add_argument('--ssh-known-hosts', type=pathlib.Path, required=True)
+args = parser.parse_args()
+assert 1 <= args.ssh_port <= 65535
+assert args.ssh_key.is_file() and args.ssh_known_hosts.is_file()
+arch = args.architecture
 index_digest = 'sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065'
 base = pathlib.Path('target/lab-state')
-index = json.loads((base/'tailscale-1.102.5-manifest-index.json').read_text())
+index_bytes = (base/'tailscale-1.102.5-manifest-index.json').read_bytes()
+assert 'sha256:' + hashlib.sha256(index_bytes).hexdigest() == index_digest
+index = json.loads(index_bytes)
 entries = [e for e in index['manifests'] if e['platform'] == {'architecture':arch,'os':'linux'}]
 assert len(entries) == 1 and re.fullmatch(r'sha256:[a-f0-9]{64}', entries[0]['digest'])
 digest = entries[0]['digest']
+pinned = json.loads(pathlib.Path('docs/rust-v2/pinned-program-inventory.json').read_bytes())
+expected = next(p for p in pinned['platforms'] if p['platform']['architecture'] == arch)
+assert 'tailscale/tailscale@' + digest == expected['platform']['platform_manifest']
 image = 'tailscale/tailscale@'+digest
-ssh = ['ssh','-i',str(base/'id_ed25519'),'-o','IdentitiesOnly=yes','-o',
-       'UserKnownHostsFile='+str(base/'known_hosts'),'-o','StrictHostKeyChecking=yes',
-       '-o','ConnectTimeout=5','-p22032','vprouterlab@127.0.0.1']
+ssh = ['ssh','-F','/dev/null','-o', 'IdentityAgent=none', '-i',str(args.ssh_key.resolve()),
+       '-o','IdentitiesOnly=yes','-o','BatchMode=yes',
+       '-o','UserKnownHostsFile='+str(args.ssh_known_hosts.resolve()),
+       '-o','GlobalKnownHostsFile=/dev/null','-o','StrictHostKeyChecking=yes',
+       '-o','ConnectTimeout=5','-p',str(args.ssh_port),'vprouterlab@127.0.0.1']
 script = r'''
 import json,os,pathlib,stat,subprocess
 root=pathlib.Path('/var/lib/vprouter-v2-lab')
@@ -77,6 +95,6 @@ subprocess.run(['docker','rm',cid],check=True,stdout=subprocess.DEVNULL,timeout=
 print(json.dumps({'exact_owned_stopped_container_removed':True}))
 '''.replace('CID',repr(cid)).replace('IMAGE_ID',repr(meta['image_id'])).replace('IMAGE',repr(image))
 removed=subprocess.run([*ssh,'sudo python3 -'],input=cleanup,text=True,capture_output=True,check=True,timeout=12)
-report={'schema_version':1,'tailscale_version':'1.102.5','source_index':'tailscale/tailscale@'+index_digest,'inventory_tool_sha256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),'platform':meta,'public_files':rows,'cleanup':json.loads(removed.stdout),'runtime_execution':'NOT_RUN','production_changes':False}
+report={'ssh_endpoint':{'host':'127.0.0.1','port':args.ssh_port,'user':'vprouterlab','key':str(args.ssh_key.resolve()),'known_hosts':str(args.ssh_known_hosts.resolve()),'known_hosts_sha256':hashlib.sha256(args.ssh_known_hosts.read_bytes()).hexdigest()},'schema_version':1,'tailscale_version':'1.102.5','source_index':'tailscale/tailscale@'+index_digest,'inventory_tool_sha256':hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),'platform':meta,'public_files':rows,'cleanup':json.loads(removed.stdout),'runtime_execution':'NOT_RUN','production_changes':False}
 (base/('tailscale-program-inventory-'+arch+'.json')).write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report,indent=2))

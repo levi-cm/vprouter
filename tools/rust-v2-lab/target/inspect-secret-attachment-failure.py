@@ -40,7 +40,7 @@ if GATEWAY:
  if r.returncode==0:out['gateway_state']=json.loads(r.stdout)
 print(json.dumps(out))
 '''.replace('NONCE',repr(nonce)).replace('MANIFEST',repr(manifest)).replace('UNIT',repr(unit)).replace('GATEWAY',repr(gateways[0]if gateways else None))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=script,capture_output=True,text=True,timeout=30);assert r.returncode==0,r.stderr
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=script,capture_output=True,text=True,timeout=30);assert r.returncode==0,r.stderr
 out=json.loads(r.stdout);out.update(record=str(path),record_sha256=hashlib.sha256(raw).hexdigest(),source_binding=record['source_binding'],artifact_sha256=record['artifact_sha256'],platform=record['platform'],expected_owner_unit=unit,read_only=True,private_profile_contents_read=False,signals_unmount_or_cleanup=False)
 destination=pathlib.Path(f'target/lab-state/secret-attachment-failure-run-{run}.json')
 with destination.open('x')as stream:json.dump(out,stream,indent=2);stream.write('\n')

@@ -43,7 +43,7 @@ print(json.dumps({'directory':str(directory),'fixed_metadata_syscall_whitelist_v
 '''.replace('DIRECTORY', repr(sys.argv[1]))
 base = pathlib.Path('target/lab-state')
 result = subprocess.run([
-    'ssh', '-i', str(base/'id_ed25519'), '-o', 'IdentitiesOnly=yes', '-o',
+    'ssh', '-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', '-i', str(base/'id_ed25519'), '-o', 'IdentitiesOnly=yes', '-o',
     'UserKnownHostsFile='+str(base/'known_hosts'), '-o', 'StrictHostKeyChecking=yes',
     '-o', 'ConnectTimeout=5', '-p22032', 'vprouterlab@127.0.0.1', 'sudo python3 -'
 ], input=guest, capture_output=True, text=True, timeout=25)

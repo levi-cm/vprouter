@@ -23,7 +23,7 @@ def query(argv):
 resources=read(base/'resources.json');journal=read(base/'records/namespaces.json')
 print(json.dumps(dict(observed_boottime=time.clock_gettime(7),resources=json.loads(resources),resources_sha256=hashlib.sha256(resources).hexdigest(),journal=json.loads(journal),journal_sha256=hashlib.sha256(journal).hexdigest(),routes=query(['ip','-j','-4','route','show','table','all']),links=query(['ip','-j','-d','link','show']))))
 '''.replace('NONCE',repr(nonce))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=s,capture_output=True,text=True,timeout=35);assert r.returncode==0,r.stderr
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=s,capture_output=True,text=True,timeout=35);assert r.returncode==0,r.stderr
 d=json.loads(r.stdout);d.update(record=str(p),record_sha256=hashlib.sha256(raw).hexdigest(),source_binding=x['source_binding'],artifact_sha256=x['artifact_sha256'],platform=b['platform'],nonce=nonce,read_only=True)
 out=pathlib.Path(f'target/lab-state/bootstrap-route-failure-run-{run}.json')
 with out.open('x') as f:json.dump(d,f,indent=2);f.write('\n')

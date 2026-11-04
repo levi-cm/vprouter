@@ -19,7 +19,7 @@ context= candidate_path.parent/(arch+'.context.tar');assert hashlib.sha256(conte
 manifest,inventory,init=context_check(context,source,arch)
 guest_path=pathlib.Path('target/platform-lab/secret-attachment.guest.py');guest_bytes=guest_path.read_bytes();guest=guest_bytes.decode().replace('CONFIGURATION',repr(dict(artifact_sha256=candidate['platforms'][arch]['artifact_sha256'],context_sha256=candidate['platforms'][arch]['context_sha256'],manifest_sha256=manifest,init_sha256=init['sha256'],init_bytes=init['bytes'],architecture=arch,mode=mode,flag=flag)));compile(guest,'fixed-secret-preparation-guest','exec')
 out=candidate_path.parent/label;out.mkdir(mode=0o700);shutil.copyfile(guest_path,out/'controller-guest.py');shutil.copyfile(__file__,out/'controller-runner.py');shutil.copyfile('target/platform-lab/attachment_context_check.py',out/'controller-context.py')
-ssh=['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5','vprouterlab@127.0.0.1']
+ssh=['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5','vprouterlab@127.0.0.1']
 listing="""import pathlib,re,stat,json
 root=pathlib.Path('/var/lib/vprouter-v2-lab');st=root.lstat();assert st.st_uid==st.st_gid==0 and stat.S_IMODE(st.st_mode)==0o700
 print(json.dumps(sorted(str(p) for p in root.iterdir() if re.fullmatch('task8b2-[1-9][0-9]*',p.name))))
@@ -27,7 +27,7 @@ print(json.dumps(sorted(str(p) for p in root.iterdir() if re.fullmatch('task8b2-
 def directories():
  r=subprocess.run([*ssh,'sudo -n python3 -I -'],input=listing,capture_output=True,text=True,check=True,timeout=15);return json.loads(r.stdout)
 before=directories();(out/'directories-before.json').write_text(json.dumps(before,indent=2)+'\n')
-opts=['-i','target/lab-state/id_ed25519','-P'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes']
+opts=['-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-P'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes']
 subprocess.run(['scp','-q',*opts,str(artifact),'vprouterlab@127.0.0.1:/home/vprouterlab/secret-attachment-'+candidate['platforms'][arch]['artifact_sha256']],capture_output=True,check=True,timeout=30)
 subprocess.run(['scp','-q',*opts,str(context),'vprouterlab@127.0.0.1:/home/vprouterlab/secret-attachment-context-'+candidate['platforms'][arch]['context_sha256']],capture_output=True,check=True,timeout=45)
 start=time.monotonic()

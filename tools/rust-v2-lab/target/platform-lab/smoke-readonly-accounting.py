@@ -208,7 +208,7 @@ result=dict(observed_at_utc=datetime.datetime.now(datetime.timezone.utc).isoform
 (directory/'result.json').write_text(json.dumps(result,indent=2)+'\n');events.close();print(json.dumps(result))
 '''
 prefix = "import base64\npayload=base64.b64decode(" + repr(base64.b64encode(source).decode()) + ")\ndigest=" + repr(digest) + "\nnonce=" + repr(nonce) + "\n"
-command = ["ssh", "-i", "target/lab-state/id_ed25519", "-p22032", "-o", "IdentitiesOnly=yes", "-o", "UserKnownHostsFile=target/lab-state/known_hosts", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5", "vprouterlab@127.0.0.1", "sudo -n python3 -I -"]
+command = ["ssh", '-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', "-i", "target/lab-state/id_ed25519", "-p22032", "-o", "IdentitiesOnly=yes", "-o", "UserKnownHostsFile=target/lab-state/known_hosts", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5", "vprouterlab@127.0.0.1", "sudo -n python3 -I -"]
 result = subprocess.run(command, input=prefix + guest, text=True, capture_output=True, timeout=40)
 (output / "ssh.stdout").write_text(result.stdout)
 (output / "ssh.stderr").write_text(result.stderr)

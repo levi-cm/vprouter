@@ -34,7 +34,7 @@ q=root/('owner-domain-nonce-run'+str(RUN)+'-'+NONCE);assert not q.exists()
 os.link(p,q,follow_symlinks=False);p.unlink();fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY);os.fsync(fd);os.close(fd)
 print(json.dumps({'failed_run':RUN,'exact_actor_units_verified_absent':UNITS,'retained_nonce':str(q),'deleted_resources':False}))
 """.replace('UNITS',repr(sorted(units))).replace('NONCE',repr(nonce)).replace('RUN',str(run))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=25)
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=25)
 assert r.returncode==0,r.stderr
 result=json.loads(r.stdout);result['source_commit']=x['source_binding']['source_commit'];result['platform']=platform;result['scope_intents']=intents
 p=pathlib.Path('target/lab-state')/f'owner-nonce-archive-run-{run}.json';assert not p.exists();p.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))

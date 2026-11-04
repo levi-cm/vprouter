@@ -177,7 +177,7 @@ out.mkdir(mode=0o700)
 with (out / 'controller.py').open('xb') as stream:
     stream.write(controller_bytes)
 machine = {'amd64': 'x86_64', 'arm64': 'aarch64'}[arch]
-command = ['ssh', '-i', 'target/lab-state/id_ed25519', '-p' + str(port),
+command = ['ssh', '-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', '-i', 'target/lab-state/id_ed25519', '-p' + str(port),
     '-o', 'IdentitiesOnly=yes', '-o', 'UserKnownHostsFile=' + known,
     '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=5',
     'vprouterlab@127.0.0.1', 'python3 -I -c ' + shlex.quote(remote) + ' '

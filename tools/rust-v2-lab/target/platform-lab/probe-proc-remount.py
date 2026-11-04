@@ -16,7 +16,7 @@ code=CHILD
 p=subprocess.run(['unshare','--mount','python3','-c',code],capture_output=True,text=True,check=True)
 print(json.dumps({'options':OPTIONS,'parent_open_write_errno_before':before,'child':json.loads(p.stdout),'parent_open_write_errno_after':probe(),'parent_proc_mounts':[l for l in pathlib.Path('/proc/self/mountinfo').read_text().splitlines() if l.split(' - ')[0].split()[4]=='/proc']},indent=2))
 '''
-ssh=['ssh','-i',str(base/'id_ed25519'),'-p22032','-o','UserKnownHostsFile='+str(base/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5','vprouterlab@127.0.0.1','sudo unshare --mount --pid --fork --mount-proc python3 -']
+ssh=['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i',str(base/'id_ed25519'),'-p22032','-o','UserKnownHostsFile='+str(base/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5','vprouterlab@127.0.0.1','sudo unshare --mount --pid --fork --mount-proc python3 -']
 rows=[]
 for options in ['remount,ro,nosuid,nodev,noexec','remount,bind,ro,nosuid,nodev,noexec']:
  c=child.replace('OPTIONS',repr(options));code=parent.replace('CHILD',repr(c)).replace('OPTIONS',repr(options));p=subprocess.run(ssh,input=code,capture_output=True,text=True,timeout=15);assert p.returncode==0,p.stderr;rows.append(json.loads(p.stdout))

@@ -4,7 +4,7 @@ port,known={'debian-clean-x86_64':(22036,'target/platform-lab/debian-clean-x86_6
 source=pathlib.Path('target/platform-lab/explicit-ifindex.guest.py').read_bytes();compile(source,'explicit-ifindex.guest.py','exec')
 out=pathlib.Path('target/lab-state')/('explicit-ifindex-'+platform+'-'+uuid.uuid4().hex);out.mkdir(mode=0o700)
 start=datetime.datetime.now(datetime.timezone.utc)
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=source,capture_output=True,timeout=75)
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo -n python3 -I -'],input=source,capture_output=True,timeout=75)
 (out/'guest.py').write_bytes(source);(out/'stdout').write_bytes(r.stdout);(out/'stderr').write_bytes(r.stderr)
 phases=[]
 for line in r.stdout.splitlines():

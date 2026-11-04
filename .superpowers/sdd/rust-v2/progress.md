@@ -1049,3 +1049,15 @@ like the two existing sites. Results: release workspace both musl targets PASS
 (static ELF); workspace tests host 425 pass/2 ignored and x86_64-musl 425/2 PASS;
 aarch64 tests build+link PASS, not executed (no qemu); fmt, strict Clippy host
 and aarch64 PASS. Logs target/task8c-cross-check/. No native/VM run.
+
+2026-11-04 rebuild phase 2. Fresh clean Debian lab guest (new lab-only key, console-
+verified host key SHA256:rk1TQu4n...), pinned Tailscale 1.102.5 index/files acquired
+and hash-matched, coherent x86 candidate rebuild-20261103T231415Z verified (local ref
+refs/vprouter-test-candidates/20261103T231415Z). Fixes: guest restart helper, status
+helper, all lab SSH/SCP confined (-F /dev/null, GlobalKnownHostsFile=/dev/null,
+IdentitiesOnly, IdentityAgent=none; 457 ssh -G proofs; archive+manifest updated),
+python -O refused. Reviews: phase2 FAIL (host crash), rereview FAIL (host crash +
+SSH confinement), fixes2 review PASS. BLOCKER: starting the nested KVM guest hard-
+resets debdev (00:21, 00:38, ~00:48 on 2026-11-04; last ~1 min after boot, no cargo).
+Lab PAUSED by user; guest down. Run409 needs the lab VM on the physical host, a
+nested-safe CPU config, or similar. No Bootstrap run. release_ready=false.

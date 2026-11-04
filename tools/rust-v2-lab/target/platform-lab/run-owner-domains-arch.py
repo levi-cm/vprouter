@@ -272,7 +272,7 @@ def main():
             with retained.open('xb') as out, pathlib.Path(path).open('rb') as input_file:
                 shutil.copyfileobj(input_file, out)
             retained.chmod(0o600)
-    opts = ['-i', str(base / 'id_ed25519'), '-o', 'IdentitiesOnly=yes', '-o',
+    opts = ['-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', '-i', str(base / 'id_ed25519'), '-o', 'IdentitiesOnly=yes', '-o',
             'UserKnownHostsFile=target/platform-lab/arch-x86_64/known_hosts', '-o',
             'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=5']
     ssh = ['ssh', *opts, '-p22033', 'vprouterlab@127.0.0.1']

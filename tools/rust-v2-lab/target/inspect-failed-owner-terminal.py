@@ -28,7 +28,7 @@ doc=json.loads(path.read_text());out['entries']=doc['entries']
 print(json.dumps(out))
 '''
 for key,value in [('NONCE',nonce),('SOURCE',binding['source_commit']),('ARTIFACT',record['artifact_sha256']),('EXPECTED',intents),('TASK',task)]:script=script.replace(key,repr(value))
-r=subprocess.run(['ssh','-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=25)
+r=subprocess.run(['ssh','-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i','target/lab-state/id_ed25519','-p'+str(port),'-o','UserKnownHostsFile='+known,'-o','StrictHostKeyChecking=yes','vprouterlab@127.0.0.1','sudo python3 -'],input=script,capture_output=True,text=True,timeout=25)
 assert r.returncode==0,r.stderr
 result=json.loads(r.stdout);path=pathlib.Path(f'target/lab-state/terminal{run}-actor-journal-reference.json')
 with path.open('x') as stream:json.dump(result,stream,indent=2);stream.write('\n')

@@ -1,5 +1,5 @@
 import pathlib,subprocess,json,hashlib
-r=pathlib.Path.cwd();s=r/'target/platform-lab/void-x86_64';opts=['-i',str(r/'target/lab-state/id_ed25519'),'-p22035','-o','UserKnownHostsFile='+str(s/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5'];ssh=['ssh',*opts,'vprouterlab@127.0.0.1']
+r=pathlib.Path.cwd();s=r/'target/platform-lab/void-x86_64';opts=['-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none', '-i',str(r/'target/lab-state/id_ed25519'),'-p22035','-o','UserKnownHostsFile='+str(s/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5'];ssh=['ssh',*opts,'vprouterlab@127.0.0.1']
 script=r'''
 import pathlib,subprocess,os,json,hashlib,stat
 root=pathlib.Path('/var/lib/vprouter-v2-lab');assert os.geteuid()==0 and stat.S_IMODE(root.stat().st_mode)==0o700

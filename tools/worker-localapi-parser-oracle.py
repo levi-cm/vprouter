@@ -5,7 +5,7 @@ artifact=pathlib.Path(sys.argv[1]);digest=sys.argv[2];source=sys.argv[3]
 assert re.fullmatch('[a-f0-9]{64}',digest) and re.fullmatch('[a-f0-9]{40}',source)
 assert hashlib.sha256(artifact.read_bytes()).hexdigest()==digest
 subprocess.run(['git','diff','--exit-code',source,'--','crates/vprouter-worker','crates/vprouter-network','Cargo.toml','Cargo.lock'],check=True,stdout=subprocess.DEVNULL)
-b=pathlib.Path('target/lab-state');opts=['-i',str(b/'id_ed25519'),'-o','IdentitiesOnly=yes','-o','UserKnownHostsFile='+str(b/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5'];ssh=['ssh',*opts,'-p22032','vprouterlab@127.0.0.1']
+b=pathlib.Path('target/lab-state');opts=['-F', '/dev/null', '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'IdentityAgent=none', '-i',str(b/'id_ed25519'),'-o','IdentitiesOnly=yes','-o','UserKnownHostsFile='+str(b/'known_hosts'),'-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5'];ssh=['ssh',*opts,'-p22032','vprouterlab@127.0.0.1']
 temp='/home/vprouterlab/worker-localapi-lab-'+digest;dest='/var/lib/vprouter-v2-lab/worker-localapi-lab'
 subprocess.run(['scp','-q',*opts,'-P22032',str(artifact),'vprouterlab@127.0.0.1:'+temp],check=True,timeout=15)
 subprocess.run([*ssh,'sudo install -o root -g root -m 0555 '+temp+' '+dest],check=True,timeout=5)

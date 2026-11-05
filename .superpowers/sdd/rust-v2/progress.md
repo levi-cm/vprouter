@@ -1092,3 +1092,11 @@ now full-record multiset (namespace exact), 9 Rust regressions (old predicate fa
 (review M1, fixed by orchestrator; 409 template accepted, tampering rejected).
 Review PASS. 181 musl tests, 34 Python tests, fmt, strict Clippy PASS; ARM64
 build/link only. Next: new candidate, clean guest (preserve 409 guest disk), run410.
+
+2026-11-04/05 run410 executed once from checkpoint 8a5942f (pushed; prep review PASS).
+Exit 0, PASS_PARTIAL_SECRET_BOOTSTRAP, 12 s: host.inventory, 20-job handoff and
+three-scope Bootstrap all passed (fault 0, 39 negatives); 409's ordering failure did not
+recur. Budget 410=0, 409=0. Collector C: provenance valid, bootstrap_exit_zero_preserved.
+Guest QEMU later SIGTERMed by systemd --user (00:32); inspector I got connection refused;
+F/A/P are failure-path tools, N/A. Typed witness validation, real-client, ARM64,
+migration/performance/release NOT_RUN; release_ready=false. See task-8c-run410-result.md.

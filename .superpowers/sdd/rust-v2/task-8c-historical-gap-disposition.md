@@ -50,3 +50,10 @@ checks can be replayed locally against its retained original controller/input
 bytes, rather than incorrectly comparing later helper revisions with old hashes.
 Run 410 execution and driver-cost results remain **NOT_RUN**; preparation and
 preflight do not qualify Bootstrap, ARM runtime or release acceptance.
+
+**Update 2026-11-05:** run 410 executed once (exit 0, PASS_PARTIAL_SECRET_BOOTSTRAP;
+see `task-8c-run410-result.md`). Budget consumed. Bootstrap reached and completed its
+witness; driver-cost speedup evidence and typed full-witness validation remain
+**NOT_RUN**; the 410 guest was later terminated by systemd (live identities
+unobservable; failure-path F/A/P not applicable). Bootstrap, ARM, real-client and
+release acceptance are still not qualified.

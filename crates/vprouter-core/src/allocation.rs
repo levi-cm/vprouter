@@ -418,10 +418,50 @@ impl AllocationTransaction {
         Ok(())
     }
     pub fn read(&self) -> Result<Option<AllocationRecord>> {
+        self.read_bytes(RECORD_NAME, MAX_RECORD_BYTES)?
+            .map(|bytes| AllocationRecord::parse(&bytes, &self.store.deployment, &[]))
+            .transpose()
+    }
+    /// Offline-only configuration and reservation snapshot. This file is never
+    /// consumed by native launch and cannot update a live allocation record.
+    pub fn read_preparation(&self) -> Result<Option<crate::transaction::FleetRecord>> {
+        self.read_bytes(
+            "fleet-preparation.json",
+            crate::transaction::MAX_PREPARATION_BYTES,
+        )?
+        .map(|bytes| crate::transaction::FleetRecord::decode(&bytes, &self.store.deployment))
+        .transpose()
+    }
+    pub fn commit_preparation(
+        &mut self,
+        prepared: &crate::transaction::PreparedFleet,
+    ) -> Result<()> {
+        if self.read()?.is_some() {
+            return Err(err(Reason::InvalidTransition));
+        }
+        let record = prepared.record();
+        record.allocations().validate(&self.store.deployment, &[])?;
+        let current = self.read_preparation()?;
+        if current
+            .as_ref()
+            .map(crate::transaction::FleetRecord::digest)
+            .transpose()?
+            != prepared.expected_digest()
+            || Some(record.generation())
+                != current
+                    .as_ref()
+                    .map_or(0, |r| r.generation())
+                    .checked_add(1)
+        {
+            return Err(err(Reason::GenerationConflict));
+        }
+        self.write_bytes("fleet-preparation.json", &record.encode()?)
+    }
+    fn read_bytes(&self, name: &str, maximum: usize) -> Result<Option<Vec<u8>>> {
         self.store.check_directory()?;
         let fd = match openat(
             &self.store.dir,
-            RECORD_NAME,
+            name,
             OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
             Mode::empty(),
         ) {
@@ -432,10 +472,11 @@ impl AllocationTransaction {
         check_file(&fd, self.store.owner)?;
         let mut bytes = Vec::new();
         File::from(fd)
-            .take((MAX_RECORD_BYTES + 1) as u64)
+            .take((maximum + 1) as u64)
             .read_to_end(&mut bytes)
             .map_err(|_| err(Reason::StorageUnavailable))?;
-        AllocationRecord::parse(&bytes, &self.store.deployment, &[]).map(Some)
+        // Each typed decoder retains its original oversize reason code.
+        Ok(Some(bytes))
     }
     /// None creates generation 1; Some(g) commits precisely g+1. A parent-fsync
     /// failure after rename returns DurabilityUncertain: re-inspect before retrying.
@@ -463,13 +504,17 @@ impl AllocationTransaction {
         if bytes.len() > MAX_RECORD_BYTES {
             return Err(err(Reason::InvalidAllocation));
         }
+        self.write_bytes(RECORD_NAME, &bytes)
+    }
+    fn write_bytes(&self, destination: &str, bytes: &[u8]) -> Result<()> {
+        self.store.check_directory()?;
         let (name, fd) = self.create_temp()?;
         let mut file = File::from(fd);
-        file.write_all(&bytes)
+        file.write_all(bytes)
             .map_err(|_| err(Reason::StorageUnavailable))?;
         file.sync_all()
             .map_err(|_| err(Reason::StorageUnavailable))?;
-        renameat(&self.store.dir, &name, &self.store.dir, RECORD_NAME)
+        renameat(&self.store.dir, &name, &self.store.dir, destination)
             .map_err(|_| err(Reason::StorageUnavailable))?;
         fsync(&self.store.dir).map_err(|_| err(Reason::DurabilityUncertain))?;
         Ok(())
@@ -555,6 +600,115 @@ mod storage_tests {
             .open(path)
             .unwrap();
         f.write_all(bytes).unwrap();
+    }
+    fn preparation() -> crate::transaction::PreparedFleet {
+        let cfg = Configuration::parse(include_bytes!("../../../examples/v2/one.json")).unwrap();
+        crate::transaction::PreparedFleet::initial(
+            cfg,
+            |_, server| {
+                crate::profile::Profile::parse(
+                    include_bytes!("../../../examples/v2/profiles/profile-1.wg.example"),
+                    server,
+                    None,
+                )
+            },
+            &[],
+        )
+        .unwrap()
+    }
+    #[test]
+    fn preparation_atomic_bundle_recovers_orphans_and_refuses_stale_or_live_allocation() {
+        use crate::transaction::ExitChange;
+        let root = TempRoot::new();
+        let store = root.store();
+        // Use this store's deployment; no real profiles or root-owned fixtures.
+        let mut cfg = preparation().record().configuration().clone();
+        cfg.deployment_id = "fleet".into();
+        let initial = crate::transaction::PreparedFleet::initial(
+            cfg,
+            |_, server| {
+                crate::profile::Profile::parse(
+                    include_bytes!("../../../examples/v2/profiles/profile-1.wg.example"),
+                    server,
+                    None,
+                )
+            },
+            &[],
+        )
+        .unwrap();
+        let id = initial.record().configuration().exits[0].id.clone();
+        let mut tx = store.lock().unwrap();
+        tx.commit_preparation(&initial).unwrap();
+        assert!(tx.read().unwrap().is_none()); // Never updates live allocations.
+        let committed = fs::read(root.0.join("fleet-preparation.json")).unwrap();
+        let next = tx
+            .read_preparation()
+            .unwrap()
+            .unwrap()
+            .prepare(
+                ExitChange::Disable { exit_id: id },
+                |_, server| {
+                    crate::profile::Profile::parse(
+                        include_bytes!("../../../examples/v2/profiles/profile-1.wg.example"),
+                        server,
+                        None,
+                    )
+                },
+                &[],
+            )
+            .unwrap();
+        private_file(&root.0.join(".allocations.tmp-interrupted"), b"{partial");
+        assert_eq!(tx.read_preparation().unwrap().unwrap().generation(), 1);
+        tx.commit_preparation(&next).unwrap();
+        assert_eq!(tx.read_preparation().unwrap().unwrap().generation(), 2);
+        assert!(root.0.join(".allocations.tmp-interrupted").exists());
+        assert!(
+            tx.commit_preparation(&initial)
+                .is_err_and(|e| e.reason() == Reason::GenerationConflict)
+        );
+        assert!(tx.commit_preparation(&next).is_err());
+        drop(tx);
+        assert!(!root.0.join("allocations.json").exists());
+        assert_ne!(
+            fs::read(root.0.join("fleet-preparation.json")).unwrap(),
+            committed
+        );
+        let live = TempRoot::new();
+        let live_store = live.store();
+        let mut live_tx = live_store.lock().unwrap();
+        live_tx.commit(None, &record(1)).unwrap();
+        assert!(
+            live_tx
+                .commit_preparation(&initial)
+                .is_err_and(|e| e.reason() == Reason::InvalidTransition)
+        );
+        assert!(!live.0.join("fleet-preparation.json").exists());
+    }
+    #[test]
+    fn preparation_refuses_malformed_committed_files_and_symlinks_without_repair() {
+        let root = TempRoot::new();
+        let store = root.store();
+        private_file(&root.0.join("fleet-preparation.json"), b"{partial");
+        let tx = store.lock().unwrap();
+        assert!(tx.read_preparation().is_err());
+        assert_eq!(
+            fs::read(root.0.join("fleet-preparation.json")).unwrap(),
+            b"{partial"
+        );
+        drop(tx);
+        fs::remove_file(root.0.join("fleet-preparation.json")).unwrap();
+        let foreign = TempRoot::new();
+        private_file(&foreign.0.join("foreign"), b"do not change");
+        symlink(
+            foreign.0.join("foreign"),
+            root.0.join("fleet-preparation.json"),
+        )
+        .unwrap();
+        assert!(store.lock().unwrap().read_preparation().is_err());
+        assert_eq!(
+            fs::read(foreign.0.join("foreign")).unwrap(),
+            b"do not change"
+        );
     }
     #[test]
     fn retained_executor_lock_outlives_transaction_and_prevents_generation_reuse() {

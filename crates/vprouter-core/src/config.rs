@@ -146,6 +146,14 @@ impl PublicConfigurationReport {
     }
 }
 impl StructuredConfiguration {
+    pub(crate) fn hostnames_by_id(&self) -> HashMap<String, String> {
+        self.configuration
+            .exits
+            .iter()
+            .zip(&self.hostnames)
+            .map(|(e, n)| (e.id.clone(), n.clone()))
+            .collect()
+    }
     pub fn configuration(&self) -> &Configuration {
         &self.configuration
     }

@@ -1112,3 +1112,11 @@ FAIL for completeness (I1-I3, I4-I8 closed; round 3 found I9 transport creation/
 binding, I10 WG down-only/original-move, M2 sweep width). Real record PASSes 19/19 (r3
 receipt). 3-attempt limit hit: committed as PARTIAL validator, I9/I10/M2 OPEN, not an
 acceptance; moving on to Task 9. Reviews/rereviews retained in task-8c-run410-witness-*.md.
+
+2026-11-06 Task 9 (multi-Mullvad exit lifecycle) OFFLINE policy/transaction layer in
+vprouter-core (fleet.rs, transaction.rs, allocation/config extensions, docs/rust-v2/
+multi-exit-preparation.md). Review1 FAIL (I1 host-clock emergency, I2 catch-up burst) ->
+fixed; Re-review: I1/I2 fixed, 1 Minor (late cancel downgrades FAILED) fixed by controller.
+Workspace 449 pass/0 fail/6 ignored; fmt+strict clippy clean. Owned-guest 1/5-exit tests
+are #[ignore] placeholders = NOT_RUN. Codex session died once (409 unsafe_affinity_unavailable);
+fresh delegates worked. No runtime/release acceptance.

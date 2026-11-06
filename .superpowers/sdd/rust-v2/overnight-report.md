@@ -116,7 +116,7 @@ A stop-hook check flagged that four small controller fixes had no independent re
 (`MAX_OPAQUE` 128) **PASS**; Task 13's REL/RELA check had two reproduced Minor gaps (nonzero `sh_link` not a symbol
 table; `sh_info` unbounded when `SHF_INFO_LINK` clear). Fixed by me in `release.py` with
 `ReviewELF.test_relocation_section_link_and_info_are_bounded` (RED 20 failures with the check removed; GREEN; 38-test
-suite OK; zero-link GNU static `--emit-relocs` layout still accepted). That last fix is itself not re-reviewed.
+suite OK; zero-link GNU static `--emit-relocs` layout still accepted). That last fix was then independently reviewed (`elf-fix-review.md`): **PASS, 0 findings**. After this, every controller-made fix has had an independent review except none; the only unreviewed-by-a-second-round items are the two PARTIAL ones below.
 
 ## What is NOT_RUN (and why)
 

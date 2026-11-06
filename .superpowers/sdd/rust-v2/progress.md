@@ -1178,3 +1178,7 @@ canary/soak gates NOT_RUN.
 2026-11-06 11:30 follow-up: ARM64 alternatives searched (only an unpinned Android-SDK aarch64 qemu;
 no ARM image/firmware/binfmt) -> still NOT_RUN. Focused review of controller fixes: Task 9/10/12 fixes PASS;
 Task 13 REL/RELA link/info Minor x2 fixed by controller (RED/GREEN), not re-reviewed.
+
+2026-11-06 11:25 ELF link/info fix (4ae2df3) independently reviewed: PASS, 0 findings
+(elf-fix-review.md). All controller fixes now independently reviewed. Open: witness I9/I10/M2,
+Task 14 T3-I1..I4 (3-attempt limit), ARM64 runtime (no image/firmware/pinned qemu; needs user decision).

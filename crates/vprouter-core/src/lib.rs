@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
+pub mod address;
 pub mod allocation;
+pub mod client;
 pub mod config;
 pub mod direct;
 pub mod fleet;

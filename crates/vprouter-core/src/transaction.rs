@@ -2,7 +2,7 @@
 //! mutations, namespace placement, or quarantine release.
 use crate::{
     allocation::{AllocationRecord, ResourceClaim},
-    config::{Configuration, Exit, Mode, ValidatedConfiguration},
+    config::{ClientMode, ClientPolicy, Configuration, Exit, Mode, ValidatedConfiguration},
     profile::Profile,
     reason::{Reason, Result, err},
 };
@@ -14,6 +14,15 @@ pub(crate) const MAX_PREPARATION_BYTES: usize = 2 * 1024 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExitChange {
+    InstallClient {
+        policy: ClientPolicy,
+    },
+    SelectClient {
+        client_id: String,
+        exit_id: String,
+        node_id: String,
+        mode: ClientMode,
+    },
     Add {
         exit: Exit,
     },
@@ -113,6 +122,27 @@ impl FleetRecord {
         let mut cfg = self.configuration.clone();
         let enabled = matches!(&change, ExitChange::Enable { .. });
         match change {
+            ExitChange::InstallClient { policy } => {
+                if cfg.client_policies.iter().any(|p| p.id == policy.id) {
+                    return Err(err(Reason::DuplicateId));
+                }
+                cfg.client_policies.push(policy);
+            }
+            ExitChange::SelectClient {
+                client_id,
+                exit_id,
+                node_id,
+                mode,
+            } => {
+                let policy = cfg
+                    .client_policies
+                    .iter_mut()
+                    .find(|p| p.id == client_id)
+                    .ok_or_else(|| err(Reason::InvalidReference))?;
+                policy.exit_id = exit_id;
+                policy.selected_node_id = node_id;
+                policy.mode = mode;
+            }
             ExitChange::Add { exit } => cfg.exits.push(exit),
             ExitChange::Remove { exit_id } => {
                 let i = cfg

@@ -1126,3 +1126,11 @@ vprouter-core (direct.rs + Task 9 fleet/transaction extensions, docs/rust-v2/
 direct-exit-preparation.md). Review: FAIL on one Minor only (status host-time
 high-water, found via the Task 9 lessons sweep), fixed by controller; core 102+ tests,
 x86_64-musl tests and ARM64 compile checks per implementer. Owned-guest tests NOT_RUN.
+
+2026-11-06 Task 11 (persistent Linux client + userspace proxy guards) OFFLINE policy/
+ruleset-rendering layer: vprouter-core client.rs + vprouter-netfilter client renderer
+(docs/rust-v2/client-guards-preparation.md). Review1 FAIL (I1 mixed-hex IPv4 aliases,
+I2 invalid-clock poll vs queued quarantine, M1 CONNECT without Host) -> fixed with class
+closure (canonical address parser + encoding cross-product, host-time matrix, HTTP table
+tests). Re-review PASS (0 defects reproduced). Per implementer: workspace >=500 pass/0
+fail, x86_64-musl tests ran, ARM64 compile-only. Owned-guest/real-client tests NOT_RUN.

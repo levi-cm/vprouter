@@ -47,7 +47,7 @@ struct ActiveExit {
     pending: Option<ActionKind>,
 }
 /// Proposed selection only, explicitly separate from observed/runtime status.
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub struct ClientPlan {
     pub exit_id: String,
     pub node_id: String,
@@ -70,6 +70,7 @@ pub struct FleetPolicy {
     last_now: f64,
     last_poll: f64,
     stopped: bool,
+    clients: Vec<crate::config::ClientPolicy>,
 }
 fn time_valid(now: f64) -> bool {
     // Keep f64 precision finer than the millisecond staggering domain.
@@ -182,6 +183,7 @@ impl FleetPolicy {
             last_now: now,
             last_poll: now,
             stopped: false,
+            clients: cfg.configuration().client_policies.clone(),
         })
     }
     pub fn enabled_count(&self) -> usize {
@@ -249,6 +251,15 @@ impl FleetPolicy {
             dns: "not_tested",
             ipv6: "not_tested",
         })
+    }
+    /// Configured stable identity only; names and advertisements cannot authorize selection.
+    pub fn configured_client_plan(&self, id: &str) -> Result<ClientPlan> {
+        let policy = self
+            .clients
+            .iter()
+            .find(|p| p.id == id)
+            .ok_or_else(|| err(Reason::InvalidReference))?;
+        self.client_plan(&policy.exit_id, &policy.selected_node_id, policy.mode)
     }
     /// Validate current host-address evidence; this never authorizes release or
     /// renews a worker witness. Any missing/drifted evidence requests quarantine.

@@ -836,7 +836,12 @@ fn allowed(a: &[Attr], kinds: &[u16]) -> Result<()> {
 /// Compare a narrow, explicit UAPI semantic model. Ignore only documented kernel
 /// bookkeeping: table/chain use counts, handles, alignment pads, base-chain flag,
 /// rule position handles. Counters/unknown expression attributes are not ignored.
-fn verify(expected: &Table, table: &[Attr], chains: &[Message], rules: &[Message]) -> Result<()> {
+pub(crate) fn verify(
+    expected: &Table,
+    table: &[Attr],
+    chains: &[Message],
+    rules: &[Message],
+) -> Result<()> {
     allowed(table, &[1, 2, 3, 4, 5, 6])?;
     if text(get(table, 1)?)? != expected.name
         || be32(get(table, 2)?)? != 0

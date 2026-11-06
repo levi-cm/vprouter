@@ -304,3 +304,21 @@ fn rendered_policy_describes_source_protocol_and_default_drop_predicates() {
     assert_eq!(json["application"]["default_verdict"], "drop");
     assert_eq!(json["application"]["new_flows"], "outbound_only");
 }
+
+#[path = "support/address_cases.rs"]
+mod address_cases;
+#[test]
+fn round1_direct_targets_share_reject_only_parsing_and_denied_classification() {
+    let p = plan();
+    for octets in address_cases::DENIED.iter().copied() {
+        let canonical = std::net::Ipv4Addr::from(octets).to_string();
+        for host in address_cases::encodings(octets) {
+            let parsed = vprouter_core::address::ipv4(&host);
+            if host == canonical {
+                assert!(!p.allows(&packet(&parsed.unwrap().to_string())));
+            } else {
+                assert!(parsed.is_err(), "direct target alias {host:?}");
+            }
+        }
+    }
+}

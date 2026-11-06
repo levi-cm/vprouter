@@ -21,6 +21,9 @@ fn mixed(providers: usize) -> Configuration {
     cfg
 }
 fn fleet(providers: usize) -> FleetPolicy {
+    fleet_with_time(providers, 0.).unwrap()
+}
+fn fleet_with_time(providers: usize, now: f64) -> vprouter_core::reason::Result<FleetPolicy> {
     let cfg = mixed(providers).validate_with(profile).unwrap();
     let allocations = AllocationRecord::from_configuration(&cfg, 1).unwrap();
     let fingerprint: String = cfg
@@ -59,7 +62,7 @@ fn fleet(providers: usize) -> FleetPolicy {
             )
         })
         .collect();
-    FleetPolicy::new(&cfg, &allocations, bindings, &[], 0.).unwrap()
+    FleetPolicy::new(&cfg, &allocations, bindings, &[], now)
 }
 fn observation(
     f: &FleetPolicy,
@@ -592,5 +595,185 @@ fn host_reconciliation_checks_all_drift_fields_and_clock_before_foreign_tokens()
                 .all(|a| a.kind == ActionKind::EmergencyQuarantineAndStop)
         );
         assert!(f.poll(3.).unwrap().is_empty());
+    }
+}
+
+#[test]
+fn round1_fleet_and_direct_time_matrix_retains_emergency_work() {
+    use vprouter_core::direct::{DirectPath, DirectPlan, HostSnapshot};
+    let cfg = mixed(1).validate_with(profile).unwrap();
+    let allocations = AllocationRecord::from_configuration(&cfg, 1).unwrap();
+    let host=HostSnapshot::parse(br#"{"generation":1,"addresses":["93.184.216.34"],"connected_prefixes":["93.184.216.0/24"],"local_prefixes":[]}"#).unwrap();
+    let plan = DirectPlan::prepare(
+        &cfg,
+        &allocations,
+        "residential",
+        host.clone(),
+        DirectPath {
+            wan_interface: "directwan0".into(),
+            ingress_ifindex: 17,
+            wan_ifindex: 18,
+        },
+    )
+    .unwrap();
+    for queued in [false, true] {
+        for now in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -1.,
+            0.,
+            1.,
+            2.,
+            1e17,
+        ] {
+            for entry in 0..7 {
+                let mut f = fleet(1);
+                f.poll(1.).unwrap();
+                let token = f.select("residential").unwrap();
+                if queued {
+                    f.worker_failed(&token).unwrap();
+                }
+                let message = observation(&f, "residential", 1, now, HealthState::Starting);
+                let bad = !now.is_finite() || !(1. ..=1e12).contains(&now);
+                let mut delivered = Vec::new();
+                let result = match entry {
+                    0 => f.observe(&token, &message, now).map(|_| ()),
+                    1 => f
+                        .observe_bytes(&token, &serde_json::to_vec(&message).unwrap(), now)
+                        .map(|_| ()),
+                    2 => f.sample_finished(&token, now),
+                    3 => f.restart(&token, "b".repeat(64), now),
+                    4 => f.reconcile_direct_host(&token, &plan, Some(&host), now),
+                    5 => f.status("residential", now).map(|_| ()),
+                    _ => f.poll(now).map(|actions| {
+                        delivered = actions;
+                    }),
+                };
+                if bad && entry != 6 {
+                    assert!(result.is_err(), "entry={entry}, now={now}");
+                }
+                if bad && entry != 5 {
+                    for id in ["mullvad-1", "residential"] {
+                        assert_eq!(
+                            f.status(id, 1.).unwrap().state,
+                            HealthState::Failed,
+                            "entry={entry}, now={now}"
+                        );
+                    }
+                    delivered.extend(f.poll(now).unwrap());
+                    assert_eq!(
+                        delivered.len(),
+                        2,
+                        "entry={entry} now={now} queued={queued}"
+                    );
+                    assert!(
+                        delivered
+                            .iter()
+                            .all(|a| a.kind == ActionKind::EmergencyQuarantineAndStop)
+                    );
+                    // Late untimed and timed callbacks cannot weaken or re-arm work.
+                    let _ = f.cancel(&token);
+                    let _ = f.cleanup_failed(&token);
+                    let _ = f.worker_failed(&token);
+                    assert!(f.restart(&token, "c".repeat(64), 1.).is_err());
+                    assert!(f.poll(now).unwrap().is_empty());
+                    assert_eq!(
+                        f.status("residential", 1.).unwrap().state,
+                        HealthState::Failed
+                    );
+                } else if entry == 5 {
+                    let actions = f.poll(1.).unwrap();
+                    assert_eq!(
+                        actions
+                            .iter()
+                            .filter(|a| a.kind == ActionKind::Quarantine)
+                            .count(),
+                        usize::from(queued)
+                    );
+                    assert!(
+                        actions
+                            .iter()
+                            .all(|a| a.kind != ActionKind::EmergencyQuarantineAndStop)
+                    );
+                } else {
+                    assert_ne!(
+                        f.status("mullvad-1", now).unwrap().state,
+                        HealthState::Failed
+                    );
+                    if queued && entry != 3 {
+                        delivered.extend(f.poll(now).unwrap());
+                        assert!(delivered.iter().any(
+                            |a| a.exit_id == "residential" && a.kind == ActionKind::Quarantine
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    // A whole-fleet terminal latch retains pending emergency actions for every
+    // timed callback, even when a second bad clock arrives before the drain.
+    for queued in [false, true] {
+        for now in [f64::NAN, f64::INFINITY, -1., 0., 1.] {
+            for entry in 0..7 {
+                let mut f = fleet(1);
+                f.poll(1.).unwrap();
+                f.container_failed();
+                if !queued {
+                    f.poll(1.).unwrap();
+                }
+                let token = f.select("residential").unwrap();
+                let message = observation(&f, "residential", 1, 1., HealthState::Starting);
+                let actions = match entry {
+                    0 => {
+                        let _ = f.observe(&token, &message, now);
+                        vec![]
+                    }
+                    1 => {
+                        let _ = f.observe_bytes(&token, b"bad", now);
+                        vec![]
+                    }
+                    2 => {
+                        let _ = f.sample_finished(&token, now);
+                        vec![]
+                    }
+                    3 => {
+                        let _ = f.restart(&token, "b".repeat(64), now);
+                        vec![]
+                    }
+                    4 => {
+                        let _ = f.reconcile_direct_host(&token, &plan, Some(&host), now);
+                        vec![]
+                    }
+                    5 => {
+                        let _ = f.status("residential", now);
+                        vec![]
+                    }
+                    _ => f.poll(now).unwrap(),
+                };
+                let rest = f.poll(now).unwrap();
+                assert_eq!(actions.len() + rest.len(), if queued { 2 } else { 0 });
+                assert!(
+                    actions
+                        .iter()
+                        .chain(&rest)
+                        .all(|a| a.kind == ActionKind::EmergencyQuarantineAndStop)
+                );
+                assert_eq!(
+                    f.status("residential", 1.).unwrap().state,
+                    HealthState::Failed
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn round1_fleet_constructor_refuses_invalid_time_before_any_obligation_exists() {
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1., 1e17] {
+        assert!(fleet_with_time(1, now).is_err());
+    }
+    for now in [0., 1., 1e12] {
+        assert!(fleet_with_time(1, now).is_ok());
     }
 }

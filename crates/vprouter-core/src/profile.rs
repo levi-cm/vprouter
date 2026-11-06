@@ -255,7 +255,7 @@ impl Profile {
                 }
                 ("[Peer]", "publickey") => public_key = Some(decode_key(value)?.0),
                 ("[Peer]", "endpoint") => {
-                    let ep = value.parse::<SocketAddrV4>().map_err(|_| invalid())?;
+                    let ep = crate::address::socket_v4(value).map_err(|_| invalid())?;
                     if ep.port() == 0 || !public_ipv4(*ep.ip()) {
                         return Err(invalid());
                     }
@@ -390,20 +390,7 @@ fn decode_key(s: &str) -> Result<SecretKey> {
 }
 /// Conservative public unicast IPv4 check, including special-use ranges.
 pub fn public_ipv4(ip: Ipv4Addr) -> bool {
-    let [a, b, c, _] = ip.octets();
-    !(a == 0
-        || a == 10
-        || a == 127
-        || a >= 224
-        || a == 169 && b == 254
-        || a == 172 && (16..=31).contains(&b)
-        || a == 192 && b == 168
-        || a == 100 && (64..=127).contains(&b)
-        || a == 198 && (b == 18 || b == 19)
-        || a == 192 && b == 0 && (c == 0 || c == 2)
-        || a == 192 && b == 88 && c == 99
-        || a == 198 && b == 51 && c == 100
-        || a == 203 && b == 0 && c == 113)
+    crate::address::public_ipv4(ip)
 }
 
 #[cfg(test)]

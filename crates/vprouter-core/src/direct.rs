@@ -1,4 +1,6 @@
 //! Offline direct-exit policy intent. No native enforcer consumes these values.
+pub use crate::address::DENIED_RANGE_VERSION;
+use crate::address::{DENIED, prefix};
 use crate::{
     allocation::{AllocationRecord, ExitAllocation},
     config::{ExitMode, ValidatedConfiguration},
@@ -10,55 +12,6 @@ use std::{
     collections::HashSet,
     net::{IpAddr, Ipv4Addr},
 };
-/// Conservative IANA special-purpose snapshot plus documented provider services.
-pub const DENIED_RANGE_VERSION: &str = "direct-ipv4-2026-11-06-v1";
-const DENIED: &[&str] = &[
-    "0.0.0.0/8",
-    "10.0.0.0/8",
-    "100.64.0.0/10",
-    "127.0.0.0/8",
-    "169.254.0.0/16",
-    "172.16.0.0/12",
-    "192.0.0.0/24",
-    "192.0.2.0/24",
-    "192.31.196.0/24",
-    "192.52.193.0/24",
-    "192.88.99.0/24",
-    "192.168.0.0/16",
-    "192.175.48.0/24",
-    "198.18.0.0/15",
-    "198.51.100.0/24",
-    "203.0.113.0/24",
-    "224.0.0.0/4",
-    "240.0.0.0/4",
-    "168.63.129.16/32",
-    "147.75.207.207/32",
-    "192.80.8.124/32",
-];
-fn prefix(value: &str) -> Result<(u32, u32)> {
-    let (address, bits) = value
-        .split_once('/')
-        .ok_or_else(|| err(Reason::InvalidEvidence))?;
-    let address = address
-        .parse::<Ipv4Addr>()
-        .map_err(|_| err(Reason::InvalidEvidence))?;
-    let bits = bits
-        .parse::<u8>()
-        .map_err(|_| err(Reason::InvalidEvidence))?;
-    if bits > 32 || value != format!("{address}/{bits}") {
-        return Err(err(Reason::InvalidEvidence));
-    }
-    let mask = if bits == 0 {
-        0
-    } else {
-        u32::MAX << (32 - bits)
-    };
-    let start = u32::from(address);
-    if start & mask != start {
-        return Err(err(Reason::InvalidEvidence));
-    }
-    Ok((start, start | !mask))
-}
 fn contains(range: (u32, u32), ip: Ipv4Addr) -> bool {
     let ip = u32::from(ip);
     range.0 <= ip && ip <= range.1
@@ -67,6 +20,7 @@ fn contains(range: (u32, u32), ip: Ipv4Addr) -> bool {
 #[serde(deny_unknown_fields)]
 pub struct HostSnapshot {
     generation: u64,
+    #[serde(deserialize_with = "crate::address::deserialize_ipv4_vec")]
     addresses: Vec<Ipv4Addr>,
     connected_prefixes: Vec<String>,
     local_prefixes: Vec<String>,

@@ -1,6 +1,7 @@
 //! Scoped native nftables actuator. This is not a router or namespace manager.
 #![forbid(unsafe_code)]
 mod actuator;
+pub mod client;
 mod codec;
 mod cooperation;
 mod enforcement;

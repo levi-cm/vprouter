@@ -87,13 +87,9 @@ impl Policy {
         {
             return Err(Error::InvalidInput);
         }
-        let subnet: Ipv4Addr = exit
-            .transport_subnet
-            .split_once('/')
-            .ok_or(Error::InvalidAllocation)?
-            .0
-            .parse()
+        let (start, _) = vprouter_core::address::prefix(&exit.transport_subnet)
             .map_err(|_| Error::InvalidAllocation)?;
+        let subnet = Ipv4Addr::from(start);
         let transport_ip = Ipv4Addr::from(u32::from(subnet) + 2);
         Ok(Self {
             allocation: exit.clone(),
@@ -463,7 +459,7 @@ pub(crate) struct Chain {
     pub rules: Vec<Vec<Attr>>,
 }
 impl Chain {
-    fn new(name: &str, hook: u32, priority: i32, policy: u32, kind: &str) -> Self {
+    pub(crate) fn new(name: &str, hook: u32, priority: i32, policy: u32, kind: &str) -> Self {
         Self {
             name: name.into(),
             hook,
@@ -473,7 +469,7 @@ impl Chain {
             rules: Vec::new(),
         }
     }
-    fn rule(&mut self, parts: Vec<Attr>) {
+    pub(crate) fn rule(&mut self, parts: Vec<Attr>) {
         // Helpers may return a nested bundle of multiple expressions; flatten it.
         self.rules.push(flatten(parts));
     }
@@ -496,7 +492,7 @@ fn bundle(parts: Vec<Attr>) -> Attr {
 fn expr(name: &str, data: Vec<Attr>) -> Attr {
     nested(1, &[string(1, name), nested(2, &data)])
 }
-fn compare(value: &[u8], unequal: bool) -> Attr {
+pub(crate) fn compare(value: &[u8], unequal: bool) -> Attr {
     expr(
         "cmp",
         vec![
@@ -506,30 +502,30 @@ fn compare(value: &[u8], unequal: bool) -> Attr {
         ],
     )
 }
-fn meta_eq(key: u32, value: &[u8]) -> Attr {
+pub(crate) fn meta_eq(key: u32, value: &[u8]) -> Attr {
     bundle(vec![
         expr("meta", vec![u32a(1, 1), u32a(2, key)]),
         compare(value, false),
     ])
 }
-fn meta_name(key: u32, name: &str) -> Attr {
+pub(crate) fn meta_name(key: u32, name: &str) -> Attr {
     let mut value = name.as_bytes().to_vec();
     value.resize(16, 0);
     meta_eq(key, &value)
 }
-fn payload(base: u32, offset: u32, len: u32) -> Attr {
+pub(crate) fn payload(base: u32, offset: u32, len: u32) -> Attr {
     expr(
         "payload",
         vec![u32a(1, 1), u32a(2, base), u32a(3, offset), u32a(4, len)],
     )
 }
-fn ip(source: bool, addr: Ipv4Addr) -> Attr {
+pub(crate) fn ip(source: bool, addr: Ipv4Addr) -> Attr {
     bundle(vec![
         payload(1, if source { 12 } else { 16 }, 4),
         compare(&addr.octets(), false),
     ])
 }
-fn port(source: bool, port: u16) -> Attr {
+pub(crate) fn port(source: bool, port: u16) -> Attr {
     bundle(vec![
         payload(2, if source { 0 } else { 2 }, 2),
         compare(&port.to_be_bytes(), false),
@@ -561,14 +557,14 @@ pub(crate) fn socket_owner(id: u64, level: u32) -> Attr {
         compare(&id.to_ne_bytes(), false),
     ])
 }
-fn established() -> Attr {
+pub(crate) fn established() -> Attr {
     bundle(vec![
         expr("ct", vec![u32a(1, 1), u32a(2, 0)]),
         bitwise(&6u32.to_ne_bytes()),
         compare(&0u32.to_ne_bytes(), true),
     ])
 }
-fn verdict(code: u32) -> Attr {
+pub(crate) fn verdict(code: u32) -> Attr {
     expr(
         "immediate",
         vec![u32a(1, 0), nested(2, &[nested(2, &[u32a(1, code)])])],
@@ -626,24 +622,26 @@ pub(crate) fn fixture(scope: Scope) -> Policy {
     .unwrap()
 }
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     #[derive(Clone)]
-    struct Packet<'a> {
-        family: u8,
-        proto: u8,
-        iif: &'a str,
-        oif: &'a str,
-        ikind: &'a str,
-        okind: &'a str,
-        src: Ipv4Addr,
-        dst: Ipv4Addr,
-        sport: u16,
-        dport: u16,
-        state: u32,
-        owner: Option<u64>,
+    pub(crate) struct Packet<'a> {
+        pub(crate) family: u8,
+        pub(crate) proto: u8,
+        pub(crate) iif: &'a str,
+        pub(crate) oif: &'a str,
+        pub(crate) ikind: &'a str,
+        pub(crate) okind: &'a str,
+        pub(crate) src: Ipv4Addr,
+        pub(crate) dst: Ipv4Addr,
+        pub(crate) sport: u16,
+        pub(crate) dport: u16,
+        pub(crate) state: u32,
+        pub(crate) owner: Option<u64>,
+        pub(crate) iindex: u32,
+        pub(crate) oindex: u32,
     }
-    fn base() -> Packet<'static> {
+    pub(crate) fn base() -> Packet<'static> {
         Packet {
             family: 2,
             proto: 17,
@@ -657,11 +655,13 @@ mod tests {
             dport: 443,
             state: 0,
             owner: None,
+            iindex: 7,
+            oindex: 2,
         }
     }
     // Independent small evaluator for this supported UAPI subset. Policy assertions
     // below test packet outcomes, not a digest or rendering of the desired model.
-    fn eval(c: &Chain, p: &Packet<'_>) -> u32 {
+    pub(crate) fn eval(c: &Chain, p: &Packet<'_>) -> u32 {
         for r in &c.rules {
             let mut reg = Vec::new();
             let mut matches = true;
@@ -682,6 +682,8 @@ mod tests {
                                 v.resize(16, 0);
                                 v
                             }
+                            4 => p.iindex.to_ne_bytes().to_vec(),
+                            5 => p.oindex.to_ne_bytes().to_vec(),
                             15 => vec![p.family],
                             16 => vec![p.proto],
                             _ => panic!("unsupported meta"),

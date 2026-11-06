@@ -564,3 +564,333 @@ provably complete. The 3-attempt limit for this step was reached; no fourth roun
 T3-I1..T3-I4 stay OPEN. Consequence: the harness is committed as a strict PARTIAL accounting
 layer; it must not be used to qualify a real run until T3-I1..T3-I4 are fixed and re-reviewed.
 No performance claim exists; baseline vs candidate data are absent; release_ready=false.
+
+
+## Review round 3
+
+IMPLEMENTATION COMPLETE / OFFLINE GREEN, 2026-11-06. Independent re-review pending.
+Started clean on rust/v2 @35c3bef. Historical checkpoints below retain their original status. Read all three
+independent reviews and Review round 1/2 above before edits. Own only performance
+tools, the two performance documents and this report; concurrent lab tools are
+out of scope. No subagents, network, sudo, VM, Rust, staging/commit/push.
+
+Tests first: added eleven EXACT independent reviewer recordings (T3-I1 both
+implementations, T3-I2, five T3-I3 variants, three T3-I4 variants), losslessly
+deduplicated with per-record canonical SHA256 in fixtures/review-round3.json.
+No production code changed before the following RED run. Model generation,
+completeness/mutation/property tests and final validation pending. This remains
+a PARTIAL, unaccepted offline harness pending validation and independent review.
+Real performance/producer/runtime/release checks NOT_RUN; release_ready=false.
+
+Round 3 RED checkpoint (before production edits):
+
+| Command | Result |
+| --- | --- |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting.py -k ReviewRoundThree -v` | exit 1, 4 methods, **11 reproduced false PASS assertions**, 0.389s. `/tmp/task14-round3-red.log`. |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting_mutations.py -k QuantityModel -v` | exit 1, 3 methods, three expected missing-model assertions. `/tmp/task14-round3-model-red.log`. |
+
+Model design: close native key sets, enumerate numeric schema positions including
+optional native subfields, generate width/presence/monotonic/physical checks and
+partition/subset/CPU-snapshot/completed-I/O relations from model data. New required
+host `cpu_clock_contract=constant_online_no_suspend` is a producer requirement,
+not authenticated by this analyzer: missing/unknown online/suspend history must
+remain insufficient. Whole-run lower CPU-clock conservation applies only with
+that contract. Existing reviewed fixtures will also be checked with this one new
+nonnumeric declaration to demonstrate numeric refusal rather than old-schema
+rejection. Counter snapshots are subsets of host totals, never equated to current
+cgroup lifetime counters (migration would invalidate that stronger equation).
+
+Round 3 incremental implementation checkpoint:
+
+- Exact-review regression test is GREEN (4 methods, exit 0, 0.054s). Its old
+  recordings are also missing the new clock contract. The stronger generated
+  relationship test adds ONLY that nonnumeric declaration, preserves every raw
+  numeric recording, and is GREEN (1 method, exit 0, 3.373s): all eleven cases
+  break their intended generated relationship, and removing that model rule
+  removes the named predicate. No old-schema rejection is counted as the fix.
+- Initial model inventory/check-removal run: exit 0, 160 numeric entries / 160
+  killed entry removals, 37.469s (`/tmp/task14-round3-inventory-progress.log`).
+  Initial relation mutation run: exit 0, 66/66 killed relation removals, 70.595s
+  (`/tmp/task14-round3-relations-progress.log`). These are superseded snapshots;
+  the model now also exposes previously opaque receipt numeric fields and adds
+  partial-sibling and declarative I/O conservation checks.
+- Current model: **247 numeric positions**, including both original monitoring
+  adapters and conditional retry/rate forms; **68 relation templates**. Every
+  supported optional native field is explicitly listed; unknown native keys and
+  unknown numeric receipt paths refuse. All eleven conditional receipt positive
+  controls freshly PASS. Required physical values are never zero-filled.
+- Found one invalid prior positive fixture: io_other.rbytes advanced with zero
+  io_other.rios. Supplied its original residual operations and included them in
+  cgroup operations. No production rule was weakened to retain this fixture.
+- Broader accounting progress has this expected fixture failure and remains a
+  progress log, not a final GREEN. Superseded property progress was stopped after
+  model expansion. An exactness progress run was stopped because its trace
+  recursively rewalked the entire run at every context-generator yield; the
+  trace now checks arithmetic/boolean/predicate returns without that quadratic
+  traversal. Original logs retained; no terminated run is claimed as PASS.
+- `PERFORMANCE_OFFLINE_NO_NETWORK=1` skips ONLY the existing socket loopback test
+  in test_offline.py. This task forbids network, so its runtime self-test will be
+  reported NOT_RUN. No socket activity has been performed by this round.
+
+Full 3-file validation, final model/registry tables, syntax/JSON and preservation
+checks remain pending. Producer authenticity, clock/online history review,
+real measurements and all release gates remain NOT_RUN; release_ready=false.
+
+Round 3 expanded targeted GREEN checkpoint (not yet final three-file result):
+
+| Command (all use `python3 -B -I -m unittest discover -s tools/performance`) | Result |
+| --- | --- |
+| `-p test_accounting_mutations.py -k test_schema_inventory_and_model_check_mutation_completeness -v` | exit 0, 1 method / 80.355s, **247/247 entry-removal mutants killed**, exact schema numeric inventory. `validation-output/round3/inventory-expanded.log`. |
+| `-p test_accounting_mutations.py -k test_relation_boundaries_and_consumer_mutations -v` | exit 0, 1 method / 109.135s, **68/68 relation-removal mutants killed**. `validation-output/round3/relations-expanded.log`. |
+| `-p test_accounting_mutations.py -k test_model_consumer_native_unknowns_and_clock_absence -v` | exit 0, 1 method / 2.983s. All eleven exact-numeric review cases refuse; disabling ONLY model verdict consumption restores false PASS. Missing clock contract, unknown native keys and unknown numeric receipt paths refuse. `validation-output/round3/consumer-progress.log`. |
+| `-p test_offline.py` with `PERFORMANCE_OFFLINE_NO_NETWORK=1` | exit 0, 9 methods / 176.999s, one socket self-test **SKIPPED / NOT_RUN**, **8142** failure-protocol cases; exactness AST/runtime tracing, decimals, redaction, exclusive publication all pass. `validation-output/round3/offline-progress.log`. |
+
+System `/tmp` tmpfs reached 100% independently of this task (owned round-3 logs
+are only tens of KiB). Two attempts to redirect/run there returned exit **120**
+before producing useful output. No existing evidence was deleted. Logs copied to
+owned ignored `tools/performance/validation-output/round3/`; subsequent tests use
+that directory for logs and an owned TMPDIR. Interrupted/superseded runs are
+retained as progress evidence, never promoted to final validation. Final runs
+have separate `final-*.log` and `final-*.exit` files. No network sockets ran.
+
+Model notes: the whole-host lower bound includes both endpoint quantization and
+outer/inner read uncertainty, exactly `16*C+(w0+w1)*C*H/10**9` ticks. Native PID/
+thread fields retain signed-32-bit positive ceilings alongside the u64 recording
+representation. Known receipt object/number projection alternatives are explicit;
+unknown numeric paths refuse. Property-test rebinding updates ONLY the digest,
+never repairs the mutated projection, and duplicate injections target the actual
+field (or its nearest containing array field).
+
+Round 3 final audit RED/GREEN before final restart:
+`-p test_accounting_mutations.py -k test_count_bytes_and_optional_presence_boundaries -v`
+returned exit **1**, 1 method / four assertions, 0.879s: three raw process/domain/
+residual cases had more completed operations than bytes, and an optional native
+byte field disappeared mid-run without a generated refusal. Same command after
+generic pair/map enforcement: exit **0**, 1 method / 0.873s, including missing
+process I/O device coverage. Logs `final-audit-red.log`, `final-audit-green.log`.
+Completed data operations now require `0 <= operations <= bytes` and zero iff
+zero; native field/device sets are stable by identity over the complete run.
+This follows the model's explicit data-I/O semantics, not a disk bandwidth guess.
+
+Superseded final runs were stopped (exit 143) and renamed `superseded-final-*`
+after the audit changed enforcement; none are final results. The older expanded
+property progress run was also stopped; its log is retained. The generic DSL
+compiler now builds exact callables from the same data (no eval/code generation),
+avoiding repeated interpretation during the full mutation suite. Final validation
+must cover that refactoring and all audit changes. All requested work remains
+inside the owned paths; concurrent lab edits are preserved.
+
+### Review round 3 model and generated registry tables
+
+Complete machine-readable per-quantity rows are in `tools/performance/quantity-model.json`; each has name, canonical schema path, exact source file/field, kind, unit, recorded and kernel width, monotonicity, parent, siblings, upper bound, absence and check/mutation bindings. Recorded values use u64; native PID/task fields additionally enforce the positive signed-32-bit domain. Conditional receipt alternatives retain the original source-specific validation.
+
+| Quantity group | Numeric positions | Generated check binding |
+| --- | ---: | --- |
+| Acquisition clocks | 4 | `quantity:<canonical name>`; width/presence and applicable monotonicity |
+| Cgroup and original residual quantities | 52 | `quantity:<canonical name>`; width/presence and applicable monotonicity |
+| Full-run role and kernel failure evidence | 45 | `quantity:<canonical name>`; width/presence and applicable monotonicity |
+| Manifest, binding, host limits and traffic | 26 | `quantity:<canonical name>`; width/presence and applicable monotonicity |
+| Original traffic and monitor receipts | 87 | `quantity:<canonical name>`; width/presence and applicable monotonicity |
+| Stable process quantities | 18 | `quantity:<canonical name>`; width/presence and applicable monotonicity |
+| Whole-host samples | 15 | `quantity:<canonical name>`; width/presence and applicable monotonicity |
+| **Total** | **247** | All require an overflow witness and killed entry-removal mutant |
+
+Native closed/stable maps are separately generated from the model:
+
+| Map ID | Modeled location |
+| --- | --- |
+| `cpu` | `/samples/*/domains/*/cpu` |
+| `memory_stat` | `/samples/*/domains/*/memory_stat` |
+| `memory_events` | `/samples/*/domains/*/memory_events` |
+| `domain_io_devices` | `/samples/*/domains/*/io` |
+| `domain_io_tuple` | `/samples/*/domains/*/io/*` |
+| `residual_io_devices` | `/samples/*/domains/*/io_other` |
+| `residual_io_tuple` | `/samples/*/domains/*/io_other/*` |
+| `process_io_devices` | `/samples/*/processes/*/io` |
+| `process_io_tuple` | `/samples/*/processes/*/io/*` |
+
+Every relation below expands by its scope, consumes model expression data and requires a raw witness plus killed rule-removal mutant. `partition` means BOTH signed inequalities. Complete byte/count partitions have zero tolerance; CPU partitions have derived endpoint allowances. `subset` is encoded as a partition with zero (or quantized CPU) upper allowance and a lower remainder bound equal to its parent; it does not fabricate complete sibling evidence. Optional overlapping fields are only summed when the stated sibling set is disjoint. Exact expressions and bounds are in the JSON, not reconstructed from the ID.
+
+| Generated relation ID | Expansion scope | Relation / bound source |
+| --- | --- | --- |
+| `host_clock` | `interval` | two-sided partition; endpoint CPU quantization/read skew |
+| `host_boot` | `sample` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `host_parts` | `sample` | two-sided partition; exact aligned partition |
+| `snapshot_domain_cpu` | `sample` | subset; endpoint CPU quantization/read skew |
+| `snapshot_process_usage` | `sample` | subset; endpoint CPU quantization/read skew |
+| `snapshot_domain_user` | `sample` | subset; endpoint CPU quantization/read skew |
+| `snapshot_process_user` | `sample` | subset; endpoint CPU quantization/read skew |
+| `snapshot_domain_system` | `sample` | subset; endpoint CPU quantization/read skew |
+| `snapshot_process_system` | `sample` | subset; endpoint CPU quantization/read skew |
+| `sum_pss_bytes` | `sample` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `sum_uss_bytes` | `sample` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `sum_charges` | `sample` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `sum_threads` | `sample` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `swap_host` | `sample` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `swap_pss` | `sample` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `swap_charges` | `sample` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `uss_pss` | `process` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `pss_rss` | `process` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `rss_ram` | `process` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `swap_order` | `process` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `fd_limit` | `process` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `pid_limit` | `process` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `thread_limit` | `process` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `process_start` | `process` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `process_lifetime` | `process` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `domain_parts` | `domain` | two-sided partition; endpoint CPU quantization/read skew |
+| `exited_parts` | `domain` | two-sided partition; exact aligned partition |
+| `memory_parts` | `domain` | two-sided partition; exact aligned partition |
+| `memory_charge` | `domain` | two-sided partition; exact aligned partition |
+| `pids` | `domain` | two-sided partition; exact aligned partition |
+| `domain_boot` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_sock` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_shmem` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_anon_thp` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_file_thp` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_shmem_thp` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_kernel_stack` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_pagetables` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_sec_pagetables` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_percpu` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_vmalloc` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_slab` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_slab_reclaimable` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_slab_unreclaimable` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_file_mapped` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_file_dirty` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_file_writeback` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_slab_subset` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_slab_parts` | `domain` | two-sided partition; exact aligned partition |
+| `native_kernel_components` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_throttled_periods` | `domain` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `native_throttled_period_deltas` | `domain_interval` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `io_read` | `io` | completed data count/bytes; each completed data operation transfers at least one byte: 0 <= operations <= bytes, and zero iff zero; no device bandwidth assumption |
+| `io_read_delta` | `io_interval` | completed data count/bytes; each completed data operation transfers at least one byte: 0 <= operations <= bytes, and zero iff zero; no device bandwidth assumption |
+| `io_write` | `io` | completed data count/bytes; each completed data operation transfers at least one byte: 0 <= operations <= bytes, and zero iff zero; no device bandwidth assumption |
+| `io_write_delta` | `io_interval` | completed data count/bytes; each completed data operation transfers at least one byte: 0 <= operations <= bytes, and zero iff zero; no device bandwidth assumption |
+| `io_discard` | `io` | completed data count/bytes; each completed data operation transfers at least one byte: 0 <= operations <= bytes, and zero iff zero; no device bandwidth assumption |
+| `io_discard_delta` | `io_interval` | completed data count/bytes; each completed data operation transfers at least one byte: 0 <= operations <= bytes, and zero iff zero; no device bandwidth assumption |
+| `member_cpu_usage` | `domain_interval` | two-sided partition; endpoint CPU quantization/read skew |
+| `member_cpu_user` | `domain_interval` | two-sided partition; endpoint CPU quantization/read skew |
+| `member_cpu_system` | `domain_interval` | two-sided partition; endpoint CPU quantization/read skew |
+| `host_charge` | `interval` | two-sided partition; endpoint CPU quantization/read skew |
+| `domain_user_delta` | `interval` | subset; endpoint CPU quantization/read skew |
+| `domain_system_delta` | `interval` | subset; endpoint CPU quantization/read skew |
+| `domain_capacity` | `domain_interval` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `network_rx` | `interval` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `network_tx` | `interval` | subset; subset: omitted siblings are nonnegative and at most the whole parent |
+| `io_conservation` | `device_interval` | two-sided partition; exact aligned partition |
+
+Production model-generated refusal reasons have the stable `quantity_model:` prefix and the generated predicate ID. Structural/native/receipt failures can also refuse first. The old 44-family registry is retained as redundant independent equations; it is not a completeness oracle and was not extended with T3 case-specific code. All complete partitions, supported native subsets, byte/count pairs and known numeric domains are model data. No empirical performance, producer authenticity or universe-wide physical-completeness claim follows from this finite registry.
+
+A speculative extra audit (`native-event-red.log`) proposed inequalities between
+throttled duration/period events and between group-OOM/task-kill counters. These
+are **not accepted invariants or reproduced defects**: kernel event timing and
+attribution can differ, and the proposed relationships were not established by
+the normalized contract. The temporary proposal test was withdrawn, not used to
+change enforcement. The supported quantities retain their modeled width, presence,
+stable-key and cumulative nonregression requirements. No arbitrary event-count/
+duration equality or unproven native event subset is imposed.
+
+Final static checkpoint: exit **0** for AST/strict JSON/ref resolution and
+idempotent authoring checks. **12 Python ASTs**, **5 performance JSON files**,
+**247 numeric positions**, **68 relations**, **9 native-map templates**.
+`validation-output/round3/static-results.json` retains file lists, hashes and
+results. Model SHA256 `9b1fd3ed3e5ef69e0c7c71f68acb07cc83db4d570388009eb84137e79bfa3a42`;
+schema SHA256 `c2bf1f470134a032dbcc7a317b5921b65cfb831ef0b071a2ab6aa365cbd74e5a`.
+The authoring rerun left both files byte-identical. Branch rust/v2, HEAD
+35c3befd8e8bee60b00630d0a9171eefaad199ac. All three review files and acceptance
+remain HEAD-identical; acceptance SHA256
+3d467451dd03d1663e3c79b24eea6a18aac461f9291f8fdfe1031e1da6e86e97 and
+release_ready=false. `git diff --check` and empty-index checks pass. Concurrent
+lab tool/report changes are visible and untouched.
+
+Final offline suite: `PERFORMANCE_OFFLINE_NO_NETWORK=1 python3 -B -I -m unittest discover -s tools/performance -p test_offline.py`
+(with owned TMPDIR) -> exit **0**, **9 methods / 177.752s**, one loopback socket
+method **SKIPPED / NOT_RUN**, **8142** failure-protocol cases. Log/exit files:
+`validation-output/round3/final-offline.log` and `.exit`. This includes exactness
+tracing through compiled model arithmetic, both receipt adapters, decimal
+rejection, redaction and atomic exclusive publication. Full accounting/mutation
+results remain pending at this checkpoint.
+
+Final accounting suite: `python3 -B -I -m unittest discover -s tools/performance -p test_accounting.py`
+(with owned TMPDIR) -> exit **0**, **44 methods / 332.652s**. All eleven exact
+reviewer recordings, numeric-targeted refusals with the new clock declaration,
+all earlier review regressions, exact threshold boundaries and positive controls
+pass. Log/exit files: `validation-output/round3/final-accounting.log` and `.exit`.
+The final mutation suite remains running at this checkpoint (CPU-active, no
+failure output). No final implementation-complete or independent PASS claim yet.
+
+
+### Review round 3 FINAL GREEN and disposition
+
+All commands below used only `python3 -B -I`, from the repository root, with
+`TMPDIR=/DATA/AppData/vprouter-rust-v2/tools/performance/validation-output/round3/tmp`.
+No network sockets, sudo, VM, Rust, delegates or Git mutations were used by this
+implementation. The loopback test was intentionally NOT_RUN under the task's
+no-network constraint. Durations are test execution time, not workload results.
+
+| Exact validation command | Exit / final result |
+| --- | --- |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting.py` | **0**, **44 tests**, 332.652s. All original review cases and eleven exact round-three recordings GREEN. `validation-output/round3/final-accounting.log`. |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting_mutations.py` | **0**, **13 tests**, 1763.932s. Existing **6108** numeric probes / **4996** violations; new fixed-seed **4104** +/-1/zero/huge/absence/duplicate probes / **2022** generated violations; **247/247** quantity-entry and **68/68** relation-removal mutants killed. `validation-output/round3/final-mutations.log`. |
+| `PERFORMANCE_OFFLINE_NO_NETWORK=1 python3 -B -I -m unittest discover -s tools/performance -p test_offline.py` | **0**, **9 tests**, 177.752s; **8 executed PASS, 1 loopback NOT_RUN**; **8142** failure-protocol cases. Exactness AST/runtime tracing includes the compiled model and both original monitor adapters. `validation-output/round3/final-offline.log`. |
+| `python3 -B -I tools/performance/validation-output/round3/static-check.py` | **0**, 12 Python ASTs, 5 strict performance JSON files, resolved schema refs, no model/schema decimals, idempotent model authoring, final source/docs manifest unchanged, acceptance/reviews preserved, empty index, diff whitespace checks clean. `final-static.log` / `static-results.json` in the same directory. |
+
+Every final unit run has its actual `.exit` file alongside the log. The final
+source/docs manifest matches the final verified bytes. Production semantics
+remained fixed during final validation. The speculative test addition described
+above was withdrawn; final test-source content matches the version loaded by
+the final runs. Documentation/report checkpoints and ignored evidence artifacts
+were updated as results arrived.
+
+Preservation qualification: during the long mutation run another actor advanced
+HEAD from **35c3befd8e8bee60b00630d0a9171eefaad199ac** to
+**848b46852d229ce5557998283053b60ebbee4e08**, commit `feat(rust): witness validator
+round 4 with observation binding registry`. Its changed paths are exclusively
+lab tools and their reports/progress, outside this task's ownership. No owned
+performance path changed in that commit. The first final static attempt returned
+exit **1** solely because its original HEAD-unchanged assertion detected this
+external commit (`static-external-head-change.log`). Replaced that shared-tree
+assumption with an explicit check that concurrent commits did not alter ANY
+owned baseline path, while retaining exact live source-manifest verification.
+The corrected final static run is exit **0**; this implementation performed no
+staging, commit or push. Concurrent lab dirty/new files were preserved. All three
+review files and acceptance remain unchanged; release_ready=false and acceptance
+SHA256 3d467451dd03d1663e3c79b24eea6a18aac461f9291f8fdfe1031e1da6e86e97.
+
+T3-I1, T3-I2, T3-I3 and T3-I4 are **implemented and offline GREEN** against the
+reviewer's exact numeric recordings, not merely refused for the new clock-field
+absence. Suppressing only model enforcement restores each reproduced false PASS.
+The numeric schema/model inventory, closed/stable native maps, per-entry/rule
+mutation coverage and seeded property now provide a derived completeness basis
+for the supported recorded semantics. No new case-specific physical check was
+added to accounting.py's legacy registry.
+
+This is the implementation delegate's result, **not independent acceptance**.
+The controller's earlier PARTIAL / NOT ACCEPTED disposition remains authoritative
+until independent re-review. The finite model is not a proof of every possible
+kernel relationship. Producer authenticity/alignment, constant-online/no-suspend
+history, native peak/transient accounting, omitted guest/iowait detail, original
+platform/cgroup semantics, independent repetition power, and the six-exit Python
+direct adapter remain unqualified. No opaque native extension can silently
+qualify; extending supported semantics requires model and witness updates.
+
+**Real Python/Rust performance runs, producer/runtime/client/ARM/migration/soak and
+release qualification remain NOT_RUN / OPEN. No performance claim is made;
+release_ready=false.** All authorized implementation and offline validation work
+for this task is complete. Independent re-review is the next gate.
+
+## Controller disposition after round 4 (2026-11-06 14:50): still PARTIAL
+
+Round 4 (`task-14-rereview3.md`): T3-I1..T3-I4 fixed; the quantity model's numeric
+inventory is complete relative to run-schema.json (247 entries, 247/247 removal mutants
+killed) but the reviewer reproduced three omitted accounting RELATIONS — T4-I1 cumulative CPU
+residuals can exceed all CPU ever recorded, T4-I2 cumulative residual block I/O can exceed a
+zero containing counter, T4-I3 socket memory has no place in the accepted charge partition —
+plus T4-M1 (FD-entry quantities omit the native descriptor-number universe) and T4-M2
+(smaps byte values need not be representable by the named source). These stay OPEN. The
+harness is checkpointed as a strictly stronger PARTIAL layer; it must not qualify a real run.
+A fifth round, if authorised, should add residual/socket-memory relations to the model and a
+relation-completeness oracle derived from kernel accounting identities, not from the schema.

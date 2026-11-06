@@ -371,4 +371,260 @@ class PhysicalRegistryTests(unittest.TestCase):
         print('numeric schema boundary probes:',count,'registered/number violations:',violations)
 
 
+
+class QuantityModelTests(unittest.TestCase):
+    def model(self):
+        self.assertTrue((ROOT/'quantity-model.json').is_file(),'missing recorded-quantity model')
+        self.assertTrue(hasattr(t.a,'_quantities'),'missing model-generated enforcement')
+        return t.a._quantities
+
+    def test_schema_inventory_and_model_check_mutation_completeness(self):
+        import json
+        q=self.model();schema=json.loads((ROOT/'run-schema.json').read_text())
+        # This traversal is independent of production's model loader/compiler.
+        def leaves(node,path=''):
+            if '$ref' in node:
+                yield from leaves(schema['$defs'][node['$ref'].split('/')[-1]],path);return
+            ty=node.get('type',[]);ty=[ty] if type(ty) is str else ty
+            if ('integer' in ty or type(node.get('const')) is int or
+                any(type(v) is int for v in node.get('enum',[]))):yield path
+            for key,value in node.get('properties',{}).items():yield from leaves(value,path+'/'+key)
+            for value in node.get('patternProperties',{}).values():yield from leaves(value,path+'/*')
+            if type(node.get('additionalProperties')) is dict:yield from leaves(node['additionalProperties'],path+'/*')
+            if 'items' in node:yield from leaves(node['items'],path+'/*')
+            for branch in ('anyOf','oneOf','allOf'):
+                for value in node.get(branch,[]):yield from leaves(value,path)
+        entries=q.MODEL['quantities'];paths={e['path'] for e in entries}
+        self.assertEqual(set(leaves(schema)),paths)
+        self.assertEqual(len(paths),len(entries),'duplicate modeled schema path')
+        # Overflow is an independent witness for EVERY numeric quantity. The
+        # same named check must disappear when that entry is removed, proving
+        # that it is generated from the entry rather than a decorative table.
+        primary=model_seed();receipt_seeds=list(t.receipt_model_seeds())
+        for entry in entries:
+            seed=next((r for r in [primary]+receipt_seeds if list(q.select(r,entry['path']))),primary)
+            with self.subTest(quantity=entry['name']):
+                for field in ('name','source','kind','unit','width','monotonic','parent_total','sibling_set','physical_upper_bound','absence_allowed','checks','mutation_test'):
+                    self.assertIn(field,entry)
+                found=list(q.select(seed,entry['path']))
+                self.assertTrue(found,'model quantity has no mutation fixture')
+                path,value=found[-1];parent=seed
+                for k in path[:-1]:parent=parent[k]
+                parent[path[-1]]=2**64
+                rows=dict(q.generated_constraints(seed))
+                check='quantity:'+entry['name']
+                self.assertIn(check,entry['checks']);self.assertFalse(rows[check])
+                changed=dict(q.generated_constraints(seed,model=q.MODEL|{'quantities':[e for e in entries if e is not entry]}))
+                self.assertNotIn(check,changed)
+                model_bind(seed)
+                self.assertNotEqual(t.a.summarize(seed)['status'],'PASS')
+                parent[path[-1]]=value
+        print('model numeric entries and killed entry removals:',len(entries))
+
+    def test_every_leaf_seeded_perturbation_preserves_refusals(self):
+        import random
+        q=self.model();rng=random.Random(0x14335C3)
+        probes=0;broken=0;covered=set()
+        seeds=[model_seed('rust'),model_seed('python')]+list(t.receipt_model_seeds())
+        for seed in seeds:
+            kind=seed['binding']['implementation']
+            self.assertEqual(t.a.summarize(seed)['status'],'PASS')
+            for entry in q.MODEL['quantities']:
+                if (kind,entry['path']) in covered:continue
+                matches=[(p,v) for p,v in q.select(seed,entry['path']) if type(v) is int]
+                if not matches:continue
+                covered.add((kind,entry['path']))
+                # Both ends of every schema position, optional native keys too.
+                for path,value in (matches[0],matches[-1]) if len(matches)>1 else matches:
+                    parent=seed
+                    for key in path[:-1]:parent=parent[key]
+                    mutations=[value+1,value-1,0,2**64,'ABSENT','DUPLICATE']
+                    rng.shuffle(mutations)
+                    for replacement in mutations:
+                        with self.subTest(kind=kind,path=path,mutation=replacement):
+                            if replacement=='DUPLICATE':
+                                # JSON duplicate keys have no in-memory dict
+                                # representation. Exercise the real decoder.
+                                spec=importlib.util.spec_from_file_location('_quantity_offline',ROOT/'offline.py')
+                                o=importlib.util.module_from_spec(spec);spec.loader.exec_module(o)
+                                raw=duplicate_leaf_json(seed,path)
+                                with self.assertRaises(ValueError):o.decode(raw)
+                                probes+=1;continue
+                            if replacement=='ABSENT':
+                                if type(parent) is list:original=parent.pop(path[-1])
+                                else:original=parent.pop(path[-1])
+                            else:parent[path[-1]]=replacement
+                            try:
+                                rows=list(q.generated_constraints(seed));bad=any(not ok for _,ok in rows)
+                                model_bind(seed);result=t.a.summarize(seed)
+                                if bad:self.assertNotEqual(result['status'],'PASS');broken+=1
+                                # Keep an independent insufficiency/failure;
+                                # repairing the sole cause may validly PASS.
+                                origin=seed['evidence_origin'];seed['evidence_origin']='synthetic'
+                                model_bind(seed)
+                                self.assertNotEqual(t.a.summarize(seed)['status'],'PASS')
+                                seed['evidence_origin']=origin
+                                failed=dict(supervision_cpu=100,total_memory_bytes=100,control_pss_bytes=1,throughput=1000,p95_latency_ns=100,monitor_misses=0,unexpected_restarts=0,oom_events=1)
+                                failed['throughput']=max(0,value if replacement=='ABSENT' else replacement)
+                                self.assertNotEqual(t.a.evaluate_metrics(failed,failed,1)['status'],'PASS')
+                            finally:
+                                if replacement=='ABSENT' and type(parent) is list:parent.insert(path[-1],original)
+                                else:parent[path[-1]]=value
+                            probes+=1
+            model_bind(seed)
+        self.assertEqual({p for kind,p in covered},{e['path'] for e in q.MODEL['quantities']})
+        self.assertGreater(broken,100)
+        print('model fixed-seed +/-1/zero/huge/absent/duplicate probes:',probes,'generated violations:',broken)
+
+    def test_count_bytes_and_optional_presence_boundaries(self):
+        q=self.model()
+        for scope in ('member','domain','residual'):
+            run=model_seed()
+            for index,sample in enumerate(run['samples']):
+                p=sample['processes'][0];d=sample['domains']['control']
+                p['io']['8:0'].update(rbytes=index,rios=index)
+                d['io_other']['8:0'].update(rbytes=index,rios=index)
+                d['io']['8:0'].update(rbytes=2*index,rios=2*index)
+                target=p['io'] if scope=='member' else d['io'] if scope=='domain' else d['io_other']
+                target['8:0']['rios']+=index*10
+            model_bind(run)
+            with self.subTest(scope=scope):
+                rows=list(q.generated_constraints(run))
+                self.assertTrue(any(name=='relation:io_read' and not ok for name,ok in rows))
+        run=model_seed();del run['samples'][1]['domains']['control']['memory_stat']['shmem']
+        self.assertFalse(dict(q.generated_constraints(run))['map:memory_stat'])
+        run=model_seed();del run['samples'][1]['processes'][0]['io']['8:0']
+        self.assertFalse(dict(q.generated_constraints(run))['map:process_io_devices'])
+
+    def test_model_consumer_native_unknowns_and_clock_absence(self):
+        from unittest.mock import patch
+        q=self.model()
+        for name in ('lost_idle','lost_idle_python','snapshot_cpu','shmem','anon_thp','kernel_stack','slab','cpu_periods','read_bytes_no_ops','write_bytes_no_ops','discard_bytes_no_ops'):
+            run=t.round3_record(name);run['host']['cpu_clock_contract']='constant_online_no_suspend';model_bind(run)
+            with self.subTest(recording=name):
+                self.assertEqual(t.a.summarize(run)['status'],'INSUFFICIENT_DATA')
+                # The original 44-family checks admit these exact numeric
+                # recordings. Removing the model verdict consumer restores the
+                # false PASS, so incidental structural rejection cannot mask it.
+                with patch.object(q,'check',lambda run,reasons:None):
+                    self.assertEqual(t.a.summarize(run)['status'],'PASS')
+        seed=model_seed();self.assertEqual(t.a.summarize(seed)['status'],'PASS')
+        del seed['host']['cpu_clock_contract'];model_bind(seed)
+        self.assertNotEqual(t.a.summarize(seed)['status'],'PASS')
+        for section in ('cpu','memory_stat','memory_events'):
+            seed=model_seed()
+            for sample in seed['samples']:sample['domains']['control'][section]['unmodeled_native_field']=0
+            model_bind(seed)
+            self.assertIn('quantity_model:map:'+section,t.a.summarize(seed)['reasons'])
+        seed=model_seed();seed['runtime_evidence']['monitoring']['unmodeled_numeric']=0;model_bind(seed)
+        self.assertIn('quantity_model:inventory:receipt_numeric',t.a.summarize(seed)['reasons'])
+
+    def test_exact_review_fixtures_break_generated_relationships(self):
+        q=self.model()
+        cases={'lost_idle':'host_clock','lost_idle_python':'host_clock','snapshot_cpu':'snapshot_domain_cpu',
+               'shmem':'native_shmem','anon_thp':'native_anon_thp','kernel_stack':'native_kernel_stack',
+               'slab':'native_slab','cpu_periods':'native_throttled_periods',
+               'read_bytes_no_ops':'io_read','write_bytes_no_ops':'io_write','discard_bytes_no_ops':'io_discard'}
+        for name,rule in cases.items():
+            run=t.round3_record(name)
+            # Add only the newly required reviewed clock contract declaration;
+            # preserve every numeric recording in the exact reviewer fixture.
+            run['host']['cpu_clock_contract']='constant_online_no_suspend'
+            rows=list(q.generated_constraints(run))
+            with self.subTest(recording=name):
+                self.assertTrue(any(k=='relation:'+rule and not ok for k,ok in rows))
+                reduced=q.MODEL|{'relations':[r for r in q.MODEL['relations'] if r['id']!=rule]}
+                self.assertFalse(any(k=='relation:'+rule for k,ok in q.generated_constraints(run,model=reduced)))
+                t.rebind_review(run)
+                self.assertEqual(t.a.summarize(run)['status'],'INSUFFICIENT_DATA')
+
+
+    def test_relation_boundaries_and_consumer_mutations(self):
+        q=self.model();seed=model_seed();witnesses={}
+        # Independent raw perturbations, with literal zero/overflow witnesses; no
+        # production predicate computes an expected success/failure boundary.
+        for entry in q.MODEL['quantities']:
+            matches=[(p,v) for p,v in q.select(seed,entry['path']) if type(v) is int]
+            for path,value in (matches[0],matches[-1]) if len(matches)>1 else matches:
+                parent=seed
+                for key in path[:-1]:parent=parent[key]
+                for replacement in (0,2**64):
+                    parent[path[-1]]=replacement
+                    for name,ok in q.generated_constraints(seed):
+                        if name.startswith('relation:') and not ok and name not in witnesses:
+                            witnesses[name]=(path,replacement)
+                parent[path[-1]]=value
+        expected={'relation:'+r['id'] for r in q.MODEL['relations']}
+        self.assertEqual(set(witnesses),expected,'every modeled relation needs a live raw mutation witness')
+        for rule in q.MODEL['relations']:
+            name='relation:'+rule['id'];path,replacement=witnesses[name]
+            parent=seed
+            for key in path[:-1]:parent=parent[key]
+            value=parent[path[-1]];parent[path[-1]]=replacement
+            reasons=set();q.check(seed,reasons)
+            with self.subTest(rule=rule['id']):
+                self.assertIn('quantity_model:'+name,reasons)
+                removed=q.MODEL|{'relations':[r for r in q.MODEL['relations'] if r is not rule]}
+                self.assertFalse(any(k==name for k,ok in q.generated_constraints(seed,model=removed)))
+                self.assertEqual(rule['mutation_test'],'QuantityModelTests.test_relation_boundaries_and_consumer_mutations')
+            parent[path[-1]]=value
+        # Hand-derived compiler oracle: exact partition at 10, allowed +/-2,
+        # outside at +/-3; strict subset remainders; completed tuples iff zero.
+        partition=dict(operator='partition',parent='x',children=['a','b'],upper_tolerance=2,lower_tolerance=2)
+        for x,want in [(7,False),(8,True),(10,True),(12,True),(13,False)]:
+            self.assertEqual(q.relation_ok(partition,dict(x=x,a=4,b=6)),want)
+        subset=partition|dict(upper_tolerance=0,lower_tolerance='x')
+        for x,a,want in [(10,11,False),(10,10,True),(10,0,True),(0,1,False)]:
+            self.assertEqual(q.relation_ok(subset,dict(x=x,a=a,b=0)),want)
+        io=dict(operator='completed_io',parent='bytes',children=['ops'])
+        for b,n,want in [(0,0,True),(1,0,False),(0,1,False),(1,1,True),(1,2,False),(2,1,True)]:
+            self.assertEqual(q.relation_ok(io,dict(bytes=b,ops=n)),want)
+        print('model relation removal mutants killed:',len(expected))
+
+def model_bind(run):
+    # Preserve the mutated measurement/projection. Rebinding must never repair
+    # the very numeric receipt leaf under test.
+    run['runtime_evidence']['record_sha256']=t.a.record_digest(run)
+
+
+def duplicate_leaf_json(run,path):
+    # Arrays cannot contain duplicate JSON keys; duplicate the closest named
+    # containing field for their leaves. Dict leaves duplicate their exact key.
+    target=tuple(path)
+    while target and type(target[-1]) is int:target=target[:-1]
+    import json
+    def encode(value,current=()):
+        if type(value) is dict:
+            items=[]
+            for key,item in value.items():
+                field=json.dumps(key).encode()+b':'+encode(item,current+(key,))
+                items.append(field)
+                if current+(key,)==target:items.append(field)
+            return b'{'+b','.join(items)+b'}'
+        if type(value) is list:return b'['+b','.join(encode(item,current+(i,)) for i,item in enumerate(value))+b']'
+        return t.a.canonical(value)
+    return encode(run)
+
+
+def model_seed(kind='rust'):
+    seed=t.reconciled_record(kind)
+    # Every supported optional numeric native key is present; no wildcard map
+    # can hide an untested extension. All zero IO pairs are intentionally idle.
+    q=t.a._quantities
+    for entry in q.MODEL['quantities']:
+        if not entry['absence_allowed']:continue
+        path=entry['path']
+        for sample in seed['samples']:
+            if '/domains/*/cpu/' in path or '/domains/*/memory_' in path:
+                section=path.split('/')[5];key=path.split('/')[-1]
+                for domain in sample['domains'].values():domain[section].setdefault(key,0)
+        if '/io/' in path or '/io_other/' in path:
+            for sample in seed['samples']:
+                maps=[p['io'] for p in sample['processes']]+[d[k] for d in sample['domains'].values() for k in ('io','io_other')]
+                for io in maps:io.setdefault('8:0',{}).update(rbytes=0,wbytes=0,rios=0,wios=0,dbytes=0,dios=0)
+    t.rebind_review(seed)
+    return seed
+
+
+
 if __name__=='__main__':unittest.main()

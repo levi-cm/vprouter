@@ -182,6 +182,7 @@
   },
   "host": {
     "architecture": "x86_64",
+    "cpu_clock_contract": "constant_online_no_suspend",
     "cpu_model": "fixture-cpu",
     "governor": "performance",
     "kernel": "6.12.0",

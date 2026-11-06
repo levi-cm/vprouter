@@ -21,7 +21,7 @@ memory, and makes native-text parsing/accounting testable without Linux resource
 in, values out; it never reads `/proc`, cgroups, clocks, identities or credentials,
 opens sockets or writes output. Its explicit sibling import loads the existing
 pure contracts in `measurement.py`, including original Python/Rust monitoring
-validators; there is no host discovery. Imports of local Python source are the
+validators, and the checked-in quantity model; there is no host discovery. Imports of local Python source are the
 usual module-loading I/O, not resource collection.
 
 `offline.py` is the bounded filesystem/CLI adapter. `loopback.py` is a separate
@@ -429,3 +429,88 @@ legacy direct baseline, producer provenance and statistical independence stay
 explicitly unavailable. No actual baseline/candidate numbers, measured improvement,
 threshold satisfaction, optimization, canary, runtime/ARM/client or release
 acceptance are delivered by this preparation.
+
+## Recorded-quantity model (review round 3)
+
+This is still **offline preparation**, pending independent re-review. The real
+Python/Rust runs, producer qualification and release gates are **NOT_RUN**;
+`release_ready=false`. A synthetic accounting PASS makes no performance claim.
+
+[`quantity-model.json`](../../tools/performance/quantity-model.json) is the
+machine-readable source for recorded units, source files/fields, counter versus
+gauge/event semantics, recorded/native widths, monotonicity, absence, containing
+totals, sibling sets and physical bounds. Its 247 numeric positions include the
+original Python and Rust monitoring receipts, conditional retry evidence and all
+supported optional native subfields. The numeric receipt inventory is also
+exposed in run-schema.json; source-specific adapter replay remains normative for
+conditional receipt structure, timer ordering, bindings and exact projections.
+Unknown numeric receipt paths and unknown native map fields refuse qualification.
+
+`quantity_model.py` expands model entries and relation templates into predicates;
+it contains no switches on individual measurement names. Entries generate exact
+integer/range/width/presence checks and stable-identity cumulative nonregression
+over the whole recording. Relation scopes expand at every snapshot, adjacent
+endpoints and every original/measured anchored prefix. The model generates CPU,
+memory, swap, task/FD, I/O and network subset/partition/capacity checks, in addition
+to the existing structural, coverage, original-receipt and failure-policy gates.
+The older 44-family registry remains redundant validation, **not the completeness
+oracle**. No new case-specific fix was added to that registry.
+
+| Model part | Generated contract |
+| --- | --- |
+| Every numeric entry | Recorded/native width, exact integer domain, absence policy and applicable monotonicity; no wrap/reset or numeric aliases. |
+| Complete partitions | Both `children - parent <= upper_tolerance` and `parent - children <= lower_tolerance`; exact aligned byte/count partitions have zero tolerances. |
+| Incomplete/overlapping subsets | Observed children cannot exceed the containing total. The unrecorded nonnegative remainder is at most the whole parent; this is a subset bound, **not evidence of a measured complete partition**. Overlapping fields are not summed as disjoint siblings. |
+| Whole host clock | Two-sided delta busy+idle versus online CPUs times awake elapsed, with one endpoint allowance of `16*ncpu` ticks. |
+| Cumulative CPU snapshots | Aggregate recorded process and disjoint domain user/system/usage cannot exceed the corresponding host cumulative classes, with endpoint quantization/read bounds. Current cgroup lifetime totals are never equated to process lifetime totals. |
+| Completed I/O | Each present read/write/discard byte/count pair is present together, zero bytes iff zero completed operations; check snapshots and endpoint deltas. Member plus original residual deltas equal each device/counter's domain delta. |
+| Native optional fields | Supported memory.stat subfields are bounded by their containing totals; disjoint observed kernel components and slab components are bounded together; complete slab pieces sum to slab. Throttled periods cannot exceed all periods, at snapshots or in deltas. |
+
+For host clock conservation the draft now **requires**
+`host.cpu_clock_contract="constant_online_no_suspend"` for the complete recorded
+window. This is a requirement on a future reviewed producer: it must retain
+original evidence of constant online CPU capacity and no suspend across the
+window. The analyzer cannot authenticate this declaration. Missing/unknown
+history is insufficient; CLOCK_BOOTTIME alone does not establish awake capacity.
+No boot-history lower bound is inferred. The existing BOOTTIME boot/lifetime
+checks remain conservative upper bounds.
+
+Let the outer bracket be `E=last.read_end-first.mono`, endpoint widths `w0,w1`,
+`C=logical_cpus`, `H=tick_hz`. The actual inter-read duration is at most E and at
+least `E-(w0+w1)`. The two-sided host-clock tolerance is therefore
+`16*C + (w0+w1)*C*H/10**9` ticks: endpoint tick quantization plus the outer-versus-
+inner duration uncertainty. Each checked window receives that allowance once.
+Cumulative snapshot host subsets use `12*C/H` CPU seconds for busy or `4*C/H`
+for user/system plus `width*C/10**9` CPU seconds; the bounds cover host category
+quantization and cross-read uncertainty. These are accounting consistency bounds,
+never epsilons in performance thresholds. Member/cgroup endpoint tolerances
+remain `2*N/H + (w0+w1)*C/10**9`, without interval accumulation.
+
+The closed native maps deliberately support a finite set of semantics. Additional
+kernel fields must be represented in the model and get independent witnesses
+before qualification; do not silently discard contradictory original fields.
+`build_quantity_model.py` is an offline authoring tool, never run automatically
+by analysis or completeness tests. Review its schema/model diff after changes.
+The completeness test independently traverses numeric schema leaves and requires
+one model entry and a live, killed removal mutation for each. Every relation
+also needs a raw witness and killed removal mutation. Fixed seed `0x14335C3`
+perturbs every numeric position at both selected endpoints with +/-1, zero,
+overflow, absence and an exact-path duplicate JSON field. It checks that generated
+violations prevent PASS and retained independent failures/insufficiency cannot
+be erased. Correcting the sole cause of a refusal may legitimately restore PASS.
+These finite checks do not prove all conceivable physical/kernel relationships.
+
+Memory peaks remain **maxima of sampled memory.current**, not native memory.peak
+or proof against transient peaks. Guest/guest_nice and iowait remain folded into
+host user/nice and idle; independent subcategory evidence is absent. Native
+RLIMIT_NOFILE, system file-table limits, device bandwidth, transient/ABA activity,
+producer honesty/alignment and statistical independence/power remain unqualified.
+
+For a no-network validation (including no loopback sockets):
+
+```bash
+PERFORMANCE_OFFLINE_NO_NETWORK=1 python3 -B -I -m unittest discover -s tools/performance -p test_offline.py
+```
+
+Only the socket loopback self-test is skipped and must be reported **NOT_RUN**.
+`TMPDIR` may point at an owned private directory if the system tmpfs is full.

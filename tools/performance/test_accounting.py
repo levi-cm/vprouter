@@ -567,6 +567,7 @@ def reconciled_record(kind='rust',rep=1):
 
 
 def enrich_review(run):
+    run['host']['cpu_clock_contract']='constant_online_no_suspend'
     for key,value in dict(link_capacity_bps=10**9,max_fd_entries=1048576,pid_max=4194304).items():
         run['host'].setdefault(key,value)
     run['failure_domains']={name:dict(memory_oom_kills=0,kernel_oom_kills=0,
@@ -708,8 +709,8 @@ class ReviewAdditionalPairs(unittest.TestCase):
         for i,s in enumerate(seed['samples']):
             p=s['processes'][0];d=s['domains']['control']
             p['io']={'8:0':dict(rbytes=i,wbytes=i*2,rios=i,wios=i)}
-            d['io_other']={'8:0':dict(rbytes=i,wbytes=0,rios=0,wios=0)}
-            d['io']={'8:0':dict(rbytes=2*i,wbytes=2*i,rios=i,wios=i)}
+            d['io_other']={'8:0':dict(rbytes=i,wbytes=0,rios=i,wios=0)}
+            d['io']={'8:0':dict(rbytes=2*i,wbytes=2*i,rios=2*i,wios=i)}
             d['cpu_exited_usec']=i*10000
             d['cpu_exited_user_usec']=i*10000
             d['cpu']['usage_usec']+=i*10000;d['cpu']['user_usec']+=i*10000
@@ -844,6 +845,70 @@ class ReviewDerivedNumerators(unittest.TestCase):
         self.assertGreater(value.numerator,2**64-1)
         proof['throughput_bytes_per_second']['bytes']-=1
         self.assertIn('invalid_runtime_evidence',a.summarize(run)['reasons'])
+
+
+
+def round3_record(name):
+    bundle=json.loads((ROOT/'fixtures/review-round3.json').read_text())
+    run=bundle['base']
+    for path,operation,value in bundle['fixtures'][name]['patch']:
+        parent=run
+        for key in path[:-1]:parent=parent[key]
+        if operation=='delete':del parent[path[-1]]
+        else:parent[path[-1]]=value
+    import hashlib
+    assert hashlib.sha256(a.canonical(run)).hexdigest()==bundle['fixtures'][name]['sha256']
+    return run
+
+
+class ReviewRoundThree(unittest.TestCase):
+    # Each exact review recording previously qualified. Removing the generated
+    # conservation/subset/pair rule must bring back the incorrect PASS.
+    def refuse(self,names):
+        for name in names:
+            with self.subTest(recording=name):
+                self.assertEqual(a.summarize(round3_record(name))['status'],'INSUFFICIENT_DATA')
+
+    def test_T3I1_missing_host_clock_both_implementations(self):
+        self.refuse(('lost_idle','lost_idle_python'))
+
+    def test_T3I2_cumulative_cpu_offsets(self):
+        self.refuse(('snapshot_cpu',))
+
+    def test_T3I3_native_subfields(self):
+        self.refuse(('shmem','anon_thp','kernel_stack','slab','cpu_periods'))
+
+    def test_T3I4_completed_io_pairs(self):
+        self.refuse(('read_bytes_no_ops','write_bytes_no_ops','discard_bytes_no_ops'))
+
+
+
+def receipt_model_seeds():
+    """Conditional original receipt shapes for model inventory/mutation tests."""
+    spec=importlib.util.spec_from_file_location('_quantity_receipts',ROOT/'test_measurement.py')
+    receipts=importlib.util.module_from_spec(spec);spec.loader.exec_module(receipts)
+    for kind in ('rust','python'):
+        normal=reconciled_record(kind);yield normal
+        integer=copy.deepcopy(normal);integer['runtime_evidence']['throughput_bytes_per_second']=normal['traffic']['bytes']//600;yield integer
+        raw=copy.deepcopy(normal);raw['runtime_evidence']['throughput_bytes_per_second']={'bytes':normal['traffic']['bytes'],'duration_ns':600*10**9};yield raw
+        triggered=copy.deepcopy(normal)
+        if kind=='rust':receipts.add_triggered_retry(triggered['runtime_evidence']);yield triggered
+        for after in (False,True):
+            aborted=copy.deepcopy(normal);op=aborted['runtime_evidence']['monitoring']['retry_coverage'][0]
+            point=op['started_ns'];op['first_result']='http_429'
+            if kind=='python':op['handshake']=None
+            checked=point+(10**9+4 if after else (10**9 if kind=='python' else 1))
+            op['completed_ns']=point+2*10**9 if after else op['completed_ns']
+            op['retry']=dict(coverage='aborted',reason='http_429',stage='after_delay' if after else 'before_delay',failed_check=dict(checked_ns=checked,failed_component='default_route',event_sha256=H),protection=dict(kind='terminal_quarantine',evidence_sha256=H))
+            if after:
+                op['first_finished_ns']=point+1
+                op['retry'].update(pre_delay_check=dict(checked_ns=point+2,interfaces_sha256=H,routes_sha256=H,handshake_age_ns=10**10),delay_started_ns=point+3,original_not_before_ns=point+3+10**9)
+                if kind=='python':
+                    router=aborted['runtime_evidence']['monitoring']['router_cycles'][0]['cycles'][0]
+                    router['started_ns']-=10**9;op['started_ns']-=10**9;op['completed_ns']=point+10**9
+                    op['retry']['delay_started_ns']=point-1;op['retry']['original_not_before_ns']=point-1+10**9
+                    op['retry']['pre_delay_check']['checked_ns']=point-2;op['first_finished_ns']=point-3;op['retry']['failed_check']['checked_ns']=point+10**9
+            yield aborted
 
 
 if __name__=='__main__':unittest.main()

@@ -494,3 +494,16 @@ record is upgraded by filling unknown values with zero. Decimal JSON tokens are
 rejected; verdict arithmetic uses integers and exact fractions throughout.
 No Python direct baseline/monitor adapter is invented, no release gate is closed,
 and the historical short samples remain unsuitable as a controlled baseline.
+
+Review round 3 replaces the finite physical-family list as the completeness basis
+with an explicit recorded-quantity model and generic generated checks. The model
+covers numeric schema positions, both original receipt formats and supported
+optional native subfields; unknown native semantics refuse. It adds two-sided
+whole-host clock conservation, cumulative process/domain-to-host CPU subsets,
+containing-total checks for native subfields and completed-I/O byte/count pairs.
+A future reviewed producer must provide the new constant-online/no-suspend clock
+contract and retain original acquisition evidence. A declaration is not proof.
+Independent re-review is pending. Real runs remain **NOT_RUN**, this work makes
+no performance claim, and `release_ready=false`. Sampled memory maxima do not
+prove native peak accounting. See performance-harness.md for model derivations,
+mutation/completeness coverage and remaining producer/platform limits.

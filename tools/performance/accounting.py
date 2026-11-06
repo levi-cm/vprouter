@@ -15,6 +15,9 @@ import re
 _spec = importlib.util.spec_from_file_location('_performance_contract', Path(__file__).with_name('measurement.py'))
 _contract = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_contract)
+_spec = importlib.util.spec_from_file_location('_performance_quantities', Path(__file__).with_name('quantity_model.py'))
+_quantities = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_quantities)
 
 U64 = 2**64-1
 MAX_TEXT = 1048576
@@ -29,7 +32,9 @@ SERVICE = CONTROL | {'container','tailscaled'}
 COMPONENTS = SERVICE | {'observer','workload'}
 SCENARIOS = [(n, mode) for n in (1,5,6) for mode in ('steady','load')]
 
-# Normative physical/accounting registry. Every row is exercised on raw records
+# Legacy redundant physical/accounting registry. The quantity model is now the
+# completeness basis; these independent older checks remain defense in depth.
+# Every row is exercised on raw records
 # in both directions at one unit and a large excursion. Missing rows/tests fail
 # completeness. All equations also run at anchored prefixes, never a sum of
 # adjacent rounding allowances. Provenance/shape/availability checks are separate.
@@ -522,6 +527,7 @@ def physical_constraints(run):
 
 
 def check_invariants(run, reasons):
+    _quantities.check(run,reasons)
     for name,ok in physical_constraints(run):
         if not ok:reasons.add(INVARIANT_REGISTRY[name]['reason'])
 
@@ -603,7 +609,7 @@ def _summarize(run):
     for name in ('run_id','tailscale_version'): identifier(b[name])
     for name in b['exit_ids']: identifier(name)
     host=run['host']
-    fields(host,'kernel cpu_model architecture logical_cpus governor memory_total_bytes swap_total_bytes tick_hz tick_bits thermal_limit_millic link_capacity_bps max_fd_entries pid_max')
+    fields(host,'kernel cpu_model architecture logical_cpus governor memory_total_bytes swap_total_bytes tick_hz tick_bits thermal_limit_millic link_capacity_bps max_fd_entries pid_max cpu_clock_contract')
     for name in ('kernel','cpu_model','architecture','governor'): identifier(host[name])
     for name in ('logical_cpus','memory_total_bytes','tick_hz','tick_bits','thermal_limit_millic','link_capacity_bps','max_fd_entries','pid_max'): integer(host[name],1)
     integer(host['swap_total_bytes']); digest(run['boot_id'])

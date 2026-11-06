@@ -26,7 +26,7 @@ class Boundaries(unittest.TestCase):
         import sys
         from unittest.mock import patch
         o=module('offline');t=module('test_accounting')
-        for name in ('offline.py','accounting.py'):
+        for name in ('offline.py','accounting.py','quantity_model.py'):
             tree=ast.parse((ROOT/name).read_text())
             self.assertFalse(any(isinstance(n,ast.Constant) and type(n.value) is float for n in ast.walk(tree)))
             self.assertFalse(any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='float' for n in ast.walk(tree)))
@@ -37,7 +37,13 @@ class Boundaries(unittest.TestCase):
             elif type(v) in (list,tuple):
                 for x in v:no_float(x)
         def trace(frame,event,arg):
-            if frame.f_code.co_filename in {str(ROOT/n) for n in ('offline.py','accounting.py','measurement.py')}:
+            if frame.f_code.co_filename==str(ROOT/'quantity_model.py'):
+                # Context generators contain the entire input run. Rewalking
+                # it at every yield is quadratic and adds no arithmetic proof.
+                if event=='return' and frame.f_code.co_name in ('expression','relation_ok','generated_constraints','reference','product','stable_delta','predicate','<lambda>'):
+                    no_float(arg)
+                return trace
+            if frame.f_code.co_filename in {str(ROOT/n) for n in ('offline.py','accounting.py','measurement.py','quantity_model.py')}:
                 if event=='return':no_float(arg)
             return trace
         def forbidden(*args,**kwargs):raise AssertionError('legacy floating helper reached')
@@ -120,6 +126,7 @@ class Boundaries(unittest.TestCase):
             self.assertNotIn(tmp,again.stdout+again.stderr)
 
 
+@unittest.skipIf(os.environ.get('PERFORMANCE_OFFLINE_NO_NETWORK')=='1','NOT_RUN: network prohibited for this validation')
 class Loopback(unittest.TestCase):
     def test_tcp_udp_dns_like_are_self_test_only_and_bounded(self):
         driver=module('loopback');self.assertTrue(hasattr(driver,'self_test'),'missing loopback driver')

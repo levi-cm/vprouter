@@ -1190,3 +1190,8 @@ window, zero intent digest, journal dirs) + M3. Checkpointed as PARTIAL. ARM64: 
 10.0.13 + AAVMF staged rootless from the signed trixie index (packages-arm64/), pinned arm64
 image verified (SHA512 e66eea33...), TCG smoke boots in ~50 s with the full lab -sandbox and a
 user netdev (-nic none halts the guest); run-411 ARM64 preparation delegated.
+
+2026-11-06 14:50 Task 14 round 4 (model-derived invariants): T3-I1..I4 fixed, 247-entry
+quantity model with generated checks; review 4 FAIL: T4-I1..I3 (CPU/IO residual relations,
+socket memory) + T4-M1/M2. Checkpointed as PARTIAL; T4-* OPEN; no 5th round started (host
+resources reserved for the ARM64 run-411 preparation).

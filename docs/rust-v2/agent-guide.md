@@ -184,3 +184,18 @@ positive capture controls, fault matrix, boot-capture reboot, 24-hour soak,
 performance comparison, second local legacy deployment, independent unsafe-launcher
 review and architecture artifacts/SBOM/provenance remain unperformed. Tests of
 synthetic profiles and mock APIs provide no runtime or performance claims.
+
+## Unreleased service and artifact drafts (Task13)
+
+Task13 adds only [offline release preparation](release-preparation.md), an
+[exact current/future migration and recovery guide](release-validation-recovery.md),
+[shape schema](configuration.schema.json), [compatibility/unsupported matrix](release-compatibility.md)
+and [security-to-test mapping](release-security-tests.md). The existing
+[one/five/mixed examples](../../examples/v2/README.md) remain synthetic.
+The Python generator/validator has no activation CLI or installation executor.
+Systemd units and runit directories are inert/disabled drafts. Runit native
+readiness/cgroup/watchdog parity is unimplemented; neither manager is qualified.
+Unsigned deterministic metadata and fixture ELF packaging cannot certify runtime,
+ARM, reproducible binary builds or release readiness. Current exact procedure:
+run offline validation only; do not install/enable/start/migrate native services.
+Task8c and all mandatory acceptance gates remain binding and OPEN.

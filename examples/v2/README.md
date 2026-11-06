@@ -21,3 +21,8 @@ When client policies are configured, they must pin the actual stable Tailscale
 node ID and explicitly select `protected` or `direct`; display names do not
 select identities. Empty adapter/policy arrays do not authorize migration of
 unknown external consumers.
+
+The unreleased [JSON shape schema](../../docs/rust-v2/configuration.schema.json)
+and [Task13 agent/recovery guide](../../docs/rust-v2/release-validation-recovery.md)
+reference these same examples. Schema validation does not replace the Rust
+semantic/profile/allocation validators or any native acceptance gate.

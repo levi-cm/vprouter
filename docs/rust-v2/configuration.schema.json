@@ -1,0 +1,291 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "deployment_id": {
+      "$ref": "#/$defs/label"
+    },
+    "site": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "not": {
+        "pattern": "[^a-z0-9-]"
+      }
+    },
+    "gateway_image": {
+      "type": "string",
+      "pattern": "^(?:sha256:[0-9a-f]{64}|[^@\\s]+@sha256:[0-9a-f]{64})$"
+    },
+    "exits": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/exit"
+      }
+    },
+    "dependency_adapters": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/adapter"
+      }
+    },
+    "client_policies": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "$ref": "#/$defs/client"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "deployment_id",
+    "site",
+    "gateway_image",
+    "exits",
+    "dependency_adapters",
+    "client_policies"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vprouter:configuration:v2:draft",
+  "title": "UNRELEASED schema2 shape reference",
+  "$comment": "Shape-only draft. Rust Configuration::parse/validate_structure and full protected profile/allocation/native checks are binding. Duplicate JSON keys, byte lengths, key/state/resource/name/node collisions and semantic references require Rust validation. Schema validation is never activation authority.",
+  "examples": [],
+  "$defs": {
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "not": {
+        "pattern": "[^a-z0-9-]"
+      }
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^/(?:[^/\\u0000]+(?:/[^/\\u0000]+)*)?$",
+      "not": {
+        "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "executable": {
+          "$ref": "#/$defs/path"
+        },
+        "argv": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 4096,
+            "not": {
+              "pattern": "\u0000"
+            }
+          }
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        },
+        "idempotent": {
+          "const": true
+        }
+      },
+      "required": [
+        "executable",
+        "argv",
+        "timeout_seconds",
+        "idempotent"
+      ]
+    },
+    "mode": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "mullvad"
+            },
+            "profile": {
+              "$ref": "#/$defs/path"
+            },
+            "expected_server": {
+              "type": "string",
+              "pattern": "^[a-z]{2}-[a-z]{2,6}-wg-[0-9]{1,4}$",
+              "not": {
+                "pattern": "[^a-z0-9-]"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "profile",
+            "expected_server"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "direct"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      ]
+    },
+    "exit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/label"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "state_dir": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/path"
+            },
+            {
+              "not": {
+                "const": "/"
+              }
+            }
+          ]
+        },
+        "enrollment_key_file": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/mode"
+        }
+      },
+      "required": [
+        "id",
+        "enabled",
+        "state_dir",
+        "mode"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "properties": {
+                  "kind": {
+                    "const": "direct"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "enrollment_key_file": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/label"
+        },
+        "drain": {
+          "$ref": "#/$defs/action"
+        },
+        "stop": {
+          "$ref": "#/$defs/action"
+        },
+        "rebind": {
+          "$ref": "#/$defs/action"
+        },
+        "start": {
+          "$ref": "#/$defs/action"
+        },
+        "health_check": {
+          "$ref": "#/$defs/action"
+        }
+      },
+      "required": [
+        "id",
+        "drain",
+        "stop",
+        "rebind",
+        "start",
+        "health_check"
+      ]
+    },
+    "client": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/label"
+        },
+        "exit_id": {
+          "$ref": "#/$defs/label"
+        },
+        "selected_node_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "not": {
+            "pattern": "[^A-Za-z0-9_-]"
+          }
+        },
+        "mode": {
+          "enum": [
+            "protected",
+            "direct"
+          ]
+        },
+        "dependency_adapters": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/label"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "exit_id",
+        "selected_node_id",
+        "mode",
+        "dependency_adapters"
+      ]
+    }
+  }
+}

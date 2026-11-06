@@ -1143,3 +1143,13 @@ closure (recursive metadata-only custody, 420 rename permutations, 2588 injected
 undecodable) -> controller fix MAX_OPAQUE=128 + RED/GREEN test; R4 fix not re-reviewed.
 Implementer workspace 568 pass/0 fail/17 ignored (before R4 fix); core re-run clean after.
 Owned-guest/real-installation migration NOT_RUN.
+
+2026-11-06 Task 13 (services + immutable artifacts) OFFLINE release engineering:
+tools/release_engineering (systemd/runit generators, ownership-manifest lifecycle plans,
+deterministic x86_64/aarch64 bundle with checksums, offline SBOM, unsigned in-toto-style
+provenance, verifier) + draft release docs/schema. Review1 FAIL (I1 rollback state
+restoration, I2 parent fsync on retry, M1 ELF size fields) -> fixed with class closure
+(per-syscall fault sweep 3096 cases, lifecycle table, ELF mutation sweep). Re-review: I1/I2/M1
+fixed, 2 Minor (REL/RELA entsize, note records) fixed/narrowed by controller. Python 37 tests
+OK; no Rust changed (workspace 569 pass earlier). Real cross builds NOT_RUN (cross-C wrappers
+absent), runit parity blocked, unsigned => never release-ready.

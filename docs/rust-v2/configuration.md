@@ -267,3 +267,13 @@ Duplicates are rejected after case normalization, so `PrivateKey` and
 `privatekey` cannot coexist. Section names, allowed options, values and server
 validation remain strict. Migration keeps the original profile path, including
 generic names such as `max-vprouter.conf`.
+
+## Unreleased machine-readable shape reference
+
+[configuration.schema.json](configuration.schema.json) is a draft JSON Schema
+2020-12 shape reference for the same schema2 and [one/five/mixed examples](../../examples/v2/README.md).
+Rust parsing and validation remain binding, including duplicate fields, byte
+bounds, key/state/resource/name/node collisions, exact adapter grammar and
+semantic references. The schema is not a runtime validator or activation permit.
+See [Task13 preparation](release-preparation.md) for disabled service drafts and
+explicit installation/migration blockers.

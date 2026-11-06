@@ -26,65 +26,24 @@ def split(record):
     return lines, index, json.loads(lines[index].split(' ', 1)[1])
 
 
-# Independently transcribed from ValidationBirth, OwnerDomainRecord, QueryFacts,
-# project.rs and native result emitters. This map is NOT read from SCHEMAS.
-U32_FIELDS = set(('pid original_pid eligible_original_pid listener_origin_uid '
-                  'listener_origin_gid planned_host_link_index mode mtu controller '
-                  'promiscuity all_multicast route_priority nexthop_id output metric '
-                  'flags priority table suppress_prefixlen postcompletion_inventory_polls '
-                  'max_pacing_offload_horizon fwmark fwmask suppress_ifgroup goto realm').split())
-U8_FIELDS = set('prefix scope preference protocol action fault received_packets released_gates'.split())
-U64_FIELDS = set(('dev ino start process_start original_start eligible_original_start '
-                  'borrowed_registration_count canonical_negative_checks complete_original_job_set '
-                  'global_assemblies_reserved global_assembly_limit global_child_capacity_limit '
-                  'global_transferred_ticket_limit historical_original_jobs original_jobs '
-                  'registered_native_slots repeat_retirement_refusals retired_original_jobs '
-                  'retired_suffix_jobs schema suffix_jobs negative_checks held_pending_polls queued_polls').split())
-U64_ARRAY_FIELDS = set(('charges_after charges_after_drop charges_before charges_before_drop '
-                        'parent_counts_after parent_counts_before namespace').split())
-DIGEST_FIELDS = set(('request query policy configuration declaration host_declaration '
-                     'binding public_result public_key device_public_key declaration_digest '
-                     'movement_query').split())
+def validator_module():
+    spec = importlib.util.spec_from_file_location('contract_types',TOOL)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-# Field-level source inventory used by the mechanical Rust/schema check and
-# the report. Option fields may be narrowed for this completed success profile.
-RUST_SHAPES = [
-    ('crates/vprouter-launch/src/owned/preparation.rs','ValidationBirth','Birth'),
-    ('crates/vprouter-launch/src/owned.rs','Identity','Identity'),
-    ('crates/vprouter-launch/src/supervision.rs','OwnerDomainRecord','OwnerEpoch'),
-    ('crates/vprouter-launch/src/attachment.rs','QueryFacts','QueryFacts'),
-    ('crates/vprouter-launch/src/owned/preparation/inspection.rs','History','InspectionHistory'),
-    ('crates/vprouter-launch/src/owned/preparation/inspection.rs','Initial','InspectionInitial'),
-    ('crates/vprouter-launch/src/owned/preparation/mount.rs','History','Attachment'),
-    ('crates/vprouter-launch/src/owned/preparation/mount.rs','Placeholder','Placeholder'),
-    ('crates/vprouter-launch/src/owned/preparation/fresh_transport.rs','History','FreshTransport'),
-    ('crates/vprouter-launch/src/owned/preparation/fresh_mount.rs','History','MountHistory'),
-    ('crates/vprouter-launch/src/owned/preparation/host_link.rs','History','HostLinkHistory'),
-    ('crates/vprouter-launch/src/owned/preparation/quarantine.rs','Operation','NetfilterHistory'),
-    ('crates/vprouter-launch/src/owned/preparation/quarantine.rs','PublicResult','NetfilterResult'),
-    ('crates/vprouter-launch/src/owned/preparation/producer_creation.rs','History','ProducerCreationHistory'),
-    ('crates/vprouter-launch/src/owned/preparation/producer_binding.rs','History','ProducerBindingHistory'),
-    ('crates/vprouter-launch/src/owned/preparation/producer_binding.rs','PublicResult','ProducerBindingResult'),
-    ('crates/vprouter-launch/src/owned/preparation/bootstrap.rs','History','BootstrapHistory'),
-    ('crates/vprouter-launch/src/owned/preparation/bootstrap.rs','PublicResult','BootstrapResult'),
-    ('crates/vprouter-network/src/project.rs','Link','Link'),
-    ('crates/vprouter-network/src/project.rs','Address','Address'),
-    ('crates/vprouter-network/src/project.rs','Route','Route'),
-    ('crates/vprouter-network/src/project.rs','Rule','Rule'),
-    ('crates/vprouter-network/src/project.rs','Wireguard','Wireguard'),
-    ('crates/vprouter-network/src/project.rs','Peer','WireguardPeer'),
-]
+TYPE_VALIDATOR = None
+LEAF_TYPES = None
 
-# Remaining serde structs reachable through the emitted histories/results.
-# Projection-only wrappers are deliberately not called Rust Deserialize types.
-SERDE_WITNESS_STRUCTS = RUST_SHAPES + [
-    ('crates/vprouter-launch/src/owned/preparation/wireguard.rs','History','WireguardHistory'),
-    ('crates/vprouter-launch/src/kernel/wireguard_role.rs','PublicResult','WireguardResult'),
-    ('crates/vprouter-launch/src/kernel/host_link.rs','PublicResult','HostLinkResult'),
-    ('crates/vprouter-launch/src/owned.rs','ProducerOwnership','EntryProducer'),
-    ('crates/vprouter-network/src/host_observation.rs','HostObservation','HostBaseline'),
-]
+
+def contract_types():
+    global TYPE_VALIDATOR,LEAF_TYPES
+    if TYPE_VALIDATOR is None:
+        TYPE_VALIDATOR = validator_module()
+        witness = split(json.loads(RAW.read_bytes()))[2]
+        LEAF_TYPES = dict(TYPE_VALIDATOR.contract_leaves(witness))
+    return TYPE_VALIDATOR,LEAF_TYPES
 
 
 def split_rust_types(text, delimiter=','):
@@ -120,35 +79,17 @@ def rust_primitive_paths(value, rust_type, path):
 
 
 def source_width_inventory(witness):
-    """Scriptable extraction of every reachable serde struct's fields+types.
-
-    Match complete struct shapes, permitting only serde's omitted optional
-    fields. Recurse through the entire witness, including repeated copies.
-    Widths in JSON-builder projections use integer_bits' explicit emitter map.
-    """
-    declarations = [(file,name,dict(rust_fields(file,name))) for file,name,_ in SERDE_WITNESS_STRUCTS]
-    widths, seen = {}, set()
-    def visit(value,path):
-        if type(value) is dict:
-            for file,name,fields in declarations:
-                omitted = set(fields)-set(value)
-                if set(value).issubset(fields) and all(fields[k].startswith('Option<') for k in omitted):
-                    # Optional movement fields are omitted in the first4 WG rows.
-                    if len(fields)-len(value) > 2:
-                        continue
-                    seen.add((file,name))
-                    for key in set(value)&set(fields):
-                        for leaf,spec in rust_primitive_paths(value[key],fields[key],path+(key,)):
-                            if leaf in widths:
-                                assert widths[leaf] == spec, (leaf,widths[leaf],spec)
-                            widths[leaf] = spec
-            for key,child in value.items():
-                visit(child,path+(key,))
-        elif type(value) is list:
-            for i,child in enumerate(value):
-                visit(child,path+(i,))
-    visit(witness,())
-    return declarations,widths,seen
+    module,_ = contract_types()
+    sources = module.CONTRACT['field_sources']
+    declarations = []
+    seen = set()
+    for name in sorted({key.split('.')[0] for key in sources}):
+        entries = {key.split('.')[1]:value for key,value in sources.items() if key.startswith(name+'.')}
+        declaration = next(iter(entries.values()))['declaration']
+        file,rust_name = declaration.rsplit('::',1)
+        declarations.append((file,rust_name,{k:v['rust_type'] for k,v in entries.items()}))
+        seen.add((file,rust_name))
+    return declarations,dict(module.contract_leaves(witness)),seen
 
 
 def rust_fields(relative, name):
@@ -171,47 +112,19 @@ def leaf_cases(value, path=()):
 
 
 def integer_bits(path):
-    key = path[-1]
-    if type(key) is int:
-        field = next(p for p in reversed(path) if type(p) is str)
-        if field in DIGEST_FIELDS or field == 'address':
-            return 8
-        if field == 'pins':
-            return 32 if key == 2 else 64
-        if field == 'addition':
-            return 32 if len(path) >= 2 and path[-2] == 'addition' else 8
-        if field == 'query_sequences':
-            return 32
-        if field == 'allowed_ips':
-            return 8
-        if field == 'tun_info':
-            field_index = max(i for i,p in enumerate(path) if p == 'tun_info')
-            return 16 if len(path)-field_index-1 == 2 else 8
-        if field in U64_ARRAY_FIELDS:
-            return 64
-        raise AssertionError('unmapped Rust integer array: '+repr(path))
-    if key == 'polls' and path[-2] == 'admission':
-        return 32
-    if key in ('hardware_type','headroom','tailroom'):
-        return 16
-    if key == 'kind' and path[-3] == 'routes':
-        return 8  # project.rs:68 Route.kind; string kinds have no integer width.
-    if key == 'index':
-        # Writer indices are usize; link and WAN indices are u32.
-        return 64 if path[-2] in ('own_intent_polling', 'own_query_intent_polling', 'original_writer') else 32
-    if key == 'original_pid' and path[-2] == 'foreign_eligibility':
-        return 31
-    if key in ('held_pending_polls','queued_polls') and path[-3:-1] == ('host_addition','own_intent_polling'):
-        return 32
-    if key in U32_FIELDS or key == 'peer_index':
-        return 32
-    if key in U8_FIELDS:
-        return 8
-    if key in ('actual_wait_status', 'listener_origin_pid'):
-        return 31  # i32::MAX+1; negative tested separately by success status guards.
-    if key in U64_FIELDS:
-        return 64
-    raise AssertionError('unmapped Rust integer field: '+repr(path))
+    module,leaf_types = contract_types()
+    if path and path[0] == 'tun_info':
+        # Resolve synthetic nonempty TUN tuples through Link's contract, even
+        # though the real record contains an empty list. No key-to-width map.
+        synthetic = dict(module.contract_leaves([[1,[2]],[3,[4]]],
+                         module.SCHEMAS['Link']['tun_info'],('tun_info',)))
+        spec = synthetic.get(path)
+    else:
+        spec = leaf_types.get(path)
+    if spec not in module.INTEGER_RANGES:
+        raise AssertionError('unmapped Rust integer path: '+repr(path))
+    maximum = module.INTEGER_RANGES[spec][1]
+    return maximum.bit_length()
 
 
 def sweep_chunk(paths):
@@ -309,6 +222,133 @@ class WitnessValidation(unittest.TestCase):
                     self.assertEqual(self.m.validate(path)['verdict'], 'FAIL', name)
         self.assertEqual(self.m.validate(prior / 'real.json')['verdict'], 'PASS')
 
+    def test_round5_all_96_retained_reviewer_fixtures(self):
+        ledger = json.loads(Path('/tmp/vprouter-witness-r4/reviewer/prior-cli-results.json').read_bytes())
+        earlier = [Path(row['fixture']) for row in ledger if row['verdict'] == 'FAIL']
+        self.assertEqual(len(earlier), 70)
+        directory = Path('/tmp/vprouter-witness-r4/reviewer')
+        names = [
+            'host_addition_zero_digest_all_copies', 'assembly_child_limit_wrong',
+            'transport_directory_foreign_from_original_journal',
+            'wan_window_foreign_from_host_policy', 'wan_verified_after_host_policy_birth',
+            'wireguard_public_key_foreign_from_input_all_copies',
+            'wireguard_name_foreign_from_allocation_all_copies',
+            'wireguard_alias_foreign_from_allocation_all_copies',
+            'wireguard_provision_query_key_mismatch', 'wireguard_peers_removed_all_copies',
+            'wireguard_result_device_name_differs_from_link',
+            'wireguard_result_device_index_differs_from_link',
+            'wireguard_original_provision_query_link_mismatch',
+            'wireguard_allowed_ips_empty_all_copies',
+        ] + [kind+'_link_guard_'+field+'_all_copies'
+             for kind in ('wireguard', 'veth')
+             for field in ('mtu','controller','port_kind','promiscuity','all_multicast','alternate_names')]
+        self.assertEqual(len(names), 26)  # 25 Important + M3, not 25 inclusive.
+        for path in earlier + [directory/(name+'.json') for name in names]:
+            with self.subTest(fixture=str(path)):
+                self.assertTrue(path.is_file())
+                result = self.m.validate(path)
+                failures = [r['name'] for r in result['checks'] if r['status'] == 'FAIL']
+                self.assertEqual(result['verdict'], 'FAIL')
+                self.assertTrue(set(failures)-{'frozen_bindings'},
+                                'helper drift must not mask an accepted semantic mutation: '+str(path))
+
+    def test_extractor_multiline_guards_and_exact_serde_types(self):
+        path = ROOT/'tools/rust-v2-lab/witness-contract-extract.py'
+        self.assertTrue(path.is_file())
+        spec = importlib.util.spec_from_file_location('contract_extractor',path)
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        source = """#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Sample {
+    // Width, Option and nested fixed arrays must come from Rust.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    value: Option<[(u16, [u8; 32]); 6]>,
+}
+fn validate(&self) -> Result<()> {
+    if self.namespace != if kind { a } else { b }
+        || self.value.len() != 6 {
+        return Err(Error::Bad);
+    }
+    if self.one { accept(); }
+    if self.two { return Err(Error::Bad); }
+    require(self.good)?;
+    ensure!(self.safe);
+    assert_eq!(self.count, 6);
+    match self.result { Some(r) if r.namespace == self.namespace => Ok(()), _ => Err(Error::Bad) }
+    Ok(())
+}
+"""
+        declarations = m.declarations('sample.rs',source)
+        field = declarations[0]['fields']['value']
+        self.assertEqual(field['rust_type'],'Option<[(u16, [u8; 32]); 6]>')
+        self.assertTrue(field['option'])
+        self.assertEqual(field['line'],6)
+        guards = m.guards_in('sample.rs',source)
+        conditions = [g['expression'] for g in guards if g['kind']=='if_return_err']
+        self.assertIn('self.namespace != if kind { a } else { b } || self.value.len() != 6',conditions)
+        self.assertIn('self.two',conditions)
+        self.assertNotIn('self.one { accept(); } if self.two',conditions)
+        self.assertIn('r.namespace == self.namespace',[g['expression'] for g in guards if g['kind']=='match_guard'])
+        self.assertEqual(len(guards),6)
+
+    def test_every_public_allocation_exit_has_native_plan_guards(self):
+        cases = [('host_interface','foreign'),('exit_id',self.witness['preparation']['member']),
+                 ('state_dir','/'),('transport_subnet','10.0.0.0/30')]
+        for key,value in cases:
+            record = copy.deepcopy(self.record)
+            lines = list(self.lines)
+            for i,line in enumerate(lines):
+                if line.startswith('{'):
+                    row = json.loads(line)
+                    if 'secret_attachment_descriptor' in row:
+                        row['secret_attachment_descriptor']['allocation']['exits'][1][key] = value
+                        lines[i] = json.dumps(row)
+            record['stdout'] = '\n'.join(lines)+'\n'
+            with self.subTest(field=key):
+                self.rejected(record,'allocation_contract')
+
+    def test_native_peer_plan_guards_beyond_reviewer_fixtures(self):
+        for field in ('public_key','endpoint','allowed_ips'):
+            def change(w):
+                for _,obj in self.m.objects(w):
+                    if 'peers' in obj and 'public_key' in obj:
+                        for peer in obj['peers']:
+                            if field == 'public_key':
+                                peer[field][0] ^= 1
+                            elif field == 'endpoint':
+                                peer[field] = '185.66.0.2:51820'
+                            else:
+                                peer[field] = [['0.0.0.0',1]]
+            with self.subTest(field=field):
+                self.rejected(self.mutated(change),'contract_success')
+
+    def test_contract_drift_and_exhaustive_guard_dispositions(self):
+        extractor = ROOT/'tools/rust-v2-lab/witness-contract-extract.py'
+        contract_path = ROOT/'tools/rust-v2-lab/witness-contract.json'
+        self.assertTrue(extractor.is_file(), 'source contract extractor missing')
+        self.assertTrue(contract_path.is_file(), 'generated source contract missing')
+        result = subprocess.run([sys.executable,'-B',str(extractor)],capture_output=True,cwd=ROOT)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout,contract_path.read_bytes(), 'source contract drift')
+        contract = json.loads(result.stdout)
+        self.assertGreater(len(contract['guards']),100)
+        dispositions = self.m.guard_dispositions()
+        self.assertEqual(set(dispositions), {g['id'] for g in contract['guards']})
+        for guard in contract['guards']:
+            with self.subTest(guard=guard['id']):
+                self.assertTrue(guard['expression'])
+                self.assertIn('fields',guard)
+                disposition = dispositions[guard['id']]
+                self.assertIn(disposition['status'],('enforced','unenforceable_offline'))
+                if disposition['status'] == 'enforced':
+                    self.assertTrue(disposition['check_ids'])
+                    self.assertTrue(all(callable(getattr(self.m,k,None)) for k in disposition['check_ids']))
+                else:
+                    self.assertTrue(disposition['reason'])
+        # An unseen Rust guard cannot acquire a blanket function/file mapping.
+        self.assertRaises(ValueError,self.m.guard_dispositions,
+                          contract['guards']+[dict(id='new-unmapped-guard',expression='x != y',fields=[])])
+
     def test_every_real_witness_leaf_through_validate(self):
         leaves = list(leaf_cases(self.witness))
         self.assertEqual(len(leaves), 28782, 'review leaf inventory changed; audit it')
@@ -359,7 +399,7 @@ class WitnessValidation(unittest.TestCase):
         errors = []
         for path,spec in widths.items():
             if re.fullmatch(r'u(8|16|32|64)|usize|i32|i64',spec):
-                wanted = 64 if spec == 'usize' else int(spec[1:])-(spec[0]=='i')
+                wanted = self.m.INTEGER_RANGES[spec][1].bit_length()
                 try:
                     actual = integer_bits(path)
                 except AssertionError as error:
@@ -371,10 +411,10 @@ class WitnessValidation(unittest.TestCase):
         for path in (('unmapped_integer',),('unmapped_array',0)):
             with self.assertRaises(AssertionError):
                 integer_bits(path)
-        leaf_map = {path: widths.get(path, ('u'+str(integer_bits(path))) if type(value) is int
-                    else type(value).__name__) for path,value in leaf_cases(self.witness)}
+        leaf_map = dict(self.m.contract_leaves(self.witness))
         self.assertEqual(len(leaf_map),28782)
-        print('source width inventory:',len(declarations),'serde structs,',
+        self.assertEqual(set(leaf_map),{p for p,_ in leaf_cases(self.witness)})
+        print('contract type inventory:',len(declarations),'serde structs,',
               sum(len(f) for _,_,f in declarations),'fields,',len(leaf_map),'leaf entries',flush=True)
 
     def test_nested_tun_tuple_widths_from_rust_source(self):
@@ -525,19 +565,21 @@ class WitnessValidation(unittest.TestCase):
                 self.assertEqual(self.receipt(self.mutated(change))['verdict'], 'FAIL')
 
     def test_rust_serialized_field_inventory_and_primitive_ranges(self):
-        for file,name,schema in RUST_SHAPES:
-            fields = rust_fields(file,name)
-            self.assertEqual(set(k for k,_ in fields), set(self.m.SCHEMAS[schema]), (file,name,schema))
-            for key,rust_type in fields:
-                base = rust_type.removeprefix('Option<').removesuffix('>')
-                if base not in ('u8','u16','u32','u64','i32','i64','[u8; 32]','[(u64, u64, u32); 6]','[(u64, u64, u32); 8]'):
+        sources = self.m.CONTRACT['field_sources']
+        for schema in sorted({key.split('.')[0] for key in sources}):
+            entries = {key.split('.')[1]:value for key,value in sources.items() if key.startswith(schema+'.')}
+            file,name = next(iter(entries.values()))['declaration'].rsplit('::',1)
+            fields = dict(rust_fields(file,name))
+            self.assertEqual(set(entries),set(fields))
+            for key,field in entries.items():
+                self.assertEqual(fields[key],field['rust_type'])
+                if key not in self.m.SCHEMAS[schema]:
+                    self.assertTrue(any('skip_serializing_if' in a for a in field['serde_attributes']))
                     continue
-                spec = self.m.SCHEMAS[schema][key]
-                expected = {'[u8; 32]':'bytes32','[(u64, u64, u32); 6]':'pins6',
-                            '[(u64, u64, u32); 8]':'pins8'}.get(base,base)
-                # Some Option values are fixed null in this success profile.
-                if spec != 'null':
-                    self.assertIn(expected, list(self.m.alternatives(spec)), (file,key,rust_type,spec))
+                rust_type = fields[key]
+                base = rust_type[7:-1] if rust_type.startswith('Option<') else rust_type
+                if re.fullmatch(r'[ui](8|16|32|64)|usize|f64|bool',base):
+                    self.assertIn(base,list(self.m.alternatives(self.m.SCHEMAS[schema][key])))
         for bits in (8,16,32,64):
             for value in (-1,2**bits,True,1.0,None):
                 with self.assertRaises(ValueError):

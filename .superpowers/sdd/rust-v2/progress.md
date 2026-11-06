@@ -1203,3 +1203,14 @@ fix; review 2 NO-GO (I1 part 2: downstream reopen-by-name), fix with one guarded
 acquisition primitive + static by-path-open test; review 3 PASS / technical GO. Note: /tmp
 tmpfs hit 100% (old review scratch cargo targets) -> test-run411-acquisition.py ENOSPC until
 cleaned; passes after. Checkpoint pushed = G1; run 411 executes next (budget 1).
+
+2026-11-06 16:20 witness validator round 5 (Rust contract extractor, 3,378 guards, 178
+enforced/3,200 unenforceable_offline, 96 fixtures rejected, real record 23/23): review 5 FAIL
+(I15-I18, M4 = extractor/disposition gaps). Checkpointed PARTIAL; iteration stopped (5 rounds).
+Run 411 EXECUTED once at 15:02:29Z on debian-arm64 (TCG): FAIL exit 1, 40.1 s, owner launcher
+exit 1 `secret_bootstrap_lab: deadline` during handoff (only phase row handoff.host begin),
+budget 0. Post-run C (failed_bootstrap_preserved, provenance valid), I (state captured), F
+(owner unit not-found, cgroup absent) done; P refused (no Deadline boundary row); A deferred
+pending diagnosis/review (selectors retained). Preserved run-409 tree re-verified 91/91 after a
+fix delegate's accidental 3-byte file at preserved/reference.json (created+removed; only the
+parent dir mtime changed). Diagnosis delegated (read-only).

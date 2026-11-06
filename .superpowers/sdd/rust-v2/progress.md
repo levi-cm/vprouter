@@ -1195,3 +1195,11 @@ user netdev (-nic none halts the guest); run-411 ARM64 preparation delegated.
 quantity model with generated checks; review 4 FAIL: T4-I1..I3 (CPU/IO residual relations,
 socket memory) + T4-M1/M2. Checkpointed as PARTIAL; T4-* OPEN; no 5th round started (host
 resources reserved for the ARM64 run-411 preparation).
+
+2026-11-06 16:05 run-411 ARM64 preparation (debian-arm64 TCG guest, frozen 410 candidate
+arm64 payload): prep PASS + exact --preflight-only PASS; go/no-go review 1 NO-GO (I1 409 not
+in isolation guards; G1 checkpoint gate; M1 smoke manifest self-checksum, regenerated),
+fix; review 2 NO-GO (I1 part 2: downstream reopen-by-name), fix with one guarded
+acquisition primitive + static by-path-open test; review 3 PASS / technical GO. Note: /tmp
+tmpfs hit 100% (old review scratch cargo targets) -> test-run411-acquisition.py ENOSPC until
+cleaned; passes after. Checkpoint pushed = G1; run 411 executes next (budget 1).

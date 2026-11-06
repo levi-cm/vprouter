@@ -1,0 +1,29 @@
+{
+  "scope": "Additional run411 ARM64 launcher and controller sources only; original 296-entry manifest unchanged",
+  "files": [
+    {
+      "source_path": "target/platform-lab/start-clean-debian-arm64.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/start-clean-debian-arm64.py",
+      "sha256": "ce0f95efe879bcfd7f26eceabd730638cd85a20801febb38f1643c6ff15c3b19",
+      "bytes": 6674
+    },
+    {
+      "source_path": "target/platform-lab/run-frozen-secret-bootstrap411.py",
+      "archive_path": "tools/rust-v2-lab/target/platform-lab/run-frozen-secret-bootstrap411.py",
+      "sha256": "a8590b6e30837b052a655ace45d670daaa6485706d10eb37f6fc09533d47cb2d",
+      "bytes": 14242
+    },
+    {
+      "source_path": "target/archive-secret-bootstrap411-selectors.py",
+      "archive_path": "tools/rust-v2-lab/target/archive-secret-bootstrap411-selectors.py",
+      "sha256": "3adf1409d095ae2c3763f655f4a4c567d2edad77691dbfa9b8be145746011f5a",
+      "bytes": 7063
+    },
+    {
+      "source_path": "target/inspect-secret-bootstrap411-failure.py",
+      "archive_path": "tools/rust-v2-lab/target/inspect-secret-bootstrap411-failure.py",
+      "sha256": "63bb036f73d3a6d6b7b1ccd0ba0cd861fd7c46b199c7b5534b88329b1d25b9c5",
+      "bytes": 8553
+    }
+  ]
+}

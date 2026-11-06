@@ -49,10 +49,21 @@ print(json.dumps(dict(boot_id=pathlib.Path('/proc/sys/kernel/random/boot_id').re
 '''
 
 
+def configured_remote(platform):
+    assert platform in ('debian-clean-x86_64','debian-arm64')
+    if platform=='debian-clean-x86_64':return REMOTE
+    script=REMOTE.replace("platform.machine()=='x86_64'","platform.machine()=='aarch64'").replace("'ens2'","'enp0s1'").replace('ctypes.c_long(228)','ctypes.c_long(113)').replace('syscall=228','syscall=113')
+    start=script.index('for digest in ');end=script.index("assert command(['docker','ps'",start)
+    script=script[:start]+script[end:]
+    return script.replace('pinned_images_inspected=True','pinned_images_inspected=False').replace('Direct x86_64 root guest syscall availability only; frozen driver execution and ARM64 runtime NOT_RUN','Direct aarch64 root guest syscall availability only; frozen driver execution NOT_RUN')
+
+
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('output',type=pathlib.Path);parser.add_argument('--expected-boot-id',default='e14efc10-050b-41b0-89d8-1e946725098c');args=parser.parse_args();output=args.output
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('output',type=pathlib.Path);parser.add_argument('--platform',choices=['debian-clean-x86_64','debian-arm64'],default='debian-clean-x86_64');parser.add_argument('--expected-boot-id',default='e14efc10-050b-41b0-89d8-1e946725098c');args=parser.parse_args();output=args.output
     ssh=['ssh','-F','/dev/null','-o','GlobalKnownHostsFile=/dev/null','-o','IdentitiesOnly=yes','-o','IdentityAgent=none','-o','BatchMode=yes','-o','UpdateHostKeys=no','-i','target/lab-state/id_ed25519','-p22036','-o','UserKnownHostsFile=target/platform-lab/debian-clean-x86_64/known_hosts','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5','vprouterlab@127.0.0.1','sudo -n python3 -I -']
-    r=subprocess.run(ssh,input=REMOTE,capture_output=True,text=True,timeout=30)
+    if args.platform=='debian-arm64':ssh=[v.replace('22036','22034').replace('debian-clean-x86_64','debian-arm64') for v in ssh]
+    remote=configured_remote(args.platform);compile(remote,'phase3-admission-remote','exec')
+    r=subprocess.run(ssh,input=remote,capture_output=True,text=True,timeout=30)
     with output.open('x') as f:json.dump(dict(argv=ssh,exit_code=r.returncode,stdout=r.stdout,stderr=r.stderr,helper_sha256=hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()),f,indent=2)
     assert r.returncode==0 and not r.stderr,r.stderr
     data=json.loads(r.stdout);assert data['boot_id']==args.expected_boot_id

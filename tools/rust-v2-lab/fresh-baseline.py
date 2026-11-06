@@ -3,7 +3,7 @@
 
 collect is read-only in the guest. author consumes saved dumps BEFORE frozen
 projection. compare checks full multisets without changing authored authority.
-Only the admitted three-link clean Debian environment is supported.
+Only the admitted three-link clean Debian x86_64 and ARM64 environments are supported.
 """
 import argparse
 import datetime
@@ -19,6 +19,8 @@ import subprocess
 
 if not __debug__:
     raise RuntimeError('optimized_python_refused')
+
+PLATFORMS={'debian-clean-x86_64':('amd64',22036,'ens2'),'debian-arm64':('arm64',22034,'enp0s1')}
 
 REMOTE = r'''
 import json,os,pathlib,socket,struct,time
@@ -133,11 +135,13 @@ def stable(value):
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--expected-boot-id',default='e14efc10-050b-41b0-89d8-1e946725098c');parser.add_argument('action',choices=['collect','author','compare']);parser.add_argument('candidate',type=pathlib.Path);parser.add_argument('evidence',type=pathlib.Path);args=parser.parse_args()
-    c=json.loads(args.candidate.read_bytes());e=args.evidence;platform='debian-clean-x86_64'
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--platform',choices=PLATFORMS,default='debian-clean-x86_64');parser.add_argument('--expected-boot-id',default='e14efc10-050b-41b0-89d8-1e946725098c');parser.add_argument('action',choices=['collect','author','compare']);parser.add_argument('candidate',type=pathlib.Path);parser.add_argument('evidence',type=pathlib.Path);args=parser.parse_args()
+    c=json.loads(args.candidate.read_bytes());e=args.evidence;platform=args.platform;arch,port,wan=PLATFORMS[platform]
     dump=e/'independent-netlink.json';admission=e/'admission.json'
     if args.action=='collect':
         ssh=['ssh','-F','/dev/null','-o','GlobalKnownHostsFile=/dev/null','-o','IdentitiesOnly=yes','-o','IdentityAgent=none','-o','BatchMode=yes','-o','UpdateHostKeys=no','-i','target/lab-state/id_ed25519','-p22036','-o','UserKnownHostsFile=target/platform-lab/debian-clean-x86_64/known_hosts','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=5','vprouterlab@127.0.0.1','sudo -n python3 -I -']
+        ssh=[v.replace('22036',str(port)).replace('debian-clean-x86_64',platform) for v in ssh]
+        compile(REMOTE,'independent-netlink-remote','exec')
         r=subprocess.run(ssh,input=REMOTE,capture_output=True,text=True,timeout=20)
         save(e/'independent-netlink-ssh.json',dict(argv=ssh,exit_code=r.returncode,stdout=r.stdout,stderr=r.stderr,remote_sha256=hashlib.sha256(REMOTE.encode()).hexdigest()))
         assert r.returncode==0 and not r.stderr,r.stderr
@@ -145,7 +149,7 @@ def main():
     data=json.loads(dump.read_bytes());a=json.loads(admission.read_bytes());expected=decode(data);shape=shape_module();shape.validate_shape(expected)
     assert data['boot_id']==a['boot_id']==args.expected_boot_id
     assert expected['namespace']==a['namespace']['/proc/1/ns/net']==a['namespace']['/proc/self/ns/net']
-    assert {v['name']:v['index'] for v in expected['links']}=={'lo':1,'ens2':2,'docker0':3}
+    assert {v['name']:v['index'] for v in expected['links']}=={'lo':1,wan:2,'docker0':3}
     assert len(expected['addresses'])==6 and len(expected['routes'])==19 and len(expected['rules'])==5
     iplinks=json.loads(a['commands']['ip -j -d link show']['stdout'])
     for link in expected['links']:
@@ -165,7 +169,7 @@ def main():
     # Full multisets: templates authored by the earlier decoder are IPv6-first.
     assert canonical(stable(expected))==canonical(stable(template['baseline'])),'template_multiset_drift'
     projection_path=args.candidate.parent/('host-projection-'+platform)/'record.json';p=json.loads(projection_path.read_bytes())
-    assert p['source_binding']==c['binding'] and p['artifact_sha256']==c['platforms']['amd64']['artifact_sha256'] and p['platform']==platform
+    assert p['source_binding']==c['binding'] and p['artifact_sha256']==c['platforms'][arch]['artifact_sha256'] and p['platform']==platform
     assert p['report']['read_only'] is True and p['report']['declaration_authority'] is p['report']['host_change_authority'] is False
     assert stable(expected)==stable(p['report']['projection']),'full_multiset_drift'
     save(e/'baseline-comparison.json',dict(exact_multisets_equal=True,namespace_preserved=True,baseline_sha256=template['baseline_sha256'],projection_sha256=sha(projection_path),template_sha256=sha(template_path),no_authority=True))

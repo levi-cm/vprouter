@@ -15,6 +15,33 @@ all four remote Python programs before any claim. Collection preserves recursive
 baseline references as well as bound inputs. Full Bootstrap witness validation
 and runtime/release acceptance remain separate from preservation receipts.
 
+Run 411 forks those controls for `debian-arm64` / `bootstrap411-arm64`, using
+only its own `run-411-*` reservation/claim/raw chain. Its candidate is the same
+frozen run410 candidate's ARM64 payload/context, with an independently authored
+ARM64 baseline. `source-manifest411.json` adds the four restored/archive source
+pairs without changing the original manifest. `start-clean-debian-arm64.py`
+requires the completed qualified sandbox bisect, no live QEMU, a verified base,
+and absent state; it starts a 1024 MiB TCG guest with fresh AAVMF VARS/seed/overlay.
+`fresh-baseline.py` and `phase3-readonly-preflight.py` accept `--platform
+debian-arm64`; the latter checks aarch64 clock syscall113 and enp0s1, with no
+registry image pull/inspection prerequisite because the fixture is FROM scratch.
+The strict context inventory binds its pinned public programs offline. Run411
+F/A refuse other run numbers before opening raw records. The shared 411 path
+guard refuses both 409 and 410 claims, reservations, consumed markers, raw
+records and evidence directories, plus `/DATA/vprouter-lab/preserved`, before
+content opens or copies. It rejects symlink aliases and multiply linked
+regular inodes. The four existing `target/{lab-state,candidates,run411-prep,
+platform-lab}` storage bridges are translated to their exact
+`/DATA/vprouter-lab/` backing paths after checking link text and inode identity;
+opens never traverse those links. Admitted reads walk directories with `O_NOFOLLOW` and compare
+the opened inode before reading. The frozen candidate exception permits its
+ARM64 payload/context/source, candidate/root verification, and fresh ARM64
+baseline/projection/411 output; old x86 evidence remains forbidden. Collector
+bindings, tombstones and recursive references use this guard before capture,
+while admitted 411 raw bytes are preserved before provenance validation.
+See the ARM64 preparation report for actual status,
+measured lab budgets and the exact command; preparation never authorizes execution.
+
 Run 409's cleanly powered-off overlay and original records are read-only in
 `/DATA/vprouter-lab/preserved/run409-guest/`; never boot that overlay writable.
 Its cold disk preservation supersedes selector archival, which was not run.
@@ -67,3 +94,27 @@ The experiment report records the exact manifest/lock/profile, seven fixed
 alternating batches, all samples and limits. Host timings do not establish native
 VM savings, Bootstrap acceptance or release performance. This harness is outside
 the293-file historical archive manifest.
+
+Run411 review round 2 carries acquired bytes through every evidence consumer.
+`run411-reservation.py.acquire` is the shared input boundary: it pins directory
+components, rejects forbidden names/aliases, compares the first admitted inode
+with the `O_NOFOLLOW|O_CLOEXEC` descriptor, checks type/link count and stability,
+reads once and hashes those bytes. Per-operation capture scopes share snapshots
+across hashing, JSON parsing, helper compilation and validation. The runner's
+frozen-source verifier and context checker consume bytes; SCP sources are sealed
+anonymous descriptors inherited explicitly with `pass_fds`, never the admitted
+source filenames. OpenSSH identity and known-host inputs use exclusively created
+0600 copies inside a private 0700 directory, populated from guarded snapshots;
+all SSH/SCP commands use those private copies. Controller outputs use exclusive
+guarded creation.
+
+`TMPDIR=/var/tmp python3 -B tools/rust-v2-lab/test-run411-acquisition.py` runs the
+static consumer boundary and full-runner replacement matrix. Admission, raw
+record publication and SSH/SCP are intercepted in that matrix; only synthetic
+scratch outputs are created. It covers the reviewer's 18 downstream cases,
+preserved variants, both transfer sources, and post-stat inode races. Static
+checks also pin complete subprocess/connection expressions and embedded guest
+program literals. The exact permitted host opens and guest-only exceptions are
+listed in the prep report's Review round 2. Real run411 remains NOT_RUN; changed
+bindings require append-only supersession while retaining the single global
+claim and one total budget.

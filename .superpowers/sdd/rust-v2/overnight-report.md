@@ -184,3 +184,71 @@ python3 -B -I tools/rust-v2-lab/test-validate-run410-witness.py
 #   specs under crates/vprouter-core/tests/*_owned_guest.rs
 # Provide credentials/canary hosts -> run docs/rust-v2/acceptance-scaffolding.md canary plan
 ```
+
+---
+
+# Continuation after "Continue" (2026-11-06 12:00–16:30 CET)
+
+Authorised by the user's "Continue" after the stop-and-report. Commits `848b468` → `ad83192`
+(pushed). Tree clean at the end of this section except the diagnosis in progress.
+
+## ARM64 runtime — now EXECUTED once, FAILED at a handoff deadline under TCG
+
+- Found and staged what the earlier search missed: `apt-get download` works rootless from the
+  signed trixie index already on the host, giving the same QEMU 10.0.13 build the x86 lab uses
+  (`qemu-system-arm` + `qemu-efi-aarch64`, sha256 in `/DATA/vprouter-lab/lab-tools/packages-arm64/`,
+  extracted under `target/platform-lab/tools/`); the pinned arm64 Debian image was fetched and
+  verified against the already-pinned `SHA512SUMS-20261021-2638` (`e66eea33…`, stored 0444); the
+  frozen run-410 candidate already contained `arm64.payload`/`arm64.context.tar` and the pinned
+  arm64 Tailscale context existed, so no cross-build and no registry access were needed.
+- Smoke (evidence `/DATA/vprouter-lab/arm64-prep/`): attempt 1 with `-nic none` HALTED at ~12 s guest
+  time (vCPUs in futex_wait); attempt 2 (no sandbox, user NIC) booted cloud-init and powered down
+  in 47 s; bisect attempt 3 showed the FULL lab `-sandbox` set works with a user NIC (50 s). The
+  supplied `SHA256SUMS` was regenerated without its self-entry (review M1); the six evidence
+  hashes are unchanged and recorded in the first 411 review.
+- Run-411 preparation (delegate): TCG launcher `start-clean-debian-arm64.py`, ARM-aware baseline
+  and preflight, 411 forks of reservation/provenance/collector/inspector/F/A/runner bound to the
+  frozen candidate's arm64 payload, measured TCG budgets (no lab-timeout change needed), exact
+  `--preflight-only` PASS. Three go/no-go reviews: NO-GO (I1 409 missing from isolation guards;
+  G1; M1) → fix → NO-GO (I1 part 2: downstream reopen-by-name) → fix with one guarded acquisition
+  primitive + static by-path-open test → **PASS / technical GO**. Checkpoint `d4c7f73` pushed (G1).
+- **Run 411 executed once at 15:02:29Z: FAIL**, exit 1, 40.1 s wall; the owner launcher exited 1
+  with `secret_bootstrap_lab: deadline` during the 20-job handoff (only phase row
+  `handoff.host event=begin`; many ordinary 2 s windows completed with millisecond phase times
+  before a long `io_inventory` journal stretch). Budget 0. Raw `a6905061…`, consumed claim
+  `4d4e9a94…`. Post-run: C `failed_bootstrap_preserved` (provenance valid), I (state captured),
+  F (owner unit not-found, cgroup absent); P refused (no Deadline boundary row); A deferred
+  pending diagnosis (selectors retained). Read-only diagnosis delegated (which deadline:
+  product 2 s window vs lab budget; TCG vs ARM-specific).
+- What it establishes: the ARM64 static payload is admitted (ELF 183), the fixture builds on
+  arm64 Docker, admission/quarantine/baseline/handoff progress on aarch64. What it does not:
+  ARM64 Bootstrap success, timing acceptance, anything runtime/release.
+
+## The two partial items — one more round each, both still PARTIAL, iteration stopped
+
+- Witness validator round 4 (binding registry; `848b468`) → review FAIL (I11-I14, M3); round 5
+  changed method to a Rust contract extractor (3,378 guards, 178 enforced, 3,200 explicitly
+  unenforceable offline; 96 fixtures rejected; real record 23/23; `ad83192`) → review FAIL
+  (I15-I18, M4: extractor closure/disposition gaps). Stopped after five rounds.
+- Task 14 round 4 (model-derived invariants, 247-entry quantity model; `9f997dd`) → review FAIL
+  (T4-I1..I3 residual/socket-memory relations, T4-M1/M2). Stopped after four rounds.
+
+## Incidents
+
+- `/tmp` (tmpfs) reached 100% from cargo build output inside earlier review scratch copies;
+  `test-run411-acquisition.py` failed with ENOSPC until those `target/` dirs were removed (the
+  reviews' reports in the repo are the record). Passes afterwards.
+- A fix delegate's RED probe created and then removed a 3-byte file at
+  `/DATA/vprouter-lab/preserved/reference.json` (top level, not inside the run-409 tree).
+  Independent re-verification: 91/91 preserved hashes and modes intact; only that directory's
+  mtime changed. Documented in the 411 prep report's Review round 1.
+
+## Updated next commands
+
+```sh
+# ARM64 diagnosis (read-only) -> .superpowers/sdd/rust-v2/task-8c-run411-arm64-result.md
+# If the fired deadline is a LAB budget: reviewed lab-only adjustment + new guest + run 412 (one-shot protocol).
+# If it is the product's own 2 s window: ARM64 runtime needs a KVM-capable aarch64 host; NOT_RUN here.
+python3 -B tools/rust-v2-lab/verify-preserved-run409.py          # 91/91
+python3 -B tools/rust-v2-lab/test-run411-acquisition.py          # needs free /tmp
+```

@@ -1214,3 +1214,8 @@ budget 0. Post-run C (failed_bootstrap_preserved, provenance valid), I (state ca
 pending diagnosis/review (selectors retained). Preserved run-409 tree re-verified 91/91 after a
 fix delegate's accidental 3-byte file at preserved/reference.json (created+removed; only the
 parent dir mtime changed). Diagnosis delegated (read-only).
+
+2026-11-06 16:25 run-411 diagnosis: fired deadline = product's 2 s host-baseline admission
+window (not a lab budget); cause TCG slowness (13-25x); no ARM defect shown; ARM64 needs a
+KVM-capable aarch64 host. A executed (six selectors archived, receipt
+secret-bootstrap-selector-archive-run-411.json). Guest preservation delegated.

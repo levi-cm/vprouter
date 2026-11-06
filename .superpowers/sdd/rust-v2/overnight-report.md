@@ -252,3 +252,19 @@ Authorised by the user's "Continue" after the stop-and-report. Commits `848b468`
 python3 -B tools/rust-v2-lab/verify-preserved-run409.py          # 91/91
 python3 -B tools/rust-v2-lab/test-run411-acquisition.py          # needs free /tmp
 ```
+
+### ARM64 diagnosis (read-only, `task-8c-run411-arm64-result.md`) and selector archival
+
+- The deadline that fired is the **product's own ordinary 2 s HOST-baseline admission window**
+  (frozen candidate `attachment/host_addition.rs:116-123,159,211`), not a lab budget (journal shows
+  a normal exit after 13.9 s; no RuntimeMaxSec kill; the 250/75/120/110 s limits are excluded).
+- Mechanism: **TCG execution overhead** — query constructors 13–25× slower than the x86/KVM run
+  410, initial full assembly 0.95 s vs 0.18 s; all 18 earlier preparatory 2 s windows passed on
+  aarch64 (0.12–1.08 s). No ARM-specific functional defect is demonstrated (4 KiB pages,
+  arch_sys_counter clocksource, aarch64 clock syscalls verified in prep).
+- Consequence: raising any lab timeout cannot help; unchanged-product ARM64 qualification needs
+  a **KVM-capable aarch64 host** (debdev's x86 KVM cannot accelerate an aarch64 guest). ARM64
+  runtime therefore stays **NOT established** on this host; it was executed, not skipped.
+- Selector archival A executed after the diagnosis' technical GO: six selectors archived as
+  `411-failed-*`, receipt `target/lab-state/secret-bootstrap-selector-archive-run-411.json`.
+  The guest is being preserved (final snapshot, clean power-off, read-only disk/records) as 409 was.

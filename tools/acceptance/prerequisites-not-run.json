@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "prerequisites": {
+    "task8c_runtime_client_acceptance": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "reviewed_complete_implementation": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "immutable_candidate_and_artifacts": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "whole_branch_independent_review": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "namespace_firewall_unsafe_review": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "client_enforcement_review": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "local_guest_and_disposable_clients": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "tailscale_credentials_available": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "mullvad_profiles_available": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "capture_privileges_and_boot_order": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "capture_positive_controls_all_points": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "all_fault_matrix_pass": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "compatibility_security_artifact_gates": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "debdev_preserved_primary": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "second_local_independent_legacy_identity": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "declared_adapters_and_dependencies": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "stopped_state_backup_compatible_rollback": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "no_concurrent_identity_copies": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "explicit_direct_authorization": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "performance_gates": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    },
+    "soak_24h_window": {
+      "status": "NOT_RUN",
+      "evidence_sha256": null
+    }
+  }
+}

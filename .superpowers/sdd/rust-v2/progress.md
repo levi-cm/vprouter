@@ -1160,3 +1160,11 @@ loopback self-test driver, run schema) + docs/rust-v2/performance-harness.md. 3 
 rounds + 3 independent reviews all FAIL (round 3: T3-I1..I4 contradictory raw recordings
 still qualify). 3-attempt limit hit -> committed as PARTIAL, NOT ACCEPTED; T3-I1..I4 OPEN.
 40 accounting tests OK. No performance claim; real 10-minute 1/5/6-exit runs NOT_RUN.
+
+2026-11-06 Task 15 (independent traffic acceptance + canary) credential-free SCAFFOLDING:
+tools/acceptance (strict ledger of 339+ mandatory scenarios all NOT_RUN, evidence-bundle
+schema + capture oracles on synthetic summaries, snapshot-based ingestion, rule registry
+with completeness test, canary/second-installation plan spec with refusing preflight) +
+docs/rust-v2/acceptance-scaffolding.md. Review1 FAIL (I1 enumeration gaps, I2 mixed-read)
+-> fixed with class closure; re-review PASS. No acceptance evidence exists; acceptance.json
+untouched, release_ready=false. All real-client/capture/fault/canary/24h-soak gates NOT_RUN.

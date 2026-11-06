@@ -1,0 +1,444 @@
+{
+  "schema_version": 1,
+  "scope": "preparation_only",
+  "status": "NOT_RUN",
+  "source": "docs/rust-v2/security-evidence-map.md",
+  "source_sha256": "f88b6d6c2fd51f61a3b7ebf6d7b4eb87bb1a3abd2498b1f66a0271c3774d07bc",
+  "rows": [
+    {
+      "invariant": "configuration_and_modes",
+      "scenario_groups": [
+        "identity",
+        "clients"
+      ],
+      "other_gates": [
+        "existing_identity_canary_debdev"
+      ],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    {
+      "invariant": "helper_confinement",
+      "scenario_groups": [
+        "process"
+      ],
+      "other_gates": [
+        "helper_cgroup_capability_fd_isolation"
+      ],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    {
+      "invariant": "encrypted_transport",
+      "scenario_groups": [
+        "tunnel_provider",
+        "routing"
+      ],
+      "other_gates": [],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    {
+      "invariant": "producer_only_bootstrap",
+      "scenario_groups": [
+        "routing",
+        "clients"
+      ],
+      "other_gates": [
+        "single_exit_native_guard_parity"
+      ],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    {
+      "invariant": "firewall_ownership",
+      "scenario_groups": [
+        "firewall"
+      ],
+      "other_gates": [
+        "namespace_firewall_unsafe_independent_review"
+      ],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    {
+      "invariant": "interruption_ownership",
+      "scenario_groups": [
+        "migration",
+        "process"
+      ],
+      "other_gates": [],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    {
+      "invariant": "provider_exact_server",
+      "scenario_groups": [
+        "tunnel_provider",
+        "identity"
+      ],
+      "other_gates": [],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    {
+      "invariant": "managed_client_no_fallback",
+      "scenario_groups": [
+        "clients",
+        "routing"
+      ],
+      "other_gates": [],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    {
+      "invariant": "cross_exit_isolation",
+      "scenario_groups": [
+        "isolation"
+      ],
+      "other_gates": [],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    {
+      "invariant": "preserved_identity_migration",
+      "scenario_groups": [
+        "migration",
+        "identity"
+      ],
+      "other_gates": [
+        "existing_identity_canary_debdev",
+        "second_existing_installation_migration"
+      ],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    {
+      "invariant": "efficiency_without_monitor_loss",
+      "scenario_groups": [
+        "resources"
+      ],
+      "other_gates": [
+        "mixed_mode_24_hour_soak",
+        "repeated_ten_minute_one_five_six_exit_benchmarks",
+        "throughput_latency_load"
+      ],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    },
+    {
+      "invariant": "supported_host_preflight",
+      "scenario_groups": [
+        "process",
+        "resources"
+      ],
+      "other_gates": [
+        "x86_64_arm64_artifacts_provenance",
+        "systemd_reboot_update_rollback_uninstall",
+        "runit_reboot_update_rollback_uninstall"
+      ],
+      "all_configurations": [
+        "one_mullvad",
+        "five_mullvad",
+        "one_direct",
+        "five_mullvad_one_direct"
+      ],
+      "all_protocols": [
+        "ipv4",
+        "dns",
+        "ipv6",
+        "tcp",
+        "udp"
+      ],
+      "all_capture_points": [
+        "client_wan",
+        "host_wan",
+        "transport",
+        "data"
+      ],
+      "runtime_status": "NOT_RUN",
+      "scaffold_oracles": [
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12"
+      ]
+    }
+  ]
+}

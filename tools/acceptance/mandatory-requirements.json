@@ -1,0 +1,2176 @@
+{
+  "schema_version": 1,
+  "source": "docs/rust-v2/IMPLEMENTATION.md#mandatory-acceptance",
+  "mandatory_text": [
+    "Real disposable Tailscale clients generating IPv4, DNS, IPv6, TCP, UDP; capture",
+    "at client WAN, host WAN, transports and data. One Mullvad, five Mullvad, direct,",
+    "and five+direct configurations. Positive capture controls; zero forbidden",
+    "plaintext/cross-exit markers; host IP as Mullvad app egress immediately fails.",
+    "Failures cover deleted/down/stale/wrong peer/key/endpoint/provider responses;",
+    "route/default/endpoint/Docker/IPv6/interface/source spoof drift; firewall removal,",
+    "failed atomic update and foreign ownership; crashes/freezes/OOM/container/Docker",
+    "restart; full disk/API timeout/reboot; revoked identity/control/approval/name;",
+    "one failed exit beside direct/healthy exits; client disappear/select/restart/",
+    "route/DNS/proxy/bypass; migration kills at every boundary. Boot capture must be",
+    "operational BEFORE protected traffic. Skips/unknowns are unverified and block",
+    "claims. No unmanaged/non-Linux client guarantee.",
+    "",
+    "Artifacts: schema + 1/5/mixed examples, exact agent/systemd/runit migration,",
+    "validation/recovery/rollback guide, compatibility matrix, redacted reports,",
+    "security-to-test mapping, workload/accounted benchmarks, immutable artifacts,",
+    "SBOM/provenance, unsupported environments. Do not publish until all gates pass."
+  ],
+  "failure_phrases": [
+    {
+      "phrase": "deleted/down/stale/wrong peer/key/endpoint/provider responses",
+      "requirements": [
+        {
+          "id": "F01.01",
+          "phrase": "deleted",
+          "scenario_ids": [
+            "tunnel_provider.wireguard_deleted"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F01.02",
+          "phrase": "down",
+          "scenario_ids": [
+            "tunnel_provider.wireguard_down"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F01.03",
+          "phrase": "stale",
+          "scenario_ids": [
+            "tunnel_provider.handshake_stale"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F01.04",
+          "phrase": "wrong peer",
+          "scenario_ids": [
+            "tunnel_provider.peer_wrong"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F01.05",
+          "phrase": "key",
+          "scenario_ids": [
+            "tunnel_provider.peer_key_wrong"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F01.06",
+          "phrase": "endpoint",
+          "scenario_ids": [
+            "tunnel_provider.endpoint_wrong"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F01.07",
+          "phrase": "provider responses",
+          "scenario_ids": [
+            "tunnel_provider.transport_loss",
+            "tunnel_provider.http_transient",
+            "tunnel_provider.http_permanent",
+            "tunnel_provider.provider_malformed",
+            "tunnel_provider.provider_negative",
+            "tunnel_provider.server_wrong"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "route/default/endpoint/Docker/IPv6/interface/source spoof drift",
+      "requirements": [
+        {
+          "id": "F02.01",
+          "phrase": "route",
+          "scenario_ids": [
+            "routing.route_drift"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F02.02",
+          "phrase": "default",
+          "scenario_ids": [
+            "routing.ordinary_default_restored"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F02.03",
+          "phrase": "endpoint",
+          "scenario_ids": [
+            "routing.endpoint_route"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F02.04",
+          "phrase": "Docker",
+          "scenario_ids": [
+            "routing.docker_subnet_route",
+            "routing.docker_gateway_route"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F02.05",
+          "phrase": "IPv6",
+          "scenario_ids": [
+            "routing.ipv6_route"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F02.06",
+          "phrase": "interface",
+          "scenario_ids": [
+            "routing.unexpected_interface"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F02.07",
+          "phrase": "source spoof drift",
+          "scenario_ids": [
+            "routing.spoofed_source"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "firewall removal, failed atomic update and foreign ownership",
+      "requirements": [
+        {
+          "id": "F03.01",
+          "phrase": "firewall removal, failed atomic update and foreign ownership",
+          "scenario_ids": [
+            "firewall.data_policy_removed",
+            "firewall.host_guard_removed",
+            "firewall.data_policy_drift",
+            "firewall.host_guard_drift",
+            "firewall.atomic_update_failed",
+            "firewall.foreign_conflict",
+            "firewall.bridge_identity_changed"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "crashes/freezes/OOM/container/Docker restart",
+      "requirements": [
+        {
+          "id": "F04.01",
+          "phrase": "crashes",
+          "scenario_ids": [
+            "process.worker_crash",
+            "process.host_guard_crash",
+            "process.tailscale_crash",
+            "process.container_kill"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F04.02",
+          "phrase": "freezes",
+          "scenario_ids": [
+            "process.worker_freeze",
+            "process.host_guard_freeze",
+            "process.tailscale_freeze"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F04.03",
+          "phrase": "OOM",
+          "scenario_ids": [
+            "process.oom"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F04.04",
+          "phrase": "container",
+          "scenario_ids": [
+            "process.container_restart"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F04.05",
+          "phrase": "Docker restart",
+          "scenario_ids": [
+            "process.docker_restart",
+            "process.service_restart"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "full disk/API timeout/reboot",
+      "requirements": [
+        {
+          "id": "F05.01",
+          "phrase": "full disk",
+          "scenario_ids": [
+            "resources.disk_full",
+            "resources.tmpfs_full",
+            "resources.runtime_operation_failure"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F05.02",
+          "phrase": "API timeout",
+          "scenario_ids": [
+            "resources.docker_api_unavailable",
+            "resources.api_delayed",
+            "resources.health_malformed"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F05.03",
+          "phrase": "reboot",
+          "scenario_ids": [
+            "resources.host_reboot"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "revoked identity/control/approval/name",
+      "requirements": [
+        {
+          "id": "F06.01",
+          "phrase": "revoked identity",
+          "scenario_ids": [
+            "identity.identity_revoked",
+            "identity.credential_revoked",
+            "identity.credential_expired",
+            "identity.duplicate_identity"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F06.02",
+          "phrase": "control",
+          "scenario_ids": [
+            "identity.control_revoked",
+            "identity.control_plane_loss"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F06.03",
+          "phrase": "approval",
+          "scenario_ids": [
+            "identity.approval_revoked"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F06.04",
+          "phrase": "name",
+          "scenario_ids": [
+            "identity.name_revoked",
+            "identity.name_server_mismatch"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "one failed exit beside direct/healthy exits",
+      "requirements": [
+        {
+          "id": "F07.01",
+          "phrase": "one failed exit beside direct",
+          "scenario_ids": [
+            "isolation.direct_active_during_mullvad_faults",
+            "isolation.exit_failure_others_active"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F07.02",
+          "phrase": "healthy exits",
+          "scenario_ids": [
+            "isolation.exit_failure_others_active",
+            "isolation.exit_restart_others_active",
+            "isolation.shared_endpoint",
+            "isolation.overlapping_vpn_addresses"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "client disappear/select/restart/ route/DNS/proxy/bypass",
+      "requirements": [
+        {
+          "id": "F08.01",
+          "phrase": "client disappear",
+          "scenario_ids": [
+            "clients.exit_disappears"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F08.02",
+          "phrase": "select",
+          "scenario_ids": [
+            "clients.selected_node_changes"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F08.03",
+          "phrase": "restart",
+          "scenario_ids": [
+            "clients.tailscale_restarts"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F08.04",
+          "phrase": "route",
+          "scenario_ids": [
+            "clients.routes_reset"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F08.05",
+          "phrase": "DNS",
+          "scenario_ids": [
+            "clients.dns_cache_empty"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F08.06",
+          "phrase": "proxy",
+          "scenario_ids": [
+            "clients.proxy_upstream_failed",
+            "clients.proxy_settings_absent"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "F08.07",
+          "phrase": "bypass",
+          "scenario_ids": [
+            "clients.proxy_settings_bypassed"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "migration kills at every boundary",
+      "requirements": [
+        {
+          "id": "F09.01",
+          "phrase": "migration kills at every boundary",
+          "scenario_ids": [
+            "migration.inspect",
+            "migration.stage",
+            "migration.plan",
+            "migration.protect",
+            "migration.drain",
+            "migration.stop",
+            "migration.backup",
+            "migration.activate",
+            "migration.restore_identity",
+            "migration.rename",
+            "migration.verify",
+            "migration.commit",
+            "migration.recover"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    }
+  ],
+  "other_phrases": [
+    {
+      "phrase": "Real disposable Tailscale clients generating IPv4, DNS, IPv6, TCP, UDP",
+      "requirements": [
+        {
+          "id": "A01.ipv4",
+          "phrase": "Real disposable Tailscale clients generating IPv4, DNS, IPv6, TCP, UDP",
+          "scenario_ids": [
+            "traffic.ipv4"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Real disposable Tailscale clients generating IPv4, DNS, IPv6, TCP, UDP",
+      "requirements": [
+        {
+          "id": "A01.dns",
+          "phrase": "Real disposable Tailscale clients generating IPv4, DNS, IPv6, TCP, UDP",
+          "scenario_ids": [
+            "traffic.dns"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Real disposable Tailscale clients generating IPv4, DNS, IPv6, TCP, UDP",
+      "requirements": [
+        {
+          "id": "A01.ipv6",
+          "phrase": "Real disposable Tailscale clients generating IPv4, DNS, IPv6, TCP, UDP",
+          "scenario_ids": [
+            "traffic.ipv6"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Real disposable Tailscale clients generating IPv4, DNS, IPv6, TCP, UDP",
+      "requirements": [
+        {
+          "id": "A01.tcp",
+          "phrase": "Real disposable Tailscale clients generating IPv4, DNS, IPv6, TCP, UDP",
+          "scenario_ids": [
+            "traffic.tcp"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Real disposable Tailscale clients generating IPv4, DNS, IPv6, TCP, UDP",
+      "requirements": [
+        {
+          "id": "A01.udp",
+          "phrase": "Real disposable Tailscale clients generating IPv4, DNS, IPv6, TCP, UDP",
+          "scenario_ids": [
+            "traffic.udp"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "capture at client WAN, host WAN, transports and data.",
+      "requirements": [
+        {
+          "id": "A02.client_wan",
+          "phrase": "capture at client WAN, host WAN, transports and data.",
+          "scenario_ids": [
+            "coverage.client_wan"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "capture at client WAN, host WAN, transports and data.",
+      "requirements": [
+        {
+          "id": "A02.host_wan",
+          "phrase": "capture at client WAN, host WAN, transports and data.",
+          "scenario_ids": [
+            "coverage.host_wan"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "capture at client WAN, host WAN, transports and data.",
+      "requirements": [
+        {
+          "id": "A02.transport",
+          "phrase": "capture at client WAN, host WAN, transports and data.",
+          "scenario_ids": [
+            "coverage.transport"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "capture at client WAN, host WAN, transports and data.",
+      "requirements": [
+        {
+          "id": "A02.data",
+          "phrase": "capture at client WAN, host WAN, transports and data.",
+          "scenario_ids": [
+            "coverage.data"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "One Mullvad, five Mullvad, direct, and five+direct configurations.",
+      "requirements": [
+        {
+          "id": "A03.one_mullvad",
+          "phrase": "One Mullvad, five Mullvad, direct, and five+direct configurations.",
+          "scenario_ids": [
+            "capture.positive_controls"
+          ],
+          "configurations": [
+            "one_mullvad"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "One Mullvad, five Mullvad, direct, and five+direct configurations.",
+      "requirements": [
+        {
+          "id": "A03.five_mullvad",
+          "phrase": "One Mullvad, five Mullvad, direct, and five+direct configurations.",
+          "scenario_ids": [
+            "capture.positive_controls"
+          ],
+          "configurations": [
+            "five_mullvad"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "One Mullvad, five Mullvad, direct, and five+direct configurations.",
+      "requirements": [
+        {
+          "id": "A03.one_direct",
+          "phrase": "One Mullvad, five Mullvad, direct, and five+direct configurations.",
+          "scenario_ids": [
+            "capture.positive_controls"
+          ],
+          "configurations": [
+            "one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "One Mullvad, five Mullvad, direct, and five+direct configurations.",
+      "requirements": [
+        {
+          "id": "A03.five_mullvad_one_direct",
+          "phrase": "One Mullvad, five Mullvad, direct, and five+direct configurations.",
+          "scenario_ids": [
+            "capture.positive_controls"
+          ],
+          "configurations": [
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Positive capture controls",
+      "requirements": [
+        {
+          "id": "A04",
+          "phrase": "Positive capture controls",
+          "scenario_ids": [
+            "capture.positive_controls"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "zero forbidden plaintext/cross-exit markers; host IP as Mullvad app egress immediately fails.",
+      "requirements": [
+        {
+          "id": "A05.forbidden_plaintext",
+          "phrase": "zero forbidden plaintext/cross-exit markers; host IP as Mullvad app egress immediately fails.",
+          "scenario_ids": [
+            "marker.forbidden_plaintext"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "zero forbidden plaintext/cross-exit markers; host IP as Mullvad app egress immediately fails.",
+      "requirements": [
+        {
+          "id": "A05.cross_exit",
+          "phrase": "zero forbidden plaintext/cross-exit markers; host IP as Mullvad app egress immediately fails.",
+          "scenario_ids": [
+            "marker.cross_exit"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "zero forbidden plaintext/cross-exit markers; host IP as Mullvad app egress immediately fails.",
+      "requirements": [
+        {
+          "id": "A05.host_as_mullvad",
+          "phrase": "zero forbidden plaintext/cross-exit markers; host IP as Mullvad app egress immediately fails.",
+          "scenario_ids": [
+            "marker.host_as_mullvad"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Boot capture must be operational BEFORE protected traffic.",
+      "requirements": [
+        {
+          "id": "A06",
+          "phrase": "Boot capture must be operational BEFORE protected traffic.",
+          "scenario_ids": [
+            "boot.capture_before_traffic"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Skips/unknowns are unverified and block claims.",
+      "requirements": [
+        {
+          "id": "A07.skip",
+          "phrase": "Skips/unknowns are unverified and block claims.",
+          "scenario_ids": [
+            "status.skip"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Skips/unknowns are unverified and block claims.",
+      "requirements": [
+        {
+          "id": "A07.unknown",
+          "phrase": "Skips/unknowns are unverified and block claims.",
+          "scenario_ids": [
+            "status.unknown"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "No unmanaged/non-Linux client guarantee.",
+      "requirements": [
+        {
+          "id": "A08",
+          "phrase": "No unmanaged/non-Linux client guarantee.",
+          "scenario_ids": [
+            "scope.unsupported_clients"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "schema + 1/5/mixed examples",
+      "requirements": [
+        {
+          "id": "D01.schema_examples_one",
+          "phrase": "schema + 1/5/mixed examples",
+          "scenario_ids": [
+            "artifact.schema_examples_one"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "schema + 1/5/mixed examples",
+      "requirements": [
+        {
+          "id": "D01.schema_examples_five",
+          "phrase": "schema + 1/5/mixed examples",
+          "scenario_ids": [
+            "artifact.schema_examples_five"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "schema + 1/5/mixed examples",
+      "requirements": [
+        {
+          "id": "D01.schema_examples_mixed",
+          "phrase": "schema + 1/5/mixed examples",
+          "scenario_ids": [
+            "artifact.schema_examples_mixed"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "exact agent/systemd/runit migration",
+      "requirements": [
+        {
+          "id": "D02.agent_migration",
+          "phrase": "exact agent/systemd/runit migration",
+          "scenario_ids": [
+            "artifact.agent_migration"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "exact agent/systemd/runit migration",
+      "requirements": [
+        {
+          "id": "D02.systemd_migration",
+          "phrase": "exact agent/systemd/runit migration",
+          "scenario_ids": [
+            "artifact.systemd_migration"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "exact agent/systemd/runit migration",
+      "requirements": [
+        {
+          "id": "D02.runit_migration",
+          "phrase": "exact agent/systemd/runit migration",
+          "scenario_ids": [
+            "artifact.runit_migration"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "validation/recovery/rollback guide",
+      "requirements": [
+        {
+          "id": "D03.validation_guide",
+          "phrase": "validation/recovery/rollback guide",
+          "scenario_ids": [
+            "artifact.validation_guide"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "validation/recovery/rollback guide",
+      "requirements": [
+        {
+          "id": "D03.recovery_guide",
+          "phrase": "validation/recovery/rollback guide",
+          "scenario_ids": [
+            "artifact.recovery_guide"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "validation/recovery/rollback guide",
+      "requirements": [
+        {
+          "id": "D03.rollback_guide",
+          "phrase": "validation/recovery/rollback guide",
+          "scenario_ids": [
+            "artifact.rollback_guide"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "compatibility matrix",
+      "requirements": [
+        {
+          "id": "D04.compatibility_matrix",
+          "phrase": "compatibility matrix",
+          "scenario_ids": [
+            "artifact.compatibility_matrix"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "redacted reports",
+      "requirements": [
+        {
+          "id": "D05.redacted_reports",
+          "phrase": "redacted reports",
+          "scenario_ids": [
+            "artifact.redacted_reports"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "security-to-test mapping",
+      "requirements": [
+        {
+          "id": "D06.security_test_map",
+          "phrase": "security-to-test mapping",
+          "scenario_ids": [
+            "artifact.security_test_map"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "workload/accounted benchmarks",
+      "requirements": [
+        {
+          "id": "D07.workload_benchmarks",
+          "phrase": "workload/accounted benchmarks",
+          "scenario_ids": [
+            "artifact.workload_benchmarks"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "workload/accounted benchmarks",
+      "requirements": [
+        {
+          "id": "D07.accounted_benchmarks",
+          "phrase": "workload/accounted benchmarks",
+          "scenario_ids": [
+            "artifact.accounted_benchmarks"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "immutable artifacts",
+      "requirements": [
+        {
+          "id": "D08.immutable_artifacts",
+          "phrase": "immutable artifacts",
+          "scenario_ids": [
+            "artifact.immutable_artifacts"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "SBOM/provenance",
+      "requirements": [
+        {
+          "id": "D09.sbom",
+          "phrase": "SBOM/provenance",
+          "scenario_ids": [
+            "artifact.sbom"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "SBOM/provenance",
+      "requirements": [
+        {
+          "id": "D09.provenance",
+          "phrase": "SBOM/provenance",
+          "scenario_ids": [
+            "artifact.provenance"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "unsupported environments",
+      "requirements": [
+        {
+          "id": "D10.unsupported_environments",
+          "phrase": "unsupported environments",
+          "scenario_ids": [
+            "artifact.unsupported_environments"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Do not publish until all gates pass.",
+      "requirements": [
+        {
+          "id": "A09",
+          "phrase": "Do not publish until all gates pass.",
+          "scenario_ids": [
+            "scope.release_blocked"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    }
+  ],
+  "migration_source": "docs/rust-v2/migration-preparation.md",
+  "migration_phrases": [
+    {
+      "phrase": "Require independent quarantine",
+      "requirements": [
+        {
+          "id": "M01.quarantine",
+          "phrase": "quarantine",
+          "scenario_ids": [
+            "migration.apply.quarantine.before",
+            "migration.apply.quarantine.after",
+            "migration.resume.quarantine.before",
+            "migration.resume.quarantine.after",
+            "migration.rollback.quarantine.before",
+            "migration.rollback.quarantine.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Stage and fsync the complete public release/image/checksums/config/allocations.",
+      "requirements": [
+        {
+          "id": "M02.stage_create",
+          "phrase": "stage_create",
+          "scenario_ids": [
+            "migration.apply.stage_create.before",
+            "migration.apply.stage_create.after",
+            "migration.resume.stage_create.before",
+            "migration.resume.stage_create.after",
+            "migration.rollback.stage_create.before",
+            "migration.rollback.stage_create.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M02.stage_write",
+          "phrase": "stage_write",
+          "scenario_ids": [
+            "migration.apply.stage_write.before",
+            "migration.apply.stage_write.after",
+            "migration.resume.stage_write.before",
+            "migration.resume.stage_write.after",
+            "migration.rollback.stage_write.before",
+            "migration.rollback.stage_write.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M02.stage_verify",
+          "phrase": "stage_verify",
+          "scenario_ids": [
+            "migration.apply.stage_verify.before",
+            "migration.apply.stage_verify.after",
+            "migration.resume.stage_verify.before",
+            "migration.resume.stage_verify.after",
+            "migration.rollback.stage_verify.before",
+            "migration.rollback.stage_verify.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M02.stage_file_fsync",
+          "phrase": "stage_file_fsync",
+          "scenario_ids": [
+            "migration.apply.stage_file_fsync.before",
+            "migration.apply.stage_file_fsync.after",
+            "migration.resume.stage_file_fsync.before",
+            "migration.resume.stage_file_fsync.after",
+            "migration.rollback.stage_file_fsync.before",
+            "migration.rollback.stage_file_fsync.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M02.stage_directory_fsync",
+          "phrase": "stage_directory_fsync",
+          "scenario_ids": [
+            "migration.apply.stage_directory_fsync.before",
+            "migration.apply.stage_directory_fsync.after",
+            "migration.resume.stage_directory_fsync.before",
+            "migration.resume.stage_directory_fsync.after",
+            "migration.rollback.stage_directory_fsync.before",
+            "migration.rollback.stage_directory_fsync.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M02.stage_checksums",
+          "phrase": "stage_checksums",
+          "scenario_ids": [
+            "migration.apply.stage_checksums.before",
+            "migration.apply.stage_checksums.after",
+            "migration.resume.stage_checksums.before",
+            "migration.resume.stage_checksums.after",
+            "migration.rollback.stage_checksums.before",
+            "migration.rollback.stage_checksums.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Drain each sorted adapter; pre-start stop; stop the scoped old service; post-stop stop; verify **all** identity users stopped.",
+      "requirements": [
+        {
+          "id": "M03.adapter_drain",
+          "phrase": "adapter_drain",
+          "scenario_ids": [
+            "migration.apply.adapter_drain.before",
+            "migration.apply.adapter_drain.after",
+            "migration.resume.adapter_drain.before",
+            "migration.resume.adapter_drain.after",
+            "migration.rollback.adapter_drain.before",
+            "migration.rollback.adapter_drain.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M03.adapter_pre_start_stop",
+          "phrase": "adapter_pre_start_stop",
+          "scenario_ids": [
+            "migration.apply.adapter_pre_start_stop.before",
+            "migration.apply.adapter_pre_start_stop.after",
+            "migration.resume.adapter_pre_start_stop.before",
+            "migration.resume.adapter_pre_start_stop.after",
+            "migration.rollback.adapter_pre_start_stop.before",
+            "migration.rollback.adapter_pre_start_stop.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M03.service_stop",
+          "phrase": "service_stop",
+          "scenario_ids": [
+            "migration.apply.service_stop.before",
+            "migration.apply.service_stop.after",
+            "migration.resume.service_stop.before",
+            "migration.resume.service_stop.after",
+            "migration.rollback.service_stop.before",
+            "migration.rollback.service_stop.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M03.adapter_post_stop_stop",
+          "phrase": "adapter_post_stop_stop",
+          "scenario_ids": [
+            "migration.apply.adapter_post_stop_stop.before",
+            "migration.apply.adapter_post_stop_stop.after",
+            "migration.resume.adapter_post_stop_stop.before",
+            "migration.resume.adapter_post_stop_stop.after",
+            "migration.rollback.adapter_post_stop_stop.before",
+            "migration.rollback.adapter_post_stop_stop.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M03.all_users_stopped",
+          "phrase": "all_users_stopped",
+          "scenario_ids": [
+            "migration.apply.all_users_stopped.before",
+            "migration.apply.all_users_stopped.after",
+            "migration.resume.all_users_stopped.before",
+            "migration.resume.all_users_stopped.after",
+            "migration.rollback.all_users_stopped.before",
+            "migration.rollback.all_users_stopped.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Require stopped-state retention metadata, exact old release checksum, original state format and same nodeID/IP/approval/server facts.",
+      "requirements": [
+        {
+          "id": "M04.stopped_state_retention",
+          "phrase": "stopped_state_retention",
+          "scenario_ids": [
+            "migration.apply.stopped_state_retention.before",
+            "migration.apply.stopped_state_retention.after",
+            "migration.resume.stopped_state_retention.before",
+            "migration.resume.stopped_state_retention.after",
+            "migration.rollback.stopped_state_retention.before",
+            "migration.rollback.stopped_state_retention.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M04.old_release_checksum",
+          "phrase": "old_release_checksum",
+          "scenario_ids": [
+            "migration.apply.old_release_checksum.before",
+            "migration.apply.old_release_checksum.after",
+            "migration.resume.old_release_checksum.before",
+            "migration.resume.old_release_checksum.after",
+            "migration.rollback.old_release_checksum.before",
+            "migration.rollback.old_release_checksum.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M04.state_format",
+          "phrase": "state_format",
+          "scenario_ids": [
+            "migration.apply.state_format.before",
+            "migration.apply.state_format.after",
+            "migration.resume.state_format.before",
+            "migration.resume.state_format.after",
+            "migration.rollback.state_format.before",
+            "migration.rollback.state_format.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M04.identity_verify",
+          "phrase": "identity_verify",
+          "scenario_ids": [
+            "migration.apply.identity_verify.before",
+            "migration.apply.identity_verify.after",
+            "migration.resume.identity_verify.before",
+            "migration.resume.identity_verify.after",
+            "migration.rollback.identity_verify.before",
+            "migration.rollback.identity_verify.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Exchange `current` and `staged` with one `renameat2(RENAME_EXCHANGE)`",
+      "requirements": [
+        {
+          "id": "M05.release_exchange",
+          "phrase": "release_exchange",
+          "scenario_ids": [
+            "migration.apply.release_exchange.before",
+            "migration.apply.release_exchange.after",
+            "migration.resume.release_exchange.before",
+            "migration.resume.release_exchange.after",
+            "migration.rollback.release_exchange.before",
+            "migration.rollback.release_exchange.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M05.release_parent_fsync",
+          "phrase": "release_parent_fsync",
+          "scenario_ids": [
+            "migration.apply.release_parent_fsync.before",
+            "migration.apply.release_parent_fsync.after",
+            "migration.resume.release_parent_fsync.before",
+            "migration.resume.release_parent_fsync.after",
+            "migration.rollback.release_parent_fsync.before",
+            "migration.rollback.release_parent_fsync.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Restore/verify same public identity/IP/approvals/exact server, then rename that existing node, never recreate it.",
+      "requirements": [
+        {
+          "id": "M06.restore_identity",
+          "phrase": "restore_identity",
+          "scenario_ids": [
+            "migration.apply.restore_identity.before",
+            "migration.apply.restore_identity.after",
+            "migration.resume.restore_identity.before",
+            "migration.resume.restore_identity.after",
+            "migration.rollback.restore_identity.before",
+            "migration.rollback.restore_identity.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M06.node_rename",
+          "phrase": "node_rename",
+          "scenario_ids": [
+            "migration.apply.node_rename.before",
+            "migration.apply.node_rename.after",
+            "migration.resume.node_rename.before",
+            "migration.resume.node_rename.after",
+            "migration.rollback.node_rename.before",
+            "migration.rollback.node_rename.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Require fixture mode/isolation/client check; scoped service start; sorted adapter rebind/post-start start/health check; durably commit the fixture result.",
+      "requirements": [
+        {
+          "id": "M07.client_verify",
+          "phrase": "client_verify",
+          "scenario_ids": [
+            "migration.apply.client_verify.before",
+            "migration.apply.client_verify.after",
+            "migration.resume.client_verify.before",
+            "migration.resume.client_verify.after",
+            "migration.rollback.client_verify.before",
+            "migration.rollback.client_verify.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M07.service_start",
+          "phrase": "service_start",
+          "scenario_ids": [
+            "migration.apply.service_start.before",
+            "migration.apply.service_start.after",
+            "migration.resume.service_start.before",
+            "migration.resume.service_start.after",
+            "migration.rollback.service_start.before",
+            "migration.rollback.service_start.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M07.adapter_rebind",
+          "phrase": "adapter_rebind",
+          "scenario_ids": [
+            "migration.apply.adapter_rebind.before",
+            "migration.apply.adapter_rebind.after",
+            "migration.resume.adapter_rebind.before",
+            "migration.resume.adapter_rebind.after",
+            "migration.rollback.adapter_rebind.before",
+            "migration.rollback.adapter_rebind.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M07.adapter_post_start",
+          "phrase": "adapter_post_start",
+          "scenario_ids": [
+            "migration.apply.adapter_post_start.before",
+            "migration.apply.adapter_post_start.after",
+            "migration.resume.adapter_post_start.before",
+            "migration.resume.adapter_post_start.after",
+            "migration.rollback.adapter_post_start.before",
+            "migration.rollback.adapter_post_start.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M07.adapter_health",
+          "phrase": "adapter_health",
+          "scenario_ids": [
+            "migration.apply.adapter_health.before",
+            "migration.apply.adapter_health.after",
+            "migration.resume.adapter_health.before",
+            "migration.resume.adapter_health.after",
+            "migration.rollback.adapter_health.before",
+            "migration.rollback.adapter_health.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Write to an exclusively created mode0600 pending file in bounded4096-byte writes; verify the still-named private file; file fsync; publish by atomic rename; fsync parent.",
+      "requirements": [
+        {
+          "id": "M08.journal_pending_create",
+          "phrase": "journal_pending_create",
+          "scenario_ids": [
+            "migration.apply.journal_pending_create.before",
+            "migration.apply.journal_pending_create.after",
+            "migration.resume.journal_pending_create.before",
+            "migration.resume.journal_pending_create.after",
+            "migration.rollback.journal_pending_create.before",
+            "migration.rollback.journal_pending_create.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M08.journal_write",
+          "phrase": "journal_write",
+          "scenario_ids": [
+            "migration.apply.journal_write.before",
+            "migration.apply.journal_write.after",
+            "migration.resume.journal_write.before",
+            "migration.resume.journal_write.after",
+            "migration.rollback.journal_write.before",
+            "migration.rollback.journal_write.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M08.journal_verify",
+          "phrase": "journal_verify",
+          "scenario_ids": [
+            "migration.apply.journal_verify.before",
+            "migration.apply.journal_verify.after",
+            "migration.resume.journal_verify.before",
+            "migration.resume.journal_verify.after",
+            "migration.rollback.journal_verify.before",
+            "migration.rollback.journal_verify.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M08.journal_file_fsync",
+          "phrase": "journal_file_fsync",
+          "scenario_ids": [
+            "migration.apply.journal_file_fsync.before",
+            "migration.apply.journal_file_fsync.after",
+            "migration.resume.journal_file_fsync.before",
+            "migration.resume.journal_file_fsync.after",
+            "migration.rollback.journal_file_fsync.before",
+            "migration.rollback.journal_file_fsync.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M08.journal_rename",
+          "phrase": "journal_rename",
+          "scenario_ids": [
+            "migration.apply.journal_rename.before",
+            "migration.apply.journal_rename.after",
+            "migration.resume.journal_rename.before",
+            "migration.resume.journal_rename.after",
+            "migration.rollback.journal_rename.before",
+            "migration.rollback.journal_rename.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M08.journal_parent_fsync",
+          "phrase": "journal_parent_fsync",
+          "scenario_ids": [
+            "migration.apply.journal_parent_fsync.before",
+            "migration.apply.journal_parent_fsync.after",
+            "migration.resume.journal_parent_fsync.before",
+            "migration.resume.journal_parent_fsync.after",
+            "migration.rollback.journal_parent_fsync.before",
+            "migration.rollback.journal_parent_fsync.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Existing journals are checksum/content CAS checked before replacement.",
+      "requirements": [
+        {
+          "id": "M09.journal_cas",
+          "phrase": "journal_cas",
+          "scenario_ids": [
+            "migration.apply.journal_cas.before",
+            "migration.apply.journal_cas.after",
+            "migration.resume.journal_cas.before",
+            "migration.resume.journal_cas.after",
+            "migration.rollback.journal_cas.before",
+            "migration.rollback.journal_cas.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Partial pending writes are removed only on explicit resume/rollback under the same lock",
+      "requirements": [
+        {
+          "id": "M10.pending_validate",
+          "phrase": "pending_validate",
+          "scenario_ids": [
+            "migration.apply.pending_validate.before",
+            "migration.apply.pending_validate.after",
+            "migration.resume.pending_validate.before",
+            "migration.resume.pending_validate.after",
+            "migration.rollback.pending_validate.before",
+            "migration.rollback.pending_validate.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M10.pending_unlink",
+          "phrase": "pending_unlink",
+          "scenario_ids": [
+            "migration.apply.pending_unlink.before",
+            "migration.apply.pending_unlink.after",
+            "migration.resume.pending_unlink.before",
+            "migration.resume.pending_unlink.after",
+            "migration.rollback.pending_unlink.before",
+            "migration.rollback.pending_unlink.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Known partial public staging is validated as bounded raw byte prefixes of the planned new files before bounded cleanup/recreation.",
+      "requirements": [
+        {
+          "id": "M11.stage_cleanup_validate",
+          "phrase": "stage_cleanup_validate",
+          "scenario_ids": [
+            "migration.apply.stage_cleanup_validate.before",
+            "migration.apply.stage_cleanup_validate.after",
+            "migration.resume.stage_cleanup_validate.before",
+            "migration.resume.stage_cleanup_validate.after",
+            "migration.rollback.stage_cleanup_validate.before",
+            "migration.rollback.stage_cleanup_validate.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M11.stage_cleanup_unlink",
+          "phrase": "stage_cleanup_unlink",
+          "scenario_ids": [
+            "migration.apply.stage_cleanup_unlink.before",
+            "migration.apply.stage_cleanup_unlink.after",
+            "migration.resume.stage_cleanup_unlink.before",
+            "migration.resume.stage_cleanup_unlink.after",
+            "migration.rollback.stage_cleanup_unlink.before",
+            "migration.rollback.stage_cleanup_unlink.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "durably requests cleanup",
+      "requirements": [
+        {
+          "id": "M12.cleanup_intent",
+          "phrase": "cleanup_intent",
+          "scenario_ids": [
+            "migration.apply.cleanup_intent.before",
+            "migration.apply.cleanup_intent.after",
+            "migration.resume.cleanup_intent.before",
+            "migration.resume.cleanup_intent.after",
+            "migration.rollback.cleanup_intent.before",
+            "migration.rollback.cleanup_intent.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Terminal `offline` is published only when quarantine and **all** cleanup obligations succeed.",
+      "requirements": [
+        {
+          "id": "M13.cleanup_quarantine",
+          "phrase": "cleanup_quarantine",
+          "scenario_ids": [
+            "migration.apply.cleanup_quarantine.before",
+            "migration.apply.cleanup_quarantine.after",
+            "migration.resume.cleanup_quarantine.before",
+            "migration.resume.cleanup_quarantine.after",
+            "migration.rollback.cleanup_quarantine.before",
+            "migration.rollback.cleanup_quarantine.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M13.cleanup_adapter_stop",
+          "phrase": "cleanup_adapter_stop",
+          "scenario_ids": [
+            "migration.apply.cleanup_adapter_stop.before",
+            "migration.apply.cleanup_adapter_stop.after",
+            "migration.resume.cleanup_adapter_stop.before",
+            "migration.resume.cleanup_adapter_stop.after",
+            "migration.rollback.cleanup_adapter_stop.before",
+            "migration.rollback.cleanup_adapter_stop.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M13.cleanup_service_stop",
+          "phrase": "cleanup_service_stop",
+          "scenario_ids": [
+            "migration.apply.cleanup_service_stop.before",
+            "migration.apply.cleanup_service_stop.after",
+            "migration.resume.cleanup_service_stop.before",
+            "migration.resume.cleanup_service_stop.after",
+            "migration.rollback.cleanup_service_stop.before",
+            "migration.rollback.cleanup_service_stop.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M13.cleanup_all_users_stopped",
+          "phrase": "cleanup_all_users_stopped",
+          "scenario_ids": [
+            "migration.apply.cleanup_all_users_stopped.before",
+            "migration.apply.cleanup_all_users_stopped.after",
+            "migration.resume.cleanup_all_users_stopped.before",
+            "migration.resume.cleanup_all_users_stopped.after",
+            "migration.rollback.cleanup_all_users_stopped.before",
+            "migration.rollback.cleanup_all_users_stopped.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        },
+        {
+          "id": "M13.terminal_publish",
+          "phrase": "terminal_publish",
+          "scenario_ids": [
+            "migration.apply.terminal_publish.before",
+            "migration.apply.terminal_publish.after",
+            "migration.resume.terminal_publish.before",
+            "migration.resume.terminal_publish.after",
+            "migration.rollback.terminal_publish.before",
+            "migration.rollback.terminal_publish.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "explicit rollback durably establishes reversal.",
+      "requirements": [
+        {
+          "id": "M14.reversal_intent",
+          "phrase": "reversal_intent",
+          "scenario_ids": [
+            "migration.apply.reversal_intent.before",
+            "migration.apply.reversal_intent.after",
+            "migration.resume.reversal_intent.before",
+            "migration.resume.reversal_intent.after",
+            "migration.rollback.reversal_intent.before",
+            "migration.rollback.reversal_intent.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    },
+    {
+      "phrase": "Committed and rolled-back journals replay without writes or lifecycle calls.",
+      "requirements": [
+        {
+          "id": "M15.terminal_replay",
+          "phrase": "terminal_replay",
+          "scenario_ids": [
+            "migration.apply.terminal_replay.before",
+            "migration.apply.terminal_replay.after",
+            "migration.resume.terminal_replay.before",
+            "migration.resume.terminal_replay.after",
+            "migration.rollback.terminal_replay.before",
+            "migration.rollback.terminal_replay.after"
+          ],
+          "configurations": [
+            "one_mullvad",
+            "five_mullvad",
+            "one_direct",
+            "five_mullvad_one_direct"
+          ]
+        }
+      ]
+    }
+  ],
+  "migration_ordinal_contract": "Every before/after ID requires every actual write chunk, journal generation, staged file and sorted adapter ordinal for that direction. No runtime producer exists; IDs are preparation only."
+}

@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "scope": "preparation_only",
+  "status": "NOT_RUN",
+  "execution_scope": "local_only",
+  "execution_supported": false,
+  "remote_validation": "NOT_PERFORMED",
+  "minimum_soak_seconds": 86400,
+  "prerequisites": [
+    "task8c_runtime_client_acceptance",
+    "reviewed_complete_implementation",
+    "immutable_candidate_and_artifacts",
+    "whole_branch_independent_review",
+    "namespace_firewall_unsafe_review",
+    "client_enforcement_review",
+    "local_guest_and_disposable_clients",
+    "tailscale_credentials_available",
+    "mullvad_profiles_available",
+    "capture_privileges_and_boot_order",
+    "capture_positive_controls_all_points",
+    "all_fault_matrix_pass",
+    "compatibility_security_artifact_gates",
+    "debdev_preserved_primary",
+    "second_local_independent_legacy_identity",
+    "declared_adapters_and_dependencies",
+    "stopped_state_backup_compatible_rollback",
+    "no_concurrent_identity_copies",
+    "explicit_direct_authorization",
+    "performance_gates",
+    "soak_24h_window"
+  ],
+  "cases": [
+    {
+      "id": "debdev_primary",
+      "target": "local_debdev",
+      "identity_policy": "preserve_primary_no_reenrollment_no_concurrent_copy",
+      "status": "NOT_RUN"
+    },
+    {
+      "id": "second_local_legacy",
+      "target": "separate_local_legacy_deployment",
+      "identity_policy": "preserve_independently_established_test_identity",
+      "status": "NOT_RUN"
+    },
+    {
+      "id": "mixed_soak",
+      "target": "local_mixed_six_exit",
+      "identity_policy": "preserve_all_approved_identities",
+      "status": "NOT_RUN"
+    }
+  ],
+  "steps": [
+    {
+      "id": "inspect",
+      "availability": "observational_cli_only",
+      "argv_template": [
+        "target/release/vprouter",
+        "migrate",
+        "inspect",
+        "--legacy-config",
+        "LOCAL_LEGACY_CONFIG"
+      ],
+      "status": "NOT_RUN"
+    },
+    {
+      "id": "plan",
+      "availability": "observational_cli_only",
+      "argv_template": [
+        "target/release/vprouter",
+        "migrate",
+        "plan",
+        "--legacy-config",
+        "LOCAL_LEGACY_CONFIG",
+        "--site",
+        "LOCAL_SITE",
+        "--expected-server",
+        "EXPECTED_SERVER",
+        "--deployment-id",
+        "LOCAL_DEPLOYMENT"
+      ],
+      "status": "NOT_RUN"
+    },
+    {
+      "id": "apply",
+      "availability": "future_cli_not_implemented",
+      "argv_template": [
+        "target/release/vprouter",
+        "migrate",
+        "apply",
+        "--plan",
+        "REVIEWED_LOCAL_PLAN"
+      ],
+      "status": "NOT_RUN"
+    },
+    {
+      "id": "rollback",
+      "availability": "future_cli_not_implemented",
+      "argv_template": [
+        "target/release/vprouter",
+        "migrate",
+        "rollback",
+        "--plan",
+        "REVIEWED_LOCAL_PLAN"
+      ],
+      "status": "NOT_RUN"
+    },
+    {
+      "id": "capture_fault_and_soak",
+      "availability": "future_controller_not_implemented",
+      "argv_template": [
+        "ACCEPTANCE_CONTROLLER_NOT_IMPLEMENTED",
+        "--local-only",
+        "--boot-capture-before-traffic",
+        "--all-configurations",
+        "--all-faults",
+        "--soak-seconds",
+        "86400"
+      ],
+      "status": "NOT_RUN"
+    }
+  ],
+  "required_records": [
+    "same_identity_addresses_credentials_approval_before_after",
+    "rename_verified_by_actual_protected_client",
+    "declared_hostname_dependencies",
+    "declared_idempotent_drain_stop_rebind_start_health_adapters",
+    "stopped_state_private_backup",
+    "compatible_release_and_state_rollback",
+    "quarantine_before_cutover_and_uncertain_recovery",
+    "kill_resume_reverse_at_every_migration_boundary",
+    "distinct_additional_imported_device_profiles",
+    "explicit_direct_never_fallback",
+    "continuous_mixed_24h_faults_positive_capture_controls",
+    "all_failed_attempts_retained_and_hash_bound"
+  ]
+}

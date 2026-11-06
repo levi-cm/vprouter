@@ -1168,3 +1168,9 @@ with completeness test, canary/second-installation plan spec with refusing prefl
 docs/rust-v2/acceptance-scaffolding.md. Review1 FAIL (I1 enumeration gaps, I2 mixed-read)
 -> fixed with class closure; re-review PASS. No acceptance evidence exists; acceptance.json
 untouched, release_ready=false. All real-client/capture/fault/canary/24h-soak gates NOT_RUN.
+
+2026-11-06 overnight /goal complete (5e989ee..fc37481, report overnight-report.md). Final check at
+fc37481: fmt 0, strict clippy 0, workspace 569 pass/0 fail/17 ignored. PARTIAL (3-attempt limit):
+run-410 witness validator (I9/I10/M2 open), Task 14 harness (T3-I1..I4 open). Task 12 R4 fix not
+re-reviewed. Everything is offline preparation; release_ready=false; all runtime/client/ARM/
+canary/soak gates NOT_RUN.

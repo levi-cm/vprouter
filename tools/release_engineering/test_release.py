@@ -964,6 +964,32 @@ class ReviewELF(unittest.TestCase):
                         self.assertRaises(ValueError):
                     r.static_elf(self.three_sections(machine, kind, good + 1, good), machine)
 
+    def test_relocation_section_link_and_info_are_bounded(self):
+        # Controller-fix review M1/M2: sh_link must be 0 or a symbol table, sh_info
+        # must index a section even when SHF_INFO_LINK is clear (0 stays valid).
+        import struct
+        for machine in (62, 183):
+            for kind, good in ((4, 24), (9, 16)):
+                base = bytearray(self.three_sections(machine, kind, good, good))
+                r.static_elf(bytes(base), machine)  # control: link 0, info 0
+                for link in (1, 2, 3, 0xffffffff):  # NULL-adjacent STRTAB, itself, out of range
+                    data = bytearray(base)
+                    struct.pack_into('<I', data, 320 + 40, link)
+                    with self.subTest(machine=machine, kind=kind, link=link), \
+                            self.assertRaises(ValueError):
+                        r.static_elf(bytes(data), machine)
+                for info in (3, 4, 0xffffffff):
+                    for flags in (0, 0x40):
+                        data = bytearray(base)
+                        struct.pack_into('<I', data, 320 + 44, info)
+                        struct.pack_into('<Q', data, 320 + 8, flags)
+                        with self.subTest(machine=machine, kind=kind, info=info, flags=flags), \
+                                self.assertRaises(ValueError):
+                            r.static_elf(bytes(data), machine)
+                data = bytearray(base)
+                struct.pack_into('<I', data, 320 + 44, 1)  # info -> existing section
+                r.static_elf(bytes(data), machine)
+
     def test_generated_header_mutations_and_truncations_for_both_targets(self):
         import struct
         fields = [

@@ -324,7 +324,10 @@ def static_elf(data, machine):
                         'invalid symbol table')
             if kind in (4, 9):
                 # ELF64 SHT_RELA / SHT_REL fixed entry sizes; header shape only.
-                require(entsize == (24 if kind == 4 else 16) and length % entsize == 0,
+                # sh_link is 0 (symbol-free static relocations) or a symbol table;
+                # sh_info (target section, 0 valid) is bounded regardless of SHF_INFO_LINK.
+                require(entsize == (24 if kind == 4 else 16) and length % entsize == 0 and
+                        (link == 0 or sections[link][1] in (2, 11)) and info < shcount,
                         'invalid ELF relocation section header')
             if kind in (14, 15, 16):
                 require(entsize == 8 and info == 0 and link == 0, 'invalid ELF address array')

@@ -48,8 +48,13 @@ offline preparation layer built and reviewed with synthetic fixtures. Full Task 
   (I1-I3, I4-I8 fixed; round 3 found I9 transport creation/mount not bound to canonical history, I10
   WireGuard down-only/original-move guards, M2 sweep width). I9/I10/M2 are OPEN. Do not cite it as
   full witness validation.
-- **ARM64 runtime: NOT_RUN** — no `qemu-system-aarch64`, no ARM Debian image, and the lab's pinned
-  cross toolchain (`target/toolchains`) was deleted. Other 8c gates (real client, driver-cost speed-up
+- **ARM64 runtime: NOT_RUN** — alternatives were searched (2026-11-06 11:10): the only `qemu-system-aarch64`
+  is an unpinned binary inside another project's Android SDK (`/home/opsec/Projects/opencode/.offload/android-sdk/
+  emulator/qemu/linux-x86_64/`), not the lab's pinned tool; there is no ARM64 Debian image locally
+  (`target/platform-lab/downloads` empty), no aarch64 UEFI firmware (`AAVMF`/`edk2-aarch64` absent), no `qemu-user`
+  binfmt handler, and Docker has no local ARM image. Booting ARM64 needs a downloaded image + firmware under
+  the one-shot lab protocol's pinned/verified tooling (public network acquisition, your call) and TCG emulation;
+  the lab's pinned cross toolchain (`target/toolchains`) was also deleted. Other 8c gates (real client, driver-cost speed-up
   evidence, typed full-witness acceptance) NOT_RUN.
 - The run-410 guest was killed by `systemd --user` (SIGTERM at 00:32 on Nov 5, cause unknown); the preserved
   409 guest and 410 disk/evidence were never booted or modified.
@@ -103,6 +108,15 @@ evidence-bundle schema + capture oracles on synthetic summaries; snapshot-based 
 with completeness test; canary/second-installation plan spec whose preflight refuses to run). Review FAIL
 (enumeration omissions; mixed-read PASS) -> fixed; re-review PASS. 46 tests OK. `acceptance.json` untouched.
 Documented limits: cooperative handoff, no packet-level correctness, stateless admission.
+
+## Post-report follow-up (11:00-11:30)
+
+A stop-hook check flagged that four small controller fixes had no independent review. A focused Sol review
+(`controller-fixes-review.md`) ran: Task 9 M1 (late cancel), Task 10 M1 (status host time) and Task 12 R4
+(`MAX_OPAQUE` 128) **PASS**; Task 13's REL/RELA check had two reproduced Minor gaps (nonzero `sh_link` not a symbol
+table; `sh_info` unbounded when `SHF_INFO_LINK` clear). Fixed by me in `release.py` with
+`ReviewELF.test_relocation_section_link_and_info_are_bounded` (RED 20 failures with the check removed; GREEN; 38-test
+suite OK; zero-link GNU static `--emit-relocs` layout still accepted). That last fix is itself not re-reviewed.
 
 ## What is NOT_RUN (and why)
 

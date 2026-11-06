@@ -1174,3 +1174,7 @@ fc37481: fmt 0, strict clippy 0, workspace 569 pass/0 fail/17 ignored. PARTIAL (
 run-410 witness validator (I9/I10/M2 open), Task 14 harness (T3-I1..I4 open). Task 12 R4 fix not
 re-reviewed. Everything is offline preparation; release_ready=false; all runtime/client/ARM/
 canary/soak gates NOT_RUN.
+
+2026-11-06 11:30 follow-up: ARM64 alternatives searched (only an unpinned Android-SDK aarch64 qemu;
+no ARM image/firmware/binfmt) -> still NOT_RUN. Focused review of controller fixes: Task 9/10/12 fixes PASS;
+Task 13 REL/RELA link/info Minor x2 fixed by controller (RED/GREEN), not re-reviewed.

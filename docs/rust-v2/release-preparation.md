@@ -132,8 +132,9 @@ LOAD/TLS filesz<=memsz, PHDR binding, executable entry, disjoint LOAD mappings,
 section names/links/size shapes and absence of PT_INTERP/PT_DYNAMIC are checked;
 bytes are never executed. The deliberately bounded profile rejects extended
 section numbering, unsupported flags/types and overlapping LOAD mappings.
-SHT_REL/SHT_RELA section headers must carry the fixed ELF64 entry size (16/24) and a
-size that is a multiple of it. It does not validate every instruction, relocation
+SHT_REL/SHT_RELA section headers must carry the fixed ELF64 entry size (16/24), a
+size that is a multiple of it, `sh_link` 0 or a symbol table, and `sh_info` indexing
+an existing section (0 is valid) regardless of `SHF_INFO_LINK`. It does not validate every instruction, relocation
 or symbol payload, and it does not parse inner note records (PT_NOTE/SHT_NOTE
 contents; only their outer segment/section ranges are bounded), build IDs or GNU
 properties. ELF

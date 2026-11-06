@@ -1219,3 +1219,8 @@ parent dir mtime changed). Diagnosis delegated (read-only).
 window (not a lab budget); cause TCG slowness (13-25x); no ARM defect shown; ARM64 needs a
 KVM-capable aarch64 host. A executed (six selectors archived, receipt
 secret-bootstrap-selector-archive-run-411.json). Guest preservation delegated.
+
+2026-11-06 16:40 run-411 guest preserved: snapshot + clean poweroff (QEMU exit <=15:25:48.604Z),
+state renamed to /DATA/vprouter-lab/preserved/run411-guest (sealed 0400/0500, 135 hashes,
+verifier PASS; two tested fixes to the preserve tool: aarch64 PSCI serial ending, resume
+reference = QEMU exit instant). 409 tree 91/91. No guest running. Continuation complete.

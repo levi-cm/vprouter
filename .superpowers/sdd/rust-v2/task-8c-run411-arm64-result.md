@@ -203,3 +203,267 @@ Established by this evidence chain:
 Scratch files: `analyze.py`, `analysis.json`, `hashes.txt`, `canonical-timeline.tsv`, `attachment-phases.tsv`, `run410.stderr`, `run411.stderr`, extracted frozen source, `guest-inspect.py`/`.jsonl`/`.stderr`, `guest-journal.txt`, `guest-dmesg.txt`, `archive-review.py`/`.jsonl`/`.stderr`, initial unprivileged SSH read output and report-generation script. Only original public evidence was read; private profile contents and key bytes were not printed or inspected. New SSH reads are later observations, not relabeled original execution samples.
 
 The report uses existing prep and 409/410 reports for context; causal conclusions and hashes above were refreshed from the specified run411/run410 records and frozen source. No historical 402–408 data was promoted into new ARM runtime evidence.
+
+## Run 411 guest preservation
+
+**Current status: cold preservation complete; offline verifier PASS.**
+The preparation and initial resume accounts below are historical; the final
+2026-11-06 exit-reference correction and successful preservation appended to this
+section supersede their blockers, live-state and unavailable-evidence statements.
+
+2026-11-06, implementation checkout `rust/v2 @e68003c8728f02dff934bee6dcbbd926e4d7f7bd`.
+**Prepared and offline-validated; live preservation BLOCKED by the snapshot sudo constraint.**
+No snapshot SSH, shutdown SSH, guest mutation or state-directory move was executed.
+Run411 remains consumed, budget0. The original raw record and C/I/F/A evidence
+were read without modification. The run409 archive was traversed only to read
+its README and `old-final-snapshot-remote.py`; its overlay was never accessed.
+No base image, run409/410 record, Git index, branch or ref was changed.
+
+Implemented `tools/rust-v2-lab/preserve-run411-guest.py`,
+`test-preserve-run411-guest.py` and `verify-preserved-run411.py`. The preservation
+tool defaults to an offline dry-run. Its one-way execute path stages evidence,
+requires the final public-selector/archive/gateway/owner/network/nft/Docker/mount
+snapshot, checks QEMU pid/start/complete argv and boot identity, requests one
+strict-SSH `sudo -n systemctl poweroff`, waits at most180 seconds for the pinned
+QEMU pidfd without sending signals, requires the final ACPI S5 / Power down
+serial ending, then moves and seals the original state. A partial execution
+leaves diagnostics in its exclusive destination and is never automatically
+retried. Cross-device fallback verifies all copied file bytes, symlink text and
+file types before removing the source. The verifier rehashes every manifest
+entry, checks modes, original C files, reference inputs, archived selector
+identities, consumed claim and the fixed original raw SHA256. No historical
+validator or guest payload is executed by that verifier.
+
+Current local preflight: QEMU pid **493434**, start tick **5902200**, full argv
+matches `process.json`, controller boot unchanged; reserved guest boot
+`525e9103-b2f9-4611-a663-ced9d001245a` (fresh SSH confirmation **NOT_RUN**).
+All61 collected-chain files and62 reference/source hashes match, including all35
+reservation bindings. Source and destination have the same filesystem device,
+so the intended state transfer is a rename. The ARM64 `known_hosts` is a regular
+file, not the relative symlink used in409; the tool records its original type,
+resolved path and pin hash in `symlink-record.json` and preserves both its state
+file and an exact `console-known_hosts` copy. Pin SHA256:
+`bf37ae607c4ff4e5f3de2a4ef2244e8e7dea3919448b22a12cc6690c399200d1`.
+
+Commands actually run, from the repository root:
+
+| Exact command | Exit | Evidence |
+| --- | --- | --- |
+| `python3 -B tools/rust-v2-lab/test-preserve-run411-guest.py` (before implementation) | 1 | Expected missing implementation file; no guest action. |
+| `python3 -B tools/rust-v2-lab/test-preserve-run411-guest.py` (final implementation) | 0 | 11 synthetic tests PASS; identity mismatch, incomplete snapshot, timeout without signals/move, serial endings, strict SSH, verified cross-device fallback, corruption retention, manifest/mode tampering. |
+| `python3 -B tools/rust-v2-lab/preserve-run411-guest.py` | 0 | Offline dry-run PASS; no SSH or guest changes;61 C files/62 references validated; remote body compiles. |
+| `git diff --check` | 0 | Tracked changes have no whitespace errors; no Git writes. |
+
+**Privilege blocker:** the supplied instruction permits guest sudo *only for
+poweroff*, while the required final snapshot reads root-owned0700
+`/var/lib/vprouter-v2-lab`, root Docker/PID identity and nft rules. The409 snapshot
+and411 inspector require root and use `sudo -n python3 -I -`; this guest's
+cloud-init explicitly disables root SSH. The current instruction does not
+authorize that snapshot elevation. A clarification was requested before any
+guest action. An explicit allowance for the bounded read-only snapshot is
+required; there is no implicit privilege fallback. The opt-in flag is
+`--sudo-read-only-snapshot` (snapshot command `sudo -n python3 -I -B -`).
+
+Planned destination `/DATA/vprouter-lab/preserved/run411-guest/` was **not created**.
+Shutdown UTC, QEMU exit, final serial ending, moved-state hashes and preserved
+manifest hash are **NOT_RUN / unavailable**. The cold archive verifier is
+**NOT_RUN** because there is no archive. No preservation success is claimed.
+After the privilege constraint is resolved, the concrete pending commands are
+`python3 -B tools/rust-v2-lab/preserve-run411-guest.py --execute --sudo-read-only-snapshot`
+and, only after successful preservation,
+`python3 -B tools/rust-v2-lab/verify-preserved-run411.py`.
+
+Prepared tool SHA256 values:
+
+| File | SHA256 |
+| --- | --- |
+| `preserve-run411-guest.py` | `27ce6ee0da04d91855d92f8492af9c988e4ff14959bbdaeb98fdbdaa4f6f4807` |
+| `test-preserve-run411-guest.py` | `5958c37e404e578995795814fb6b06d87c5af52135a249fb10aa5e956283bb8a` |
+| `verify-preserved-run411.py` | `561b8e35f25c0214048b498d371c095a5912fd2fe6fc5425bc8f329bc590efe0` |
+
+Rechecked original raw411 SHA256 remains
+`a69050610bde2a1d78b23aabf30335afb4576919bc897c9cb872435a3cea9f61`.
+A receipt SHA256 remains
+`d0d13f68c9a6fc39cbba1f7d2a68ab10baeb7d9d9c93072c77a28064cd1fb657`.
+
+
+### 2026-11-06 ARM64 serial correction and explicit offline resume
+
+Implementation checkout `rust/v2 @c7b4525`; no subagents, SSH, QEMU/QMP actions,
+host sudo, external network, Git writes, run409 archive access, run409/410 record
+changes or base-image access occurred during this follow-up. Only the three owned
+Python tools and this section were edited. Existing archive and state bytes were
+read without modification; the real resume refused before adding or moving files.
+
+The controller's already-authorized original command was
+`python3 -B tools/rust-v2-lab/preserve-run411-guest.py --execute --sudo-read-only-snapshot`
+(started at 2026-11-06T15:25:28Z; controller reported exit 1, traceback retained in
+`/DATA/vprouter-lab/run411-exec/preserve.err`). The final snapshot receipt records
+2026-11-06T15:25:30.133083Z through 15:25:40.432669Z, exit 0. The shutdown request
+receipt records **2026-11-06T15:25:40.444751Z** through
+**2026-11-06T15:25:41.116369Z**, exit 0. Those are command/request timestamps,
+not a receipt of the later QEMU-exit wall-clock time.
+
+The actual serial log contains one Linux boot banner, one shutdown.target, and
+one final power-down. Its final lines are:
+
+```text
+[ 9276.693067] systemd-shutdown[1]: All filesystems, swaps, loop devices, MD devices and DM devices detached.
+[ 9276.698279] systemd-shutdown[1]: Syncing filesystems and block devices.
+[ 9276.702065] systemd-shutdown[1]: Powering off.
+[ 9276.722010] reboot: Power down
+```
+
+The ARM64 rule now requires an ordered systemd shutdown/poweroff sequence ending
+in `reboot: Power down`, with no subsequent boot banner. The x86 rule still
+requires ACPI S5 and final power-down. Truncated, halted, later-boot and
+boot-then-second-shutdown fixtures are refused. The explicit
+`--resume-after-shutdown` branch bypasses live preflight and SSH material setup;
+it validates original snapshot/shutdown receipts, successful confined recorded
+commands, guest boot identity, the fixed raw/A hashes, original C and references,
+archived selector identities, pin/type/link and special records. It checks the
+recorded controller boot and absence of pid+start tick, reads both kernel TCP
+listener tables, and checks local port bindability without contacting any guest.
+It refuses state mtime OR ctime after the receipt cutoff (including backdated
+content), locks the archive directory, and checks state content before moving.
+A consistent synthetic partial archive is renamed, documented, fully manifested
+(excluding SHA256SUMS itself) and sealed 0400/0500; a second resume refuses before
+any move. Original attempt tools stay in preservation-tools/; a successful
+resume would add resume-tools/ and a receipt/state-identity record. The verifier
+checks those identities and independently binds both fixed raw and A hashes.
+
+Commands actually run in this follow-up, from the repository root:
+
+| Command | Exit | Actual outcome |
+| --- | --- | --- |
+| `python3 -B tools/rust-v2-lab/test-preserve-run411-guest.py` (tests first) | 1 | Missing platform argument/resume behavior failed; later selector-inode and reboot-then-shutdown regressions also failed before their fixes. |
+| `python3 -B tools/rust-v2-lab/test-preserve-run411-guest.py` (final) | 0 | 20 synthetic tests PASS, including complete resumed archive verifier PASS and fixed-A tampering with a regenerated manifest refused. |
+| `python3 -B tools/rust-v2-lab/preserve-run411-guest.py --help` | 0 | Explicit resume mode documented. |
+| `python3 -B tools/rust-v2-lab/preserve-run411-guest.py --resume-after-shutdown` | 1 | Executed ONCE for real. `state_modified_after_shutdown:.`; no move, archive addition, permission change or sealing occurred. |
+| `python3 -B tools/rust-v2-lab/verify-preserved-run411.py` | 1 | `root_mode`; existing partial archive remains 0700 and has no completed manifest. This is not preserved-archive PASS. |
+| `git diff --check` | 0 | No whitespace errors; no staging/commit/push. |
+
+**Unexpected timing blocker:** normal final shutdown writes occurred after the
+SSH poweroff command returned. guest.qcow2 mtime/ctime is
+2026-11-06T15:25:48.200Z; serial.log is 15:25:48.364Z; the state directory is
+15:25:48.436Z (consistent with QEMU removing its pidfile). All are newer than the
+only shutdown command receipt completion, 15:25:41.116369Z. The original
+`preserve.err` mtime/ctime is 15:25:48.604Z; its traceback occurs after `wait_exit`
+returned and before any state move. Using that later failure observation as a
+shutdown cutoff requires clarification; it was not silently substituted and no
+timestamps were backdated. Its SHA256 is recorded below. The known serial bug is
+fixed, but the conservative resume time check correctly prevents completion
+under the currently implemented receipt cutoff. No success or state tampering
+is inferred from this timing mismatch.
+
+The still-partial archive remains `/DATA/vprouter-lab/preserved/run411-guest/`.
+The cold state remains unmoved at
+`/DATA/AppData/vprouter-rust-v2/target/platform-lab/debian-arm64/`
+(resolves through platform-lab to `/DATA/vprouter-lab/platform-lab/debian-arm64/`).
+QEMU pid 493434 / start tick 5902200 is absent and port 22034 is not listening.
+No preserved `state/`, README.md, preservation.json or SHA256SUMS has been created;
+completed preserved-artifact/manifest hashes are therefore **unavailable**.
+Current cold-source and already-staged evidence hashes (read-only observations):
+
+| Path | SHA256 |
+| --- | --- |
+| `/DATA/AppData/vprouter-rust-v2/target/platform-lab/debian-arm64/guest.qcow2` | `e1f81d7069a91d2ecf98dc5223f77e6e5f1d6ae3a077dd8fef7a643d3bd93fe6` |
+| `/DATA/AppData/vprouter-rust-v2/target/platform-lab/debian-arm64/seed.iso` | `4c6589439631d627da389988b4965c6115a8c3bc606ded195aa30a9d619e0733` |
+| `/DATA/AppData/vprouter-rust-v2/target/platform-lab/debian-arm64/vars.fd` | `2aa93744ad57676d2c1d80fe9546fbe2c3c3c679e6b0374d4be3784b31c8f50f` |
+| `/DATA/AppData/vprouter-rust-v2/target/platform-lab/debian-arm64/serial.log` | `9b4644d4d56e4ff0c352b38fe02969c28b724e7f11870fc9726d9e2c26156fc5` |
+| `/DATA/AppData/vprouter-rust-v2/target/platform-lab/debian-arm64/process.json` | `830e578fd8b1ab35cee1a7e48da5d54a69ba0bf120ca397811d921bb49485966` |
+| `/DATA/vprouter-lab/preserved/run411-guest/console-known_hosts` | `bf37ae607c4ff4e5f3de2a4ef2244e8e7dea3919448b22a12cc6690c399200d1` |
+| `/DATA/vprouter-lab/preserved/run411-guest/final-snapshot.stdout` | `2a85cfbf3a2b24a3dd35dd87e6cf62b408bf8e4324810f0dcb35d243e61fa3b8` |
+| `/DATA/vprouter-lab/preserved/run411-guest/shutdown-request.json` | `5431448a97959af3ae7fb56dc22f0f76a5476b24852245ad29c150ce45149c6c` |
+| `/DATA/vprouter-lab/preserved/run411-guest/reference-inputs/target/lab-state/secret-bootstrap-selector-archive-run-411.json` | `d0d13f68c9a6fc39cbba1f7d2a68ab10baeb7d9d9c93072c77a28064cd1fb657` |
+| `/DATA/vprouter-lab/preserved/run411-guest/collected-chain/files/target/lab-state/actual-program-run-411.json` | `a69050610bde2a1d78b23aabf30335afb4576919bc897c9cb872435a3cea9f61` |
+| `/DATA/vprouter-lab/run411-exec/preserve.err` | `1f9e8114512bc939675b20ac4d54af4d9e6c3793ade5efd8c9f5d580b0e1c7e8` |
+| `/DATA/AppData/vprouter-rust-v2/tools/rust-v2-lab/preserve-run411-guest.py` | `652cc1d07c5865da32d43862d50008b0abb7b1d2d865bc93399ff9c877a8f937` |
+| `/DATA/AppData/vprouter-rust-v2/tools/rust-v2-lab/test-preserve-run411-guest.py` | `29b7c30a1ec46eeab32fa95d66c5587783cab94059e687fc175a078d0d70b895` |
+| `/DATA/AppData/vprouter-rust-v2/tools/rust-v2-lab/verify-preserved-run411.py` | `5d49a37fd64979174f1bcd5016e8e9e1e397ac3e9502efc19ce8605df3b0693b` |
+
+### 2026-11-06 exit-reference correction and completed cold preservation
+
+**Actual outcome: PASS.** Implementation checkout `rust/v2 @c7b4525`; the real
+`--resume-after-shutdown` was executed **ONCE in this follow-up**, exit **0**.
+Validation time was **2026-11-06T15:37:13.449667+00:00**. The original cold state was
+renamed to `/DATA/vprouter-lab/preserved/run411-guest/state/`; the source state
+path is absent. The archive is sealed: regular files and any retained socket
+0400, directories 0500. `verify-preserved-run411.py` exited **0**, **PASS**:
+135 manifest-covered regular file hashes, all 61 original C retained files,
+fixed original raw and A receipt hashes, state transfer identity and modes.
+Run411 remains consumed, budget0. This establishes cold evidence preservation.
+
+The cutoff now uses QEMU exit observation rather than the poweroff request.
+The execute path immediately records `qemu-exit.json` after `wait_exit(pidfd)`
+returns, before context cleanup, serial checks or moves. This original partial
+archive had no such timestamp. Its receipt therefore explicitly records
+`method=retained-post-wait-error-upper-bound` and uses
+**2026-11-06T15:25:48.604000Z** (`1793978748604000000` ns) as the historical
+exit-observation **upper bound**, not an exact measured QEMU exit instant.
+The original pinned `preserve.err` traceback was emitted by serial validation,
+which the retained execute source reaches only after `wait_exit` completes.
+Its mtime and ctime are both 15:25:48.604Z; its 1529 unchanged bytes are now
+retained as `qemu-exit-evidence/preserve.err`, SHA256
+`1f9e8114512bc939675b20ac4d54af4d9e6c3793ade5efd8c9f5d580b0e1c7e8`.
+The receipt binds `poweroff.command.json` (SHA256
+`5431448a97959af3ae7fb56dc22f0f76a5476b24852245ad29c150ce45149c6c`),
+whose completion **15:25:41.116369Z** is the earlier request completion.
+The derivation and original evidence timestamps are recorded in `qemu-exit.json`
+and covered by the manifest; the original external error file was not changed.
+
+The applied state cutoff is **exit upper bound + 2 s =
+2026-11-06T15:25:50.604000Z** (`1793978750604000000` ns). Both state mtime
+and ctime must be at or before that cutoff; the ctime backdating fence remains.
+The receipt records every state entry's timestamps before moving. QEMU's final
+flushes satisfy it: guest.qcow2 15:25:48.200Z, serial.log 15:25:48.364Z and the
+state directory 15:25:48.436Z. Identity, successful snapshot/shutdown receipts,
+controller boot, pid+start absence, port absence/bindability, fixed C/raw/A,
+references, selector inode/device/hash and pin checks remain enforced.
+
+Tests were added before implementation. Initial red runs exposed the missing
+exit receipt, unsupported recorded-exit partial archive and request-time cutoff.
+Final **26 synthetic tests PASS**, including writes just before/at exit and
+exactly at exit+2s accepted, one nanosecond after exit+2s refused without archive
+mutation, backdated content refused by ctime, request-only derivation with retained
+evidence, missing/changed derivation evidence refused, verifier timing/identity
+tamper refused, and second resume refused without moving or changing state again.
+The second-resume test is synthetic; no second real resume was attempted.
+
+Commands actually run in this follow-up, from the repository root:
+
+| Exact command | Exit | Actual outcome |
+| --- | --- | --- |
+| `python3 -B tools/rust-v2-lab/test-preserve-run411-guest.py` (tests first) | 1 | Red: missing exit receipt and unsupported exit reference/cutoff. |
+| `python3 -B tools/rust-v2-lab/test-preserve-run411-guest.py` (final) | 0 | 26 synthetic tests PASS. |
+| `python3 -B tools/rust-v2-lab/preserve-run411-guest.py --resume-after-shutdown` | 0 | ONCE for real; validated offline, renamed cold state, documented and sealed archive. |
+| `python3 -B tools/rust-v2-lab/verify-preserved-run411.py` | 0 | PASS: manifest, 0400/0500 modes, 135 file hashes, original C/raw/A, state identity and exit receipt/cutoff. |
+| `git diff --check` | 0 | No whitespace errors; read-only Git check. |
+
+Actual preserved hashes below are relative to
+`/DATA/vprouter-lab/preserved/run411-guest/`. State bytes match the cold source
+hashes recorded in the previous account.
+
+| Preserved path | SHA256 |
+| --- | --- |
+| `state/guest.qcow2` | `e1f81d7069a91d2ecf98dc5223f77e6e5f1d6ae3a077dd8fef7a643d3bd93fe6` |
+| `state/known_hosts` | `bf37ae607c4ff4e5f3de2a4ef2244e8e7dea3919448b22a12cc6690c399200d1` |
+| `state/meta-data` | `7f7dae677e09f55e74d1c4981c5ea0e17e6380f6be91567837a19ca3b6c7671a` |
+| `state/process.json` | `830e578fd8b1ab35cee1a7e48da5d54a69ba0bf120ca397811d921bb49485966` |
+| `state/qemu.log` | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+| `state/seed.iso` | `4c6589439631d627da389988b4965c6115a8c3bc606ded195aa30a9d619e0733` |
+| `state/serial.log` | `9b4644d4d56e4ff0c352b38fe02969c28b724e7f11870fc9726d9e2c26156fc5` |
+| `state/user-data` | `4af25ff4a6d81c67742cf4e76afc586e4659934b2b589cd782489491a3f73990` |
+| `state/vars.fd` | `2aa93744ad57676d2c1d80fe9546fbe2c3c3c679e6b0374d4be3784b31c8f50f` |
+| `qemu-exit.json` | `cdfcf29eb1a1a044e08c98e66f4fff72f751be5238ff7383981df800ed151a5d` |
+| `resume-validation.json` | `8c08184e3203a4e7d97cb104a2f1700e0d50ffb8bffd96f4b7c800a8b592ac88` |
+| `preservation.json` | `8a93eac0076c0b736f4488dbea725155bcb8a8b3493284479e198ea1c0a2dd9f` |
+| `SHA256SUMS` | `8746991efa459d298dcd1ef30fb0b033339bbd5091890e44f738a6105437a861` |
+| `collected-chain/files/target/lab-state/actual-program-run-411.json` | `a69050610bde2a1d78b23aabf30335afb4576919bc897c9cb872435a3cea9f61` |
+| `reference-inputs/target/lab-state/secret-bootstrap-selector-archive-run-411.json` | `d0d13f68c9a6fc39cbba1f7d2a68ab10baeb7d9d9c93072c77a28064cd1fb657` |
+
+Only the three owned Python tools and this preservation section were edited
+in the checkout. No subagents, SSH, QEMU/QMP, sudo, network, Git staging, commit
+or push were used. No run409 archive contents or base images were accessed or
+changed; no run409/410 records were changed. Original attempt sources remain
+unchanged in `preservation-tools/`; final sources are retained in `resume-tools/`.

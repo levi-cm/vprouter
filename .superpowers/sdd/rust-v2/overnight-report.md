@@ -268,3 +268,22 @@ python3 -B tools/rust-v2-lab/test-run411-acquisition.py          # needs free /t
 - Selector archival A executed after the diagnosis' technical GO: six selectors archived as
   `411-failed-*`, receipt `target/lab-state/secret-bootstrap-selector-archive-run-411.json`.
   The guest is being preserved (final snapshot, clean power-off, read-only disk/records) as 409 was.
+
+### Run-411 guest preserved (final state of the ARM64 chain)
+
+Final read-only snapshot (confined in-guest `sudo -n python3 -I -`, authorised as for 409 and the
+411 inspector), strict-SSH `systemctl poweroff`, QEMU 493434 exited (upper-bound instant
+2026-11-06T15:25:48.604Z), serial ends with systemd-shutdown then `reboot: Power down` (PSCI;
+an aarch64 guest prints no ACPI S5 line — the preservation tool's x86-derived check and its
+resume reference time needed two small tested fixes), state renamed into
+`/DATA/vprouter-lab/preserved/run411-guest/` and sealed 0400/0500 (overlay `e1f81d70…`,
+serial `9b4644d4…`, manifest `8746991e…`). `verify-preserved-run411.py`: PASS, 135 hashes,
+raw `a6905061…` and A receipt `d0d13f68…` bound. Run-409 tree re-verified 91/91. No lab guest
+is running; `/tmp` at ~39 %.
+
+**Standing at the end of the continuation (`rust/v2`, pushed):** ARM64 runtime was executed once
+and failed in the product's own 2 s window under TCG — not skipped, not passed; a KVM-capable
+aarch64 host is the way to qualify the unchanged product. Witness validator and performance
+harness are strictly stronger partials, iteration stopped after five and four review rounds.
+All budgets 409/410/411 are 0. `release_ready=false`; nothing here is runtime, client, migration,
+performance or release acceptance.

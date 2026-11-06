@@ -1153,3 +1153,10 @@ restoration, I2 parent fsync on retry, M1 ELF size fields) -> fixed with class c
 fixed, 2 Minor (REL/RELA entsize, note records) fixed/narrowed by controller. Python 37 tests
 OK; no Rust changed (workspace 569 pass earlier). Real cross builds NOT_RUN (cross-C wrappers
 absent), runit parity blocked, unsigned => never release-ready.
+
+2026-11-06 Task 14 (performance accounting harness) OFFLINE: tools/performance (strict
+/proc+cgroup parsers, exact-rational statistics, 44-family invariant registry, comparator,
+loopback self-test driver, run schema) + docs/rust-v2/performance-harness.md. 3 delegate
+rounds + 3 independent reviews all FAIL (round 3: T3-I1..I4 contradictory raw recordings
+still qualify). 3-attempt limit hit -> committed as PARTIAL, NOT ACCEPTED; T3-I1..I4 OPEN.
+40 accounting tests OK. No performance claim; real 10-minute 1/5/6-exit runs NOT_RUN.

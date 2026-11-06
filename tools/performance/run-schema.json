@@ -1,0 +1,1479 @@
+{
+  "$defs": {
+    "accounting": {
+      "additionalProperties": false,
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "isolated_host": {
+          "type": "boolean"
+        },
+        "kernel_networking": {
+          "enum": [
+            "included_in_domains",
+            "unavailable"
+          ]
+        },
+        "outside_overhead": {
+          "enum": [
+            "none",
+            "unavailable"
+          ]
+        },
+        "review_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "complete",
+        "isolated_host",
+        "kernel_networking",
+        "outside_overhead",
+        "review_sha256"
+      ],
+      "type": "object"
+    },
+    "binding": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "exit_ids": {
+          "items": {
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+            "type": "string"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "exit_modes": {
+          "items": {
+            "enum": [
+              "mullvad",
+              "direct"
+            ]
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "type": "array"
+        },
+        "exits": {
+          "enum": [
+            1,
+            5,
+            6
+          ]
+        },
+        "host_id_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "identity_set_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "implementation": {
+          "enum": [
+            "python",
+            "rust"
+          ]
+        },
+        "monitoring": {
+          "additionalProperties": false,
+          "properties": {
+            "handshake_seconds": {
+              "const": 180
+            },
+            "health_seconds": {
+              "const": 45
+            },
+            "provider_seconds": {
+              "const": 5
+            },
+            "retry_seconds": {
+              "const": 1
+            },
+            "watchdog_seconds": {
+              "const": 90
+            }
+          },
+          "required": [
+            "provider_seconds",
+            "retry_seconds",
+            "handshake_seconds",
+            "health_seconds",
+            "watchdog_seconds"
+          ],
+          "type": "object"
+        },
+        "network_conditions_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "peers_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "repetition": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "run_id": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+          "type": "string"
+        },
+        "scenario": {
+          "enum": [
+            "steady",
+            "load"
+          ]
+        },
+        "source_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "tailscale_artifact_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "tailscale_version": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+          "type": "string"
+        },
+        "workload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_sha256",
+        "artifact_sha256",
+        "config_sha256",
+        "workload_sha256",
+        "identity_set_sha256",
+        "peers_sha256",
+        "network_conditions_sha256",
+        "tailscale_artifact_sha256",
+        "host_id_sha256",
+        "implementation",
+        "tailscale_version",
+        "run_id",
+        "repetition",
+        "exits",
+        "exit_ids",
+        "exit_modes",
+        "scenario",
+        "monitoring"
+      ],
+      "type": "object"
+    },
+    "domain": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "items": {
+            "enum": [
+              "supervision",
+              "workers",
+              "guard",
+              "init_shim",
+              "container",
+              "tailscaled",
+              "workload",
+              "observer"
+            ]
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+          "type": "string"
+        },
+        "native_identity": {
+          "items": {
+            "maximum": 18446744073709551615,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "scope": {
+          "items": {
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "scope",
+        "native_identity",
+        "components"
+      ],
+      "type": "object"
+    },
+    "domain_sample": {
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "additionalProperties": {
+            "maximum": 18446744073709551615,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxProperties": 256,
+          "propertyNames": {
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+            "type": "string"
+          },
+          "required": [
+            "usage_usec",
+            "user_usec",
+            "system_usec"
+          ],
+          "type": "object"
+        },
+        "cpu_exited_system_usec": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cpu_exited_usec": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cpu_exited_user_usec": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "io": {
+          "additionalProperties": false,
+          "maxProperties": 256,
+          "patternProperties": {
+            "^[0-9]+:[0-9]+$": {
+              "additionalProperties": {
+                "maximum": 18446744073709551615,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxProperties": 256,
+              "propertyNames": {
+                "enum": [
+                  "rbytes",
+                  "wbytes",
+                  "rios",
+                  "wios",
+                  "dbytes",
+                  "dios"
+                ]
+              },
+              "required": [
+                "rbytes",
+                "wbytes",
+                "rios",
+                "wios"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "io_other": {
+          "additionalProperties": false,
+          "maxProperties": 256,
+          "patternProperties": {
+            "^[0-9]+:[0-9]+$": {
+              "additionalProperties": {
+                "maximum": 18446744073709551615,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxProperties": 256,
+              "propertyNames": {
+                "enum": [
+                  "rbytes",
+                  "wbytes",
+                  "rios",
+                  "wios",
+                  "dbytes",
+                  "dios"
+                ]
+              },
+              "required": [
+                "rbytes",
+                "wbytes",
+                "rios",
+                "wios"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "member_pids": {
+          "items": {
+            "maximum": 18446744073709551615,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 4096,
+          "minItems": 0,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "memory_current_bytes": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memory_events": {
+          "additionalProperties": {
+            "maximum": 18446744073709551615,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxProperties": 256,
+          "propertyNames": {
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+            "type": "string"
+          },
+          "required": [
+            "oom",
+            "oom_kill"
+          ],
+          "type": "object"
+        },
+        "memory_other_bytes": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memory_stat": {
+          "additionalProperties": {
+            "maximum": 18446744073709551615,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxProperties": 256,
+          "propertyNames": {
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+            "type": "string"
+          },
+          "required": [
+            "anon",
+            "file",
+            "kernel",
+            "sock"
+          ],
+          "type": "object"
+        },
+        "memory_stat_other_bytes": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pids_current": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "swap_current_bytes": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cpu",
+        "cpu_exited_usec",
+        "io",
+        "io_other",
+        "member_pids",
+        "memory_current_bytes",
+        "memory_events",
+        "memory_other_bytes",
+        "memory_stat",
+        "pids_current",
+        "memory_stat_other_bytes",
+        "cpu_exited_user_usec",
+        "cpu_exited_system_usec",
+        "swap_current_bytes"
+      ],
+      "type": "object"
+    },
+    "host": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+          "type": "string"
+        },
+        "cpu_model": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+          "type": "string"
+        },
+        "governor": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+          "type": "string"
+        },
+        "kernel": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+          "type": "string"
+        },
+        "link_capacity_bps": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "logical_cpus": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_fd_entries": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "memory_total_bytes": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "pid_max": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "swap_total_bytes": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thermal_limit_millic": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "tick_bits": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "tick_hz": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kernel",
+        "cpu_model",
+        "architecture",
+        "logical_cpus",
+        "governor",
+        "memory_total_bytes",
+        "swap_total_bytes",
+        "tick_hz",
+        "tick_bits",
+        "thermal_limit_millic",
+        "link_capacity_bps",
+        "max_fd_entries",
+        "pid_max"
+      ],
+      "type": "object"
+    },
+    "host_sample": {
+      "additionalProperties": false,
+      "properties": {
+        "busy_ticks": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "idle_ticks": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "irq_ticks": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "network_rx_bytes": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "network_tx_bytes": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "other_cpu_usec": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "softirq_ticks": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "steal_ticks": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "swap_in_pages": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "swap_out_pages": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "swap_used_bytes": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "system_ticks": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "temperature_millic": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "thermal_throttle_count": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "user_ticks": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "busy_ticks",
+        "irq_ticks",
+        "other_cpu_usec",
+        "softirq_ticks",
+        "swap_in_pages",
+        "swap_out_pages",
+        "swap_used_bytes",
+        "temperature_millic",
+        "thermal_throttle_count",
+        "user_ticks",
+        "system_ticks",
+        "steal_ticks",
+        "idle_ticks",
+        "network_rx_bytes",
+        "network_tx_bytes"
+      ],
+      "type": "object"
+    },
+    "process": {
+      "additionalProperties": false,
+      "properties": {
+        "component": {
+          "enum": [
+            "supervision",
+            "workers",
+            "guard",
+            "init_shim",
+            "container",
+            "tailscaled",
+            "workload",
+            "observer"
+          ]
+        },
+        "domain": {
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+          "type": "string"
+        },
+        "executable_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "fds": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "io": {
+          "additionalProperties": false,
+          "maxProperties": 256,
+          "patternProperties": {
+            "^[0-9]+:[0-9]+$": {
+              "additionalProperties": {
+                "maximum": 18446744073709551615,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxProperties": 256,
+              "propertyNames": {
+                "enum": [
+                  "rbytes",
+                  "wbytes",
+                  "rios",
+                  "wios",
+                  "dbytes",
+                  "dios"
+                ]
+              },
+              "required": [
+                "rbytes",
+                "wbytes",
+                "rios",
+                "wios"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
+        "pid": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "pss_bytes": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rss_bytes": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "start_ticks": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stime_ticks": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "swap_bytes": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "swap_pss_bytes": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threads": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uss_bytes": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "utime_ticks": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "wakeups": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "component",
+        "domain",
+        "executable_sha256",
+        "fds",
+        "io",
+        "pid",
+        "pss_bytes",
+        "rss_bytes",
+        "start_ticks",
+        "stime_ticks",
+        "threads",
+        "uss_bytes",
+        "utime_ticks",
+        "wakeups",
+        "swap_bytes",
+        "swap_pss_bytes"
+      ],
+      "type": "object"
+    },
+    "sample": {
+      "additionalProperties": false,
+      "properties": {
+        "domains": {
+          "additionalProperties": {
+            "$ref": "#/$defs/domain_sample"
+          },
+          "maxProperties": 32,
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$",
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "host": {
+          "$ref": "#/$defs/host_sample"
+        },
+        "mono_ns": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processes": {
+          "items": {
+            "$ref": "#/$defs/process"
+          },
+          "maxItems": 4096,
+          "minItems": 1,
+          "type": "array"
+        },
+        "read_end_ns": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wall_after_ns": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wall_before_ns": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mono_ns",
+        "read_end_ns",
+        "wall_before_ns",
+        "wall_after_ns",
+        "domains",
+        "processes",
+        "host"
+      ],
+      "type": "object"
+    },
+    "traffic": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "latencies_ns": {
+          "items": {
+            "maximum": 18446744073709551615,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 100000,
+          "minItems": 1,
+          "type": "array"
+        },
+        "monitor_misses": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "oom_events": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unexpected_restarts": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "bytes",
+        "latencies_ns",
+        "monitor_misses",
+        "unexpected_restarts",
+        "oom_events"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Structural schema only. Cross-field clocks, monotonic counters, completeness, workload compatibility, provenance and exact monitor semantics require accounting.py. Synthetic data cannot qualify performance. Review round 1 requires explicit all-domain failures and aligned measured residuals; old draft records without these fields are insufficient. Review round 1 requires explicit all-domain failures and aligned measured residuals; old draft records without these fields are insufficient.",
+  "properties": {
+    "accounting": {
+      "$ref": "#/$defs/accounting"
+    },
+    "binding": {
+      "$ref": "#/$defs/binding"
+    },
+    "boot_id": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "clock": {
+      "const": "CLOCK_BOOTTIME"
+    },
+    "domains": {
+      "items": {
+        "$ref": "#/$defs/domain"
+      },
+      "maxItems": 32,
+      "minItems": 1,
+      "type": "array"
+    },
+    "duration_ns": {
+      "maximum": 90000000000000,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "evidence_origin": {
+      "enum": [
+        "synthetic",
+        "actual_runtime"
+      ]
+    },
+    "failure_domains": {
+      "additionalProperties": false,
+      "properties": {
+        "container": {
+          "additionalProperties": false,
+          "properties": {
+            "kernel_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "memory_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "missing_samples": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "monitor_misses": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "unexpected_restarts": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "memory_oom_kills",
+            "kernel_oom_kills",
+            "unexpected_restarts",
+            "monitor_misses",
+            "missing_samples"
+          ],
+          "type": "object"
+        },
+        "guard": {
+          "additionalProperties": false,
+          "properties": {
+            "kernel_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "memory_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "missing_samples": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "monitor_misses": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "unexpected_restarts": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "memory_oom_kills",
+            "kernel_oom_kills",
+            "unexpected_restarts",
+            "monitor_misses",
+            "missing_samples"
+          ],
+          "type": "object"
+        },
+        "init_shim": {
+          "additionalProperties": false,
+          "properties": {
+            "kernel_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "memory_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "missing_samples": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "monitor_misses": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "unexpected_restarts": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "memory_oom_kills",
+            "kernel_oom_kills",
+            "unexpected_restarts",
+            "monitor_misses",
+            "missing_samples"
+          ],
+          "type": "object"
+        },
+        "kernel": {
+          "additionalProperties": false,
+          "properties": {
+            "kernel_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "memory_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "missing_samples": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "monitor_misses": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "unexpected_restarts": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "memory_oom_kills",
+            "kernel_oom_kills",
+            "unexpected_restarts",
+            "monitor_misses",
+            "missing_samples"
+          ],
+          "type": "object"
+        },
+        "observer": {
+          "additionalProperties": false,
+          "properties": {
+            "kernel_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "memory_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "missing_samples": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "monitor_misses": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "unexpected_restarts": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "memory_oom_kills",
+            "kernel_oom_kills",
+            "unexpected_restarts",
+            "monitor_misses",
+            "missing_samples"
+          ],
+          "type": "object"
+        },
+        "supervision": {
+          "additionalProperties": false,
+          "properties": {
+            "kernel_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "memory_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "missing_samples": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "monitor_misses": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "unexpected_restarts": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "memory_oom_kills",
+            "kernel_oom_kills",
+            "unexpected_restarts",
+            "monitor_misses",
+            "missing_samples"
+          ],
+          "type": "object"
+        },
+        "tailscaled": {
+          "additionalProperties": false,
+          "properties": {
+            "kernel_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "memory_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "missing_samples": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "monitor_misses": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "unexpected_restarts": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "memory_oom_kills",
+            "kernel_oom_kills",
+            "unexpected_restarts",
+            "monitor_misses",
+            "missing_samples"
+          ],
+          "type": "object"
+        },
+        "workers": {
+          "additionalProperties": false,
+          "properties": {
+            "kernel_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "memory_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "missing_samples": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "monitor_misses": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "unexpected_restarts": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "memory_oom_kills",
+            "kernel_oom_kills",
+            "unexpected_restarts",
+            "monitor_misses",
+            "missing_samples"
+          ],
+          "type": "object"
+        },
+        "workload": {
+          "additionalProperties": false,
+          "properties": {
+            "kernel_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "memory_oom_kills": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "missing_samples": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "monitor_misses": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "unexpected_restarts": {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "memory_oom_kills",
+            "kernel_oom_kills",
+            "unexpected_restarts",
+            "monitor_misses",
+            "missing_samples"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "supervision",
+        "workers",
+        "guard",
+        "init_shim",
+        "container",
+        "tailscaled",
+        "observer",
+        "workload",
+        "kernel"
+      ],
+      "type": "object"
+    },
+    "host": {
+      "$ref": "#/$defs/host"
+    },
+    "instrumentation_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "interval_ns": {
+      "maximum": 10000000000,
+      "minimum": 250000000,
+      "type": "integer"
+    },
+    "purpose": {
+      "enum": [
+        "harness_self_test",
+        "runtime_measurement"
+      ]
+    },
+    "runtime_evidence": {
+      "description": "Source-specific schema-2 monitoring; exact accounting projections only: throughput_bytes_per_second is an integer, {numerator,denominator}, or {bytes,duration_ns}, never float. See accounting.validate_exact_traffic.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "samples": {
+      "items": {
+        "$ref": "#/$defs/sample"
+      },
+      "maxItems": 10001,
+      "minItems": 2,
+      "type": "array"
+    },
+    "schema": {
+      "const": 1
+    },
+    "traffic": {
+      "$ref": "#/$defs/traffic"
+    },
+    "warmup_discard_ns": {
+      "maximum": 18446744073709551615,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "accounting",
+    "binding",
+    "boot_id",
+    "clock",
+    "domains",
+    "duration_ns",
+    "evidence_origin",
+    "failure_domains",
+    "host",
+    "instrumentation_sha256",
+    "interval_ns",
+    "purpose",
+    "runtime_evidence",
+    "samples",
+    "schema",
+    "traffic",
+    "warmup_discard_ns"
+  ],
+  "title": "Offline accounting run schema 1; semantic Python validator is normative",
+  "type": "object"
+}

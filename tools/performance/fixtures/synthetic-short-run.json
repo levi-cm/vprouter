@@ -1,0 +1,1115 @@
+{
+  "accounting": {
+    "complete": true,
+    "isolated_host": true,
+    "kernel_networking": "included_in_domains",
+    "outside_overhead": "none",
+    "review_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "binding": {
+    "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "config_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "exit_ids": [
+      "exit1"
+    ],
+    "exit_modes": [
+      "mullvad"
+    ],
+    "exits": 1,
+    "host_id_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "identity_set_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "implementation": "rust",
+    "monitoring": {
+      "handshake_seconds": 180,
+      "health_seconds": 45,
+      "provider_seconds": 5,
+      "retry_seconds": 1,
+      "watchdog_seconds": 90
+    },
+    "network_conditions_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "peers_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "repetition": 1,
+    "run_id": "synthetic-self-test",
+    "scenario": "steady",
+    "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tailscale_artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tailscale_version": "1.102.5",
+    "workload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "boot_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "clock": "CLOCK_BOOTTIME",
+  "domains": [
+    {
+      "components": [
+        "supervision",
+        "workers",
+        "guard",
+        "init_shim"
+      ],
+      "id": "control",
+      "native_identity": [
+        1,
+        1
+      ],
+      "scope": [
+        "suite",
+        "control"
+      ]
+    },
+    {
+      "components": [
+        "container"
+      ],
+      "id": "runtime",
+      "native_identity": [
+        1,
+        2
+      ],
+      "scope": [
+        "suite",
+        "runtime"
+      ]
+    },
+    {
+      "components": [
+        "tailscaled"
+      ],
+      "id": "tailscale",
+      "native_identity": [
+        1,
+        3
+      ],
+      "scope": [
+        "suite",
+        "tailscale"
+      ]
+    },
+    {
+      "components": [
+        "observer"
+      ],
+      "id": "observer",
+      "native_identity": [
+        1,
+        4
+      ],
+      "scope": [
+        "suite",
+        "observer"
+      ]
+    },
+    {
+      "components": [
+        "workload"
+      ],
+      "id": "workload",
+      "native_identity": [
+        1,
+        5
+      ],
+      "scope": [
+        "suite",
+        "workload"
+      ]
+    }
+  ],
+  "duration_ns": 2000000000,
+  "evidence_origin": "synthetic",
+  "failure_domains": {
+    "container": {
+      "kernel_oom_kills": 0,
+      "memory_oom_kills": 0,
+      "missing_samples": 0,
+      "monitor_misses": 0,
+      "unexpected_restarts": 0
+    },
+    "guard": {
+      "kernel_oom_kills": 0,
+      "memory_oom_kills": 0,
+      "missing_samples": 0,
+      "monitor_misses": 0,
+      "unexpected_restarts": 0
+    },
+    "init_shim": {
+      "kernel_oom_kills": 0,
+      "memory_oom_kills": 0,
+      "missing_samples": 0,
+      "monitor_misses": 0,
+      "unexpected_restarts": 0
+    },
+    "kernel": {
+      "kernel_oom_kills": 0,
+      "memory_oom_kills": 0,
+      "missing_samples": 0,
+      "monitor_misses": 0,
+      "unexpected_restarts": 0
+    },
+    "observer": {
+      "kernel_oom_kills": 0,
+      "memory_oom_kills": 0,
+      "missing_samples": 0,
+      "monitor_misses": 0,
+      "unexpected_restarts": 0
+    },
+    "supervision": {
+      "kernel_oom_kills": 0,
+      "memory_oom_kills": 0,
+      "missing_samples": 0,
+      "monitor_misses": 0,
+      "unexpected_restarts": 0
+    },
+    "tailscaled": {
+      "kernel_oom_kills": 0,
+      "memory_oom_kills": 0,
+      "missing_samples": 0,
+      "monitor_misses": 0,
+      "unexpected_restarts": 0
+    },
+    "workers": {
+      "kernel_oom_kills": 0,
+      "memory_oom_kills": 0,
+      "missing_samples": 0,
+      "monitor_misses": 0,
+      "unexpected_restarts": 0
+    },
+    "workload": {
+      "kernel_oom_kills": 0,
+      "memory_oom_kills": 0,
+      "missing_samples": 0,
+      "monitor_misses": 0,
+      "unexpected_restarts": 0
+    }
+  },
+  "host": {
+    "architecture": "x86_64",
+    "cpu_model": "fixture-cpu",
+    "governor": "performance",
+    "kernel": "6.12.0",
+    "link_capacity_bps": 1000000000,
+    "logical_cpus": 4,
+    "max_fd_entries": 1048576,
+    "memory_total_bytes": 1073741824,
+    "pid_max": 4194304,
+    "swap_total_bytes": 0,
+    "thermal_limit_millic": 90000,
+    "tick_bits": 64,
+    "tick_hz": 100
+  },
+  "instrumentation_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "interval_ns": 1000000000,
+  "purpose": "harness_self_test",
+  "runtime_evidence": null,
+  "samples": [
+    {
+      "domains": {
+        "control": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 0,
+            "user_usec": 0
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            1
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "observer": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 0,
+            "user_usec": 0
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            4
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "runtime": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 0,
+            "user_usec": 0
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            2
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "tailscale": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 0,
+            "user_usec": 0
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            3
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "workload": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 0,
+            "user_usec": 0
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            5
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        }
+      },
+      "host": {
+        "busy_ticks": 0,
+        "idle_ticks": 0,
+        "irq_ticks": 0,
+        "network_rx_bytes": 0,
+        "network_tx_bytes": 0,
+        "other_cpu_usec": 0,
+        "softirq_ticks": 0,
+        "steal_ticks": 0,
+        "swap_in_pages": 0,
+        "swap_out_pages": 0,
+        "swap_used_bytes": 0,
+        "system_ticks": 0,
+        "temperature_millic": 40000,
+        "thermal_throttle_count": 0,
+        "user_ticks": 0
+      },
+      "mono_ns": 103000000000000,
+      "processes": [
+        {
+          "component": "supervision",
+          "domain": "control",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 1,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 0,
+          "wakeups": 0
+        },
+        {
+          "component": "container",
+          "domain": "runtime",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 2,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 0,
+          "wakeups": 0
+        },
+        {
+          "component": "tailscaled",
+          "domain": "tailscale",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 3,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 0,
+          "wakeups": 0
+        },
+        {
+          "component": "observer",
+          "domain": "observer",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 4,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 0,
+          "wakeups": 0
+        },
+        {
+          "component": "workload",
+          "domain": "workload",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 5,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 0,
+          "wakeups": 0
+        }
+      ],
+      "read_end_ns": 103000000001000,
+      "wall_after_ns": 1103000000001000,
+      "wall_before_ns": 1103000000000000
+    },
+    {
+      "domains": {
+        "control": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 400000,
+            "user_usec": 400000
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            1
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "observer": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 10000,
+            "user_usec": 10000
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            4
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "runtime": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 10000,
+            "user_usec": 10000
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            2
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "tailscale": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 10000,
+            "user_usec": 10000
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            3
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "workload": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 10000,
+            "user_usec": 10000
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            5
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        }
+      },
+      "host": {
+        "busy_ticks": 44,
+        "idle_ticks": 356,
+        "irq_ticks": 0,
+        "network_rx_bytes": 1000,
+        "network_tx_bytes": 1000,
+        "other_cpu_usec": 0,
+        "softirq_ticks": 0,
+        "steal_ticks": 0,
+        "swap_in_pages": 0,
+        "swap_out_pages": 0,
+        "swap_used_bytes": 0,
+        "system_ticks": 0,
+        "temperature_millic": 40000,
+        "thermal_throttle_count": 0,
+        "user_ticks": 44
+      },
+      "mono_ns": 103001000000000,
+      "processes": [
+        {
+          "component": "supervision",
+          "domain": "control",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 1,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 40,
+          "wakeups": 1
+        },
+        {
+          "component": "container",
+          "domain": "runtime",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 2,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 1,
+          "wakeups": 1
+        },
+        {
+          "component": "tailscaled",
+          "domain": "tailscale",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 3,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 1,
+          "wakeups": 1
+        },
+        {
+          "component": "observer",
+          "domain": "observer",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 4,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 1,
+          "wakeups": 1
+        },
+        {
+          "component": "workload",
+          "domain": "workload",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 5,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 1,
+          "wakeups": 1
+        }
+      ],
+      "read_end_ns": 103001000001000,
+      "wall_after_ns": 1103001000001000,
+      "wall_before_ns": 1103001000000000
+    },
+    {
+      "domains": {
+        "control": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 800000,
+            "user_usec": 800000
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            1
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "observer": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 20000,
+            "user_usec": 20000
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            4
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "runtime": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 20000,
+            "user_usec": 20000
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            2
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "tailscale": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 20000,
+            "user_usec": 20000
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            3
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        },
+        "workload": {
+          "cpu": {
+            "system_usec": 0,
+            "usage_usec": 20000,
+            "user_usec": 20000
+          },
+          "cpu_exited_system_usec": 0,
+          "cpu_exited_usec": 0,
+          "cpu_exited_user_usec": 0,
+          "io": {},
+          "io_other": {},
+          "member_pids": [
+            5
+          ],
+          "memory_current_bytes": 20971520,
+          "memory_events": {
+            "oom": 0,
+            "oom_kill": 0
+          },
+          "memory_other_bytes": 16777216,
+          "memory_stat": {
+            "anon": 10485760,
+            "file": 2097152,
+            "kernel": 2097152,
+            "sock": 0
+          },
+          "memory_stat_other_bytes": 6291456,
+          "pids_current": 1,
+          "swap_current_bytes": 0
+        }
+      },
+      "host": {
+        "busy_ticks": 88,
+        "idle_ticks": 712,
+        "irq_ticks": 0,
+        "network_rx_bytes": 2000,
+        "network_tx_bytes": 2000,
+        "other_cpu_usec": 0,
+        "softirq_ticks": 0,
+        "steal_ticks": 0,
+        "swap_in_pages": 0,
+        "swap_out_pages": 0,
+        "swap_used_bytes": 0,
+        "system_ticks": 0,
+        "temperature_millic": 40000,
+        "thermal_throttle_count": 0,
+        "user_ticks": 88
+      },
+      "mono_ns": 103002000000000,
+      "processes": [
+        {
+          "component": "supervision",
+          "domain": "control",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 1,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 80,
+          "wakeups": 2
+        },
+        {
+          "component": "container",
+          "domain": "runtime",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 2,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 2,
+          "wakeups": 2
+        },
+        {
+          "component": "tailscaled",
+          "domain": "tailscale",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 3,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 2,
+          "wakeups": 2
+        },
+        {
+          "component": "observer",
+          "domain": "observer",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 4,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 2,
+          "wakeups": 2
+        },
+        {
+          "component": "workload",
+          "domain": "workload",
+          "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fds": 3,
+          "io": {},
+          "pid": 5,
+          "pss_bytes": 8388608,
+          "rss_bytes": 10485760,
+          "start_ticks": 1,
+          "stime_ticks": 0,
+          "swap_bytes": 0,
+          "swap_pss_bytes": 0,
+          "threads": 1,
+          "uss_bytes": 4194304,
+          "utime_ticks": 2,
+          "wakeups": 2
+        }
+      ],
+      "read_end_ns": 103002000001000,
+      "wall_after_ns": 1103002000001000,
+      "wall_before_ns": 1103002000000000
+    }
+  ],
+  "schema": 1,
+  "traffic": {
+    "bytes": 2000,
+    "latencies_ns": [
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100,
+      100
+    ],
+    "monitor_misses": 0,
+    "oom_events": 0,
+    "unexpected_restarts": 0
+  },
+  "warmup_discard_ns": 0
+}

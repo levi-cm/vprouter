@@ -472,3 +472,25 @@ Focused checks (no workloads or long collection):
 ```bash
 python3 -B -m unittest discover -s tools/performance -p 'test_*.py' -v
 ```
+
+## Task 14 offline accounting preparation
+
+See [performance-harness.md](performance-harness.md) for the additional pure
+schema-1 accounting/parser/statistics layer, bounded exclusive-output CLI,
+synthetic fixtures, local loopback self-test and owned-guest runner/workload
+specifications. No real workload or benchmark ran. The new layer reuses the
+source-specific schema-2 monitoring replay, validates traffic projections with
+exact rational arithmetic, requires explicit failure/reconciliation evidence
+(see the draft schema revision in performance-harness.md), and requires six matched
+repetitions per steady/load 1/5/6 case for a finite distribution-free median CI.
+It returns PASS/FAIL/INSUFFICIENT_DATA. Existing tools above retain their earlier
+interfaces; their two-repetition minimum does not satisfy the new layer's policy.
+Review round 2 adds an executable physical invariant registry and anchored
+whole-run CPU reconciliation: tick/read-skew tolerances are endpoint bounds,
+never accumulated per interval. Host CPU subsets/capacity, aggregate PSS/USS,
+swap, task/FD limits, completed I/O and physical-link counters must reconcile.
+The draft schema requires explicit measurements for those bounds; no legacy
+record is upgraded by filling unknown values with zero. Decimal JSON tokens are
+rejected; verdict arithmetic uses integers and exact fractions throughout.
+No Python direct baseline/monitor adapter is invented, no release gate is closed,
+and the historical short samples remain unsuitable as a controlled baseline.

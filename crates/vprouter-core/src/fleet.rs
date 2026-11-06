@@ -11,7 +11,8 @@ use crate::{
 use std::{collections::HashSet, sync::Arc};
 
 /// Bounds active policy slots; disabled reservations use the existing schema cap.
-pub const MAX_ACTIVE_EXITS: usize = 5;
+pub const MAX_ACTIVE_EXITS: usize = 6;
+pub const MAX_MULLVAD_EXITS: usize = 5;
 const MAX_LIFECYCLES: usize = 1024;
 /// Existing worker operation budget. Native synchronous cancellation may take
 /// another 5s; policy expires independently of worker completion.
@@ -45,6 +46,18 @@ struct ActiveExit {
     in_flight: Option<f64>,
     pending: Option<ActionKind>,
 }
+/// Proposed selection only, explicitly separate from observed/runtime status.
+#[derive(serde::Serialize)]
+pub struct ClientPlan {
+    pub exit_id: String,
+    pub node_id: String,
+    pub mode: ExitMode,
+    pub generation: u64,
+    pub exposure: &'static str,
+    pub observed_egress: &'static str,
+    pub dns: &'static str,
+    pub ipv6: &'static str,
+}
 pub struct FleetPolicy {
     instance: Arc<()>,
     // Only enabled exits have state machines, sessions, or deadlines.
@@ -59,7 +72,8 @@ pub struct FleetPolicy {
     stopped: bool,
 }
 fn time_valid(now: f64) -> bool {
-    now.is_finite() && now >= 0. && now + 90. > now
+    // Keep f64 precision finer than the millisecond staggering domain.
+    now.is_finite() && (0. ..=1e12).contains(&now)
 }
 impl FleetPolicy {
     /// `bindings` are public expected data, not authenticated process witnesses.
@@ -85,7 +99,14 @@ impl FleetPolicy {
             .map(|b| format!("{b:02x}"))
             .collect();
         let enabled = cfg.exits().iter().filter(|e| e.exit().enabled).count();
-        if enabled > MAX_ACTIVE_EXITS {
+        if enabled > MAX_ACTIVE_EXITS
+            || cfg
+                .exits()
+                .iter()
+                .filter(|e| e.exit().enabled && e.exit().mode.kind() == ExitMode::Mullvad)
+                .count()
+                > MAX_MULLVAD_EXITS
+        {
             return Err(err(Reason::InvalidSchema));
         }
         let mut nodes = HashSet::new();
@@ -100,17 +121,17 @@ impl FleetPolicy {
                 .iter()
                 .find(|e| e.exit().id == binding.exit_id)
                 .ok_or_else(|| err(Reason::InvalidReference))?;
-            let Mode::Mullvad {
-                expected_server, ..
-            } = &e.exit().mode
-            else {
-                return Err(err(Reason::InvalidTransition));
+            let expected_server = match &e.exit().mode {
+                Mode::Mullvad {
+                    expected_server, ..
+                } => Some(expected_server.as_str()),
+                Mode::Direct {} => None,
             };
             if binding.deployment_id != cfg.configuration().deployment_id
                 || binding.generation != allocations.generation
-                || binding.mode != ExitMode::Mullvad
+                || binding.mode != e.exit().mode.kind()
                 || binding.display_name != e.hostname()
-                || binding.expected_server.as_ref() != Some(expected_server)
+                || binding.expected_server.as_deref() != expected_server
                 || binding.config_fingerprint != fingerprint
                 || boot.as_ref().is_some_and(|b| b != &binding.boot_id)
                 || !ids.insert(binding.exit_id.clone())
@@ -137,8 +158,7 @@ impl FleetPolicy {
                 let offset = provider_offset_ms(&binding.deployment_id, &binding.exit_id, enabled)
                     as f64
                     / 1000.;
-                let machine =
-                    HealthMachine::new(ExitMode::Mullvad, Some(expected_server), &binding.node_id)?;
+                let machine = HealthMachine::new(binding.mode, expected_server, &binding.node_id)?;
                 let session = Session::new(binding.clone(), lifecycle.clone(), now)?;
                 active.push(ActiveExit {
                     binding,
@@ -187,6 +207,72 @@ impl FleetPolicy {
             epoch: self.active[index].epoch,
         })
     }
+    /// Offline client intent only; never native selection/activation authority.
+    pub fn select_client(
+        &self,
+        id: &str,
+        node_id: &str,
+        mode: crate::config::ClientMode,
+    ) -> Result<ExitToken> {
+        let token = self.select(id)?;
+        let binding = &self.active[token.index].binding;
+        if binding.node_id != node_id
+            || !matches!(
+                (mode, binding.mode),
+                (crate::config::ClientMode::Protected, ExitMode::Mullvad)
+                    | (crate::config::ClientMode::Direct, ExitMode::Direct)
+            )
+        {
+            return Err(err(Reason::InvalidReference));
+        }
+        Ok(token)
+    }
+    pub fn client_plan(
+        &self,
+        id: &str,
+        node_id: &str,
+        mode: crate::config::ClientMode,
+    ) -> Result<ClientPlan> {
+        let token = self.select_client(id, node_id, mode)?;
+        let binding = &self.active[token.index].binding;
+        Ok(ClientPlan {
+            exit_id: binding.exit_id.clone(),
+            node_id: binding.node_id.clone(),
+            mode: binding.mode,
+            generation: binding.generation,
+            exposure: if binding.mode == ExitMode::Direct {
+                "direct-exposed"
+            } else {
+                "unverified"
+            },
+            observed_egress: "not_tested",
+            dns: "not_tested",
+            ipv6: "not_tested",
+        })
+    }
+    /// Validate current host-address evidence; this never authorizes release or
+    /// renews a worker witness. Any missing/drifted evidence requests quarantine.
+    pub fn reconcile_direct_host(
+        &mut self,
+        token: &ExitToken,
+        plan: &crate::direct::DirectPlan,
+        observed: Option<&crate::direct::HostSnapshot>,
+        now: f64,
+    ) -> Result<()> {
+        self.accept_host_time(now)?;
+        let exit = self.selected(token)?;
+        if matches!(
+            exit.machine.state(),
+            HealthState::Stopping | HealthState::Failed
+        ) {
+            return Err(err(Reason::InvalidTransition));
+        }
+        if !plan.matches_binding(&exit.binding) || !plan.matches_host(observed) {
+            exit.block();
+            return Err(err(Reason::InvalidEvidence));
+        }
+        Ok(())
+    }
     fn selected(&mut self, token: &ExitToken) -> Result<&mut ActiveExit> {
         if !Arc::ptr_eq(&self.instance, &token.instance) {
             return Err(err(Reason::InvalidReference));
@@ -212,6 +298,11 @@ impl FleetPolicy {
         Ok(())
     }
     pub fn status(&self, id: &str, now: f64) -> Result<Status> {
+        // Observational: never advances the high-water mark, renews a watchdog or
+        // quarantines; it only refuses a host time the fleet has already passed.
+        if !time_valid(now) || now < self.last_now {
+            return Err(err(Reason::StaleEvidence));
+        }
         self.active
             .iter()
             .find(|e| e.binding.exit_id == id)
@@ -319,6 +410,9 @@ impl FleetPolicy {
         Ok(())
     }
     pub fn container_failed(&mut self) {
+        if self.stopped {
+            return;
+        }
         self.stopped = true;
         for exit in &mut self.active {
             exit.session.revoke();
@@ -346,7 +440,7 @@ impl FleetPolicy {
             .ok_or_else(|| err(Reason::InvalidTransition))?;
         exit.machine.stop();
         exit.machine.reconfigure(
-            ExitMode::Mullvad,
+            exit.binding.mode,
             exit.binding.expected_server.as_deref(),
             &exit.binding.node_id,
         )?;

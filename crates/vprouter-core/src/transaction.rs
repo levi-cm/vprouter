@@ -2,7 +2,7 @@
 //! mutations, namespace placement, or quarantine release.
 use crate::{
     allocation::{AllocationRecord, ResourceClaim},
-    config::{Configuration, Exit, ExitMode, Mode, ValidatedConfiguration},
+    config::{Configuration, Exit, Mode, ValidatedConfiguration},
     profile::Profile,
     reason::{Reason, Result, err},
 };
@@ -63,12 +63,6 @@ pub struct PreparedFleet {
     validated: ValidatedConfiguration,
     renames: Vec<HostnameChange>,
 }
-fn mullvad_only(cfg: &Configuration) -> Result<()> {
-    if cfg.exits.iter().any(|e| e.mode.kind() != ExitMode::Mullvad) {
-        return Err(err(Reason::InvalidTransition));
-    }
-    Ok(())
-}
 impl FleetRecord {
     pub fn generation(&self) -> u64 {
         self.allocations.generation
@@ -94,7 +88,6 @@ impl FleetRecord {
         if record.schema_version != 1 {
             return Err(err(Reason::InvalidSchema));
         }
-        mullvad_only(&record.configuration)?;
         let structure = record.configuration.clone().validate_structure()?;
         record.allocations.validate(deployment, &[])?;
         let expected = AllocationRecord::from_structure(&structure, record.generation())?;
@@ -141,11 +134,16 @@ impl FleetRecord {
                 profile,
                 expected_server,
             } => {
-                cfg.exits
+                let exit = cfg
+                    .exits
                     .iter_mut()
                     .find(|e| e.id == exit_id)
-                    .ok_or_else(|| err(Reason::InvalidReference))?
-                    .mode = Mode::Mullvad {
+                    .ok_or_else(|| err(Reason::InvalidReference))?;
+                // Pinning cannot convert an exposed identity into a provider identity.
+                if !matches!(exit.mode, Mode::Mullvad { .. }) {
+                    return Err(err(Reason::InvalidTransition));
+                }
+                exit.mode = Mode::Mullvad {
                     profile,
                     expected_server,
                 };
@@ -175,7 +173,6 @@ impl PreparedFleet {
     where
         F: FnMut(&Path, &str) -> Result<Profile>,
     {
-        mullvad_only(&cfg)?;
         let validated = cfg.validate_with(reader)?;
         let allocations = AllocationRecord::from_configuration(&validated, generation)?;
         allocations.validate(&validated.configuration().deployment_id, foreign)?;

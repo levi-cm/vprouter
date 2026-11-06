@@ -719,3 +719,50 @@ fn late_cancel_cannot_downgrade_a_scoped_failed_exit() {
             .any(|a| a.kind == ActionKind::QuarantineAndStop)
     );
 }
+
+#[test]
+fn repeated_container_failure_cannot_rearm_drained_emergency_actions() {
+    let mut f = fleet(1);
+    f.container_failed();
+    assert_eq!(f.poll(1.).unwrap().len(), 1);
+    f.container_failed();
+    assert!(f.poll(2.).unwrap().is_empty());
+}
+
+#[test]
+fn finite_host_time_must_represent_subsecond_stagger_and_retry_without_zero_progress() {
+    // At this finite value f64 can represent 90s but cannot represent the 1s
+    // retry or subsecond staggering. It must fail closed before scheduling.
+    let mut f = fleet(1);
+    let t = f.select("mullvad-1").unwrap();
+    assert!(f.restart(&t, "d".repeat(64), 1e17).is_err());
+    assert_eq!(
+        f.status("mullvad-1", 0.).unwrap().state,
+        HealthState::Failed
+    );
+    assert_eq!(
+        f.poll(1.).unwrap()[0].kind,
+        ActionKind::EmergencyQuarantineAndStop
+    );
+}
+
+#[test]
+fn status_refuses_host_time_behind_the_high_water_mark_without_side_effects() {
+    let mut f = fleet(2);
+    f.poll(0.).unwrap();
+    f.poll(2.).unwrap();
+    // Behind the accepted fleet time, non-finite and negative queries are refused.
+    assert!(f.status("mullvad-1", 1.).is_err());
+    assert!(f.status("mullvad-1", f64::NAN).is_err());
+    assert!(f.status("mullvad-1", -1.).is_err());
+    // Observational: no state change, no emergency, same-or-later time still works.
+    let at = f.status("mullvad-1", 2.).unwrap();
+    assert_eq!(at.state, f.status("mullvad-1", 3.).unwrap().state);
+    assert!(f.status("mullvad-2", 2.).is_ok());
+    assert!(
+        f.poll(3.)
+            .unwrap()
+            .iter()
+            .all(|a| { a.kind != ActionKind::EmergencyQuarantineAndStop })
+    );
+}

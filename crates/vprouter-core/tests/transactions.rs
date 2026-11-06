@@ -186,7 +186,7 @@ fn changes_refuse_duplicate_key_state_identity_resource_and_subnet_before_writes
 }
 
 #[test]
-fn strict_transactions_reject_direct_unknown_duplicate_fields_missing_exit_and_last_removal() {
+fn strict_transactions_reject_unknown_duplicate_fields_missing_exit_and_last_removal() {
     for bytes in [
         br#"{"operation":"disable","exit_id":"a","fallback":true}"#.as_slice(),
         br#"{"operation":"disable","exit_id":"a","exit_id":"b"}"#,
@@ -216,7 +216,7 @@ fn strict_transactions_reject_direct_unknown_duplicate_fields_missing_exit_and_l
     );
     let mut direct = configuration(1);
     direct.exits[0].mode = Mode::Direct {};
-    assert!(PreparedFleet::initial(direct, profile, &[]).is_err());
+    assert!(PreparedFleet::initial(direct, profile, &[]).is_ok());
 }
 
 #[test]

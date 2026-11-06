@@ -392,19 +392,39 @@ impl StoreCore {
     }
 }
 impl AllocationTransaction {
+    // Bind every transaction operation to the original still-named lock inode.
+    // This detects replacement; the protected directory and cooperative flock
+    // remain the exclusion boundary, not a claim against malicious root races.
+    fn check_lock(&self) -> Result<()> {
+        self.store.check_directory()?;
+        check_file(&self._lock, self.store.owner)?;
+        let current = openat(
+            &self.store.dir,
+            LOCK_NAME,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| err(Reason::StorageUnsafe))?;
+        check_file(&current, self.store.owner)?;
+        let original = fstat(&self._lock).map_err(|_| err(Reason::StorageUnsafe))?;
+        let named = fstat(&current).map_err(|_| err(Reason::StorageUnsafe))?;
+        if (original.st_dev, original.st_ino) != (named.st_dev, named.st_ino) {
+            return Err(err(Reason::StorageUnsafe));
+        }
+        Ok(())
+    }
     /// Duplicate only the held flock's open-file description for a surviving
     /// fixed executor. This is not an allocation writer or a fresh independent
     /// flock. Its recipient must forbid write/flock/dup/close on the lease FD
     /// until its final _exit; no record or directory authority is included.
     pub fn retain_executor_lock(&self) -> Result<OwnedFd> {
-        self.store.check_directory()?;
-        check_file(&self._lock, self.store.owner)?;
+        self.check_lock()?;
         rustix::io::fcntl_dupfd_cloexec(&self._lock, 3).map_err(|_| err(Reason::StorageUnavailable))
     }
     /// Verify a retained directory is exactly this locked allocation authority.
     /// Exposes no store/lock descriptor or caller-provided evidence flag.
     pub fn verify_directory(&self, directory: std::os::fd::BorrowedFd<'_>) -> Result<()> {
-        self.store.check_directory()?;
+        self.check_lock()?;
         let actual = fstat(directory).map_err(|_| err(Reason::StorageUnsafe))?;
         let expected = fstat(&self.store.dir).map_err(|_| err(Reason::StorageUnsafe))?;
         if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino)
@@ -458,7 +478,7 @@ impl AllocationTransaction {
         self.write_bytes("fleet-preparation.json", &record.encode()?)
     }
     fn read_bytes(&self, name: &str, maximum: usize) -> Result<Option<Vec<u8>>> {
-        self.store.check_directory()?;
+        self.check_lock()?;
         let fd = match openat(
             &self.store.dir,
             name,
@@ -507,13 +527,28 @@ impl AllocationTransaction {
         self.write_bytes(RECORD_NAME, &bytes)
     }
     fn write_bytes(&self, destination: &str, bytes: &[u8]) -> Result<()> {
-        self.store.check_directory()?;
+        self.check_lock()?;
         let (name, fd) = self.create_temp()?;
         let mut file = File::from(fd);
         file.write_all(bytes)
             .map_err(|_| err(Reason::StorageUnavailable))?;
         file.sync_all()
             .map_err(|_| err(Reason::StorageUnavailable))?;
+        self.check_lock()?;
+        check_file(&file, self.store.owner)?;
+        let named = openat(
+            &self.store.dir,
+            &name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| err(Reason::StorageUnsafe))?;
+        check_file(&named, self.store.owner)?;
+        let original = fstat(&file).map_err(|_| err(Reason::StorageUnsafe))?;
+        let actual = fstat(&named).map_err(|_| err(Reason::StorageUnsafe))?;
+        if (original.st_dev, original.st_ino) != (actual.st_dev, actual.st_ino) {
+            return Err(err(Reason::StorageUnsafe));
+        }
         renameat(&self.store.dir, &name, &self.store.dir, destination)
             .map_err(|_| err(Reason::StorageUnavailable))?;
         fsync(&self.store.dir).map_err(|_| err(Reason::DurabilityUncertain))?;
@@ -708,6 +743,76 @@ mod storage_tests {
         assert_eq!(
             fs::read(foreign.0.join("foreign")).unwrap(),
             b"do not change"
+        );
+    }
+    #[test]
+    fn direct_preparation_atomic_reopen_and_disabled_state_never_load_provider_credentials() {
+        use crate::transaction::{ExitChange, PreparedFleet};
+        let root = TempRoot::new();
+        let store = root.store();
+        let mut cfg = preparation().record().configuration().clone();
+        cfg.deployment_id = "fleet".into();
+        cfg.exits[0].mode = crate::config::Mode::Direct {};
+        let initial = PreparedFleet::initial(
+            cfg,
+            |_, _| panic!("direct must not read a provider credential"),
+            &[],
+        )
+        .unwrap();
+        let id = initial.record().configuration().exits[0].id.clone();
+        store.lock().unwrap().commit_preparation(&initial).unwrap();
+        private_file(
+            &root.0.join(".allocations.tmp-direct-interrupted"),
+            b"partial",
+        );
+        let reopened = root.store();
+        let mut tx = reopened.lock().unwrap();
+        let record = tx.read_preparation().unwrap().unwrap();
+        assert_eq!(record.allocations().exits[0].mode, ExitMode::Direct);
+        let disabled = record
+            .prepare(
+                ExitChange::Disable { exit_id: id },
+                |_, _| panic!("direct must not read a provider credential"),
+                &[],
+            )
+            .unwrap();
+        tx.commit_preparation(&disabled).unwrap();
+        assert!(
+            !tx.read_preparation()
+                .unwrap()
+                .unwrap()
+                .configuration()
+                .exits[0]
+                .enabled
+        );
+        assert_eq!(
+            fs::read(root.0.join(".allocations.tmp-direct-interrupted")).unwrap(),
+            b"partial"
+        );
+        assert!(!root.0.join(RECORD_NAME).exists());
+    }
+    #[test]
+    fn preparation_lock_replacement_and_hardlinks_refuse_without_touching_foreign_bytes() {
+        let root = TempRoot::new();
+        let store = root.store();
+        let tx = store.lock().unwrap();
+        fs::rename(root.0.join(LOCK_NAME), root.0.join("retired-lock")).unwrap();
+        private_file(&root.0.join(LOCK_NAME), b"foreign-lock");
+        assert!(tx.read_preparation().is_err());
+        assert_eq!(fs::read(root.0.join(LOCK_NAME)).unwrap(), b"foreign-lock");
+        drop(tx);
+        fs::remove_file(root.0.join(LOCK_NAME)).unwrap();
+        fs::rename(root.0.join("retired-lock"), root.0.join(LOCK_NAME)).unwrap();
+        private_file(&root.0.join("foreign-record"), b"foreign-record");
+        fs::hard_link(
+            root.0.join("foreign-record"),
+            root.0.join("fleet-preparation.json"),
+        )
+        .unwrap();
+        assert!(store.lock().unwrap().read_preparation().is_err());
+        assert_eq!(
+            fs::read(root.0.join("foreign-record")).unwrap(),
+            b"foreign-record"
         );
     }
     #[test]

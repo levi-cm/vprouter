@@ -387,7 +387,14 @@ impl Configuration {
                     server_name(expected_server)?;
                     format!("mullvad-{}-exit-{}", self.site, expected_server)
                 }
-                Mode::Direct {} => format!("unsafe-direct-host-ip-{}-exit", self.site),
+                Mode::Direct {} => {
+                    // Direct identity must be freshly enrolled interactively;
+                    // unattended enrollment-key reuse is not a direct-mode input.
+                    if exit.enrollment_key_file.is_some() {
+                        return Err(err(Reason::InvalidSchema));
+                    }
+                    format!("unsafe-direct-host-ip-{}-exit", self.site)
+                }
             };
             *counts.entry(name.clone()).or_insert(0usize) += 1;
             names.push(name);

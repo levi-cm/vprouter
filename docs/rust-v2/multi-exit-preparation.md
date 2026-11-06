@@ -2,7 +2,8 @@
 
 Task8c acceptance remains OPEN, including the run410 witness I9/I10/M2 gaps,
 runtime, ARM and client gates. This package supplies library policy and offline
-configuration transactions only. It grants no native activation, launch,
+configuration transactions only. Task10 extends the same APIs for explicit
+mixed/direct fleets; see [direct-exit-preparation.md](direct-exit-preparation.md). It grants no native activation, launch,
 quarantine-release, readiness or cleanup authority. No production CLI command,
 service or runtime import path consumes the preparation snapshot.
 
@@ -29,7 +30,8 @@ addresses and provider endpoints may overlap; transport /30s must be distinct.
 Client-policy references cannot dangle after removal. The binding schema requires
 at least one configured exit; disable the last exit instead of removing it.
 
-Hostname calculation remains `mullvad-{site}-exit-{server}`. Every colliding name
+Hostname calculation remains `mullvad-{site}-exit-{server}` for provider exits;
+Task10 uses `unsafe-direct-host-ip-{site}-exit` for explicit direct entries. Every colliding name
 gets its own stable exit ID suffix, including disabled entries; no truncation.
 `PreparedFleet::renames` reports all resulting hostname changes, including a
 previously existing peer gaining or losing a suffix. Resource/state identity
@@ -57,7 +59,7 @@ generation, ID, display name, mode/server, boot, canonical schema2 configuration
 SHA256, node identity and host-assigned lifecycle. Disabled identities/lifecycles
 stay reserved. Supplied bindings are data, not authenticated witness authority.
 Only explicitly enabled exits have health machines, sessions and deadlines.
-At most five are active; up to128 configured reservations use the existing
+At most six are active (at most five Mullvad); up to128 configured reservations use the existing
 schema ceiling. Single-exit offset is zero and absent exits have no slots.
 
 Non-clonable correlation tokens bind the exact policy instance, exit and process
@@ -73,7 +75,8 @@ a received READY flag cannot skip the streak. Malformed, unknown, replayed,
 wrong-binding and expired observations block only that exit. Session expiry
 uses its existing44s margin below45s and exact handshake<180s deadline;
 heartbeats cannot extend verification. DNS/IPv6 remain independently not_tested
-until observed. No server/provider fallback or direct-mode path is added.
+until observed. No server/provider fallback is added. Task10's explicit direct policy is an
+offline extension only; native direct paths remain unavailable.
 
 `poll` performs no I/O. It checks all exits and returns quarantine/stop actions
 BEFORE sample actions, even with a peer sample in progress. Per-exit offsets are
@@ -86,7 +89,7 @@ with fresh structural checks;
 this scheduler never repeats whole failed samples. Guard-loop absence>=90s,
 backward/nonfinite host clock or container failure produces terminal emergency
 quarantine-and-stop actions for every active exit. All operational callbacks
-with `now` (`observe`, `observe_bytes`, `sample_finished`, `restart`, `poll`)
+with `now` (`observe`, `observe_bytes`, `sample_finished`, `restart`, `poll`, `reconcile_direct_host`)
 validate it against one host-time high-water mark, including malformed wire
 input; worker timestamps remain untrusted per-exit evidence. Only enforcement
 polls renew the guard watchdog. Cleanup ambiguity is terminal for its exit.
@@ -94,7 +97,7 @@ Late observation, completion, restart, worker-failure, cancel and cleanup
 callbacks cannot weaken emergency state or re-arm drained emergency actions.
 Status and deadline queries are observational; they perform no enforcement.
 
-Limits bound policy slots and action lists (at most10 actions per poll), retained
+Limits bound policy slots and action lists (at most12 actions per poll), retained
 lifecycle IDs and wire frames. No new process, timer, pool or thread is started.
 These limits are not measured overhead/savings or realtime scheduling evidence.
 A future native driver must retain per-exit launch/guard authority, apply each

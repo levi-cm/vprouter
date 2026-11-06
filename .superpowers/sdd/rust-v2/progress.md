@@ -1120,3 +1120,9 @@ fixed; Re-review: I1/I2 fixed, 1 Minor (late cancel downgrades FAILED) fixed by 
 Workspace 449 pass/0 fail/6 ignored; fmt+strict clippy clean. Owned-guest 1/5-exit tests
 are #[ignore] placeholders = NOT_RUN. Codex session died once (409 unsafe_affinity_unavailable);
 fresh delegates worked. No runtime/release acceptance.
+
+2026-11-06 Task 10 (explicit direct exit) OFFLINE policy/config/transaction layer in
+vprouter-core (direct.rs + Task 9 fleet/transaction extensions, docs/rust-v2/
+direct-exit-preparation.md). Review: FAIL on one Minor only (status host-time
+high-water, found via the Task 9 lessons sweep), fixed by controller; core 102+ tests,
+x86_64-musl tests and ARM64 compile checks per implementer. Owned-guest tests NOT_RUN.

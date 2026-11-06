@@ -1100,3 +1100,15 @@ recur. Budget 410=0, 409=0. Collector C: provenance valid, bootstrap_exit_zero_p
 Guest QEMU later SIGTERMed by systemd --user (00:32); inspector I got connection refused;
 F/A/P are failure-path tools, N/A. Typed witness validation, real-client, ARM64,
 migration/performance/release NOT_RUN; release_ready=false. See task-8c-run410-result.md.
+
+2026-11-06 overnight /goal started (checkout rust/v2 @5e989ee). Delegation: codex gpt-6.1-sol,
+reasoningEffort=high. The goal's "serviceTier=fast" is not a catalog value; the catalog for
+gpt-6.1-sol offers serviceTier default|priority, so fast mode = serviceTier=priority, set
+explicitly on every delegate. Delegate 1 (8c run-410 witness validator) accepted priority;
+no fallback to default needed. Caps: cargo -j 4, one QEMU guest at a time, <=2 GB, no-kvmapf kept.
+
+2026-11-06 8c run-410 witness validator: 3 delegate rounds + 3 independent Sol reviews, all
+FAIL for completeness (I1-I3, I4-I8 closed; round 3 found I9 transport creation/mount
+binding, I10 WG down-only/original-move, M2 sweep width). Real record PASSes 19/19 (r3
+receipt). 3-attempt limit hit: committed as PARTIAL validator, I9/I10/M2 OPEN, not an
+acceptance; moving on to Task 9. Reviews/rereviews retained in task-8c-run410-witness-*.md.

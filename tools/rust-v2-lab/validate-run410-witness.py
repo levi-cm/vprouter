@@ -1828,6 +1828,11 @@ def canonical_histories(w, rows):
             require(r['namespace'] == (p['data_network'] if i == 4 else h['namespace'])
                     and ((r['link'] is None and r['wireguard'] is None) if i in (0,3)
                          else (r['link'] is not None and r['wireguard'] is not None)), 'wireguard result contract')
+            # attachment/provision.rs:1002-1005 and movement.rs:824-835.
+            # The booleans on the enclosing witness cannot establish link state.
+            if i not in (0,3):
+                require(r['link']['up'] is False and r['link']['kind'] == 'wireguard',
+                        'WireGuard result must remain down and kind wireguard')
             if i == 4:
                 q = p['movement_query']
                 require(h['destination'] == p['data_network'] != h['namespace'] and h['movement_query'] == q['request']
@@ -1912,6 +1917,239 @@ def canonical_histories(w, rows):
 def same_fields(left, right, keys, reference):
     for key in keys:
         require(left[key] == right[key], reference + '.' + key)
+
+
+# A registry entry names the observation, its canonical source, and every
+# compared field (including aliases). No observed value chooses its own source.
+# Paths are absolute in {witness, rows}; '*' captures an array index only.
+P = ('witness', 'preparation')
+HOST = ('witness', 'host_addition')
+BINDING = HOST + ('producer_binding',)
+ASSEMBLY = BINDING + ('assembly',)
+QUARANTINE = ASSEMBLY + ('quarantine',)
+MOVEMENT = QUARANTINE + ('movement',)
+PROVISION = MOVEMENT + ('provision',)
+ATTACHMENT = PROVISION + ('attachment',)
+
+
+def binding_entry(name, observation, canonical, fields, mode='equal', guards=()):
+    pairs = tuple((tuple(a.split('.')), tuple(b.split('.'))) if isinstance(a, str)
+                  else (a,b) for a,b in
+                  ((f,f) if isinstance(f,str) else f for f in fields))
+    return dict(name=name, observation=observation, canonical=canonical,
+                fields=pairs, mode=mode, guards=guards)
+
+
+def make_binding_registry():
+    registry = []
+    def add(name, observation, canonical, fields, mode='equal', guards=()):
+        registry.append(binding_entry(name,observation,canonical,fields,mode,guards))
+
+    # These are the canonical recorded roots, not observations of another
+    # serialized object. Domain/order/publication guards still run separately.
+    # Native custody and the independent regeneration of digests are not implied.
+    roots = ('attachment base_network birth bootstrap bootstrap_queries canonical_owner_epoch '
+             'data_network deadline entry_producer fresh_transport host_link inspection '
+             'member movement_query netfilter producer_binding producer_binding_query '
+             'producer_creation producer_query quarantine_query requested_at transport_network wireguard writers').split()
+    add('canonical_preparation',P,None,roots,'root',
+        ('canonical_histories','bootstrap_scopes','owner_identity','writer_histories','monotonic_deadlines'))
+    # Each retained preparation is a historical projection, with populated
+    # histories/prefixes bound to the final history. Null/empty earlier stages
+    # remain checked by retained_success and their exact stage cardinalities.
+    for stage in (('witness','handoff'),HOST,BINDING,ASSEMBLY,QUARANTINE,MOVEMENT,PROVISION,ATTACHMENT):
+        add('retained_preparation:'+'.'.join(stage),stage+('preparation',),P,roots,
+            'projection',('preparation_success','retained_success'))
+
+    # I9: provision.rs:878-885; kernel/fresh_transport.rs:498-505;
+    # kernel/fresh_transport_mount.rs:852-861; owned/preparation/
+    # fresh_transport.rs:112-120, fresh_mount.rs:115-120,452-453.
+    add('transport_creation',PROVISION+('transport_creation',),P+('fresh_transport',),
+        ('request','source','host','data','birth','requested_at','deadline','verified_at'))
+    mount_fields = ('birth','requested_at','deadline','placeholder',
+                    ('original_source','source'),('original_directory','directory'))
+    add('transport_mount',PROVISION+('transport_mount',),P+('fresh_transport','mount'),mount_fields)
+    add('data_mount',ATTACHMENT+('mount',),P+('attachment',),mount_fields)
+    add('validator_birth',ATTACHMENT+('validator',),P,('birth',))
+
+    query_fields = ('kind','birth','facts','requested_at','deadline','verified_at')
+    for name,observation,history in (
+        ('attachment_recheck',ATTACHMENT+('second_query',),P+('inspection',)),
+        ('postmount_query',ATTACHMENT+('postmount_query',),P+('attachment','query')),
+        ('movement_query',MOVEMENT+('movement_query',),P+('movement_query',)),
+        ('quarantine_query',QUARANTINE+('quarantine_query',),P+('quarantine_query',)),
+        ('producer_query',QUARANTINE+('producer_query',),P+('producer_query',)),
+        ('binding_query',BINDING+('query',),P+('producer_binding_query',)),
+        ('bootstrap_queries',('witness','queries','*'),P+('bootstrap_queries','*'))):
+        add(name,observation,history,query_fields)
+    add('initial_query',ATTACHMENT+('first_query',),P+('inspection','initial'),('birth','facts','verified_at'))
+    # Initial History intentionally omits its kind; the source discriminator is
+    # fixed by owned/preparation/inspection.rs:142,864-875, not freely substitutable.
+    add('initial_query_kind',ATTACHMENT+('first_query',),('expected','initial_query'),('kind',))
+    add('initial_query_window',ATTACHMENT+('first_query',),P+('inspection',),('requested_at','deadline'))
+
+    operation_fields = ('birth','kind','request','requested_at','deadline','result',('accepted_at','verified_at'),
+                        ('original_pid','birth.pid'),('original_start','birth.start'))
+    for name,observation,history,extra in (
+        ('provision_operations',PROVISION+('operations','*'),P+('wireguard','*'),()),
+        ('movement_operations',MOVEMENT+('operations','*'),P+('wireguard','*'),()),
+        ('quarantine_operations',QUARANTINE+('operations','*'),P+('netfilter','*'),('scope',)),
+        ('host_operations',HOST+('operations','*'),P+('host_link','*'),('namespace','host','declaration','admission','addition')),
+        ('bootstrap_operations',('witness','operations','*'),P+('bootstrap','*'),('namespace','scope','query','policy','pins','group'))):
+        fields = tuple(f for f in operation_fields if f != 'kind') if name == 'bootstrap_operations' else operation_fields
+        add(name,observation,history,fields+extra)
+    add('bootstrap_producer_source',('witness','operations','*'),P+('producer_creation',),('parent','name'))
+    add('binding_operation',BINDING+('observation',),P+('producer_binding',),
+        tuple(f for f in operation_fields if f != 'kind')+('parent','group','name','data','query','policy','pins'))
+    add('producer_operation',QUARANTINE+('producer',),P+('producer_creation',),
+        ('request','parent','group','name','data','query','birth','requested_at','deadline','verified_at',
+         ('original_pid','birth.pid'),('original_start','birth.start')))
+    add('binding_original_group',BINDING,P+('producer_creation',),(('original_group','group'),))
+
+    for name,observation,index in (
+        ('host_intent',HOST+('own_intent_polling',),75),
+        ('bootstrap_query_intent',('witness','own_query_intent_polling'),87),
+        ('bootstrap_intent',('witness','own_intent_polling'),90)):
+        add(name,observation,P+('writers',index),('pid','start'))
+    add('quarantine_intent',QUARANTINE+('own_intent_polling',),P+('writers',42),
+        (('original_writer.pid','pid'),('original_writer.start','start'),
+         ('deadline','io_deadline'),'verified_at','actual_wait_status'))
+
+    original_jobs = [P+('attachment','birth'),P+('fresh_transport','birth'),P+('fresh_transport','mount','birth')]
+    original_jobs += [P+('wireguard',i,'birth') for i in range(5)]
+    original_jobs += [P+('netfilter',i,'birth') for i in range(6)]
+    original_jobs += [P+('producer_creation','birth')]
+    suffix_jobs = [P+('producer_binding','birth')]+[P+('host_link',i,'birth') for i in range(4)]
+    for prefix,jobs in ((ASSEMBLY,original_jobs),(('witness','handoff'),suffix_jobs)):
+        for i,source in enumerate(jobs):
+            add('retired_job:'+'.'.join(prefix)+':'+str(i),prefix+('resources',i),source,
+                (('original_pid','pid'),('original_start','start')))
+        add('reservation_owner:'+'.'.join(prefix),prefix+('reservation',),P,
+            (('owner_epoch','canonical_owner_epoch'),'member'))
+
+    # I10: attachment/movement.rs:824-835. Use the original query result,
+    # not another retained copy of the moved result.
+    add('original_wireguard_move',P+('wireguard',4,'result'),P+('wireguard',2,'result'),
+        ('link.name','link.alias','wireguard.public_key','wireguard.peers'))
+
+    add('host_admission_history',HOST+('admission',),P+('host_link',0),
+        ('declaration',('namespace','host'),(('requested_at',),('admission',0)),
+         (('deadline',),('admission',1)),(('accepted_at',),('admission',2))))
+    add('host_baseline',HOST+('admission',),('rows','secret_host_baseline',0,'declaration'),
+        (('declared_baseline','baseline'),('namespace','host_namespace')))
+    add('host_inventory',HOST+('operations',3,'host_observation'),HOST+('admission','declared_baseline'),
+        ('namespace','addresses','routes','rules'))
+    # The added link is separately checked against the original host result.
+    add('host_inventory_links',HOST+('operations',3,'host_observation'),None,('links',),'root',('retained_success',))
+    add('wan_declaration',QUARANTINE+('wan',),('rows','secret_quarantine_host',0,'declaration'),
+        (('host_namespace','host_namespace'),('name','wan.name'),('index','wan.index'),('address','wan.address')))
+    add('wan_observation_window',QUARANTINE+('wan',),None,('requested_at','deadline','verified_at'),
+        'root',('recorded_emitters','monotonic_deadlines'))
+    add('foreign_capacity_parent',ASSEMBLY+('foreign_eligibility',),P+('wireguard',0,'birth'),
+        (('eligible_original_pid','pid'),('eligible_original_start','start')))
+    add('foreign_capacity_observation',ASSEMBLY+('foreign_eligibility',),None,
+        ('original_pid','original_start','requested_at','deadline','verified_at'),
+        'root',('recorded_emitters','monotonic_deadlines'))
+    return tuple(registry)
+
+
+BINDING_REGISTRY = make_binding_registry()
+
+
+def schema_nodes(value, spec='BootstrapWitness', path=('witness',)):
+    """Walk declared schema edges only; unknown observation children stay uncovered."""
+    if value is None:
+        return
+    if '|' in spec:
+        choices = [s for s in alternatives(spec) if s in SCHEMAS and type(value) is dict]
+        if choices:
+            spec = min(choices,key=lambda s: len(set(value).symmetric_difference(SCHEMAS[s])))
+    if spec in SCHEMAS and type(value) is dict:
+        yield path, value
+        for key,child_spec in SCHEMAS[spec].items():
+            if key in value:
+                yield from schema_nodes(value[key],child_spec,path+(key,))
+    elif spec.startswith('list(') or spec == 'queries3':
+        child_spec = 'InspectionHistory|null' if spec == 'queries3' else spec[5:-1]
+        if type(value) is list:
+            for i,child in enumerate(value):
+                yield from schema_nodes(child,child_spec,path+(i,))
+
+
+def at_path(root, path):
+    for key in path:
+        root = root[key]
+    return root
+
+
+def binding_instances(root, pattern, path=(), captures=()):
+    if not pattern:
+        yield path,captures,root
+    elif pattern[0] == '*':
+        require(type(root) is list, 'binding wildcard requires array')
+        for i,item in enumerate(root):
+            yield from binding_instances(item,pattern[1:],path+(i,),captures+(i,))
+    else:
+        key = pattern[0]
+        yield from binding_instances(root[key],pattern[1:],path+(key,),captures)
+
+
+def bind_observations(w, rows):
+    """The single comparison engine for the complete declarative registry."""
+    root = dict(witness=w,rows=rows,expected={'initial_query': {'kind': 'Initial'}})
+    for entry in BINDING_REGISTRY:
+        for path,captures,observation in binding_instances(root,entry['observation']):
+            if entry['mode'] == 'root':
+                continue  # explicitly named canonical evidence; guards run in validate
+            indices = iter(captures)
+            source_path = tuple(next(indices) if key == '*' else key for key in entry['canonical'])
+            source = at_path(root,source_path)
+            for left,right in entry['fields']:
+                actual,expected = at_path(observation,left),at_path(source,right)
+                if entry['mode'] == 'projection':
+                    if actual is None:
+                        continue
+                    if left == ('bootstrap_queries',):
+                        require(all(q is None or q == expected[i] for i,q in enumerate(actual)),entry['name']+': queries')
+                        continue
+                    if type(actual) is list:
+                        expected = expected[:len(actual)]
+                require(actual == expected, entry['name']+': '+repr(path+left)+' binds '+repr(source_path+right))
+    coverage = binding_coverage(w)
+    require(not coverage['uncovered'], 'unregistered observation objects: '+repr(coverage['uncovered']))
+
+
+OBSERVATION_KEYS = frozenset(('pid','start','dev','ino','deadline','birth','original_pid',
+                              'original_start','process_start','io_deadline','parent_deadline'))
+
+
+def binding_coverage(w):
+    # Coverage is established by explicit compared fields, not a blanket parent
+    # exemption or object-shape whitelist. schema_nodes refuses unknown edges.
+    nodes = dict(schema_nodes(w))
+    prefixes = set()
+    for entry in BINDING_REGISTRY:
+        for path,_,_ in binding_instances(dict(witness=w),entry['observation']):
+            for left,_ in entry['fields']:
+                prefixes.add(path+left)
+    observations = []
+    uncovered = []
+    def walk(value,path):
+        if type(value) is dict:
+            keys = OBSERVATION_KEYS.intersection(value)
+            if keys:
+                observations.append(path)
+                fields = [path+(key,) for key in keys]
+                if path not in nodes or any(not any(field[:i] in prefixes for i in range(1,len(field)+1))
+                                            for field in fields):
+                    uncovered.append(path)
+            for key,child in value.items():
+                walk(child,path+(key,))
+        elif type(value) is list:
+            for i,child in enumerate(value):
+                walk(child,path+(i,))
+    walk(w,('witness',))
+    return dict(observations=len(observations),uncovered=uncovered)
 
 
 def intent_success(intent, p, index, negatives, held=2):
@@ -2330,12 +2568,13 @@ def baseline_consistency(w, record, rows):
 
 
 def validate(raw_path):
-    receipt = dict(schema=1, validator_revision=3, run=410, raw_record=str(raw_path), verdict='FAIL', checks=[],
+    receipt = dict(schema=1, validator_revision=4, run=410, raw_record=str(raw_path), verdict='FAIL', checks=[],
                    full_bootstrap_witness_validation='FAIL', runtime_acceptance=False,
                    release_ready=False, does_not_prove=LIMITS,
                    validation_scope='offline recorded run410 successful witness consistency; no live custody',
                    supersedes=['target/run410-evidence/witness-validation.json',
-                               'target/run410-evidence/witness-validation-r2.json'])
+                               'target/run410-evidence/witness-validation-r2.json',
+                               'target/run410-evidence/witness-validation-r3.json'])
 
     def check(name, references, function):
         row = dict(name=name, status='PASS', references=references)
@@ -2370,6 +2609,8 @@ def validate(raw_path):
             ('preparation_success', ['stdout:13 preparation success guards/entry_producer/87-writer prefix/16 retained fields', 'attachment/operational/bootstrap.rs:1028-1069'], lambda: preparation_success(w)),
             ('retained_success', ['stdout:13 retained successful emitter continuations; host intent writer75/oracle20/operations'], lambda: retained_success(w)),
             ('canonical_histories', ['stdout:13 all retained preparation histories and canonical publication chains'], lambda: canonical_histories(w, rows)),
+            ('observation_bindings', ['BINDING_REGISTRY: every observation to its canonical history; explicit canonical roots',
+                                      'attachment/provision.rs:878-885; attachment/movement.rs:824-835'], lambda: bind_observations(w, rows)),
             ('recorded_emitters', ['stdout:13 retained constructor/result receipts and resource identities'], lambda: recorded_emitters(w, rows)),
             ('writer_histories', ['stdout:13 every retained original writer, exact phase/window/status schedule'], lambda: writer_histories(w)),
             ('charge_conservation', ['stdout:13 charges_before_drop/charges_after_drop/handoff.charges_*'], lambda: charge_conservation(w)),

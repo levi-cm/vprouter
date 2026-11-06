@@ -1182,3 +1182,11 @@ Task 13 REL/RELA link/info Minor x2 fixed by controller (RED/GREEN), not re-revi
 2026-11-06 11:25 ELF link/info fix (4ae2df3) independently reviewed: PASS, 0 findings
 (elf-fix-review.md). All controller fixes now independently reviewed. Open: witness I9/I10/M2,
 Task 14 T3-I1..I4 (3-attempt limit), ARM64 runtime (no image/firmware/pinned qemu; needs user decision).
+
+2026-11-06 14:00 (user "Continue" authorised a 4th round) witness validator round 4: I9/I10/M2
+fixed, 67-entry binding registry, real record 20/20 (r4 receipt), all 70 earlier mutations
+rejected; independent review 4 FAIL for completeness: new I11-I14 (network results, WAN
+window, zero intent digest, journal dirs) + M3. Checkpointed as PARTIAL. ARM64: aarch64 qemu
+10.0.13 + AAVMF staged rootless from the signed trixie index (packages-arm64/), pinned arm64
+image verified (SHA512 e66eea33...), TCG smoke boots in ~50 s with the full lab -sandbox and a
+user netdev (-nic none halts the guest); run-411 ARM64 preparation delegated.

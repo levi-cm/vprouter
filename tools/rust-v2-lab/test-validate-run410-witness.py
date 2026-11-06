@@ -31,8 +31,17 @@ def split(record):
 U32_FIELDS = set(('pid original_pid eligible_original_pid listener_origin_uid '
                   'listener_origin_gid planned_host_link_index mode mtu controller '
                   'promiscuity all_multicast route_priority nexthop_id output metric '
-                  'flags priority table suppress_prefixlen postcompletion_inventory_polls').split())
+                  'flags priority table suppress_prefixlen postcompletion_inventory_polls '
+                  'max_pacing_offload_horizon fwmark fwmask suppress_ifgroup goto realm').split())
 U8_FIELDS = set('prefix scope preference protocol action fault received_packets released_gates'.split())
+U64_FIELDS = set(('dev ino start process_start original_start eligible_original_start '
+                  'borrowed_registration_count canonical_negative_checks complete_original_job_set '
+                  'global_assemblies_reserved global_assembly_limit global_child_capacity_limit '
+                  'global_transferred_ticket_limit historical_original_jobs original_jobs '
+                  'registered_native_slots repeat_retirement_refusals retired_original_jobs '
+                  'retired_suffix_jobs schema suffix_jobs negative_checks held_pending_polls queued_polls').split())
+U64_ARRAY_FIELDS = set(('charges_after charges_after_drop charges_before charges_before_drop '
+                        'parent_counts_after parent_counts_before namespace').split())
 DIGEST_FIELDS = set(('request query policy configuration declaration host_declaration '
                      'binding public_result public_key device_public_key declaration_digest '
                      'movement_query').split())
@@ -66,6 +75,80 @@ RUST_SHAPES = [
     ('crates/vprouter-network/src/project.rs','Wireguard','Wireguard'),
     ('crates/vprouter-network/src/project.rs','Peer','WireguardPeer'),
 ]
+
+# Remaining serde structs reachable through the emitted histories/results.
+# Projection-only wrappers are deliberately not called Rust Deserialize types.
+SERDE_WITNESS_STRUCTS = RUST_SHAPES + [
+    ('crates/vprouter-launch/src/owned/preparation/wireguard.rs','History','WireguardHistory'),
+    ('crates/vprouter-launch/src/kernel/wireguard_role.rs','PublicResult','WireguardResult'),
+    ('crates/vprouter-launch/src/kernel/host_link.rs','PublicResult','HostLinkResult'),
+    ('crates/vprouter-launch/src/owned.rs','ProducerOwnership','EntryProducer'),
+    ('crates/vprouter-network/src/host_observation.rs','HostObservation','HostBaseline'),
+]
+
+
+def split_rust_types(text, delimiter=','):
+    depth, start, result = 0, 0, []
+    for i,c in enumerate(text):
+        if c in '(<[':
+            depth += 1
+        elif c in ')>]':
+            depth -= 1
+        elif c == delimiter and depth == 0:
+            result.append(text[start:i].strip())
+            start = i+1
+    result.append(text[start:].strip())
+    return result
+
+
+def rust_primitive_paths(value, rust_type, path):
+    """Independent Rust type decomposition; never consult validator SCHEMAS."""
+    if rust_type.startswith('Option<'):
+        yield from rust_primitive_paths(value,rust_type[7:-1],path)
+    elif re.fullmatch(r'[ui](8|16|32|64)|usize|f64|bool',rust_type):
+        yield path,rust_type
+    elif rust_type.startswith('Vec<') and type(value) is list:
+        for i,item in enumerate(value):
+            yield from rust_primitive_paths(item,rust_type[4:-1],path+(i,))
+    elif rust_type.startswith('[') and type(value) is list:
+        item_type = split_rust_types(rust_type[1:-1],';')[0]
+        for i,item in enumerate(value):
+            yield from rust_primitive_paths(item,item_type,path+(i,))
+    elif rust_type.startswith('(') and type(value) is list:
+        for i,item_type in enumerate(split_rust_types(rust_type[1:-1])):
+            yield from rust_primitive_paths(value[i],item_type,path+(i,))
+
+
+def source_width_inventory(witness):
+    """Scriptable extraction of every reachable serde struct's fields+types.
+
+    Match complete struct shapes, permitting only serde's omitted optional
+    fields. Recurse through the entire witness, including repeated copies.
+    Widths in JSON-builder projections use integer_bits' explicit emitter map.
+    """
+    declarations = [(file,name,dict(rust_fields(file,name))) for file,name,_ in SERDE_WITNESS_STRUCTS]
+    widths, seen = {}, set()
+    def visit(value,path):
+        if type(value) is dict:
+            for file,name,fields in declarations:
+                omitted = set(fields)-set(value)
+                if set(value).issubset(fields) and all(fields[k].startswith('Option<') for k in omitted):
+                    # Optional movement fields are omitted in the first4 WG rows.
+                    if len(fields)-len(value) > 2:
+                        continue
+                    seen.add((file,name))
+                    for key in set(value)&set(fields):
+                        for leaf,spec in rust_primitive_paths(value[key],fields[key],path+(key,)):
+                            if leaf in widths:
+                                assert widths[leaf] == spec, (leaf,widths[leaf],spec)
+                            widths[leaf] = spec
+            for key,child in value.items():
+                visit(child,path+(key,))
+        elif type(value) is list:
+            for i,child in enumerate(value):
+                visit(child,path+(i,))
+    visit(witness,())
+    return declarations,widths,seen
 
 
 def rust_fields(relative, name):
@@ -101,11 +184,18 @@ def integer_bits(path):
             return 32
         if field == 'allowed_ips':
             return 8
-        return 64
+        if field == 'tun_info':
+            field_index = max(i for i,p in enumerate(path) if p == 'tun_info')
+            return 16 if len(path)-field_index-1 == 2 else 8
+        if field in U64_ARRAY_FIELDS:
+            return 64
+        raise AssertionError('unmapped Rust integer array: '+repr(path))
     if key == 'polls' and path[-2] == 'admission':
         return 32
-    if key == 'hardware_type':
+    if key in ('hardware_type','headroom','tailroom'):
         return 16
+    if key == 'kind' and path[-3] == 'routes':
+        return 8  # project.rs:68 Route.kind; string kinds have no integer width.
     if key == 'index':
         # Writer indices are usize; link and WAN indices are u32.
         return 64 if path[-2] in ('own_intent_polling', 'own_query_intent_polling', 'original_writer') else 32
@@ -119,7 +209,9 @@ def integer_bits(path):
         return 8
     if key in ('actual_wait_status', 'listener_origin_pid'):
         return 31  # i32::MAX+1; negative tested separately by success status guards.
-    return 64
+    if key in U64_FIELDS:
+        return 64
+    raise AssertionError('unmapped Rust integer field: '+repr(path))
 
 
 def sweep_chunk(paths):
@@ -230,6 +322,119 @@ class WitnessValidation(unittest.TestCase):
                 failures.extend(errors)
         print('leaf sweep:', len(leaves), 'leaves,', total, 'end-to-end mutations', flush=True)
         self.assertEqual(failures, [], 'false PASS leaf mutations: ' + repr(failures))
+
+    def test_round3_fifteen_reviewer_fixtures_through_validate(self):
+        names = (
+            'transport_creation_source_is_host transport_creation_source_is_data '
+            'transport_creation_source_foreign transport_creation_and_mount_foreign_source '
+            'transport_mount_source_foreign transport_creation_host_foreign '
+            'transport_creation_data_foreign transport_mount_directory_foreign '
+            'transport_mount_wrong_placeholder_mode wireguard_up_all_copies '
+            'wireguard_wrong_link_kind_all_copies moved_wireguard_name_substitution '
+            'moved_wireguard_alias_substitution moved_wireguard_key_substitution '
+            'moved_wireguard_peers_removed').split()
+        self.assertEqual(len(names), 15)
+        for name in names:
+            path = Path('/tmp/vprouter-witness-r3') / (name + '.json')
+            with self.subTest(fixture=name):
+                self.assertTrue(path.is_file(), 'required reviewer fixture missing')
+                self.assertEqual(self.m.validate(path)['verdict'], 'FAIL', name)
+
+    def test_route_kind_uses_actual_u8_boundary_through_validate(self):
+        path, value = next((p,v) for p,v in leaf_cases(self.witness)
+                           if p[-1] == 'kind' and type(v) is int)
+        def change(w):
+            obj = w
+            for key in path[:-1]:
+                obj = obj[key]
+            obj['kind'] = 256
+        self.rejected(self.mutated(change), 'typed_witness')
+        self.assertEqual(integer_bits(path), 8, 'Route.kind must overflow at 256')
+
+    def test_source_extracted_widths_cover_every_witness_leaf(self):
+        declarations,widths,seen = source_width_inventory(self.witness)
+        self.assertEqual(seen, {(file,name) for file,name,_ in declarations})
+        # Source Optional primitive fields get a width assertion even when null
+        # in this run; this catches missing headroom/fwmark/etc map entries too.
+        errors = []
+        for path,spec in widths.items():
+            if re.fullmatch(r'u(8|16|32|64)|usize|i32|i64',spec):
+                wanted = 64 if spec == 'usize' else int(spec[1:])-(spec[0]=='i')
+                try:
+                    actual = integer_bits(path)
+                except AssertionError as error:
+                    actual = str(error)
+                if actual != wanted:
+                    errors.append((path,spec,actual))
+        self.assertEqual(errors, [])
+        # No default integer width is allowed for an unrecognized scalar/array.
+        for path in (('unmapped_integer',),('unmapped_array',0)):
+            with self.assertRaises(AssertionError):
+                integer_bits(path)
+        leaf_map = {path: widths.get(path, ('u'+str(integer_bits(path))) if type(value) is int
+                    else type(value).__name__) for path,value in leaf_cases(self.witness)}
+        self.assertEqual(len(leaf_map),28782)
+        print('source width inventory:',len(declarations),'serde structs,',
+              sum(len(f) for _,_,f in declarations),'fields,',len(leaf_map),'leaf entries',flush=True)
+
+    def test_nested_tun_tuple_widths_from_rust_source(self):
+        # Empty in run410, but still a reachable serialized Vec<(u16,Vec<u8>)>.
+        field_type = dict(rust_fields('crates/vprouter-network/src/project.rs','Link'))['tun_info']
+        for path,spec in rust_primitive_paths([[1,[2]],[3,[4]]],field_type,('tun_info',)):
+            with self.subTest(path=path):
+                self.assertEqual(integer_bits(path),int(spec[1:]))
+
+    def test_binding_registry_covers_observations_and_refuses_unregistered_object(self):
+        self.assertTrue(hasattr(self.m, 'binding_coverage'), 'explicit binding registry missing')
+        coverage = self.m.binding_coverage(self.witness)
+        self.assertEqual(coverage['uncovered'], [])
+        self.assertGreater(coverage['observations'], 1000)
+        changed = copy.deepcopy(self.witness)
+        # Neither a new observation at root nor one nested in a covered
+        # canonical object may inherit coverage merely from its parent.
+        for parent in (changed, changed['preparation']['fresh_transport']):
+            parent['unregistered_observation'] = dict(pid=99, start=99, deadline=99.)
+        self.assertEqual(len(self.m.binding_coverage(changed)['uncovered']), 2)
+
+    def test_registry_coverage_requires_each_identity_field(self):
+        original = self.m.BINDING_REGISTRY
+        try:
+            self.m.BINDING_REGISTRY = tuple(dict(entry,fields=tuple(
+                pair for pair in entry['fields'] if pair[0] != ('deadline',)))
+                if entry['name'] == 'transport_creation' else entry for entry in original)
+            uncovered = self.m.binding_coverage(self.witness)['uncovered']
+            self.assertIn(self.m.PROVISION+('transport_creation',),uncovered,
+                          'covering birth must not cover the independent request deadline')
+        finally:
+            self.m.BINDING_REGISTRY = original
+
+    def test_all_transport_observation_binding_fields_through_validate(self):
+        prefix = ('host_addition','producer_binding','assembly','quarantine','movement','provision')
+        for observation, fields in (
+            ('transport_creation', ('request','source','host','data','birth','requested_at','deadline','verified_at')),
+            ('transport_mount', ('original_source','original_directory','placeholder','birth','requested_at','deadline'))):
+            for field in fields:
+                def change(w):
+                    obj = w
+                    for key in prefix:
+                        obj = obj[key]
+                    value = obj[observation][field]
+                    if type(value) is dict:
+                        value['pid' if field == 'birth' else 'mode' if field == 'placeholder' else 'ino'] += 1
+                    elif type(value) is list:
+                        value[0] ^= 1
+                    else:
+                        obj[observation][field] += .000001
+                with self.subTest(observation=observation, field=field):
+                    self.assertEqual(self.receipt(self.mutated(change))['verdict'], 'FAIL')
+
+    def test_initial_observation_kind_cannot_claim_another_query_stage(self):
+        def change(w):
+            obj = w
+            for key in ('host_addition','producer_binding','assembly','quarantine','movement','provision','attachment'):
+                obj = obj[key]
+            obj['first_query']['kind'] = 'BootstrapHostRecheck'
+        self.assertEqual(self.receipt(self.mutated(change))['verdict'], 'FAIL')
 
     def test_retained_success_guards_through_validate(self):
         # Each is a retained successful continuation, prior to its own drop.

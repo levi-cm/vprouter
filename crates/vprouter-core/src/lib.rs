@@ -6,6 +6,7 @@ pub mod config;
 pub mod direct;
 pub mod fleet;
 pub mod health;
+pub mod migration;
 pub mod profile;
 pub mod reason;
 pub mod secret_boundary;

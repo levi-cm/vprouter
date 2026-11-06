@@ -319,7 +319,12 @@ impl AllocationStore {
     fn open_for_test(path: &Path, deployment: &str) -> Result<Self> {
         Self::open_owned(path, deployment, rustix::process::getuid().as_raw(), true)
     }
-    fn open_owned(path: &Path, deployment: &str, owner: u32, test_temp: bool) -> Result<Self> {
+    pub(crate) fn open_owned(
+        path: &Path,
+        deployment: &str,
+        owner: u32,
+        test_temp: bool,
+    ) -> Result<Self> {
         absolute_path(path)?;
         label(deployment, 32)?;
         let mut dir = open(
@@ -357,15 +362,60 @@ impl AllocationStore {
         })
     }
     pub fn lock(&self) -> Result<AllocationTransaction> {
+        self.lock_inner(true, &[])
+    }
+    pub(crate) fn directory(&self) -> &OwnedFd {
+        &self.core.dir
+    }
+    pub(crate) fn lock_existing(&self, protected: &[(u64, u64)]) -> Result<AllocationTransaction> {
+        self.lock_inner(false, protected)
+    }
+    fn lock_inner(&self, create: bool, protected: &[(u64, u64)]) -> Result<AllocationTransaction> {
         self.core.check_directory()?;
+        // Fixture migration supplies metadata-only identity custody BEFORE the
+        // lock's data descriptor is opened. Keep O_PATH held to prevent reuse.
+        let metadata = if create {
+            None
+        } else {
+            let fd = openat(
+                &self.core.dir,
+                LOCK_NAME,
+                OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map_err(|_| err(Reason::StorageUnsafe))?;
+            check_file(&fd, self.core.owner)?;
+            let stat = fstat(&fd).map_err(|_| err(Reason::StorageUnsafe))?;
+            if protected.contains(&(stat.st_dev, stat.st_ino)) {
+                return Err(err(Reason::StorageUnsafe));
+            }
+            Some(fd)
+        };
         let fd = openat(
             &self.core.dir,
             LOCK_NAME,
-            OFlags::CREATE | OFlags::RDWR | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            (if create {
+                OFlags::CREATE
+            } else {
+                OFlags::empty()
+            }) | OFlags::RDWR
+                | OFlags::NOFOLLOW
+                | OFlags::NONBLOCK
+                | OFlags::CLOEXEC,
             Mode::RUSR | Mode::WUSR,
         )
         .map_err(|_| err(Reason::StorageUnsafe))?;
         check_file(&fd, self.core.owner)?;
+        let opened = fstat(&fd).map_err(|_| err(Reason::StorageUnsafe))?;
+        if protected.contains(&(opened.st_dev, opened.st_ino)) {
+            return Err(err(Reason::StorageUnsafe));
+        }
+        if let Some(metadata) = metadata {
+            let before = fstat(metadata).map_err(|_| err(Reason::StorageUnsafe))?;
+            if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino) {
+                return Err(err(Reason::StorageUnsafe));
+            }
+        }
         flock(&fd, FlockOperation::NonBlockingLockExclusive).map_err(|error| {
             err(if error == Errno::WOULDBLOCK {
                 Reason::LockBusy
@@ -395,13 +445,19 @@ impl AllocationTransaction {
     // Bind every transaction operation to the original still-named lock inode.
     // This detects replacement; the protected directory and cooperative flock
     // remain the exclusion boundary, not a claim against malicious root races.
-    fn check_lock(&self) -> Result<()> {
+    pub(crate) fn directory(&self) -> &OwnedFd {
+        &self.store.dir
+    }
+    pub(crate) fn owner(&self) -> u32 {
+        self.store.owner
+    }
+    pub(crate) fn check_lock(&self) -> Result<()> {
         self.store.check_directory()?;
         check_file(&self._lock, self.store.owner)?;
         let current = openat(
             &self.store.dir,
             LOCK_NAME,
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
             Mode::empty(),
         )
         .map_err(|_| err(Reason::StorageUnsafe))?;

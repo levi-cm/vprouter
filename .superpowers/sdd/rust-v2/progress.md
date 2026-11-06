@@ -1134,3 +1134,12 @@ I2 invalid-clock poll vs queued quarantine, M1 CONNECT without Host) -> fixed wi
 closure (canonical address parser + encoding cross-product, host-time matrix, HTTP table
 tests). Re-review PASS (0 defects reproduced). Per implementer: workspace >=500 pass/0
 fail, x86_64-musl tests ran, ARM64 compile-only. Owned-guest/real-client tests NOT_RUN.
+
+2026-11-06 Task 12 (transactional migration/rollback) OFFLINE fixture engine in vprouter-core
+(migration/, docs/rust-v2/migration-preparation.md). Review1 FAIL (R1 Critical opaque state
+descendants unprotected, R2 offline after failed drain, R3 UTF-8 staging) -> fixed + class
+closure (recursive metadata-only custody, 420 rename permutations, 2588 injected-error and
+1494 SIGKILL cases). Re-review: R1-R3 fixed, new Important R4 (custody 129-256 entries
+undecodable) -> controller fix MAX_OPAQUE=128 + RED/GREEN test; R4 fix not re-reviewed.
+Implementer workspace 568 pass/0 fail/17 ignored (before R4 fix); core re-run clean after.
+Owned-guest/real-installation migration NOT_RUN.

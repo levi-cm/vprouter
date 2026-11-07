@@ -166,6 +166,195 @@ def sweep_chunk(paths):
     return total, failures
 
 
+
+def reviewer_records(module, original):
+    """Reconstruct documented probes; never claim these are lost reviewer bytes.
+
+    The four reports specify 96 negative fixtures (18+15+37+26); round 5 adds
+    13. Unnamed round-3 rejection controls are reconstructed by their documented
+    predicate family. All changes run through the actual CLI, including raw
+    duplicate-key and NaN bytes. No dependency on a previous boot's /tmp.
+    """
+    result = {}
+    def add(name, change=None, row_change=None, raw_change=None):
+        record = copy.deepcopy(original)
+        lines, index, w = split(record)
+        if change:
+            change(w)
+        lines[index] = 'LAB_SECRET_BOOTSTRAP ' + json.dumps(w, separators=(',', ':'))
+        if row_change:
+            rows = [json.loads(line) if line.startswith('{') else line for line in lines]
+            row_change(rows, w)
+            lines = [json.dumps(row, separators=(',', ':')) if type(row) is dict else row for row in rows]
+        record['stdout'] = '\n'.join(lines)+'\n'
+        raw = json.dumps(record, separators=(',', ':')).encode()
+        if raw_change:
+            raw = raw_change(raw)
+        assert raw != json.dumps(original, separators=(',', ':')).encode(), name
+        result[name] = raw
+    def set_(obj, key, value): obj[key] = copy.deepcopy(value)
+    def each(w, predicate, change):
+        for _,obj in list(module.objects(w)):
+            if predicate(obj): change(obj)
+    def link(o, kind): return set(o) == set(module.SCHEMAS['Link']) and o['kind'] == kind
+    def device(o): return 'peers' in o and 'public_key' in o
+    def binding(o): return 'pins' in o and len(o['pins']) == 6
+    def provision(w): return w['host_addition']['producer_binding']['assembly']['quarantine']['movement']['provision']
+    def wan(w): return w['host_addition']['producer_binding']['assembly']['quarantine']['wan']
+    def byte(o,k): o[k][0] ^= 1
+    add('authorization',lambda w:set_(w['operations'][0],'placement_authorized',True))
+    add('boot_id',lambda w:set_(w['preparation']['canonical_owner_epoch'],'boot_id','00000000-0000-0000-0000-000000000000'))
+    add('charge',lambda w:set_(w,'charges_after_drop',[0,0]))
+    add('deadline',lambda w:set_(w['queries'][0],'verified_at',w['queries'][0]['deadline']))
+    add('drop_row',row_change=lambda rows,w:rows.pop(0))
+    add('duplicate_key',raw_change=lambda b:b.replace(b'"exit_code":0',b'"exit_code":0,"exit_code":0',1))
+    add('fault',lambda w:set_(w,'fault',1))
+    add('nan',raw_change=lambda b:b.replace(b'final_process_verified_at\\":',b'final_process_verified_at\\":NaN,\\"discard\\":',1))
+    add('unknown_field',lambda w:set_(w['operations'][0],'foreign',True))
+    add('binding_result_8pins',lambda w:w['preparation']['producer_binding']['result']['pins'].extend([[1,2,3],[4,5,6]]))
+    add('bootstrap_result_6pins',lambda w:set_(w['preparation']['bootstrap'][0]['result'],'pins',w['preparation']['bootstrap'][0]['result']['pins'][:6]))
+    add('own_intent_identity',lambda w:set_(w['own_intent_polling'],'pid',w['own_intent_polling']['pid']+1))
+    add('query_intent_index',lambda w:set_(w['own_query_intent_polling'],'index',0))
+    for name,key,value in [('preparation_fenced','mutation_fenced',True),('preparation_pending','canonical_pending',True),
+                           ('preparation_phase','entry_phase','failed'),('preparation_unreaped','native_children_reaped',False)]:
+        add(name,lambda w,k=key,v=value:set_(w['preparation'],k,v))
+    add('retained_prefix_birth',lambda w:set_(w['preparation']['writers'][0],'pid',w['preparation']['writers'][0]['pid']+1))
+    def query_pid(w):
+        w['queries'][0]['birth']['pid'] = w['preparation']['bootstrap_queries'][0]['birth']['pid'] = 2**32
+    add('bootstrap_query_u32_pid_overflow',query_pid)
+    def initial(w):
+        q=w['preparation']['bootstrap_queries'][0]
+        q['initial']={k:copy.deepcopy(q[k]) for k in ('request','birth','facts','verified_at')}
+    add('bootstrap_query_has_initial',initial)
+    for field,value in [('kind','sockets'),('scope','data')]:
+        add('host_bootstrap_policy_wrong_'+field,lambda w,k=field,v=value:each(w,
+            lambda o:o.get('kind')=='initial_quarantine' and o.get('scope')=='host',lambda o:set_(o,k,v)))
+    add('entry_producer_binding_mismatch_all_prefixes',lambda w:each(w,lambda o:'binding' in o and 'parent' in o,lambda o:byte(o,'binding')))
+    add('binding_policy_mismatch_canonical_all_prefixes',lambda w:each(w,lambda o:binding(o) and 'policy' in o,lambda o:byte(o,'policy')))
+    add('binding_query_mismatch_all_prefixes',lambda w:each(w,lambda o:binding(o) and 'query' in o,lambda o:byte(o,'query')))
+    def binding_data(w):
+        each(w,lambda o:binding(o),lambda o:set_(o['data'] if 'data' in o else o['namespace'],'ino',(o['data'] if 'data' in o else o['namespace'])['ino']+100))
+    add('binding_data_mismatch_all_prefixes',binding_data)
+    for name,key,value in [('host_fault_nonzero','fault',1),('host_negative_count_zero','canonical_negative_checks',0)]:
+        add(name,lambda w,k=key,v=value:set_(w['host_addition'],k,v))
+    add('host_own_intent_identity',lambda w:set_(w['host_addition']['own_intent_polling'],'pid',2))
+    # Four explicitly documented second-round rejection controls.
+    add('control_binding_result_size',lambda w:w['preparation']['producer_binding']['result']['pins'].pop())
+    add('control_preparation_unreserved',lambda w:set_(w['preparation'],'service_reserved',False))
+    add('control_query_intent_start',lambda w:set_(w['own_query_intent_polling'],'start',1))
+    add('control_two_queued_policy_polls',lambda w:set_(w['own_intent_polling'],'queued_polls',2))
+    for suffix,source in [('host','host'),('data','data')]:
+        add('transport_creation_source_is_'+suffix,lambda w,k=source:set_(provision(w)['transport_creation'],'source',provision(w)['transport_creation'][k]))
+    for name,obj,key in [('transport_creation_source_foreign','transport_creation','source'),
+                         ('transport_mount_source_foreign','transport_mount','original_source'),
+                         ('transport_creation_host_foreign','transport_creation','host'),
+                         ('transport_creation_data_foreign','transport_creation','data'),
+                         ('transport_mount_directory_foreign','transport_mount','original_directory')]:
+        add(name,lambda w,o=obj,k=key:set_(provision(w)[o][k],'ino',provision(w)[o][k]['ino']+100))
+    def transport_pair(w):
+        p=provision(w); p['transport_creation']['source']['ino']+=100
+        p['transport_mount']['original_source']=copy.deepcopy(p['transport_creation']['source'])
+    add('transport_creation_and_mount_foreign_source',transport_pair)
+    add('transport_mount_wrong_placeholder_mode',lambda w:set_(provision(w)['transport_mount']['placeholder'],'mode',0o100666))
+    for name,key,value in [('wireguard_up_all_copies','up',True),('wireguard_wrong_link_kind_all_copies','kind','veth')]:
+        add(name,lambda w,k=key,v=value:each(w,lambda o:link(o,'wireguard'),lambda o:set_(o,k,v)))
+    def moved(w,field,value):
+        namespace=w['preparation']['data_network']
+        def change(o):
+            if field in ('name','alias'): o['link'][field]=value
+            elif field=='public_key': byte(o['wireguard'],field)
+            else: o['wireguard']['peers']=[]
+        each(w,lambda o:o.get('namespace')==namespace and type(o.get('link')) is dict and 'wireguard' in o,change)
+    for suffix,key,value in [('name','name','foreignwg'),('alias','alias','foreign-alias'),('key','public_key',None),('peers_removed','peers',None)]:
+        name='moved_wireguard_'+suffix+('_substitution' if suffix!='peers_removed' else '')
+        add(name,lambda w,k=key,v=value:moved(w,k,v))
+    # 22 round-3 controls: documented families, fresh names where originals were
+    # not named in the report. They are reconstruction, not exact-byte replay.
+    controls=[('u8',256),('u16',65536),('u32',2**32),('u64',2**64),('i32',2**31)]
+    types=dict(module.contract_leaves(split(original)[2]))
+    for ty,value in controls:
+        path=next(p for p,t in types.items() if t==ty)
+        for label,v in [('overflow',value),('wrong_type',{})]:
+            def change(w,p=path,v=v):
+                for key in p[:-1]: w=w[key]
+                w[p[-1]]=copy.deepcopy(v)
+            add('r3_control_'+ty+'_'+label,change)
+    for i in range(3):
+        add('r3_control_bootstrap_pin_writable_'+str(i),lambda w,i=i:set_(w['operations'][i]['pins'][1],2,0o40777))
+        add('r3_control_bootstrap_pin_duplicate_'+str(i),lambda w,i=i:set_(w['operations'][i]['pins'],1,w['operations'][i]['pins'][0]))
+    add('r3_control_host_veth_up',lambda w:each(w,lambda o:link(o,'veth') and o['name'].startswith('vh'),lambda o:set_(o,'up',True)))
+    add('r3_control_route_kind_256',lambda w:each(w,lambda o:set(o)==set(module.SCHEMAS['Route']),lambda o:set_(o,'kind',256)))
+    add('r3_control_wrong_query_initial',initial)
+    add('r3_control_wrong_intent_count',lambda w:set_(w['host_addition']['own_intent_polling'],'held_polls',0))
+    add('r3_control_origin_digest',lambda w:byte(provision(w)['attachment']['preparation']['attachment']['origin'],'public_result'))
+    add('r3_control_authority',lambda w:set_(w['operations'][0],'placement_authorized',True))
+    # Fourth-round 26 reported contradictions.
+    add('host_addition_zero_digest_all_copies',lambda w:each(w,lambda o:type(o.get('addition')) is list,lambda o:set_(o['addition'],0,[0]*32)))
+    add('assembly_child_limit_wrong',lambda w:set_(w['host_addition']['producer_binding']['assembly'],'global_child_capacity_limit',65))
+    def directory(w):
+        each(w,lambda o:'directory' in o and 'name' in o and ('source' in o) and ('host' in o or 'mounted_at' in o),lambda o:set_(o['directory'],'ino',o['directory']['ino']+100))
+        provision(w)['transport_mount']['original_directory']['ino']+=100
+    add('transport_directory_foreign_from_original_journal',directory)
+    def window(w):
+        for k in ('requested_at','deadline','verified_at'): wan(w)[k]+=1
+    add('wan_window_foreign_from_host_policy',window)
+    add('wan_verified_after_host_policy_birth',lambda w:set_(wan(w),'verified_at',w['preparation']['netfilter'][1]['birth']['born_at']+0.001))
+    for name,action in [
+        ('wireguard_public_key_foreign_from_input_all_copies',lambda o:byte(o,'public_key')),
+        ('wireguard_peers_removed_all_copies',lambda o:set_(o,'peers',[])),
+        ('wireguard_result_device_name_differs_from_link',lambda o:set_(o,'name','foreignwg')),
+        ('wireguard_result_device_index_differs_from_link',lambda o:set_(o,'index',o['index']+100)),
+        ('wireguard_allowed_ips_empty_all_copies',lambda o:[set_(p,'allowed_ips',[]) for p in o['peers']])]:
+        add(name,lambda w,action=action:each(w,device,action))
+    for suffix,key,value in [('name','name','foreignwg'),('alias','alias','foreign-alias')]:
+        add('wireguard_'+suffix+'_foreign_from_allocation_all_copies',lambda w,k=key,v=value:each(w,lambda o:link(o,'wireguard'),lambda o:set_(o,k,v)))
+    def provision_only(w,key):
+        def change(o):
+            r=o['result']
+            if key=='public_key': byte(r['wireguard'],key)
+            else: r['link'][key]+=100
+        each(w,lambda o:o.get('kind')=='provision' and type(o.get('result')) is dict and o['result'].get('link') is not None,change)
+    add('wireguard_provision_query_key_mismatch',lambda w:provision_only(w,'public_key'))
+    add('wireguard_original_provision_query_link_mismatch',lambda w:provision_only(w,'mtu'))
+    for kind in ('wireguard','veth'):
+        for field,value in [('mtu',1400),('controller',1),('port_kind','bridge'),('promiscuity',1),('all_multicast',1),('alternate_names',['foreign-alt'])]:
+            add(kind+'_link_guard_'+field+'_all_copies',lambda w,k=kind,f=field,v=value:each(w,lambda o:link(o,k),lambda o:set_(o,f,v)))
+    assert len(result)==96,len(result)
+    # Round 5: preserve all copies and update the public declaration digest.
+    for name,key,value in [('wan_zero_mac','address',[0]*6),('wan_multicast_mac','address',[1,2,3,4,5,6]),
+                           ('wan_index_zero','index',0),('wan_forbidden_name','name','lo'),
+                           ('wan_invalid_name','name','bad/name'),('wan_allocated_name','name',None)]:
+        def change_rows(rows,w,key=key,value=value):
+            host=next(r['secret_quarantine_host'] for r in rows if type(r) is dict and 'secret_quarantine_host' in r)
+            descriptor=next(r['secret_attachment_descriptor'] for r in rows if type(r) is dict and 'secret_attachment_descriptor' in r)
+            value=value if value is not None else descriptor['allocation']['exits'][0]['host_interface']
+            host['declaration']['wan'][key]=copy.deepcopy(value); wan(w)[key]=copy.deepcopy(value)
+            encoded=module.canonical(host['declaration']); old=host['sha256']
+            import hashlib
+            host['sha256']=hashlib.sha256(encoded).hexdigest();host['bytes']=len(encoded)
+            old_bytes=list(bytes.fromhex(old));new_bytes=list(bytes.fromhex(host['sha256']))
+            for _,o in module.objects(w):
+                for field in ('host_declaration','declaration_digest'):
+                    if o.get(field)==old_bytes:o[field]=new_bytes[:]
+            # w was decoded separately; replace the embedded witness after edits.
+            i=next(i for i,r in enumerate(rows) if type(r) is str and r.startswith('LAB_SECRET_BOOTSTRAP '))
+            rows[i]='LAB_SECRET_BOOTSTRAP '+json.dumps(w,separators=(',',':'))
+        add(name,row_change=change_rows)
+    for name,kind,field,value in [('wireguard_index_zero','wireguard','index',0),
+                                  ('wireguard_hardware_type_ethernet','wireguard','hardware_type',1),
+                                  ('veth_hardware_type_wireguard','veth','hardware_type',65534),
+                                  ('wireguard_peer_index_present','wireguard','peer_index',999),
+                                  ('veth_tun_value_257','veth','tun_info',[[1,[0]*257]]),
+                                  ('veth_tun_count_65','veth','tun_info',[[1,[0]]]*65)]:
+        def change(w,k=kind,f=field,v=value):
+            each(w,lambda o:link(o,k),lambda o:set_(o,f,v))
+            if k=='wireguard' and f=='index':each(w,device,lambda o:set_(o,'index',0))
+        add(name,change)
+    add('binding_group_mode_writable',lambda w:each(w,binding,lambda o:set_(o['pins'][1],2,0o40777)))
+    assert len(result)==109,len(result)
+    return result
+
+
 class WitnessValidation(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -176,6 +365,19 @@ class WitnessValidation(unittest.TestCase):
         spec.loader.exec_module(cls.m)
         cls.record = json.loads(RAW.read_bytes())
         cls.lines, cls.index, cls.witness = split(cls.record)
+
+    def test_stale_predicate_lineage_id_is_refused(self):
+        # Review r6 M7: a lineage ID with no extracted predicate must fail inventory integrity.
+        lineage = self.m.CONTRACT['predicate_lineage']
+        stale = 'f' * 20
+        self.assertNotIn(stale, lineage)
+        lineage[stale] = next(iter(lineage.values()))
+        try:
+            with self.assertRaisesRegex(ValueError, 'stale predicate lineage mapping'):
+                self.m.guard_dispositions()
+        finally:
+            del lineage[stale]
+        self.m.guard_dispositions()
 
     def receipt(self, record):
         with tempfile.TemporaryDirectory(prefix='run410-witness-') as tmp:
@@ -197,60 +399,18 @@ class WitnessValidation(unittest.TestCase):
         record['stdout'] = '\n'.join(lines) + '\n'
         return record
 
-    def test_all_independent_reviewer_fixtures_through_validate(self):
-        # Keep these exact reviewer bytes, including duplicate-key/NaN probes.
-        prior = Path('/tmp/vprouter-witness-review')
-        current = Path('/tmp/vprouter-witness-rereview')
-        original = (
-            'authorization boot_id charge deadline drop_row duplicate_key fault nan '
-            'unknown_field binding_result_8pins bootstrap_result_6pins own_intent_identity '
-            'query_intent_index preparation_fenced preparation_pending preparation_phase '
-            'preparation_unreaped retained_prefix_birth').split()
-        fresh = (
-            'bootstrap_query_u32_pid_overflow bootstrap_query_has_initial '
-            'host_bootstrap_policy_wrong_kind host_bootstrap_policy_wrong_scope '
-            'entry_producer_binding_mismatch_all_prefixes '
-            'binding_policy_mismatch_canonical_all_prefixes '
-            'binding_query_mismatch_all_prefixes binding_data_mismatch_all_prefixes '
-            'host_fault_nonzero host_negative_count_zero host_own_intent_identity').split()
-        self.assertEqual((len(original), len(fresh)), (18, 11))
-        for directory, names in ((prior, original), (current, fresh)):
-            for name in names:
-                path = directory / (name + '.json')
-                with self.subTest(fixture=str(path)):
-                    self.assertTrue(path.is_file(), 'required reviewer fixture missing')
-                    self.assertEqual(self.m.validate(path)['verdict'], 'FAIL', name)
-        self.assertEqual(self.m.validate(prior / 'real.json')['verdict'], 'PASS')
-
-    def test_round5_all_96_retained_reviewer_fixtures(self):
-        ledger = json.loads(Path('/tmp/vprouter-witness-r4/reviewer/prior-cli-results.json').read_bytes())
-        earlier = [Path(row['fixture']) for row in ledger if row['verdict'] == 'FAIL']
-        self.assertEqual(len(earlier), 70)
-        directory = Path('/tmp/vprouter-witness-r4/reviewer')
-        names = [
-            'host_addition_zero_digest_all_copies', 'assembly_child_limit_wrong',
-            'transport_directory_foreign_from_original_journal',
-            'wan_window_foreign_from_host_policy', 'wan_verified_after_host_policy_birth',
-            'wireguard_public_key_foreign_from_input_all_copies',
-            'wireguard_name_foreign_from_allocation_all_copies',
-            'wireguard_alias_foreign_from_allocation_all_copies',
-            'wireguard_provision_query_key_mismatch', 'wireguard_peers_removed_all_copies',
-            'wireguard_result_device_name_differs_from_link',
-            'wireguard_result_device_index_differs_from_link',
-            'wireguard_original_provision_query_link_mismatch',
-            'wireguard_allowed_ips_empty_all_copies',
-        ] + [kind+'_link_guard_'+field+'_all_copies'
-             for kind in ('wireguard', 'veth')
-             for field in ('mtu','controller','port_kind','promiscuity','all_multicast','alternate_names')]
-        self.assertEqual(len(names), 26)  # 25 Important + M3, not 25 inclusive.
-        for path in earlier + [directory/(name+'.json') for name in names]:
-            with self.subTest(fixture=str(path)):
-                self.assertTrue(path.is_file())
-                result = self.m.validate(path)
-                failures = [r['name'] for r in result['checks'] if r['status'] == 'FAIL']
-                self.assertEqual(result['verdict'], 'FAIL')
-                self.assertTrue(set(failures)-{'frozen_bindings'},
-                                'helper drift must not mask an accepted semantic mutation: '+str(path))
+    def test_all_five_review_rounds_reconstructed_through_cli(self):
+        fixtures = reviewer_records(self.m, self.record)
+        self.assertEqual(len(fixtures), 109)
+        with tempfile.TemporaryDirectory(prefix='run410-review-reconstructed-') as tmp:
+            for name, raw in fixtures.items():
+                with self.subTest(fixture=name):
+                    path = Path(tmp)/(name+'.json'); path.write_bytes(raw)
+                    result = subprocess.run([sys.executable,'-B',str(TOOL),str(path)],capture_output=True)
+                    receipt = json.loads(result.stdout)
+                    self.assertEqual(result.returncode,1,name)
+                    self.assertEqual(receipt['verdict'],'FAIL',name)
+                    self.assertTrue({c['name'] for c in receipt['checks'] if c['status']=='FAIL'}-{'frozen_bindings'},name)
 
     def test_extractor_multiline_guards_and_exact_serde_types(self):
         path = ROOT/'tools/rust-v2-lab/witness-contract-extract.py'
@@ -339,15 +499,95 @@ fn validate(&self) -> Result<()> {
                 self.assertTrue(guard['expression'])
                 self.assertIn('fields',guard)
                 disposition = dispositions[guard['id']]
-                self.assertIn(disposition['status'],('enforced','unenforceable_offline'))
-                if disposition['status'] == 'enforced':
-                    self.assertTrue(disposition['check_ids'])
-                    self.assertTrue(all(callable(getattr(self.m,k,None)) for k in disposition['check_ids']))
-                else:
-                    self.assertTrue(disposition['reason'])
+                self.assertIn(disposition['status'],('enforced','partial'))
+                for predicate in disposition['predicates'].values():
+                    self.assertIn(predicate['status'],('enforced','unenforceable_offline','pending'))
+                    if predicate['status']=='enforced':
+                        self.assertTrue(predicate['projection_proof'])
+                        self.assertTrue(all(callable(getattr(self.m,k,None)) for k in predicate['check_ids']))
+                    else:
+                        self.assertTrue(predicate['reason'])
         # An unseen Rust guard cannot acquire a blanket function/file mapping.
         self.assertRaises(ValueError,self.m.guard_dispositions,
                           contract['guards']+[dict(id='new-unmapped-guard',expression='x != y',fields=[])])
+
+    def extractor(self):
+        spec=importlib.util.spec_from_file_location('extract_r6',ROOT/'tools/rust-v2-lab/witness-contract-extract.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        return module
+
+    def test_transitive_closure_resolves_helpers_traits_closures_and_macros(self):
+        m=self.extractor()
+        texts={'entry.rs': 'fn success() { let f = || helper(); f(); wrap!(); obj.poll(); }',
+               'helper.rs': 'fn helper() { leaf(); } fn leaf() {} macro_rules! wrap { () => { helper() }; } impl Trait for T { fn poll(&self) { helper(); } }'}
+        graph=m.validation_call_graph(texts,{'entry.rs'})
+        names={n['name'] for n in graph['nodes']}
+        self.assertTrue({'helper','leaf','poll','wrap'} <= names)
+        self.assertFalse(graph['unresolved'])
+        for edge in graph['edges']:
+            self.assertTrue(edge.get('targets') or (edge.get('external') and edge.get('reason')),edge)
+        with self.assertRaisesRegex(ValueError,'unresolved.*unknown_callee'):
+            m.validation_call_graph({'entry.rs':'fn success() { unknown_callee(); }'},{'entry.rs'})
+        with self.assertRaisesRegex(ValueError,'unresolved.*missing_module'):
+            m.validation_call_graph({'entry.rs':'fn success() { missing_module::len(); }'},{'entry.rs'})
+        self.assertIn('crates/vprouter-netfilter/src/fixed_producer.rs',self.m.CONTRACT['source_files'])
+        self.assertTrue(any(g['function']=='observe_group' for g in self.m.CONTRACT['guards']))
+
+    def test_real_graph_closure_and_incomplete_full_claim(self):
+        graph=self.m.CONTRACT['call_graph']
+        ids={n['id'] for n in graph['nodes']}
+        self.assertFalse(graph['unresolved'])
+        for edge in graph['edges']:
+            if edge.get('targets'):
+                self.assertTrue(set(graph['target_sets'][edge['targets']]) <= ids,edge)
+            else:
+                self.assertTrue(edge.get('external') and edge.get('reason'),edge)
+        receipt=self.m.validate(RAW)
+        self.assertEqual(receipt['verdict'],'PASS')
+        self.assertEqual(receipt['full_bootstrap_witness_validation'],'INCOMPLETE')
+        self.assertFalse(receipt['complete_predicate_validation'])
+        self.assertGreater(receipt['predicate_counts']['pending'],0)
+        self.assertFalse(receipt['runtime_acceptance'])
+        self.assertFalse(receipt['release_ready'])
+
+    def test_atomic_predicates_and_mixed_guard_dispositions(self):
+        m=self.extractor()
+        atoms=m.atomic_predicates('a != b || (c == d && e.is_none()) || xs.iter().any(|x| x.n == 0 || x.m > 2)')
+        self.assertEqual([a['expression'] for a in atoms],['a != b','c == d','e.is_none()','x.n == 0','x.m > 2'])
+        self.assertEqual(m.atomic_predicates('fstatfs(fd).map_err(|_| Error::Foreign)?.f_type != 1')[0]['expression'],
+                         'fstatfs(fd).map_err(|_| Error::Foreign)?.f_type != 1')
+        for guard in self.m.CONTRACT['guards']:
+            disposition=self.m.GUARD_DISPOSITIONS[guard['id']]
+            self.assertEqual(set(disposition['predicates']),{p['id'] for p in guard['predicates']})
+            complete=all(p['status']=='enforced' for p in disposition['predicates'].values())
+            self.assertEqual(disposition['status']=='enforced',complete)
+            self.assertEqual(set(disposition['skipped_predicates']),{k for k,p in disposition['predicates'].items() if p['status']!='enforced'})
+
+    def test_offline_predicates_require_mechanical_absence_certificates(self):
+        m=self.extractor();contract=self.m.CONTRACT
+        for guard in contract['guards']:
+            for predicate in guard['predicates']:
+                disposition=self.m.GUARD_DISPOSITIONS[guard['id']]['predicates'][predicate['id']]
+                decision=m.predicate_decidability(predicate,contract)
+                self.assertEqual(disposition['decidability'],decision)
+                if disposition['status']=='unenforceable_offline':
+                    self.assertEqual(decision['status'],'absent_value')
+                    self.assertTrue(decision['absence_proofs'])
+                    for proof in decision['absence_proofs']:
+                        self.assertEqual(proof['serialization_paths'],[])
+        for expression in ('link.index == 0','link.hardware_type != hardware','created.peer_index.is_some()',
+                           'l.tun_info.len() > 64','s.st_mode & 0o7777 != 0o700'):
+            decision=m.predicate_decidability({'expression':expression},contract)
+            self.assertNotEqual(decision['status'],'absent_value',expression)
+
+    def test_direct_emitter_search_is_not_a_transitive_absence_proof(self):
+        m=self.extractor()
+        # A helper can carry the intrinsic to an emitter under another name.
+        # Until def-use/alias paths are proved, absence of the literal expression
+        # in json_builders is insufficient to label the predicate offline.
+        contract=dict(field_sources={},json_builders=[dict(file='x.rs',line=1,fields={'owner':'identity_helper()'})])
+        for expression in ('std::process::id() != creator','Rc::ptr_eq(&a, &b)','Instant::now() > end'):
+            self.assertNotEqual(m.predicate_decidability({'expression':expression},contract)['status'],'absent_value')
 
     def test_every_real_witness_leaf_through_validate(self):
         leaves = list(leaf_cases(self.witness))
@@ -362,23 +602,6 @@ fn validate(&self) -> Result<()> {
                 failures.extend(errors)
         print('leaf sweep:', len(leaves), 'leaves,', total, 'end-to-end mutations', flush=True)
         self.assertEqual(failures, [], 'false PASS leaf mutations: ' + repr(failures))
-
-    def test_round3_fifteen_reviewer_fixtures_through_validate(self):
-        names = (
-            'transport_creation_source_is_host transport_creation_source_is_data '
-            'transport_creation_source_foreign transport_creation_and_mount_foreign_source '
-            'transport_mount_source_foreign transport_creation_host_foreign '
-            'transport_creation_data_foreign transport_mount_directory_foreign '
-            'transport_mount_wrong_placeholder_mode wireguard_up_all_copies '
-            'wireguard_wrong_link_kind_all_copies moved_wireguard_name_substitution '
-            'moved_wireguard_alias_substitution moved_wireguard_key_substitution '
-            'moved_wireguard_peers_removed').split()
-        self.assertEqual(len(names), 15)
-        for name in names:
-            path = Path('/tmp/vprouter-witness-r3') / (name + '.json')
-            with self.subTest(fixture=name):
-                self.assertTrue(path.is_file(), 'required reviewer fixture missing')
-                self.assertEqual(self.m.validate(path)['verdict'], 'FAIL', name)
 
     def test_route_kind_uses_actual_u8_boundary_through_validate(self):
         path, value = next((p,v) for p,v in leaf_cases(self.witness)

@@ -13,6 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 LAUNCH = 'crates/vprouter-launch/src/'
@@ -1019,7 +1020,7 @@ PROJECTION_ENUMS = {'daemon_security': ('AppArmorBuiltinSeccomp', 'BuiltinSeccom
 
 def masked(text):
     """Preserve offsets/newlines while hiding comments and string contents."""
-    pattern = r'//[^\n]*|/\*[\s\S]*?\*/|r(#+)?"[\s\S]*?"\1|"(?:\\.|[^"\\])*"'
+    pattern = r'''//[^\n]*|/\*[\s\S]*?\*/|r(#+)?"[\s\S]*?"\1|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])' '''.strip()
     return re.sub(pattern, lambda m: ''.join('\n' if c == '\n' else ' ' for c in m[0]), text)
 
 
@@ -1096,6 +1097,352 @@ def source_files():
     return sorted(result)
 
 
+# This is a conservative lexical may-call graph, not a Rust type checker. All
+# same-named workspace implementations are followed (including trait impls),
+# and local function items are followed even when passed rather than invoked.
+# Unsupported calls fail generation. This cannot certify dynamic dispatch,
+# proc-macro expansions, cfg selection or compiler-resolved import identities.
+EXTERNAL_CALLS = {
+    'std': set('as_ref as_mut as_deref as_deref_mut clone cloned copied copy_from_slice len is_empty iter iter_mut into_iter enumerate zip chain collect map map_err and_then or_else ok_or ok_or_else unwrap unwrap_or unwrap_or_else unwrap_or_default expect is_ok is_err is_some is_none take replace insert remove push pop clear retain contains contains_key get get_mut entry or_insert or_default extend extend_from_slice sort sort_by sort_by_key dedup binary_search filter filter_map find any all count sum fold next last first flatten flat_map for_each repeat to_vec to_string to_owned as_str as_bytes bytes chars lines split split_once split_whitespace trim strip_prefix strip_suffix starts_with ends_with eq ne cmp min max checked_add checked_sub checked_mul saturating_add saturating_sub wrapping_add wrapping_mul checked_duration_since duration_since elapsed checked_add as_secs_f64 as_secs as_millis as_nanos from_secs from_millis from_secs_f64 now is_finite is_ascii is_ascii_alphanumeric is_ascii_lowercase is_ascii_digit is_absolute components display parent file_name join starts_with into_owned into_inner into_raw as_raw_fd as_fd from_raw_fd as_ptr as_mut_ptr addr port ip octets is_ipv4 is_ipv6 is_unspecified is_loopback is_multicast parse from_str from_le_bytes to_le_bytes from_ne_bytes to_ne_bytes from_be_bytes to_be_bytes to_bits from_bits try_from try_into into from default new with_capacity with_hasher resize resize_with truncate reserve swap swap_remove reverse write write_all write_fmt flush read read_to_end read_to_string read_exact seek metadata canonicalize open create create_new set_len sync_all sync_data set_permissions set_read_timeout set_write_timeout try_clone connect bind send send_to recv recv_from local_addr peer_addr shutdown spawn wait wait_with_output kill status output args arg env envs env_clear current_dir stdin stdout stderr id exit abort drop size_of align_of forget transmute replace zeroed ptr_eq downgrade upgrade strong_count weak_count borrow borrow_mut try_borrow try_borrow_mut set get_or_insert get_or_insert_with get_or_default close fcntl getpid getuid geteuid pipe fork socketpair panic unreachable todo unimplemented assert assert_eq assert_ne debug_assert debug_assert_eq debug_assert_ne format format_args vec matches eprintln println print write writeln include_str include_bytes concat stringify cfg option_env env file line column Some None Ok Err Self'.split()),
+    'rustix': set('fstat fstatfs stat statfs pread pwrite read write fcntl_getfl fcntl_getfd fcntl_setfd fcntl_setfl dup dup3 open openat openat2 mkdir mkdirat unlinkat renameat fsync flock fchmod fchown statx ioctl_fionread getsockopt socket socketpair recv recvmsg send sendmsg bind connect listen accept acceptfrom getsockname getpeername setns unshare mount umount2 pivot_root chroot setrlimit getrlimit setresuid setresgid setgroups getuid geteuid getgid getegid getpid getppid gettid kill waitpid waitid pipe_with fork execve exit_group prctl sigaction sigprocmask timerfd_create timerfd_settime poll epoll_create epoll_add epoll_del epoll_mod epoll_wait clock_gettime clock_getres'.split()),
+    'serde': set('serialize deserialize serialize_seq serialize_element serialize_field serialize_struct end deserialize_seq deserialize_any deserialize_map deserialize_struct next_element next_key next_value custom to_vec to_writer to_string from_slice from_str json'.split()),
+    'sha2': set('digest update finalize'.split()),
+}
+
+EXTERNAL_CALLS['std'].update('with is_some_and is_none_or as_slice ok borrow_raw from_utf8 ino raw_os_error dev is_ok_and transpose last_os_error not to_str revents null from_mut values position find_map skip map_or try_clone_to_owned write_str mode as_raw from_str_radix clearenv cast last_mut saturating_duration_since retain_mut from_raw uninit or null_mut args_os then_some sort_unstable fetch_add as_os_str push_str to_bytes remove_dir_all read_dir nth groups then temp_dir from_mode set_nonblocking try_from_secs_f64 windows is_private symlink_metadata read_link is_err_and remove_dir discriminant pointer_mut eq_ignore_ascii_case and is_zero inspect_err rsplit_once try_wait segments as_mut_slice keys rdev fchdir from_nanos to_string_lossy pop_front is_dir into_bytes chunks gid as_micros as_raw_nonzero split_at_mut from_ref cast_mut as_raw_pid is_ascii_hexdigit push_back headers fill with_extension front to_ascii_lowercase is_broadcast is_file try_fold map_or_else current_exe vars_os as_encoded_bytes once yield_now parse_chunk_size is_ascii_uppercase as_u16 sort_unstable_by_key from_iter fetch_update compare_exchange try_send try_lock create_dir_all is_ascii_graphic extension dedup_by sync_channel is_subset difference nlink is downcast_ref get_ref powi trim_end_matches subsec_nanos div_ceil from_fn is_multiple_of floor debug_struct finish_non_exhaustive from_utf8_lossy from_borrowed_fd from_ascii size_of_val take_error pointer try_exists values_mut cycle new_abstract_name chunks_exact_mut chunks_exact is_char_device file_type split_last len_utf8 encode_utf8 from_u32'.split())
+EXTERNAL_CALLS['rustix'].update('fcntl_dupfd_cloexec from_raw_mode statat intersects repr socket_with bits cmsg_space major minor eventfd socket_domain socket_type socket_protocol socket_peercred sendto recvfrom pidfd_open socket_error open_tree ioctl memfd_create renameat_with fstatvfs pause clock_gettime_dynamic makedev readlink getgroups pipe2 move_mount accept4 accept_with'.split())
+EXTERNAL_CALLS['serde'].update('duplicate_field missing_field as_array as_f64 as_u64 from_value as_bool to_value as_f64 is_f64 from_f64 to_vec_pretty as_i64 deserialize_string visit_borrowed_str is_boolean sort_all_objects serialize_u64 as_array_mut'.split())
+EXTERNAL_CALLS.update({
+ 'libc': set('syscall WIFEXITED WEXITSTATUS WIFSIGNALED WTERMSIG sigemptyset sigtimedwait sigaddset _exit chdir kill_process'.split()),
+ 'tokio': set('timeout new_current_thread block_on enable_io enable_time changed from_std interval_at set_missed_tick_behavior timeout_at peer_cred unix_stream into_std call process_id unix_user_id enable_all set_nodelay'.split()),
+ 'crypto': set('x25519 default_provider builder_with_provider with_safe_default_protocol_versions with_no_client_auth with_root_certificates generate der builder with_single_cert self_signed signed_by serialize_der'.split()),
+ 'netlink-packet': set('ScmRights V4 V6 NewLink InnerMessage SetLink GetLink IfName LinkInfo GetAddress GetRoute Inet NewAddress NewRoute PrivateKey NetNsFd Mtu Flags from_payload IfAlias emit_value GetRule PublicKey IfIndex read_from Ipv4 DelLink Broadcast CacheInfo FamilyName AfSpecUnspec Destination Oif PrefSource Gateway Priority Inet6 IpAddr Cidr PresharedKey PersistentKeepalive Fwmark set_resolved_family_id Domain NewRule SuppressPrefixLen move_into_link_name_space sender RoutePriority Label FamilyId PortKind PortData BridgePort Tun Bridge Controller Promiscuity AllMulticast PropList AltIfName ProtoDown Xdp Attached DevlinkPort DpllPin PermAddress ParentDevName ParentDevBusName Qdisc TxQueueLen OperState Group NumTxQueues NumRxQueues Carrier CarrierChanges CarrierUpCount CarrierDownCount GsoMaxSegs GsoMaxSize MinMtu MaxMtu GroMaxSize TsoMaxSize TsoMaxSegs GsoIpv4MaxSize GroIpv4MaxSize Stats Stats64 Map LinkNetNsId NetnsImmutable Preference NhId LastHandshake RxBytes TxBytes ProtocolVersion ListenPort read_u32 try_parse FwMark FwMask SuppressIfGroup Goto Realm add_query query Known AddrGenMode WireguardPeer WireguardAllowedIp NewIfIndex'.split()),
+ 'http-dns': set('A CNAME method uri send_request get_all body_mut is_trailers into_data max_headers max_buf_size handshake is_parse is_user is_incomplete_message is_canceled'.split()),
+ 'Rust attribute/pattern syntax': set('derive allow cfg_attr serde Normal Ca break'.split()),
+})
+
+EXTERNAL_CALLS['std'].update('trim_matches rename symlink hard_link'.split())
+EXTERNAL_CALLS['libc'].add('dup2')
+EXTERNAL_CALLS['serde'].add('next_entry')
+EXTERNAL_CALLS['netlink-packet'].add('value_len')
+EXTERNAL_CALLS['http-dns'].add('header')
+EXTERNAL_CALLS['memchr']={'memmem'}
+
+
+def validation_call_graph(texts, root_files, require_complete=True):
+    nodes, by_name = {}, {}
+    for file,text in sorted(texts.items()):
+        code=masked(text)
+        candidates=functions(text)
+        for m in re.finditer(r'\bmacro_rules!\s*(\w+)\s*\{',code):
+            candidates.append(dict(name=m[1],start=m.start(),body=m.end()-1,end=close_at(code,m.end()-1),signature='macro_rules! '+m[1]))
+        for f in candidates:
+            f['is_test']=any(a.strip()=='test' for a in attrs_before(text,f['start']))
+            identity=f'{file}:{text.count(chr(10),0,f["start"])+1}:{f["name"]}'
+            f=dict(f,id=identity,file=file)
+            nodes[identity]=f;by_name.setdefault(f['name'],[]).append(identity)
+    for text in texts.values():
+        for original,alias in re.findall(r'\b(\w+)\s+as\s+(\w+)',masked(text)):
+            if original in by_name:
+                by_name.setdefault(alias,[]).extend(by_name[original])
+    known_roots=set(by_name)
+    for manifest in (ROOT/'crates').glob('*/Cargo.toml'):
+        package=tomllib.loads(manifest.read_text())
+        for section in ('dependencies','dev-dependencies','build-dependencies'):
+            known_roots.update(name.replace('-','_') for name in package.get(section,{}))
+    known_roots.update(('Vec','String','Box','Option','Result','Default','char',
+                        'std','core','alloc','rustix','libc','serde','serde_json','sha2','tokio','Self',
+                        'u8','u16','u32','u64','usize','i8','i16','i32','i64','isize','f32','f64'))
+    for file,text in texts.items():
+        known_roots.update(re.findall(r'\b(?:struct|enum|type|mod|trait)\s+(\w+)',masked(text)))
+        known_roots.update(re.findall(r'\b([A-Z]\w*)\s*:(?!:)',masked(text)))
+        # Import aliases and grouped imports supply qualified roots. This is
+        # still lexical; receiver/type identity remains explicitly unproved.
+        for use in re.finditer(r'\buse\s+([^;]+);',masked(text)):
+            known_roots.update(re.findall(r'\b[A-Za-z_]\w*\b',use[1]))
+        for part in Path(file).parts:
+            if part.startswith('vprouter-'):known_roots.add(part.replace('-','_'))
+    roots=sorted(k for k,f in nodes.items() if f['file'] in root_files and not f.get('is_test'))
+    visited=set();todo=list(roots);edges=[];unresolved=[]
+    # All source constructors are resolved as syntax, never mistaken for helpers.
+    constructors=set()
+    for text in texts.values():
+        code=masked(text)
+        constructors.update(re.findall(r'\b(?:struct|enum|type)\s+(\w+)',code))
+        for enum in re.finditer(r'\benum\s+\w+\s*\{',code):
+            for item in split_top(code[enum.end():close_at(code,enum.end()-1)]):
+                variant=re.match(r'(?:#\[[^]]*\]\s*)*(\w+)',item)
+                if variant:constructors.add(variant[1])
+    while todo:
+        identity=todo.pop()
+        if identity in visited:continue
+        visited.add(identity);f=nodes[identity];text=texts[f['file']]
+        body=masked(text[f['body']+1:f['end']])
+        closures=set(re.findall(r'\blet\s+(?:mut\s+)?(\w+)\s*=\s*(?:move\s+)?\|',body))
+        closures.update(re.findall(r'\blet\s+Some\((\w+)\)\s*=',body))
+        parameters=set(re.findall(r'\b(\w+)\s*:\s*(?:impl\s+)?(?:Fn|F\b)',f['signature']))
+        local_calls=[]
+        for m in re.finditer(r'\b([A-Za-z_]\w*)\s*(?:(?:!\s*)|(?:::\s*<[^;{}]*?>\s*))?\(',body):
+            name=m[1]
+            if name in ('if','while','for','match','return','fn','let','loop','unsafe','extern'):continue
+            if re.search(r'\bfn\s*$',body[max(0,m.start()-5):m.start()]):continue
+            prefix=re.search(r'([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)::$',body[:m.start()])
+            qualified=prefix[1]+'::'+name if prefix else name
+            if prefix and prefix[1].split('::')[0] not in known_roots and not re.search(r'\b'+re.escape(prefix[1].split('::')[0])+r'\b',f['signature']):
+                local_calls.append((qualified,m.start()))
+            else:
+                local_calls.append((name,m.start()))
+        # Resolve higher-order function items and macro bodies as a conservative
+        # superset: lexical references to local functions become edges as well.
+        called={n for n,_ in local_calls}
+        for m in re.finditer(r'\b[A-Za-z_]\w*\b',body):
+            if m[0] in by_name and m[0] not in called:
+                local_calls.append((m[0],m.start()));called.add(m[0])
+        for name,offset in local_calls:
+            edge=dict(caller=identity,callee=name,line=text.count('\n',0,f['body']+1+offset)+1)
+            if name in closures or name in parameters:
+                edge.update(external='lexical closure/parameter',reason='Closure body is scanned in the containing function; generic Fn targets require compiler review.')
+            elif name in by_name:
+                edge['targets']=name;todo.extend(by_name[name])
+            elif name in constructors:
+                edge.update(external='Rust constructor syntax',reason='Value construction; not a function body. Enum/type identities are not compiler-resolved.')
+            else:
+                provider=next((p for p,names in EXTERNAL_CALLS.items() if name in names),None)
+                if provider:
+                    edge.update(external=provider,reason='Explicit external symbol inventory; body unavailable in workspace. Name-based resolution requires compiler review.')
+                else:
+                    unresolved.append(dict(edge));edge['unresolved']=True
+            edges.append(edge)
+    unique={}
+    for edge in edges:
+        key=(edge['caller'],edge['callee'])
+        if key not in unique:unique[key]=edge
+    edges=list(unique.values())
+    graph=dict(dependency_manifests={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((ROOT/'crates').glob('*/Cargo.toml'))},target_sets={name:sorted(ids) for name,ids in sorted(by_name.items()) if any(i in visited for i in ids)},kind='conservative lexical may-call graph; NOT compiler closure proof',roots=roots,
+               nodes=[{k:f[k] for k in ('id','name','file','signature')} for k,f in sorted(nodes.items()) if k in visited],
+               edges=sorted(edges,key=lambda e:(e['caller'],e['line'],e['callee'])),unresolved=unresolved,
+               limitations=['overloaded method and trait targets conservatively include all same-name implementations',
+                            'external calls resolved by explicit symbol name, not receiver type',
+                            'closures scanned lexically; generic Fn and dynamic dispatch not compiler-proven',
+                            'proc macros, cfg, include expansions and import alias identity require compiler review'])
+    if unresolved and require_complete:
+        raise ValueError('unresolved validation callees: '+repr(unresolved[:30]))
+    return graph
+
+
+def atomic_predicates(expression):
+    """Split boolean structure, retaining enclosing quantifier/polarity context.
+
+    A match, call or unsupported Rust expression remains a pending atom. This
+    is an inventory, not an evaluator or proof of semantic normal form.
+    """
+    result=[]
+    def walk(value,context):
+        value=value.strip();code=masked(value)
+        while code and code[0] in '({' and close_at(code,0)==len(code)-1:
+            value=value[1:-1].strip();code=masked(value)
+        depth=0;start=0;pieces=[];i=0
+        while i<len(code):
+            if code[i] in '([{':i=close_at(code,i)+1;continue
+            if code[i:i+2] in ('||','&&'):
+                pieces.append(value[start:i]);start=i+2;i+=2;continue
+            i+=1
+        if pieces:
+            pieces.append(value[start:])
+            for piece in pieces:walk(piece,context+[normalized(value)])
+            return
+        # Closures inside iter().any/all are predicates with a quantifier.
+        closure=re.search(r'\|(?:[^|]|\|\|)*?\|',code)
+        if closure:
+            # Find the first opening argument group containing the closure.
+            begins=[i for i,c in enumerate(code[:closure.start()]) if c=='(' and close_at(code,i)>=closure.end()]
+            if begins and re.search(r'\b(?:any|all|filter|find|position)\s*$',code[:begins[-1]]):
+                end=close_at(code,begins[-1]);inner=value[closure.end():end].strip()
+                if inner:
+                    walk(inner,context+[normalized(value)]);return
+        result.append(dict(expression=normalized(value),context=context))
+    try:
+        walk(expression,[])
+    except ValueError as error:
+        return [dict(expression=normalized(expression),context=[],syntax_unresolved=str(error))]
+    return result
+
+
+def serialization_index(contract):
+    """Public field paths and emitter expressions; no observed record consulted."""
+    result={}
+    for key in contract['field_sources']:
+        result.setdefault(key.rsplit('.',1)[-1],[]).append('field_sources:'+key)
+    for builder in contract['json_builders']:
+        for key,expression in builder['fields'].items():
+            result.setdefault(key,[]).append(f'json_builders:{builder["file"]}:{builder["line"]}:{key}')
+            for field in re.findall(r'\.\s*([A-Za-z_]\w*)\b(?!\s*\()',masked(expression)):
+                result.setdefault(field,[]).append(f'json_builders:{builder["file"]}:{builder["line"]}:{key}={expression}')
+    return {k:sorted(set(v)) for k,v in sorted(result.items())}
+
+
+# Reviewed necessary public projections only. These annotations are deliberately
+# not extrapolated to every field with the same spelling. Generic source-to-JSON
+# def-use analysis is still missing and therefore withholds the complete claim.
+SERIALIZED_PROJECTIONS = {'0df26af51ab07703279b': ['HostBaseline', 'Link'],
+ '174fc9cdeafd09c23620': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ '189fb825268a7848d90c': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ '18a6bd9f2eb7ac520c83': ['HostBaseline', 'Link'],
+ '1c84c14a78aaaf24a19b': ['Link'],
+ '1d7723d139a47fbc0689': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ '27dffc5cc205d5a9a2e3': ['ProducerBindingHistory', 'ProducerBindingResult'],
+ '281eb7f32266024621f1': ['HostBaseline', 'Link'],
+ '2b5996af901fc1d48d99': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ '49189111d51923f14cb3': ['HostBaseline'],
+ '4b967c4a190e596069f1': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ '4bb4e02af9996f098b46': ['Link'],
+ '5409a4644ddeeaa8d0e4': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ '58a37ac8bd9cba1d4b5e': ['HostBaseline', 'Link'],
+ '595abe5f1b2aceb3a46b': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ '5d782b5ab3f56cea23b6': ['HostBaseline', 'Link'],
+ '6203fb73943d6ed610b0': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ '6605a6920812640e8be8': ['HostBaseline', 'Link'],
+ '69f97ad4042afc0bfc8a': ['Link'],
+ '6aa0fdff0aac04f01d01': ['Link'],
+ '705b76140fbce87e8113': ['HostBaseline'],
+ '7181849b73f3ba2ab893': ['Link'],
+ '742acfbb590976810451': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ '80917945bf0b541fef17': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ '877c79dae70246045f06': ['HostBaseline', 'Link'],
+ '88f0d880b81419ef46e3': ['HostBaseline', 'Link'],
+ '8de1b1217bfc9647313b': ['Link'],
+ '8e86d38dcde823037621': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ '8eb5f21fcb51977b6207': ['Link'],
+ '9255b33211650f65d358': ['Link'],
+ '9a9b7fdc4f89724ef5b8': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ 'a33695bdf5772e1c6ea4': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ 'a715e3b6511ddca36e94': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ 'af93a4df5a610d2e4583': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ 'b68c92ed64dd276d2f9a': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ 'bc38d4da0d591e6ef705': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ 'bc6d5d798292ec5b6c99': ['ProducerBindingHistory', 'ProducerBindingResult'],
+ 'be7a10b85d65230129c7': ['Link'],
+ 'ca3f7cd71b82cc76e868': ['Link'],
+ 'cf14d0e17c320e6b0f3f': ['HostBaseline', 'Link'],
+ 'd1d06eaace8c847f7276': ['HostBaseline', 'Link'],
+ 'd29468d858334bbe5d28': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity'],
+ 'e05cb7ecffd20753a083': ['HostBaseline', 'Link'],
+ 'fac2e6ecbb9e75ba9efb': ['Link'],
+ 'fc6fafb473083b5c9ca3': ['WanDeclaration',
+                          'QuarantineHostDeclaration',
+                          'Allocation',
+                          'AllocationExit',
+                          'Identity']}
+
+def predicate_decidability(predicate,contract):
+    """Fail closed: missing mapping is UNKNOWN, never evidence of absence.
+
+    Live intrinsic searches produce candidates, never absence certificates. A field-name match
+    supplies candidate serialized paths, not a def-use/type equivalence proof.
+    All other expressions need manual/compiler lineage proof before disposition.
+    """
+    expression=predicate['expression'];code=masked(expression)
+    lineage=contract.get('predicate_lineage',{}).get(predicate.get('id'))
+    if lineage:
+        if not lineage['field_sources'] or any(key not in contract['field_sources'] for key in lineage['field_sources']):
+            raise ValueError('stale serialized predicate lineage: '+str(predicate.get('id')))
+        return dict(status='serialized_projection',absence_proofs=[],lineage=lineage)
+    index=contract.get('serialization_index') or serialization_index(contract)
+    fields=sorted(set(re.findall(r'\.\s*([A-Za-z_]\w*|\d+)\b(?!\s*\()',code)))
+    paths={f:index.get(f,[]) for f in fields}
+    proofs=[]
+    for pattern,value in ((r'\bstd::process::id\s*\(', 'std::process::id()'),
+                          (r'\b(?:Rc|Weak)::ptr_eq\s*\(', 'Rc/Weak pointer identity'),
+                          (r'\bInstant::now\s*\(', 'Instant::now()')):
+        if re.search(pattern,code):
+            # An emitter of the same intrinsic is insufficient to serialize the
+            # fresh operand at validation time. Keep that case unresolved.
+            emitters=[f'json_builders:{b["file"]}:{b["line"]}:{key}'
+                      for b in contract['json_builders'] for key,expr in b['fields'].items() if re.search(pattern,masked(expr))]
+            if not emitters:
+                proofs.append(dict(value=value,serialization_paths=[],
+                    search_domains=['field_sources','json_builders'],
+                    reason='Fresh live intrinsic result/pointer identity has no serialized operand; historical PID/time fields cannot supply it.'))
+    if proofs:
+        return dict(status='requires_lineage_proof',absence_proofs=[],absence_candidates=proofs,field_paths=paths,
+                    reason='Direct emitter search cannot exclude serialization through helper/alias paths.')
+    # These names are only candidates. E.g. self.index in an unrelated native
+    # struct is not automatically Link.index. Never equate them by spelling.
+    return dict(status='requires_lineage_proof',absence_proofs=[],field_paths=paths)
+
+
 def declarations(file, text):
     code = masked(text)
     result = []
@@ -1153,10 +1500,15 @@ def functions(text):
     for m in re.finditer(r'\bfn\s+(\w+)\s*(?:<[^;{]*?>)?\s*\(',code):
         args_start = code.index('(',m.start())
         args_end = close_at(code,args_start)
-        body_start = code.find('{',args_end)
-        semi = code.find(';',args_end)
-        if body_start < 0 or (semi >= 0 and semi < body_start):
+        cursor=args_end+1
+        while cursor < len(code) and code[cursor] not in '{;':
+            if code[cursor] in '([':
+                cursor=close_at(code,cursor)+1
+            else:
+                cursor+=1
+        if cursor == len(code) or code[cursor] == ';':
             continue
+        body_start=cursor
         result.append(dict(name=m[1],start=m.start(),body=body_start,end=close_at(code,body_start),
                            signature=normalized(text[m.start():body_start])))
     return result
@@ -1328,7 +1680,11 @@ ENUM_ROOTS = {
 
 
 def extract():
-    texts = {str(p.relative_to(ROOT)):p.read_text() for p in source_files()}
+    root_files={str(p.relative_to(ROOT)) for p in source_files()}
+    workspace_texts={str(p.relative_to(ROOT)):p.read_text() for p in (ROOT/'crates').rglob('*.rs')}
+    graph=validation_call_graph(workspace_texts,root_files)
+    reached_files=root_files | {node['file'] for node in graph['nodes']}
+    texts={file:workspace_texts[file] for file in sorted(reached_files)}
     decls = [d for file,text in texts.items() for d in declarations(file,text)]
     by_id = {d['id']:d for d in decls}
     schemas = json.loads(json.dumps(SUCCESS_ADAPTERS))
@@ -1466,7 +1822,7 @@ def extract():
     public_profile = {k:v for k,v in re.findall(r'(PublicKey|Endpoint|AllowedIPs)=([^\n]+)',profile)}
     import base64
     public_profile['PublicKey'] = list(base64.b64decode(public_profile['PublicKey'],validate=True))
-    return dict(schema=1,profile='run410 Bootstrap fault0 completed retained continuation',
+    contract = dict(schema=2,call_graph=graph,coverage_complete=False,profile='run410 Bootstrap fault0 completed retained continuation',
                 target_pointer_width=64,
                 success_rules={'allocation_hash_seed':int(re.search(r'\.fold\((0x[0-9a-f]+)',texts['crates/vprouter-core/src/allocation.rs'])[1],16),
                                'allocation_hash_prime':int(re.search(r'wrapping_mul\((0x[0-9a-f]+)',texts['crates/vprouter-core/src/allocation.rs'])[1],16),
@@ -1493,6 +1849,23 @@ def extract():
                          'mac6':schemas['WanDeclaration']['address'],
                          'ip_prefix':schemas['WireguardPeer']['allowed_ips'][5:-1]},
                 guards=sorted(guards,key=lambda g:(g['file'],g['line'],g['id'])))
+    contract['predicate_lineage']={identity:dict(schemas=schemas,
+        field_sources=sorted(key for key in field_sources if key.split('.')[0] in schemas),
+        proof_scope='Reviewed necessary public projection under enclosing guard/quantifier context; not a general def-use proof.')
+        for identity,schemas in SERIALIZED_PROJECTIONS.items()}
+    contract['serialization_index']=serialization_index(contract)
+    for guard in contract['guards']:
+        guard['predicates']=[]
+        for i,atom in enumerate(atomic_predicates(guard['expression'])):
+            atom['id']=hashlib.sha256((guard['id']+':'+str(i)+':'+atom['expression']).encode()).hexdigest()[:20]
+            guard['predicates'].append(atom)
+    contract['inventory_limits'] = [
+        'Lexical may-call closure is not compiler-resolved closure; external receiver types and dispatch are unproved.',
+        'Guard inventory supports selected early-error/assert/match syntaxes; arbitrary Rust control/data flow is not normalized.',
+        'Generic/tuple structs, inline-module identities, serde rename/flatten/discriminants, const-symbol arrays and proc macros require compiler review.',
+        'Serialization field spelling and builder expressions are candidate lineage, not an equivalence proof.',
+        'No pending predicate is claimed enforced or unenforceable_offline; full validation cannot PASS while pending exists.']
+    return contract
 
 
 def main():

@@ -1224,3 +1224,11 @@ secret-bootstrap-selector-archive-run-411.json). Guest preservation delegated.
 state renamed to /DATA/vprouter-lab/preserved/run411-guest (sealed 0400/0500, 135 hashes,
 verifier PASS; two tested fixes to the preserve tool: aarch64 PSCI serial ending, resume
 reference = QEMU exit instant). 409 tree 91/91. No guest running. Continuation complete.
+
+2026-11-07 witness validator round 6 (GPT delegate, started before the user switched agents
+to OpenCode DeepSeek v4.1 flash max): per-predicate dispositions, call-graph closure; 5,699
+guards / 10,714 predicates: 45 enforced, 10,669 pending, 0 certified offline; real record
+24/24 with full_bootstrap_witness_validation=INCOMPLETE (r6 receipt). Review r6 (DeepSeek):
+PASS = honest about what it checks; I15-I18 closed; Minor M6-M10. Controller fixed M7
+(stale lineage IDs refused, RED/GREEN test), M8 wording, M10 RECEIPT-INDEX.json marking
+r1-r5 superseded. Full suite + run410 suites green. Still PARTIAL coverage, not acceptance.

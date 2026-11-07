@@ -1818,7 +1818,9 @@
         "member_cpu_system",
         "host_charge",
         "domain_user_delta",
-        "domain_system_delta"
+        "domain_system_delta",
+        "outside_cpu_snapshot",
+        "snapshot_host_accounted"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -2394,15 +2396,7 @@
       "parent_total": null,
       "path": "/runtime_evidence/monitoring/health/*/observations/*/time",
       "physical_upper_bound": "exact receipt binding/window/cadence/timer/projection equations in original adapter",
-      "relation_checks": [
-        "snapshot_process_usage",
-        "snapshot_process_user",
-        "snapshot_process_system",
-        "process_lifetime",
-        "member_cpu_usage",
-        "member_cpu_user",
-        "member_cpu_system"
-      ],
+      "relation_checks": [],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
       "source": {
@@ -3996,27 +3990,7 @@
       "path": "/runtime_evidence/throughput_bytes_per_second/bytes",
       "physical_upper_bound": "exact receipt binding/window/cadence/timer/projection equations in original adapter",
       "relation_checks": [
-        "sum_pss_bytes",
-        "sum_uss_bytes",
-        "sum_charges",
-        "swap_host",
-        "swap_pss",
-        "swap_charges",
-        "uss_pss",
-        "pss_rss",
-        "rss_ram",
-        "swap_order",
-        "memory_parts",
-        "memory_charge",
-        "native_sock",
-        "io_read",
-        "io_read_delta",
-        "io_write",
-        "io_write_delta",
-        "io_discard",
-        "io_discard_delta",
-        "network_rx",
-        "network_tx"
+        "network_payload"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4126,27 +4100,7 @@
       "path": "/runtime_evidence/throughput_intervals/*/bytes",
       "physical_upper_bound": "exact receipt binding/window/cadence/timer/projection equations in original adapter",
       "relation_checks": [
-        "sum_pss_bytes",
-        "sum_uss_bytes",
-        "sum_charges",
-        "swap_host",
-        "swap_pss",
-        "swap_charges",
-        "uss_pss",
-        "pss_rss",
-        "rss_ram",
-        "swap_order",
-        "memory_parts",
-        "memory_charge",
-        "native_sock",
-        "io_read",
-        "io_read_delta",
-        "io_write",
-        "io_write_delta",
-        "io_discard",
-        "io_discard_delta",
-        "network_rx",
-        "network_tx"
+        "network_payload"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4174,16 +4128,7 @@
       "parent_total": null,
       "path": "/runtime_evidence/throughput_intervals/*/end_ns",
       "physical_upper_bound": "exact receipt binding/window/cadence/timer/projection equations in original adapter",
-      "relation_checks": [
-        "host_clock",
-        "host_boot",
-        "process_start",
-        "process_lifetime",
-        "domain_boot",
-        "domain_capacity",
-        "network_rx",
-        "network_tx"
-      ],
+      "relation_checks": [],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
       "source": {
@@ -4296,7 +4241,10 @@
         "domain_boot",
         "member_cpu_usage",
         "host_charge",
-        "domain_capacity"
+        "domain_capacity",
+        "snapshot_host_accounted",
+        "exited_usage_snapshot",
+        "counter_samples_domains_cpu_usage_usec"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4326,9 +4274,10 @@
       "relation_checks": [
         "snapshot_domain_user",
         "domain_parts",
-        "exited_parts",
         "member_cpu_user",
-        "domain_user_delta"
+        "domain_user_delta",
+        "exited_user_snapshot",
+        "counter_samples_domains_cpu_user_usec"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [
@@ -4361,9 +4310,10 @@
       "relation_checks": [
         "snapshot_domain_system",
         "domain_parts",
-        "exited_parts",
         "member_cpu_system",
-        "domain_system_delta"
+        "domain_system_delta",
+        "exited_system_snapshot",
+        "counter_samples_domains_cpu_system_usec"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [
@@ -4395,7 +4345,8 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "native_throttled_periods",
-        "native_throttled_period_deltas"
+        "native_throttled_period_deltas",
+        "counter_samples_domains_cpu_nr_periods"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4424,7 +4375,9 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "native_throttled_periods",
-        "native_throttled_period_deltas"
+        "native_throttled_period_deltas",
+        "counter_samples_domains_cpu_nr_throttled",
+        "native_throttle_time_count"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [
@@ -4454,7 +4407,10 @@
       "parent_total": null,
       "path": "/samples/*/domains/*/cpu/throttled_usec",
       "physical_upper_bound": "host boot/lifetime capacity and host cumulative class subsets where attribution exists",
-      "relation_checks": [],
+      "relation_checks": [
+        "counter_samples_domains_cpu_throttled_usec",
+        "native_throttle_time_count"
+      ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
       "source": {
@@ -4482,7 +4438,9 @@
       "physical_upper_bound": "host boot/lifetime capacity and host cumulative class subsets where attribution exists",
       "relation_checks": [
         "exited_parts",
-        "member_cpu_system"
+        "member_cpu_system",
+        "exited_system_snapshot",
+        "counter_samples_domains_cpu_exited_system_usec"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4511,7 +4469,9 @@
       "physical_upper_bound": "host boot/lifetime capacity and host cumulative class subsets where attribution exists",
       "relation_checks": [
         "exited_parts",
-        "member_cpu_usage"
+        "member_cpu_usage",
+        "exited_usage_snapshot",
+        "counter_samples_domains_cpu_exited_usec"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4540,7 +4500,9 @@
       "physical_upper_bound": "host boot/lifetime capacity and host cumulative class subsets where attribution exists",
       "relation_checks": [
         "exited_parts",
-        "member_cpu_user"
+        "member_cpu_user",
+        "exited_user_snapshot",
+        "counter_samples_domains_cpu_exited_user_usec"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4569,7 +4531,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_discard",
-        "io_discard_delta"
+        "io_discard_delta",
+        "counter_samples_domains_io_dbytes",
+        "counter_samples_domains_io_other_dbytes",
+        "counter_samples_processes_io_dbytes"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4598,7 +4563,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_discard",
-        "io_discard_delta"
+        "io_discard_delta",
+        "counter_samples_domains_io_dios",
+        "counter_samples_domains_io_other_dios",
+        "counter_samples_processes_io_dios"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4627,7 +4595,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_read",
-        "io_read_delta"
+        "io_read_delta",
+        "counter_samples_domains_io_rbytes",
+        "counter_samples_domains_io_other_rbytes",
+        "counter_samples_processes_io_rbytes"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4656,7 +4627,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_read",
-        "io_read_delta"
+        "io_read_delta",
+        "counter_samples_domains_io_rios",
+        "counter_samples_domains_io_other_rios",
+        "counter_samples_processes_io_rios"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4685,7 +4659,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_write",
-        "io_write_delta"
+        "io_write_delta",
+        "counter_samples_domains_io_wbytes",
+        "counter_samples_domains_io_other_wbytes",
+        "counter_samples_processes_io_wbytes"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4714,7 +4691,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_write",
-        "io_write_delta"
+        "io_write_delta",
+        "counter_samples_domains_io_wios",
+        "counter_samples_domains_io_other_wios",
+        "counter_samples_processes_io_wios"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4743,7 +4723,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_discard",
-        "io_discard_delta"
+        "io_discard_delta",
+        "counter_samples_domains_io_dbytes",
+        "counter_samples_domains_io_other_dbytes",
+        "counter_samples_processes_io_dbytes"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4772,7 +4755,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_discard",
-        "io_discard_delta"
+        "io_discard_delta",
+        "counter_samples_domains_io_dios",
+        "counter_samples_domains_io_other_dios",
+        "counter_samples_processes_io_dios"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4801,7 +4787,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_read",
-        "io_read_delta"
+        "io_read_delta",
+        "counter_samples_domains_io_rbytes",
+        "counter_samples_domains_io_other_rbytes",
+        "counter_samples_processes_io_rbytes"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4830,7 +4819,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_read",
-        "io_read_delta"
+        "io_read_delta",
+        "counter_samples_domains_io_rios",
+        "counter_samples_domains_io_other_rios",
+        "counter_samples_processes_io_rios"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4859,7 +4851,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_write",
-        "io_write_delta"
+        "io_write_delta",
+        "counter_samples_domains_io_wbytes",
+        "counter_samples_domains_io_other_wbytes",
+        "counter_samples_processes_io_wbytes"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4888,7 +4883,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_write",
-        "io_write_delta"
+        "io_write_delta",
+        "counter_samples_domains_io_wios",
+        "counter_samples_domains_io_other_wios",
+        "counter_samples_processes_io_wios"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -4972,7 +4970,9 @@
       "parent_total": null,
       "path": "/samples/*/domains/*/memory_events/low",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
-      "relation_checks": [],
+      "relation_checks": [
+        "counter_samples_domains_memory_events_low"
+      ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
       "source": {
@@ -4998,7 +4998,9 @@
       "parent_total": null,
       "path": "/samples/*/domains/*/memory_events/high",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
-      "relation_checks": [],
+      "relation_checks": [
+        "counter_samples_domains_memory_events_high"
+      ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
       "source": {
@@ -5025,10 +5027,7 @@
       "path": "/samples/*/domains/*/memory_events/max",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
-        "sum_threads",
-        "fd_limit",
-        "pid_limit",
-        "thread_limit"
+        "counter_samples_domains_memory_events_max"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -5055,7 +5054,9 @@
       "parent_total": null,
       "path": "/samples/*/domains/*/memory_events/oom",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
-      "relation_checks": [],
+      "relation_checks": [
+        "counter_samples_domains_memory_events_oom"
+      ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
       "source": {
@@ -5081,7 +5082,10 @@
       "parent_total": null,
       "path": "/samples/*/domains/*/memory_events/oom_kill",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
-      "relation_checks": [],
+      "relation_checks": [
+        "counter_samples_domains_memory_events_oom_kill",
+        "native_group_kill_oom_kill"
+      ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
       "source": {
@@ -5107,7 +5111,10 @@
       "parent_total": null,
       "path": "/samples/*/domains/*/memory_events/oom_group_kill",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
-      "relation_checks": [],
+      "relation_checks": [
+        "counter_samples_domains_memory_events_oom_group_kill",
+        "native_group_kill_oom_kill"
+      ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
       "source": {
@@ -5241,7 +5248,8 @@
         "native_percpu",
         "native_vmalloc",
         "native_slab",
-        "native_kernel_components"
+        "native_kernel_components",
+        "socket_container"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [
@@ -5274,7 +5282,8 @@
       "path": "/samples/*/domains/*/memory_stat/sock",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
-        "native_sock"
+        "native_sock",
+        "socket_container"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -5460,7 +5469,6 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "native_pagetables",
-        "native_sec_pagetables",
         "native_kernel_components"
       ],
       "rust_width": "u64 recorded representation",
@@ -5783,7 +5791,8 @@
       "path": "/samples/*/domains/*/memory_stat_other_bytes",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
-        "memory_parts"
+        "memory_parts",
+        "socket_container"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -5872,7 +5881,10 @@
         "host_parts",
         "snapshot_domain_cpu",
         "snapshot_process_usage",
-        "host_charge"
+        "host_charge",
+        "outside_cpu_snapshot",
+        "snapshot_host_accounted",
+        "counter_samples_host_busy_ticks"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -5929,7 +5941,8 @@
       "path": "/samples/*/host/irq_ticks",
       "physical_upper_bound": "host boot/lifetime capacity and host cumulative class subsets where attribution exists",
       "relation_checks": [
-        "host_parts"
+        "host_parts",
+        "counter_samples_host_irq_ticks"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [
@@ -5963,7 +5976,9 @@
       "path": "/samples/*/host/network_rx_bytes",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
-        "network_rx"
+        "network_rx",
+        "counter_samples_host_network_rx_bytes",
+        "network_payload"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -5991,7 +6006,9 @@
       "path": "/samples/*/host/network_tx_bytes",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
-        "network_tx"
+        "network_tx",
+        "counter_samples_host_network_tx_bytes",
+        "network_payload"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6019,7 +6036,10 @@
       "path": "/samples/*/host/other_cpu_usec",
       "physical_upper_bound": "host boot/lifetime capacity and host cumulative class subsets where attribution exists",
       "relation_checks": [
-        "host_charge"
+        "host_charge",
+        "outside_cpu_snapshot",
+        "snapshot_host_accounted",
+        "counter_samples_host_other_cpu_usec"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6047,7 +6067,8 @@
       "path": "/samples/*/host/softirq_ticks",
       "physical_upper_bound": "host boot/lifetime capacity and host cumulative class subsets where attribution exists",
       "relation_checks": [
-        "host_parts"
+        "host_parts",
+        "counter_samples_host_softirq_ticks"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [
@@ -6081,7 +6102,8 @@
       "path": "/samples/*/host/steal_ticks",
       "physical_upper_bound": "host boot/lifetime capacity and host cumulative class subsets where attribution exists",
       "relation_checks": [
-        "host_parts"
+        "host_parts",
+        "counter_samples_host_steal_ticks"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [
@@ -6114,7 +6136,9 @@
       "parent_total": null,
       "path": "/samples/*/host/swap_in_pages",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
-      "relation_checks": [],
+      "relation_checks": [
+        "counter_samples_host_swap_in_pages"
+      ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
       "source": {
@@ -6140,7 +6164,9 @@
       "parent_total": null,
       "path": "/samples/*/host/swap_out_pages",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
-      "relation_checks": [],
+      "relation_checks": [
+        "counter_samples_host_swap_out_pages"
+      ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
       "source": {
@@ -6200,7 +6226,8 @@
         "host_parts",
         "snapshot_domain_system",
         "snapshot_process_system",
-        "domain_system_delta"
+        "domain_system_delta",
+        "counter_samples_host_system_ticks"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [
@@ -6289,7 +6316,8 @@
         "host_parts",
         "snapshot_domain_user",
         "snapshot_process_user",
-        "domain_user_delta"
+        "domain_user_delta",
+        "counter_samples_host_user_ticks"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [
@@ -6342,7 +6370,7 @@
       "checks": [
         "quantity:samples.*.processes.*.fds"
       ],
-      "kernel_width": "u64 normalized original producer value; platform semantics require review",
+      "kernel_width": "count of distinct nonnegative signed-int descriptor numbers, cardinality <= INT_MAX+1",
       "kind": "gauge",
       "maximum": 18446744073709551615,
       "minimum": 0,
@@ -6352,9 +6380,10 @@
       "object_alternative": false,
       "parent_total": null,
       "path": "/samples/*/processes/*/fds",
-      "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
+      "physical_upper_bound": "native descriptor namespace cardinality <= 2**31, plus reviewed max_fd_entries; shared file descriptions are not distinct entries",
       "relation_checks": [
-        "fd_limit"
+        "fd_limit",
+        "fd_native_universe"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6383,7 +6412,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_discard",
-        "io_discard_delta"
+        "io_discard_delta",
+        "counter_samples_domains_io_dbytes",
+        "counter_samples_domains_io_other_dbytes",
+        "counter_samples_processes_io_dbytes"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6412,7 +6444,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_discard",
-        "io_discard_delta"
+        "io_discard_delta",
+        "counter_samples_domains_io_dios",
+        "counter_samples_domains_io_other_dios",
+        "counter_samples_processes_io_dios"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6441,7 +6476,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_read",
-        "io_read_delta"
+        "io_read_delta",
+        "counter_samples_domains_io_rbytes",
+        "counter_samples_domains_io_other_rbytes",
+        "counter_samples_processes_io_rbytes"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6470,7 +6508,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_read",
-        "io_read_delta"
+        "io_read_delta",
+        "counter_samples_domains_io_rios",
+        "counter_samples_domains_io_other_rios",
+        "counter_samples_processes_io_rios"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6499,7 +6540,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_write",
-        "io_write_delta"
+        "io_write_delta",
+        "counter_samples_domains_io_wbytes",
+        "counter_samples_domains_io_other_wbytes",
+        "counter_samples_processes_io_wbytes"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6528,7 +6572,10 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "io_write",
-        "io_write_delta"
+        "io_write_delta",
+        "counter_samples_domains_io_wios",
+        "counter_samples_domains_io_other_wios",
+        "counter_samples_processes_io_wios"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6556,10 +6603,7 @@
       "path": "/samples/*/processes/*/pid",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
-        "sum_threads",
-        "pid_limit",
-        "thread_limit",
-        "pids"
+        "pid_limit"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6575,7 +6619,7 @@
       "checks": [
         "quantity:samples.*.processes.*.pss_bytes"
       ],
-      "kernel_width": "unsigned long 64-bit kB, checked multiply by 1024 into u64",
+      "kernel_width": "unsigned long 64-bit integer kB, checked multiply by 1024 into u64; normalized quantum 1024 bytes",
       "kind": "gauge",
       "maximum": 18446744073709551615,
       "minimum": 0,
@@ -6588,10 +6632,9 @@
       "physical_upper_bound": "MemTotal (or SwapTotal for swap), plus declared subset/partition equations",
       "relation_checks": [
         "sum_pss_bytes",
-        "swap_pss",
         "uss_pss",
         "pss_rss",
-        "swap_order"
+        "smaps_pss_quantum"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6607,7 +6650,7 @@
       "checks": [
         "quantity:samples.*.processes.*.rss_bytes"
       ],
-      "kernel_width": "unsigned long 64-bit kB, checked multiply by 1024 into u64",
+      "kernel_width": "unsigned long 64-bit integer kB, checked multiply by 1024 into u64; normalized quantum 1024 bytes",
       "kind": "gauge",
       "maximum": 18446744073709551615,
       "minimum": 0,
@@ -6620,7 +6663,8 @@
       "physical_upper_bound": "MemTotal (or SwapTotal for swap), plus declared subset/partition equations",
       "relation_checks": [
         "pss_rss",
-        "rss_ram"
+        "rss_ram",
+        "smaps_rss_quantum"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6681,7 +6725,8 @@
         "snapshot_process_system",
         "process_lifetime",
         "member_cpu_usage",
-        "member_cpu_system"
+        "member_cpu_system",
+        "counter_samples_processes_stime_ticks"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6697,7 +6742,7 @@
       "checks": [
         "quantity:samples.*.processes.*.swap_bytes"
       ],
-      "kernel_width": "unsigned long 64-bit kB, checked multiply by 1024 into u64",
+      "kernel_width": "unsigned long 64-bit integer kB, checked multiply by 1024 into u64; normalized quantum 1024 bytes",
       "kind": "gauge",
       "maximum": 18446744073709551615,
       "minimum": 0,
@@ -6709,7 +6754,8 @@
       "path": "/samples/*/processes/*/swap_bytes",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
-        "swap_order"
+        "swap_order",
+        "smaps_swap_quantum"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6725,7 +6771,7 @@
       "checks": [
         "quantity:samples.*.processes.*.swap_pss_bytes"
       ],
-      "kernel_width": "unsigned long 64-bit kB, checked multiply by 1024 into u64",
+      "kernel_width": "unsigned long 64-bit integer kB, checked multiply by 1024 into u64; normalized quantum 1024 bytes",
       "kind": "gauge",
       "maximum": 18446744073709551615,
       "minimum": 0,
@@ -6738,7 +6784,8 @@
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
         "swap_pss",
-        "swap_order"
+        "swap_order",
+        "smaps_swap_pss_quantum"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6784,7 +6831,7 @@
       "checks": [
         "quantity:samples.*.processes.*.uss_bytes"
       ],
-      "kernel_width": "unsigned long 64-bit kB, checked multiply by 1024 into u64",
+      "kernel_width": "unsigned long 64-bit integer kB, checked multiply by 1024 into u64; normalized quantum 1024 bytes",
       "kind": "gauge",
       "maximum": 18446744073709551615,
       "minimum": 0,
@@ -6798,7 +6845,8 @@
       "relation_checks": [
         "sum_uss_bytes",
         "uss_pss",
-        "memory_charge"
+        "memory_charge",
+        "smaps_uss_quantum"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6830,7 +6878,8 @@
         "snapshot_process_user",
         "process_lifetime",
         "member_cpu_usage",
-        "member_cpu_user"
+        "member_cpu_user",
+        "counter_samples_processes_utime_ticks"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -6857,7 +6906,9 @@
       "parent_total": null,
       "path": "/samples/*/processes/*/wakeups",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
-      "relation_checks": [],
+      "relation_checks": [
+        "counter_samples_processes_wakeups"
+      ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
       "source": {
@@ -6997,27 +7048,7 @@
       "path": "/traffic/bytes",
       "physical_upper_bound": "declared integer domain; no universal tighter physical bound",
       "relation_checks": [
-        "sum_pss_bytes",
-        "sum_uss_bytes",
-        "sum_charges",
-        "swap_host",
-        "swap_pss",
-        "swap_charges",
-        "uss_pss",
-        "pss_rss",
-        "rss_ram",
-        "swap_order",
-        "memory_parts",
-        "memory_charge",
-        "native_sock",
-        "io_read",
-        "io_read_delta",
-        "io_write",
-        "io_write_delta",
-        "io_discard",
-        "io_discard_delta",
-        "network_rx",
-        "network_tx"
+        "network_payload"
       ],
       "rust_width": "u64 recorded representation",
       "sibling_set": [],
@@ -7161,6 +7192,7 @@
   ],
   "relations": [
     {
+      "catalog_identity": "host_clock",
       "children": [
         [
           "delta",
@@ -7281,6 +7313,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "host_boot",
       "children": [
         [
           "add",
@@ -7334,6 +7367,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "host_parts",
       "children": [
         "c.user_ticks",
         "c.system_ticks",
@@ -7353,6 +7387,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "snapshot_domain_cpu",
       "children": [
         [
           "sum",
@@ -7413,6 +7448,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "snapshot_process_usage",
       "children": [
         [
           "add",
@@ -7461,6 +7497,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "snapshot_domain_user",
       "children": [
         [
           "sum",
@@ -7521,6 +7558,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "snapshot_process_user",
       "children": [
         [
           "sum",
@@ -7561,6 +7599,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "snapshot_domain_system",
       "children": [
         [
           "sum",
@@ -7621,6 +7660,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "snapshot_process_system",
       "children": [
         [
           "sum",
@@ -7661,6 +7701,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "sum_pss_bytes",
       "children": [
         [
           "sum",
@@ -7680,6 +7721,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "sum_uss_bytes",
       "children": [
         [
           "sum",
@@ -7699,6 +7741,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "sum_charges",
       "children": [
         [
           "sum",
@@ -7718,6 +7761,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "sum_threads",
       "children": [
         [
           "sum",
@@ -7737,6 +7781,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "swap_host",
       "children": [
         "c.swap_used_bytes"
       ],
@@ -7752,6 +7797,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "swap_pss",
       "children": [
         [
           "sum",
@@ -7771,6 +7817,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "swap_charges",
       "children": [
         [
           "sum",
@@ -7790,6 +7837,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "uss_pss",
       "children": [
         "p.uss_bytes"
       ],
@@ -7805,6 +7853,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "pss_rss",
       "children": [
         "p.pss_bytes"
       ],
@@ -7820,6 +7869,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "rss_ram",
       "children": [
         "p.rss_bytes"
       ],
@@ -7835,6 +7885,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "swap_order",
       "children": [
         "p.swap_pss_bytes"
       ],
@@ -7850,6 +7901,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "fd_limit",
       "children": [
         "p.fds"
       ],
@@ -7865,6 +7917,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "pid_limit",
       "children": [
         "p.pid"
       ],
@@ -7880,6 +7933,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "thread_limit",
       "children": [
         "p.threads"
       ],
@@ -7895,6 +7949,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "process_start",
       "children": [
         "p.start_ticks"
       ],
@@ -7926,6 +7981,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "process_lifetime",
       "children": [
         [
           "add",
@@ -7993,6 +8049,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "domain_parts",
       "children": [
         "d.cpu.user_usec",
         "d.cpu.system_usec"
@@ -8009,6 +8066,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "exited_parts",
       "children": [
         "d.cpu_exited_user_usec",
         "d.cpu_exited_system_usec"
@@ -8025,6 +8083,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "memory_parts",
       "children": [
         "d.memory_stat.anon",
         "d.memory_stat.file",
@@ -8043,6 +8102,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "memory_charge",
       "children": [
         [
           "sum",
@@ -8063,6 +8123,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "pids",
       "children": [
         [
           "sum",
@@ -8082,6 +8143,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "domain_boot",
       "children": [
         "d.cpu.usage_usec"
       ],
@@ -8113,6 +8175,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "native_sock",
       "children": [
         "d.memory_stat.sock"
       ],
@@ -8128,6 +8191,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "native_shmem",
       "children": [
         "d.memory_stat.shmem"
       ],
@@ -8145,6 +8209,7 @@
       ]
     },
     {
+      "catalog_identity": "native_anon_thp",
       "children": [
         "d.memory_stat.anon_thp"
       ],
@@ -8162,6 +8227,7 @@
       ]
     },
     {
+      "catalog_identity": "native_file_thp",
       "children": [
         "d.memory_stat.file_thp"
       ],
@@ -8179,6 +8245,7 @@
       ]
     },
     {
+      "catalog_identity": "native_shmem_thp",
       "children": [
         "d.memory_stat.shmem_thp"
       ],
@@ -8196,6 +8263,7 @@
       ]
     },
     {
+      "catalog_identity": "native_kernel_stack",
       "children": [
         "d.memory_stat.kernel_stack"
       ],
@@ -8213,6 +8281,7 @@
       ]
     },
     {
+      "catalog_identity": "native_pagetables",
       "children": [
         "d.memory_stat.pagetables"
       ],
@@ -8230,6 +8299,7 @@
       ]
     },
     {
+      "catalog_identity": "native_sec_pagetables",
       "children": [
         "d.memory_stat.sec_pagetables"
       ],
@@ -8247,6 +8317,7 @@
       ]
     },
     {
+      "catalog_identity": "native_percpu",
       "children": [
         "d.memory_stat.percpu"
       ],
@@ -8264,6 +8335,7 @@
       ]
     },
     {
+      "catalog_identity": "native_vmalloc",
       "children": [
         "d.memory_stat.vmalloc"
       ],
@@ -8281,6 +8353,7 @@
       ]
     },
     {
+      "catalog_identity": "native_slab",
       "children": [
         "d.memory_stat.slab"
       ],
@@ -8298,6 +8371,7 @@
       ]
     },
     {
+      "catalog_identity": "native_slab_reclaimable",
       "children": [
         "d.memory_stat.slab_reclaimable"
       ],
@@ -8315,6 +8389,7 @@
       ]
     },
     {
+      "catalog_identity": "native_slab_unreclaimable",
       "children": [
         "d.memory_stat.slab_unreclaimable"
       ],
@@ -8332,6 +8407,7 @@
       ]
     },
     {
+      "catalog_identity": "native_file_mapped",
       "children": [
         "d.memory_stat.file_mapped"
       ],
@@ -8349,6 +8425,7 @@
       ]
     },
     {
+      "catalog_identity": "native_file_dirty",
       "children": [
         "d.memory_stat.file_dirty"
       ],
@@ -8366,6 +8443,7 @@
       ]
     },
     {
+      "catalog_identity": "native_file_writeback",
       "children": [
         "d.memory_stat.file_writeback"
       ],
@@ -8383,6 +8461,7 @@
       ]
     },
     {
+      "catalog_identity": "native_slab_subset",
       "children": [
         [
           "present_sum",
@@ -8407,6 +8486,7 @@
       ]
     },
     {
+      "catalog_identity": "native_slab_parts",
       "children": [
         "d.memory_stat.slab_reclaimable",
         "d.memory_stat.slab_unreclaimable"
@@ -8427,6 +8507,7 @@
       ]
     },
     {
+      "catalog_identity": "native_kernel_components",
       "children": [
         [
           "present_sum",
@@ -8453,6 +8534,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "native_throttled_periods",
       "children": [
         "d.cpu.nr_throttled"
       ],
@@ -8479,6 +8561,7 @@
       ]
     },
     {
+      "catalog_identity": "native_throttled_period_deltas",
       "children": [
         [
           "delta",
@@ -8506,6 +8589,7 @@
       ]
     },
     {
+      "catalog_identity": "io_read",
       "children": [
         "io.rios"
       ],
@@ -8530,6 +8614,7 @@
       ]
     },
     {
+      "catalog_identity": "io_read_delta",
       "children": [
         [
           "delta",
@@ -8560,6 +8645,7 @@
       ]
     },
     {
+      "catalog_identity": "io_write",
       "children": [
         "io.wios"
       ],
@@ -8584,6 +8670,7 @@
       ]
     },
     {
+      "catalog_identity": "io_write_delta",
       "children": [
         [
           "delta",
@@ -8614,6 +8701,7 @@
       ]
     },
     {
+      "catalog_identity": "io_discard",
       "children": [
         "io.dios"
       ],
@@ -8638,6 +8726,7 @@
       ]
     },
     {
+      "catalog_identity": "io_discard_delta",
       "children": [
         [
           "delta",
@@ -8668,6 +8757,7 @@
       ]
     },
     {
+      "catalog_identity": "member_cpu_usage",
       "children": [
         [
           "div",
@@ -8802,6 +8892,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "member_cpu_user",
       "children": [
         [
           "div",
@@ -8928,6 +9019,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "member_cpu_system",
       "children": [
         [
           "div",
@@ -9054,6 +9146,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "host_charge",
       "children": [
         [
           "sub",
@@ -9185,6 +9278,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "domain_user_delta",
       "children": [
         [
           "sub",
@@ -9280,6 +9374,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "domain_system_delta",
       "children": [
         [
           "sub",
@@ -9375,6 +9470,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "domain_capacity",
       "children": [
         [
           "delta",
@@ -9431,6 +9527,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "network_rx",
       "children": [
         [
           "delta",
@@ -9487,6 +9584,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "network_tx",
       "children": [
         [
           "delta",
@@ -9543,6 +9641,7 @@
       "when_present": []
     },
     {
+      "catalog_identity": "io_conservation",
       "children": [
         [
           "delta",
@@ -9590,6 +9689,760 @@
       "scope": "device_interval",
       "upper_tolerance": 0,
       "when_present": []
+    },
+    {
+      "catalog_identity": "outside_cpu_snapshot",
+      "children": [
+        "c.other_cpu_usec"
+      ],
+      "derivation": "nonnegative cumulative residual/subset, aligned source epochs",
+      "id": "outside_cpu_snapshot",
+      "lower_tolerance": [
+        "div",
+        [
+          "mul",
+          "c.busy_ticks",
+          1000000
+        ],
+        "h.tick_hz"
+      ],
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "partition",
+      "parent": [
+        "div",
+        [
+          "mul",
+          "c.busy_ticks",
+          1000000
+        ],
+        "h.tick_hz"
+      ],
+      "presence_pairs": [],
+      "scope": "sample",
+      "upper_tolerance": [
+        "add",
+        [
+          "div",
+          [
+            "mul",
+            12,
+            "h.logical_cpus",
+            1000000
+          ],
+          "h.tick_hz"
+        ],
+        [
+          "div",
+          [
+            "mul",
+            [
+              "sub",
+              "s.read_end_ns",
+              "s.mono_ns"
+            ],
+            "h.logical_cpus"
+          ],
+          1000
+        ]
+      ],
+      "when_present": []
+    },
+    {
+      "catalog_identity": "snapshot_host_accounted",
+      "children": [
+        [
+          "add",
+          [
+            "sum",
+            "groups",
+            "item.cpu.usage_usec"
+          ],
+          "c.other_cpu_usec"
+        ]
+      ],
+      "derivation": "nonnegative cumulative residual/subset, aligned source epochs",
+      "id": "snapshot_host_accounted",
+      "lower_tolerance": [
+        "add",
+        [
+          "div",
+          [
+            "mul",
+            12,
+            "h.logical_cpus",
+            1000000
+          ],
+          "h.tick_hz"
+        ],
+        [
+          "div",
+          [
+            "mul",
+            [
+              "sub",
+              "s.read_end_ns",
+              "s.mono_ns"
+            ],
+            "h.logical_cpus"
+          ],
+          1000
+        ]
+      ],
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "partition",
+      "parent": [
+        "div",
+        [
+          "mul",
+          "c.busy_ticks",
+          1000000
+        ],
+        "h.tick_hz"
+      ],
+      "presence_pairs": [],
+      "scope": "sample",
+      "upper_tolerance": [
+        "add",
+        [
+          "div",
+          [
+            "mul",
+            12,
+            "h.logical_cpus",
+            1000000
+          ],
+          "h.tick_hz"
+        ],
+        [
+          "div",
+          [
+            "mul",
+            [
+              "sub",
+              "s.read_end_ns",
+              "s.mono_ns"
+            ],
+            "h.logical_cpus"
+          ],
+          1000
+        ]
+      ],
+      "when_present": []
+    },
+    {
+      "catalog_identity": "exited_usage_snapshot",
+      "children": [
+        "d.cpu_exited_usec"
+      ],
+      "derivation": "nonnegative cumulative residual/subset, aligned source epochs",
+      "id": "exited_usage_snapshot",
+      "lower_tolerance": "d.cpu.usage_usec",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "partition",
+      "parent": "d.cpu.usage_usec",
+      "presence_pairs": [],
+      "scope": "domain",
+      "upper_tolerance": 2,
+      "when_present": []
+    },
+    {
+      "catalog_identity": "exited_user_snapshot",
+      "children": [
+        "d.cpu_exited_user_usec"
+      ],
+      "derivation": "nonnegative cumulative residual/subset, aligned source epochs",
+      "id": "exited_user_snapshot",
+      "lower_tolerance": "d.cpu.user_usec",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "partition",
+      "parent": "d.cpu.user_usec",
+      "presence_pairs": [],
+      "scope": "domain",
+      "upper_tolerance": 2,
+      "when_present": []
+    },
+    {
+      "catalog_identity": "exited_system_snapshot",
+      "children": [
+        "d.cpu_exited_system_usec"
+      ],
+      "derivation": "nonnegative cumulative residual/subset, aligned source epochs",
+      "id": "exited_system_snapshot",
+      "lower_tolerance": "d.cpu.system_usec",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "partition",
+      "parent": "d.cpu.system_usec",
+      "presence_pairs": [],
+      "scope": "domain",
+      "upper_tolerance": 2,
+      "when_present": []
+    },
+    {
+      "catalog_identity": "io_residual_snapshot",
+      "children": [
+        "io_residual"
+      ],
+      "derivation": "nonnegative cumulative residual/subset, aligned source epochs",
+      "id": "io_residual_snapshot",
+      "lower_tolerance": "io_parent",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "partition",
+      "parent": "io_parent",
+      "presence_pairs": [],
+      "scope": "device",
+      "upper_tolerance": 0,
+      "when_present": []
+    },
+    {
+      "catalog_identity": "socket_container",
+      "children": [
+        "d.memory_stat.sock"
+      ],
+      "derivation": "nonnegative cumulative residual/subset, aligned source epochs",
+      "id": "socket_container",
+      "lower_tolerance": [
+        "add",
+        "d.memory_stat.kernel",
+        "d.memory_stat_other_bytes"
+      ],
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "partition",
+      "parent": [
+        "add",
+        "d.memory_stat.kernel",
+        "d.memory_stat_other_bytes"
+      ],
+      "presence_pairs": [],
+      "scope": "domain",
+      "upper_tolerance": 0,
+      "when_present": []
+    },
+    {
+      "catalog_identity": "fd_native_universe",
+      "children": [
+        "p.fds"
+      ],
+      "derivation": "nonnegative cumulative residual/subset, aligned source epochs",
+      "id": "fd_native_universe",
+      "lower_tolerance": 2147483648,
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "partition",
+      "parent": 2147483648,
+      "presence_pairs": [],
+      "scope": "process",
+      "upper_tolerance": 0,
+      "when_present": []
+    },
+    {
+      "catalog_identity": "smaps_pss_quantum",
+      "children": [
+        1024
+      ],
+      "derivation": "native integer kB converted exactly by 1024; USS is sum of integer kB private fields",
+      "id": "smaps_pss_quantum",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "multiple",
+      "parent": "p.pss_bytes",
+      "presence_pairs": [],
+      "scope": "process",
+      "when_present": []
+    },
+    {
+      "catalog_identity": "smaps_rss_quantum",
+      "children": [
+        1024
+      ],
+      "derivation": "native integer kB converted exactly by 1024; USS is sum of integer kB private fields",
+      "id": "smaps_rss_quantum",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "multiple",
+      "parent": "p.rss_bytes",
+      "presence_pairs": [],
+      "scope": "process",
+      "when_present": []
+    },
+    {
+      "catalog_identity": "smaps_uss_quantum",
+      "children": [
+        1024
+      ],
+      "derivation": "native integer kB converted exactly by 1024; USS is sum of integer kB private fields",
+      "id": "smaps_uss_quantum",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "multiple",
+      "parent": "p.uss_bytes",
+      "presence_pairs": [],
+      "scope": "process",
+      "when_present": []
+    },
+    {
+      "catalog_identity": "smaps_swap_quantum",
+      "children": [
+        1024
+      ],
+      "derivation": "native integer kB converted exactly by 1024; USS is sum of integer kB private fields",
+      "id": "smaps_swap_quantum",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "multiple",
+      "parent": "p.swap_bytes",
+      "presence_pairs": [],
+      "scope": "process",
+      "when_present": []
+    },
+    {
+      "catalog_identity": "smaps_swap_pss_quantum",
+      "children": [
+        1024
+      ],
+      "derivation": "native integer kB converted exactly by 1024; USS is sum of integer kB private fields",
+      "id": "smaps_swap_pss_quantum",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "multiple",
+      "parent": "p.swap_pss_bytes",
+      "presence_pairs": [],
+      "scope": "process",
+      "when_present": []
+    },
+    {
+      "catalog_identity": "counter_samples_domains_memory_events_low",
+      "id": "counter_samples_domains_memory_events_low",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/memory_events/low",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_memory_events_high",
+      "id": "counter_samples_domains_memory_events_high",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/memory_events/high",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_memory_events_max",
+      "id": "counter_samples_domains_memory_events_max",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/memory_events/max",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_memory_events_oom",
+      "id": "counter_samples_domains_memory_events_oom",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/memory_events/oom",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_memory_events_oom_kill",
+      "id": "counter_samples_domains_memory_events_oom_kill",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/memory_events/oom_kill",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_memory_events_oom_group_kill",
+      "id": "counter_samples_domains_memory_events_oom_group_kill",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/memory_events/oom_group_kill",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_cpu_usage_usec",
+      "id": "counter_samples_domains_cpu_usage_usec",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/cpu/usage_usec",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_cpu_user_usec",
+      "id": "counter_samples_domains_cpu_user_usec",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/cpu/user_usec",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_cpu_system_usec",
+      "id": "counter_samples_domains_cpu_system_usec",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/cpu/system_usec",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_cpu_nr_periods",
+      "id": "counter_samples_domains_cpu_nr_periods",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/cpu/nr_periods",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_cpu_nr_throttled",
+      "id": "counter_samples_domains_cpu_nr_throttled",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/cpu/nr_throttled",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_cpu_throttled_usec",
+      "id": "counter_samples_domains_cpu_throttled_usec",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/cpu/throttled_usec",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_cpu_exited_usec",
+      "id": "counter_samples_domains_cpu_exited_usec",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/cpu_exited_usec",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_cpu_exited_user_usec",
+      "id": "counter_samples_domains_cpu_exited_user_usec",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/cpu_exited_user_usec",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_cpu_exited_system_usec",
+      "id": "counter_samples_domains_cpu_exited_system_usec",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/cpu_exited_system_usec",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_host_other_cpu_usec",
+      "id": "counter_samples_host_other_cpu_usec",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/host/other_cpu_usec",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_processes_utime_ticks",
+      "id": "counter_samples_processes_utime_ticks",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/processes/*/utime_ticks",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_processes_stime_ticks",
+      "id": "counter_samples_processes_stime_ticks",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/processes/*/stime_ticks",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_processes_wakeups",
+      "id": "counter_samples_processes_wakeups",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/processes/*/wakeups",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_rbytes",
+      "id": "counter_samples_domains_io_rbytes",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io/*/rbytes",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_wbytes",
+      "id": "counter_samples_domains_io_wbytes",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io/*/wbytes",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_rios",
+      "id": "counter_samples_domains_io_rios",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io/*/rios",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_wios",
+      "id": "counter_samples_domains_io_wios",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io/*/wios",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_dbytes",
+      "id": "counter_samples_domains_io_dbytes",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io/*/dbytes",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_dios",
+      "id": "counter_samples_domains_io_dios",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io/*/dios",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_other_rbytes",
+      "id": "counter_samples_domains_io_other_rbytes",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io_other/*/rbytes",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_other_wbytes",
+      "id": "counter_samples_domains_io_other_wbytes",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io_other/*/wbytes",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_other_rios",
+      "id": "counter_samples_domains_io_other_rios",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io_other/*/rios",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_other_wios",
+      "id": "counter_samples_domains_io_other_wios",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io_other/*/wios",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_other_dbytes",
+      "id": "counter_samples_domains_io_other_dbytes",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io_other/*/dbytes",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_domains_io_other_dios",
+      "id": "counter_samples_domains_io_other_dios",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/domains/*/io_other/*/dios",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_processes_io_rbytes",
+      "id": "counter_samples_processes_io_rbytes",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/processes/*/io/*/rbytes",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_processes_io_wbytes",
+      "id": "counter_samples_processes_io_wbytes",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/processes/*/io/*/wbytes",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_processes_io_rios",
+      "id": "counter_samples_processes_io_rios",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/processes/*/io/*/rios",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_processes_io_wios",
+      "id": "counter_samples_processes_io_wios",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/processes/*/io/*/wios",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_processes_io_dbytes",
+      "id": "counter_samples_processes_io_dbytes",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/processes/*/io/*/dbytes",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_processes_io_dios",
+      "id": "counter_samples_processes_io_dios",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/processes/*/io/*/dios",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_host_network_rx_bytes",
+      "id": "counter_samples_host_network_rx_bytes",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/host/network_rx_bytes",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_host_network_tx_bytes",
+      "id": "counter_samples_host_network_tx_bytes",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/host/network_tx_bytes",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "network_payload",
+      "children": [
+        "run.traffic.bytes"
+      ],
+      "derivation": "reviewed complete physical-link observation contains delivered payload",
+      "id": "network_payload",
+      "lower_tolerance": [
+        "add",
+        [
+          "delta",
+          "c.network_rx_bytes"
+        ],
+        [
+          "delta",
+          "c.network_tx_bytes"
+        ]
+      ],
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "partition",
+      "parent": [
+        "add",
+        [
+          "delta",
+          "c.network_rx_bytes"
+        ],
+        [
+          "delta",
+          "c.network_tx_bytes"
+        ]
+      ],
+      "presence_pairs": [],
+      "scope": "measured_interval",
+      "upper_tolerance": 0,
+      "when_present": []
+    },
+    {
+      "catalog_identity": "counter_samples_host_busy_ticks",
+      "id": "counter_samples_host_busy_ticks",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/host/busy_ticks",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_host_user_ticks",
+      "id": "counter_samples_host_user_ticks",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/host/user_ticks",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_host_system_ticks",
+      "id": "counter_samples_host_system_ticks",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/host/system_ticks",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_host_irq_ticks",
+      "id": "counter_samples_host_irq_ticks",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/host/irq_ticks",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_host_softirq_ticks",
+      "id": "counter_samples_host_softirq_ticks",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/host/softirq_ticks",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_host_steal_ticks",
+      "id": "counter_samples_host_steal_ticks",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/host/steal_ticks",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_host_swap_in_pages",
+      "id": "counter_samples_host_swap_in_pages",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/host/swap_in_pages",
+      "scope": "quantity"
+    },
+    {
+      "catalog_identity": "counter_samples_host_swap_out_pages",
+      "id": "counter_samples_host_swap_out_pages",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "monotonic",
+      "path": "/samples/*/host/swap_out_pages",
+      "scope": "quantity"
+    },
+    {
+      "antecedent": "d.cpu.throttled_usec",
+      "catalog_identity": "native_throttle_time_count",
+      "consequent": "d.cpu.nr_throttled",
+      "derivation": "one-way duration-to-period containment: accumulated throttle time implies at least one throttled interval; no converse, rate, or per-period duration bound",
+      "id": "native_throttle_time_count",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "implies_positive",
+      "presence_pairs": [],
+      "presence_rule": "positive_antecedent_requires_present_positive_consequent",
+      "scope": "domain_tail"
+    },
+    {
+      "catalog_identity": "native_group_kill_oom_kill",
+      "children": [
+        "d.memory_events.oom_group_kill"
+      ],
+      "derivation": "one-way containment of group OOM kill events by killed-process count under the documented nonempty-victim assumption; not an ordered partition",
+      "id": "native_group_kill_oom_kill",
+      "mutation_test": "QuantityModelTests.test_relation_boundaries_and_consumer_mutations",
+      "operator": "containment",
+      "parent": "d.memory_events.oom_kill",
+      "presence_pairs": [],
+      "scope": "domain",
+      "when_present": [
+        "d.memory_events.oom_kill",
+        "d.memory_events.oom_group_kill"
+      ]
     }
   ],
   "schema": 1

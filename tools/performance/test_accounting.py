@@ -771,7 +771,9 @@ class ReviewAdditionalPairs(unittest.TestCase):
                             self.assertEqual(a.evaluate_metrics(bs['metrics'],cs['metrics'],1)['gates'][gate],want)
                     count+=1
             for exits,target in [(1,16*MIB),(5,48*MIB)]:
-                for delta in (-1,0,1):
+                # Raw smaps PSS comes in integer kB. Direct metric API tests
+                # above retain the abstract one-byte threshold boundaries.
+                for delta in (-1024,0,1024):
                     run=reconciled_record();value=target+delta
                     for s in run['samples']:s['processes'][0].update(pss_bytes=value,rss_bytes=value)
                     rebind_review(run);summary=a.summarize(run)

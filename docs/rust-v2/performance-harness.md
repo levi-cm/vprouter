@@ -69,7 +69,8 @@ is stable, including when run arguments are reversed.
 
 `tools/performance/run-schema.json` provides the structural schema;
 `accounting.summarize` is the normative semantic validator. All named object
-fields are required; unknown fields fail except extensible native counter maps.
+fields are required; unknown fields fail. Native maps support only the closed,
+explicitly modeled optional fields.
 Unknown measurements are explicit nulls and make the run insufficient; an omitted
 field is invalid. Every raw integer is unsigned and <=2^64-1 unless a tighter bound
 is specified. Booleans are not integers. Memory is bytes, ticks are raw cumulative
@@ -112,8 +113,8 @@ USS is private clean+dirty; nonzero hugetlb is unsupported and refused because
 Linux excludes it from Rss/Pss. Duplicate/unknown smaps keys, duplicate native map
 keys/devices/PIDs/fds, missing required counters, malformed units and integer
 overflow (including aggregate overflow), reversed smaps address ranges, stopped/terminal
-process states and unknown host metadata fail. Unknown cgroup statistic names are retained as unsigned native
-counters, never relabeled as bytes. Memory.stat byte gauges may decrease; event
+process states and unknown host metadata fail. The standalone cgroup text parser retains unsigned native fields; qualification
+refuses every native field whose semantics are outside the closed model. Memory.stat byte gauges may decrease; event
 counters and every CPU/I/O/wakeup counter may not reset or regress. The parser
 understands a 32-bit tick bound, but acceptance requires 64-bit ticks: wrap or
 ambiguous width is rejected, never repaired by adding 2^32. Wakeups are specifically
@@ -193,8 +194,8 @@ At each aligned observation, `pids_current` equals member thread counts (Linux
 pids.current counts tasks, not just leader PIDs), and cgroup membership equals
 recorded leader PIDs. Under the required reviewed private-charge/isolated policy,
 member USS plus `memory_other_bytes` equals memory.current; anon+file+kernel plus
-`memory_stat_other_bytes` also equals memory.current. Sock is checked against the
-charge ceiling. Its charge belongs either in the reviewed kernel total or in the
+`memory_stat_other_bytes` also equals memory.current. Sock is checked against both the charge ceiling and kernel plus the measured
+residual outside anon/file/kernel. Its charge belongs either in the reviewed kernel total or in the
 measured residual and must never be added twice. Per-process RSS and
 the sum of disjoint domain charges, aggregate PSS and aggregate USS cannot exceed
 host RAM. RSS/PSS are never
@@ -222,8 +223,8 @@ allowance, and cumulative cgroup CPU by boot time times CPUs. This fixed host
 contract excludes CPU hotplug since boot unless a conservative CPU ceiling can
 be established independently. These checks do not authenticate host history.
 
-The executable `INVARIANT_REGISTRY` in `accounting.py` names every physical
-equation family, enforcement function, refusal code/status and raw mutation test.
+The legacy `INVARIANT_REGISTRY` in `accounting.py` names its original physical
+equation families, enforcement function, refusal code/status and raw mutation test.
 The Review round 2 implementation report contains the corresponding table.
 Each entry must have live constraints and signed raw boundary tests; removing a
 row, its constraints, test binding, or verdict enforcement fails completeness or
@@ -231,11 +232,17 @@ mutation checks. All contradictions return INSUFFICIENT_DATA; a performance gate
 can separately FAIL, and insufficient evidence takes precedence.
 
 The draft now also requires host `link_capacity_bps`, `max_fd_entries` (a reviewed
-upper bound on FD entries per process, not file descriptions), and inclusive
-`pid_max` (maximum allowed PID and host task population). FD/thread counts are
-gauges and may decrease; process wakeups are monotonic counters without an
-invented per-second maximum. Member thread sums equal cgroup pids.current and
-the aggregate task population cannot exceed the host ceiling. Summed FD entries
+upper bound on FD entries per process, not file descriptions), and `pid_max`.
+The source is `/proc/sys/kernel/pid_max`, the PID wrap value, which is one
+greater than the maximum PID. The current manifest contract conservatively
+treats the declared value as an inclusive PID/task ceiling, so `pid == pid_max`
+and `threads == pid_max` are one-unit looser than the native wrap; this known
+residual is disclosed rather than promoted as an exact native bound. A future
+producer should declare the maximum PID (`pid_max-1`) or explicitly define the
+normalization. FD/thread counts are gauges and may decrease; process wakeups
+are monotonic counters without an invented per-second maximum. Member thread
+sums equal cgroup pids.current and the aggregate task population cannot exceed
+the host ceiling. Summed FD entries
 are not compared to file-nr because inherited/duplicated entries share file
 descriptions. Physical-link `network_rx_bytes`/`network_tx_bytes` counters are
 monotonic and individually bounded by full-duplex capacity times the outer
@@ -269,12 +276,18 @@ rates, bounds and gates remain integer/Fraction arithmetic.
 
 All measured domains and all nine failure roles are mandatory. OOM deltas from
 all declared cgroups, including `oom_group_kill`, are retained over the entire
-recording before warm-up discard. Kernel log and per-role memory events, restarts,
-monitor misses and missing samples are also mandatory. Positive counts anywhere
-prevent PASS, including observer/workload failures; raw service/traffic and
-all-domain counts are combined conservatively by maximum, never subtracted or
-claimed as an exact deduplicated kill count. A schema declaration does not prove
-that omitted or hidden events were collected. That remains a producer review gate.
+recording before warm-up discard. In addition, every declared cgroup's absolute
+`memory.events.oom`, `oom_kill` and `oom_group_kill` must be zero at the first
+acquisition sample; a constant pre-existing nonzero baseline is
+`oom_baseline_contaminated` and cannot PASS. Equality to the first sample is
+never treated as a zero baseline. The absolute first-sample count is also
+retained in the reported OOM metric. Kernel log and per-role memory events,
+restarts, monitor misses and missing samples are also mandatory absolute-zero
+gates. Positive counts anywhere prevent PASS, including observer/workload
+failures; raw service/traffic and all-domain counts are combined conservatively
+by maximum, never subtracted or claimed as an exact deduplicated kill count. A
+schema declaration does not prove that omitted or hidden events were collected.
+That remains a producer review gate.
 
 ## Accounting and statistical method
 
@@ -430,7 +443,7 @@ explicitly unavailable. No actual baseline/candidate numbers, measured improveme
 threshold satisfaction, optimization, canary, runtime/ARM/client or release
 acceptance are delivered by this preparation.
 
-## Recorded-quantity model (review round 3)
+## Recorded-quantity model (review round 3; catalog revision below)
 
 This is still **offline preparation**, pending independent re-review. The real
 Python/Rust runs, producer qualification and release gates are **NOT_RUN**;
@@ -514,3 +527,178 @@ PERFORMANCE_OFFLINE_NO_NETWORK=1 python3 -B -I -m unittest discover -s tools/per
 
 Only the socket loopback self-test is skipped and must be reported **NOT_RUN**.
 `TMPDIR` may point at an owned private directory if the system tmpfs is full.
+
+
+## Kernel identity catalog (review round 6)
+
+This revision remains **PARTIAL / offline preparation pending independent
+re-review**. It cannot qualify a real run yet. Real Python/Rust performance,
+producer/runtime/client/ARM/migration/soak and release checks remain **NOT_RUN**;
+`release_ready=false`. No performance claim follows from these constructed tests.
+Round 6 removes the invalid `oom_group_kill <= oom` identity after a kernel
+semantics audit, retains the valid one-way throttle and nonempty-victim OOM-kill
+containment identities, and extends the counter-pair audit to sibling counters
+of one partition. The explicit co-located counter-pair decision table and the
+absolute event-baseline gate remain.
+
+[`kernel-identities.json`](../../tools/performance/kernel-identities.json) is the
+source of the model's accounting relations. It was authored from knowledge of
+Linux `Documentation/admin-guide/cgroup-v2.rst`,
+`Documentation/filesystems/proc.rst` and man proc(5), with a supplemental
+getrlimit(2) allocation-limit citation. No documentation was fetched, and the
+citation text is identified as a paraphrase, not a verified quotation or a
+qualification of a particular running kernel. Each identity records its source
+section/text, quantities, assumptions, mathematical statement and executable
+check templates. Native Linux facts are distinguished from this harness's
+stricter aligned observation, attribution and positive-data-I/O contracts.
+
+`kernel_identities.py` selects identities whose quantities occur in the schema;
+`build_quantity_model.py` derives their relation templates from the catalog. It
+contains no handwritten relation list. `quantity_model.py` audits the checked-in
+model against the catalog at import and refuses if provenance/templates are
+inconsistent. Every generated relation cites exactly one catalog identity.
+The audit detects omitted checks, invented or altered templates, unknown
+citations, duplicate IDs and any newly recordable catalog identity that lacks
+an implementation. Schema availability never invents a kernel equation.
+
+There are **139 catalog identities**, **131 available/generated relations**,
+**eight explicitly unavailable source identities**, **247 numeric model
+positions**, and an explicit **159-pair co-located counter audit**. Optional
+numeric source fields count as available schema quantities; their predicates
+expand only where the source is present, with stable key sets. There are two
+exceptions. (1) The one-way presence rule of `implies_positive`: a positive
+antecedent requires a present positive consequent, while an absent antecedent
+is vacuous. (2) Symmetric `presence_pairs` (e.g. `native_throttled_periods`
+over `nr_periods`/`nr_throttled`): those fields must be recorded together or
+not at all, so a one-sided record is refused (deliberate fail-closed
+over-refusal, review R7-M4). The catalog is
+independently reviewable source data, not a proof that no other Linux identity
+exists. The witness table is authored independently of its expressions; a
+missing identity cannot be justified by a predicate count.
+
+Two surviving one-way identities close native containments that are not
+partitions and have no safe converse:
+
+| Identity | Source semantics | Generated check |
+| --- | --- | --- |
+| `native_throttle_time_count` | `cpu.stat`: `nr_throttled` counts throttled intervals; `throttled_usec` is total throttled duration. Accumulated duration cannot exist without a throttled interval. | `throttled_usec > 0 => nr_throttled > 0` at every domain sample **after the first acquisition sample**; `nr_throttled` must be present when the antecedent is positive. No converse, rate or per-period bound. |
+| `native_group_kill_oom_kill` | A group OOM kill kills the cgroup's processes; under the documented nonempty-victim assumption at least one process is killed. | `oom_group_kill <= oom_kill`; one-way containment. |
+
+A single `cpu.stat` read is not a cross-field atomic snapshot, so the first
+sample may catch an update between fields. The throttle implication therefore
+exempts exactly the first sample and is required at every later sample; a
+contradiction sustained across later samples is not a read-ordering artifact.
+A later single-sample tear is therefore deliberately over-refused: the policy
+does not attempt to infer read ordering beyond the documented first-sample
+exemption. Presence is also one-way: `throttled_usec > 0` with `nr_throttled`
+absent is refused, while `nr_throttled > 0` with `throttled_usec` absent is a
+valid half-space because the converse is not asserted. The report records both
+reproduced round-5 variants (constant and increasing `throttled_usec` with zero
+`nr_throttled`) as before/after evidence. No
+`nr_throttled > 0 => throttled_usec > 0` converse is asserted.
+
+For `memory.events`, `oom` counts the number of times the cgroup's memory usage
+reached the limit and the allocation was about to fail (a single event, not per
+process); it is not an OOM-kill count. `oom_kill` counts processes belonging to
+the cgroup killed by any kind of OOM killer. `oom_group_kill` counts the number
+of times the OOM killer killed all processes belonging to the cgroup
+(`memory.oom.group=1`). A system-wide OOM can select this cgroup and kill its
+whole group without this cgroup's own memory limit being reached, so
+`oom_group_kill` can increase while `oom` stays zero. Round 6 therefore removed
+the earlier `oom_group_kill <= oom` identity; that pair is an explicit
+`no_native_relation`. The surviving `oom_group_kill <= oom_kill` containment is
+not an ordered partition; `oom_kill <= oom`, `oom <= oom_kill`,
+`oom_group_kill <= oom` and their converses are explicitly **not** asserted.
+The `memory.events` containments are evaluated at every sample with **no**
+read-order exemption. A one-sample `oom_group_kill`/`oom_kill` tear would be
+refused; this over-refusal is accepted because the independent absolute-zero OOM
+policy already prevents any nonzero OOM event from PASSing.
+
+`counter_sources` and `counter_pairs` in the catalog record every pair of
+recorded monotonic counters co-located in one native source object: `cpu.stat`
+(15), domain exited CPU (3), `memory.events` (15), each IO tuple location
+(15+15+15), host counters (78) and process counters (3). Of the **159** pairs,
+**35** cite the identity whose operands relate them and **124** are explicit
+`no_native_relation` entries with a source-semantic reason (for example
+independent read/write/discard IO streams, full-duplex RX/TX, independent
+swap-in/swap-out, no fixed CPU-time↔throttle-event ratio, or `oom` versus
+`oom_group_kill` under a system-wide OOM). The import-time catalog audit
+requires exactly one decision per pair, no extraneous pair, and no
+caller-visible gap. It also catches a covered pair (parent/child,
+antecedent/consequent, or two siblings under one partition/containment)
+relabelled as `no_native_relation`; two operands combined inside a single child
+expression are not siblings for this audit. Cross-source pairs are outside this
+table by construction: they are not two observations of one counter object, and
+no native ordering is claimed for them.
+
+| Source family | Accounting interpretation / limit |
+| --- | --- |
+| `/proc/stat` | busy = user+nice (guest included) + system + IRQ + softirq + steal; idle folds native idle+iowait. Guest must not be counted again. Native iowait is unreliable and may decrease; its independent value is absent. The model requires normalized idle not to regress, so the producer must smooth/reclassify iowait before normalization or the run is refused; this is an over-refusal limit, not evidence that native idle is monotonic. The strict accepted normalized CPU clock requires the reviewed online/no-suspend contract. |
+| `/proc/PID/stat`, `cpu.stat` | utime includes guest; cutime/cstime are waited-child CPU and must not be added to live children again. Only utime/stime are recorded. User+system approximately partitions usage after native microsecond truncation. `nr_throttled <= nr_periods`; `throttled_usec > 0` implies `nr_throttled > 0` after the first acquisition sample, and a positive antecedent requires the consequent to be present. The converse (`nr_throttled > 0 => throttled_usec > 0`), symmetric presence and any throttle rate/per-period bound are not asserted. Do not equate a process lifetime with its current cgroup lifetime. |
+| Original cumulative CPU residuals | Outside CPU shares the host boot attribution origin. Host busy = disjoint domains + outside, within the endpoint bound, and outside <= host busy. Exited usage/user/system share the containing cgroup attribution origin and are individually <= its corresponding totals (2 us truncation bound). Exited user+system = usage. All residual counters must be monotonic. |
+| `memory.current`, `memory.stat` | Under the reviewed aligned partition, other = current-anon-file-kernel; other is nonnegative and <= current. Private-charge residual = current-sum(member USS), under separately reviewed ownership. shmem is within file; percpu/slab and other modeled kernel components are within kernel. Do not sum overlapping native subsets. Sock must fit kernel+other as well as current; never add sock twice. Native asynchronously read files alone do not prove either partition. |
+| `memory.events` | All supported counts are cumulative and nondecreasing with a stable source. `oom` counts limit-reached allocation-failure events, not OOM kills; `oom_kill` counts killed processes; `oom_group_kill` counts group OOM kills. Under the nonempty-victim group-kill assumption, `oom_group_kill <= oom_kill`; `oom_group_kill <= oom` is **not** asserted because a system-wide OOM group kill can leave this cgroup's own `oom` zero. They are not an ordered partition; `oom_kill <= oom`, `oom <= oom_kill` and their converses are not asserted, and no event-duration inequality is invented. The containments run at every sample with no first-sample read-order exemption; a one-sample tear is over-refused, and any nonzero OOM event is independently refused. Failure policy requires absolute zero for `oom`, `oom_kill` and `oom_group_kill` in every role, including warm-up; a constant nonzero first-sample baseline is contamination, not a zero baseline. |
+| `io.stat` and original residual IO | For every recorded device/byte/operation counter, 0 <= cumulative residual <= containing domain, with aligned domain origins. Retain delta(domain)=delta(members)+delta(residual) at adjacent and anchored windows. The positive-data completed-I/O contract relates bytes/operations; raw flush/zero-length or partial-completion semantics must be reviewed, not guessed. No disk bandwidth limit is inferred. |
+| `smaps_rollup` | USS<=PSS<=RSS and SwapPss<=Swap. Every recorded RSS/PSS/USS/Swap/SwapPss byte value is a multiple of 1024, since the named source prints integer kB. PSS and SwapPss may apportion pages; they are not required to be multiples of 4096. Native Private/Shared components and page size are absent, so the full resident partition and page-size divisibility cannot be checked. Nonzero hugetlb remains unsupported. |
+| `/proc/PID/fd`, resource limits | Each entry has a distinct nonnegative signed-int descriptor number. Counts cannot exceed 2**31, even with a looser manifest limit; native enumeration also rejects descriptor numbers above INT_MAX. RLIMIT_NOFILE restricts allocation-time descriptor numbers; lowering a limit does not invalidate existing descriptors. No unconditional count<=current soft-limit law is imposed. Numbers/limit history and global file-table accounting are absent. |
+| `pids.current`, `pids.max` | Stable recursive membership must reconcile tasks/threads, not only leaders. pids.max governs creation; current may exceed max after migration or lowering max. max/history is absent; no false current<=max invariant. The manifest's declared `pid_max` ceiling remains enforced, with the documented one-unit PID-wrap looseness. |
+| Network and swap | Native interface bytes do not universally equal wire bytes. Capacity and delivered-payload containment require the existing reviewed physical serialized-link normalization, with RX/TX bounded separately for duplex. Swap used<=total and cumulative swap in/out are checked; SwapFree is absent so used=total-free cannot be checked independently. |
+
+A residual is defined by the parent minus its known attributed children. For an
+aligned complete partition, that difference must match the independently
+recorded residual; its admissible range is [0,parent]. Cumulative residuals
+additionally must be nondecreasing and remain within the cumulative parent at
+every snapshot. Constant offsets cannot disappear through subtraction.
+For domain exited CPU and IO, member **lifetimes** can start outside the current
+cgroup, so only their attributed stable-window deltas are reconciled; no false
+lifetime snapshot equality is introduced. An independent tracker with a different
+origin must remain unavailable until a reviewed epoch binding exists. A digest
+and a declaration cannot establish that binding. Memory residuals are gauges and
+may fall. No CPU, memory or IO residual is filled from a mismatch by the analyzer.
+
+CPU snapshot outside/host partition uses the existing exact endpoint bound
+`12*C*10**6/H + width_ns*C/1000` microseconds. Cgroup exited class containment
+allows 2 us for native truncation. IO and charge partitions have zero tolerance;
+read width alone cannot bound byte/task churn. Tick, microsecond and byte
+calculations stay integers/Fractions. These bounds do not relax WP11 thresholds.
+
+`test_kernel_identities.py` reconstructs all nine round-four review payloads
+from the review documents (the reboot removed earlier /tmp scratch); it does not
+claim byte-identical recovery of those scratch records. The recorded initial
+RED is nine false-PASS assertions plus the absent catalog. A second independent
+RED caught the cumulative host residual's missing lower equality. The final
+source-derived witness table covers every applicable identity with fixed seed
+`0x144EB2F50E`, **262 unconditional boundary-refusal probes**: both signed sides
+of partitions/quanta, or raising the child/lowering the parent across subset
+bounds, plus the one-way throttle and OOM-kill containment. It asserts both named
+enforcement and never-PASS through the real raw summary, without consulting
+predicates to choose expected invalidity. A step into the valid half-space may
+legitimately PASS. Availability and reverse audits cover every catalog identity,
+every generated rule and all 159 counter-pair decisions. These finite witnesses
+do not prove all kernel relationships or that each rule is the sole reason
+for a refusal.
+
+Nine six-repetition scenarios and nine actual CLI subprocesses must also refuse
+the reconstructed round-four findings, redact paths, emit empty stderr and
+publish no result/temp file. Round 5 adds both throttle variants (constant and
+increasing `throttled_usec` with zero `nr_throttled`), both still-valid
+group-kill variants (`oom_group_kill=1` with `oom=oom_kill=0`;
+`oom=oom_kill=1` with `oom_group_kill=2`, both refused by
+`native_group_kill_oom_kill` and the absolute-zero policy) and three constant
+nonzero pre-existing baselines (`oom=oom_kill=1` with `oom_group_kill=0`;
+`oom=0, oom_kill=1`; and `oom=oom_kill=oom_group_kill=1`, which satisfies the
+surviving containment and is refused by the policy). Round 6 adds the valid
+system-wide OOM shape `oom=0, oom_kill>=1, oom_group_kill=1`: it must not be
+reported as an `oom_group_kill <= oom` contradiction and must still be refused
+by the OOM policy. Each is exercised through raw `summarize`, six-repetition
+scenario comparison and the real `offline.py summarize` CLI with no
+publication. Original exact threshold,
+all-role failure, atomic exclusive publication, deterministic output and
+integer-only parser tests remain in place. The loopback self-test is **NOT_RUN**
+under this revision's no-network constraint.
+
+Remaining limits include producer authenticity/alignment and residual epoch
+review, actual kernel-version attribution, page-size and native peak/transient
+accounting, unobserved ABA/migration, CPU history, physical-link normalization,
+repetition independence/power and the six-exit Python direct adapter. No catalog
+or static/offline test closes those runtime or release gates.

@@ -6,11 +6,24 @@ legacy receipt replay and structural/coverage validators remain separate gates.
 """
 from fractions import Fraction
 from functools import lru_cache
+import importlib.util
 import json
 from pathlib import Path
 import re
 
 MODEL=json.loads(Path(__file__).with_name('quantity-model.json').read_text())
+_catalog_spec=importlib.util.spec_from_file_location('_kernel_catalog',Path(__file__).with_name('kernel_identities.py'))
+_catalog=importlib.util.module_from_spec(_catalog_spec);_catalog_spec.loader.exec_module(_catalog)
+SCHEMA=json.loads(Path(__file__).with_name('run-schema.json').read_text())
+
+
+def catalog_coverage(model=None, catalog=None, schema=None):
+    return _catalog.coverage(MODEL if model is None else model,
+                             SCHEMA if schema is None else schema,
+                             _catalog.CATALOG if catalog is None else catalog)
+
+
+CATALOG_PROBLEMS=catalog_coverage()
 MISSING=object()
 
 
@@ -87,13 +100,74 @@ def expression(node,context):
 
 
 def compile_relation(rule):
+    operator=rule['operator']
+    if operator=='implies_positive':
+        # One-way implication a>0 => b>0. The converse is deliberately not
+        # expressible: a torn native read may observe one field before a
+        # concurrent update, so callers select a scope that tolerates it.
+        # Presence is one-way too: an absent antecedent is vacuous, but a
+        # present positive antecedent requires a present positive consequent.
+        # A symmetric when_present gate would silently accept a positive
+        # duration whose event count was not captured at all.
+        if rule.get('when_present'):
+            raise ValueError('model_relation')
+        antecedent=compile_expression(freeze(rule['antecedent']))
+        consequent=compile_expression(freeze(rule['consequent']))
+        presence=[(compile_expression(group['object']),group['keys']) for group in rule.get('presence_pairs',[])]
+        def implication(context):
+            for obj_fn,keys in presence:
+                obj=obj_fn(context)
+                if any(k in obj for k in keys) and not all(k in obj for k in keys):return False
+            try:left=antecedent(context)
+            except KeyError:return True
+            # Negative native counters are separately rejected by the schema;
+            # fail closed here as well. A zero antecedent never requires the
+            # consequent, because the converse is not asserted.
+            if type(left) is not int or left<0:return False
+            if left==0:return True
+            try:right=consequent(context)
+            except KeyError:return False
+            return type(right) is int and right>0
+        return implication
+    if operator=='containment':
+        # One-way count/duration containment: 0 <= sum(children) <= parent.
+        # There is no converse/partition claim about the unrecorded remainder.
+        parent=compile_expression(freeze(rule['parent']))
+        children=[compile_expression(freeze(child)) for child in rule['children']]
+        optional=[compile_expression(path) for path in rule.get('when_present',[])]
+        presence=[(compile_expression(group['object']),group['keys']) for group in rule.get('presence_pairs',[])]
+        def contained(context):
+            for obj_fn,keys in presence:
+                obj=obj_fn(context)
+                if any(k in obj for k in keys) and not all(k in obj for k in keys):return False
+            for fn in optional:
+                try:fn(context)
+                except KeyError:return True
+            limit=parent(context)
+            if type(limit) is not int or limit<0:return False
+            values=[fn(context) for fn in children]
+            return (all(type(value) is int and value>=0 for value in values)
+                    and sum(values)<=limit)
+        return contained
+    if operator=='monotonic':
+        def monotonic(context):
+            seen={}
+            for path,value in select(context['run'],rule['path']):
+                identity=path[2:]
+                if path[2]=='processes':
+                    p=context['run']['samples'][path[1]]['processes'][path[3]]
+                    identity=('process',p['pid'],p['start_ticks'],p['executable_sha256'],p['domain'],p['component'])+path[4:]
+                if type(value) is not int:return False
+                if identity in seen and value<seen[identity]:return False
+                seen[identity]=value
+            return True
+        return monotonic
     parent=compile_expression(freeze(rule['parent']))
     children=[compile_expression(freeze(child)) for child in rule['children']]
     upper=compile_expression(freeze(rule.get('upper_tolerance',0)))
     lower=compile_expression(freeze(rule.get('lower_tolerance',0)))
     optional=[compile_expression(path) for path in rule.get('when_present',[])]
     presence=[(compile_expression(group['object']),group['keys']) for group in rule.get('presence_pairs',[])]
-    operator=rule['operator']
     def predicate(context):
         for obj_fn,keys in presence:
             obj=obj_fn(context)
@@ -104,20 +178,43 @@ def compile_relation(rule):
         left=parent(context);right=sum(fn(context) for fn in children)
         if operator=='partition':return right-left<=upper(context) and left-right<=lower(context)
         if operator=='completed_io':return 0<=right<=left and (right==0)==(left==0)
+        if operator=='multiple':return type(left) is int and right>0 and left>=0 and left%right==0
         raise ValueError('model_relation')
     return predicate
 
 
 def contexts(run,scope):
     samples=run['samples'];h=run['host']
-    if scope=='run':yield {'run':run,'h':h};return
+    if scope in ('run','quantity'):yield {'run':run,'h':h};return
+    if scope=='measured_interval':
+        first=next((s for s in samples if s['mono_ns']-samples[0]['mono_ns']>=run['warmup_discard_ns']),None)
+        if first is None:raise ValueError('model_measured_window')
+        last=samples[-1]
+        yield {'run':run,'h':h,'s':last,'c':last['host'],
+               'old':{'run':run,'h':h,'s':first,'c':first['host']}}
+        return
     for index,s in enumerate(samples):
         base={'run':run,'h':h,'s':s,'c':s['host'],'groups':list(s['domains'].values()),'processes':s['processes']}
         if scope=='sample':yield base
+        elif scope=='domain_tail':
+            # One-way read-tearing tolerance: every domain observation after the
+            # first acquisition sample. A contradiction sustained beyond the
+            # first sample is still refused.
+            if index==0:continue
+            for name,d in s['domains'].items():
+                yield base|{'d':d,'members':[p for p in s['processes'] if p['domain']==name]}
         elif scope=='process':
             for p in s['processes']:yield base|{'p':p}
         elif scope=='domain':
             for name,d in s['domains'].items():yield base|{'d':d,'members':[p for p in s['processes'] if p['domain']==name]}
+        elif scope=='device':
+            for d in s['domains'].values():
+                for device in set(d['io'])|set(d['io_other']):
+                    parent=d['io'].get(device,{})
+                    residual=d['io_other'].get(device,{})
+                    for key in set(parent)|set(residual):
+                        # Missing source values cannot become favorable zeros.
+                        yield base|{'io_parent':parent[key],'io_residual':residual[key]}
         elif scope=='io':
             for obj in list(s['domains'].values())+s['processes']:
                 for io_key in ('io','io_other'):
@@ -158,6 +255,7 @@ def relation_ok(rule,context):
 
 
 def generated_constraints(run,model=None):
+    yield 'catalog:coverage',not CATALOG_PROBLEMS
     model=MODEL if model is None else model
     for entry in model['quantities']:
         check='quantity:'+entry['name']

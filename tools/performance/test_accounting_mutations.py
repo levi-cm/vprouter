@@ -548,7 +548,7 @@ class QuantityModelTests(unittest.TestCase):
             for path,value in (matches[0],matches[-1]) if len(matches)>1 else matches:
                 parent=seed
                 for key in path[:-1]:parent=parent[key]
-                for replacement in (0,2**64):
+                for replacement in (-1,0,1,2**64):
                     parent[path[-1]]=replacement
                     for name,ok in q.generated_constraints(seed):
                         if name.startswith('relation:') and not ok and name not in witnesses:
@@ -580,6 +580,33 @@ class QuantityModelTests(unittest.TestCase):
         for b,n,want in [(0,0,True),(1,0,False),(0,1,False),(1,1,True),(1,2,False),(2,1,True)]:
             self.assertEqual(q.relation_ok(io,dict(bytes=b,ops=n)),want)
         print('model relation removal mutants killed:',len(expected))
+
+    def test_new_operator_truth_tables(self):
+        q=self.model()
+        # One-way positive implication: a>0 => b>0; the converse is NOT
+        # asserted, because a read may observe a throttled interval before its
+        # duration is accumulated.
+        implies=dict(operator='implies_positive',antecedent='a',consequent='b')
+        for a,b,want in [(0,0,True),(0,1,True),(1,0,False),(1,1,True),(2,0,False),(2,1,True)]:
+            self.assertEqual(q.relation_ok(implies,dict(a=a,b=b)),want)
+        # One-way presence: a positive antecedent requires a present positive
+        # consequent; an absent antecedent is vacuous and never requires the
+        # consequent. Every presence combination is covered.
+        presence_cases=[({},True),
+                        ({'a':0},True),({'a':1},False),({'a':2},False),
+                        ({'b':0},True),({'b':1},True),
+                        ({'a':0,'b':0},True),({'a':0,'b':1},True),
+                        ({'a':1,'b':0},False),({'a':1,'b':1},True),
+                        ({'a':2,'b':0},False),({'a':2,'b':1},True)]
+        for context,want in presence_cases:
+            with self.subTest(context=context):
+                self.assertEqual(q.relation_ok(implies,context),want)
+        # Count/duration containment: nonnegative contents may not exceed a
+        # containing counter; it is not a two-sided partition.
+        containment=dict(operator='containment',parent='p',children=['a','b'])
+        for p,a,b,want in [(0,0,0,True),(1,0,0,True),(1,0,1,True),(1,1,1,False),
+                           (5,2,3,True),(5,2,4,False),(0,1,0,False),(1,1,0,True)]:
+            self.assertEqual(q.relation_ok(containment,dict(p=p,a=a,b=b)),want)
 
 def model_bind(run):
     # Preserve the mutated measurement/projection. Rebinding must never repair

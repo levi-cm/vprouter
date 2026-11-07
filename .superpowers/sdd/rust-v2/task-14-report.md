@@ -1,6 +1,6 @@
 # Task 14: offline performance preparation
 
-Status: REVIEW ROUND 1 FIXED / OFFLINE_PREPARATION_ONLY; final requested checks PASS, independent re-review pending. The original implementation and its failed-review history follow; the current evidence is in Review round 1 below. Base `cb91c79855fb1482e61f3becef6f8b71495e049e`, branch `rust/v2`, initially clean. No subagents, network, sudo, VM, service changes, long benchmarks, staging or commits. `release_ready=false`; `acceptance.json` must remain byte-identical.
+Status: REVIEW ROUND 6 IMPLEMENTED / OFFLINE GREEN / PARTIAL pending independent re-review / OFFLINE_PREPARATION_ONLY. Final results are in Review round 6 below; earlier sections retain their historical evidence, including superseded round-5 claims where explicitly noted. No performance claim; real runs NOT_RUN; release_ready=false.
 
 ## Binding inputs and design
 
@@ -67,13 +67,17 @@ The comparator requires all steady/load 1/5/6 cases, six matched IDs each (72 re
 | --- | --- | --- | --- | --- |
 | CPU baseline 100 | 50 PASS | 49 PASS | 51 FAIL | INSUFFICIENT_DATA |
 | Total memory baseline 1000 | 1000 PASS | 999 PASS | 1001 FAIL | INSUFFICIENT_DATA |
-| One-exit control PSS | 16777216 PASS | -1 B PASS | +1 B FAIL | INSUFFICIENT_DATA |
-| Five-exit control PSS | 50331648 PASS | -1 B PASS | +1 B FAIL | INSUFFICIENT_DATA |
+| One-exit control PSS (raw record) | 16777216 PASS | -1 KiB PASS | +1 KiB FAIL | INSUFFICIENT_DATA |
+| Five-exit control PSS (raw record) | 50331648 PASS | -1 KiB PASS | +1 KiB FAIL | INSUFFICIENT_DATA |
 | Throughput baseline 1000 | 950 PASS | 951 PASS | 949 FAIL | INSUFFICIENT_DATA |
 | p95 latency baseline 1000 | 1050 PASS | 1049 PASS | 1051 FAIL | INSUFFICIENT_DATA |
 | Monitor misses, unexpected restarts, OOM, either side | 0 PASS | negative invalid | 1 FAIL | INSUFFICIENT_DATA |
 
-These are synthetic arithmetic expectations, not measured product results. Conservative CPU read brackets can make a nominal counter ratio at 50% fail to demonstrate the bound; no uncertainty is rounded away.
+These are synthetic arithmetic expectations, not measured product results. The
+raw-record control-PSS boundary is a 1 KiB quantum because `smaps_rollup`
+prints integer kB; the direct metric API retains the abstract ±1 B boundaries.
+Conservative CPU read brackets can make a nominal counter ratio at 50% fail to
+demonstrate the bound; no uncertainty is rounded away.
 
 ### Integration checks
 
@@ -894,3 +898,1013 @@ plus T4-M1 (FD-entry quantities omit the native descriptor-number universe) and 
 harness is checkpointed as a strictly stronger PARTIAL layer; it must not qualify a real run.
 A fifth round, if authorised, should add residual/socket-memory relations to the model and a
 relation-completeness oracle derived from kernel accounting identities, not from the schema.
+
+
+## Review round 4
+
+IMPLEMENTATION COMPLETE / OFFLINE GREEN, 2026-11-07; independent re-review pending. Implementation delegate; no children. Started clean on
+rust/v2 @eb2f50e3d83fd9439f9f120052e716e9d5f9e95c. All four reviews and the
+report Review rounds 1-3 read in full. Own only tools/performance/**, the two
+performance docs and this report. Concurrent witness-validator work is untouched.
+No network (including loopback), sudo, VM, Rust or Git writes. Python uses only
+`python3 -B -I`. Earlier /tmp reviewer fixtures were lost on reboot; reconstruct
+from review text, do not claim recovery of their exact original bytes.
+
+### RED checkpoint
+
+Before production changes, added test_kernel_identities.py reconstructing all
+nine review variants: outside CPU, exited user/system CPU, read/write/discard
+residual IO, socket partition, FD universe and PSS byte quantum.
+`python3 -B -I -m unittest discover -s tools/performance -p test_kernel_identities.py`
+returned **exit 1, 6 methods, 10 assertion failures**, all nine false PASSes plus
+the missing catalog. Log: tools/performance/validation-output/round4/red-confirmed.log;
+actual exit in .exit. Initial PSS fixture failed an unrelated USS bound; corrected
+its positive USS/charge context before recording the confirmed RED, retaining
+red.log. No source fix preceded either run.
+
+Catalog design: document Linux source identities independently of the schema,
+including absent quantities and explicit non-identities/overlaps. Distinguish
+kernel guarantees from the harness's stricter aligned acquisition/attribution
+contracts. Derive checks from catalog bindings, audit both directions, and add
+fixed-seed independent boundary witnesses. No performance claim. All real runs
+and producer/runtime/client/ARM/migration/soak/release checks remain NOT_RUN;
+release_ready=false. Independent re-review remains required.
+
+### Catalog and independent boundary checkpoint
+
+Initial catalog-derived regressions GREEN: same six-method file -> **exit 0,
+6 tests / 1.716s**, green-progress.log. This was a targeted checkpoint, not final.
+Catalog now records **127 source identities: 120 applicable/generated and seven
+explicitly unavailable**. Bidirectional coverage test -> **exit 0, 1 method /
+0.072s**, coverage-progress.log, including every generated relation removal and
+unknown citation, plus all seven hypothetical schema-availability gates.
+
+The independent fixed-seed property (0x144EB2F50E) has literal source-derived
+witness recipes for **all 120 applicable identities**, not expectations chosen
+by production predicates. Its first run -> **exit 1, 1 method, 240 probes /
+49.479s**, property-red.log: the new cumulative host-accounted check had an upper
+bound but omitted the residual definition's lower equality. Changed the catalog
+template to a two-sided aligned snapshot partition, preserving separate outside
+containment and anchored delta checks. This is a real additional RED, not a
+passing model test relabeled as completeness. All source citations are paraphrases
+from documentation knowledge, without network or local kernel-version validation.
+Native counter semantics and the harness's stricter attribution/epoch/alignment
+contracts are distinguished; no invented RLIMIT-current or pids.current<=max
+snapshot law is asserted.
+
+FD native-parser audit also RED: `python3 -B -I -m unittest discover -s tools/performance -p test_kernel_identities.py -k native_FD_names`
+-> **exit 1**, one expected assertion (fd-parser-red.log). Added the signed-int
+number ceiling to native fd enumeration as well as the count-universe relation.
+Final GREEN pending. Real runs and release remain NOT_RUN / release_ready=false.
+
+Expanded source audit adds physical-link delivered-payload containment and explicit
+host CPU/swap cumulative identities, plus the unavailable SwapFree equality.
+Final catalog snapshot for validation: **137 identities, 129 applicable generated
+relations, eight unavailable source identities; 247 quantity entries**. The early
+120-identity progress file is GREEN (**11 tests / 73.907s**, identities-progress.log),
+including 240 signed probes, 54 candidate summaries, nine six-repetition scenarios
+and nine actual CLI refusals with no publication. It is superseded by final runs.
+The old relation-progress process was terminated with TERM after catalog expansion;
+its exit/log remain progress evidence, never final validation. Broad accounting
+progress was loaded before the PSS fixture correction: raw PSS boundaries now use
++/-1024 bytes (native kB); direct metric API retains +/-1-byte arithmetic tests.
+No production threshold or quantum was weakened to admit an impossible raw source.
+
+
+### Review round 4 catalog / identity tables
+
+The complete machine-readable table is tools/performance/kernel-identities.json.
+Each row has ID, source document/section/paraphrase, source-bound quantities,
+assumptions, identity statement and check templates (or an explicit unavailable
+reason). It was authored from Linux documentation knowledge, without network;
+not a fetched quotation or running-kernel qualification. The model's 129 relation
+rows are derived by kernel_identities.py and cite their catalog identity exactly.
+The authoring tool no longer contains a handwritten relation list. Import-time
+catalog/model consistency is a mandatory generated verdict gate.
+
+| Catalog source family | Identities | Available generated checks |
+| --- | ---: | ---: |
+| `events` | 6 | 6 |
+| `fds` | 3 | 2 |
+| `host_cpu` | 21 | 19 |
+| `io` | 26 | 26 |
+| `memory` | 23 | 23 |
+| `net` | 5 | 5 |
+| `pids` | 5 | 4 |
+| `process_cpu` | 29 | 28 |
+| `smaps` | 12 | 10 |
+| `swap` | 7 | 6 |
+| **Total** | **137** | **129** |
+
+| New/strengthened identity | Source and normalized contract | Generated checks |
+| --- | --- | --- |
+| Host cumulative residual definition | /proc/stat classes; aligned boot origin, residual=host busy-sum(disjoint domains), 0<=residual<=parent | outside_cpu_snapshot; snapshot_host_accounted (both signed bounds); counter_samples_host_other_cpu_usec |
+| Exited/transient CPU | cpu.stat usage/user/system and original cgroup-origin tracker; each residual<=its containing cumulative class with 2us truncation bound; usage=user+system | exited_usage_snapshot; exited_user_snapshot; exited_system_snapshot; exited_parts; three catalog cumulative checks |
+| Per-device IO residual | io.stat rbytes/wbytes/rios/wios/dbytes/dios; same domain attribution epoch, no lifetime process/cgroup equality | io_residual_snapshot expands all present devices/counters; existing io_conservation deltas and six residual cumulative checks |
+| Socket container | memory.stat + memory.current; reviewed aligned anon/file/kernel/other partition | socket_container: sock<=kernel+other, retaining native_sock<=current; never add sock twice |
+| FD number universe | proc PID/fd; nonnegative signed-int namespace independent of loose manifest | fd_native_universe: count<=2**31; parse_fd_entries additionally requires numbers<=INT_MAX |
+| smaps representability | proc smaps_rollup integer kB; private clean+dirty defines USS | smaps_pss/rss/uss/swap/swap_pss_quantum: divisible by1024; no assumed4096-byte PSS quantum |
+| Native cumulative sources | stat, cpu.stat, memory.events, completed io.stat, sched wakeups and net/vmstat source contracts | 47 source-bound monotonic relations, including residuals and every supported memory.events key; width/map checks retained |
+| Delivered network payload | reviewed physical serialized-link normalization; native net/dev is not universally wire bytes | network_payload over actual post-warm-up endpoints; network_rx/network_tx remain separately duplex bounded |
+
+| Catalog identity unavailable in this schema | Missing source evidence / no invented law |
+| --- | --- |
+| `native_guest_user` | Schema folds user+nice and does not record guest separately. |
+| `native_idle_iowait` | Folded iowait is not separately recorded; native reliability remains a producer gate. |
+| `native_waited_children` | Only utime/stime recorded; original exited tracker must avoid waited-child duplication. |
+| `native_smaps_resident_partition` | Only USS aggregate recorded. Shared/private native pieces not available to verify separately. |
+| `native_smaps_page_quantum` | No page-size contract in schema. Enforce 1024-byte output quantum only; never assume 4096-byte PSS. |
+| `native_fd_allocation_limit` | Descriptor numbers, allocation-time limits and limit history are absent. Do not invent count <= current RLIMIT_NOFILE. |
+| `native_pids_limit` | pids.max/history absent; no invalid snapshot bound is generated. |
+| `native_swap_used` | SwapFree is not recorded separately; only the used<=total subset can be checked. |
+
+Residual definitions are not values fabricated by the analyzer. Cumulative
+residuals require common containing-counter attribution origins, nonnegative
+values, snapshot containment and stable-identity nonregression. Member lifetimes
+may predate the current cgroup: reconcile attributed member deltas, not false
+snapshot equality of current cgroup and process lifetime totals. Memory residuals
+are gauges. Unknown origin/alignment/ownership remains a producer blocker; a hash
+and declaration do not prove it. All eight hypothetical newly available source
+identities are explicitly rejected by the coverage audit until implemented.
+
+### Review round 4 validation checkpoints
+
+| Exact command (repo root; all use python3 -B -I) | Fresh result / retained log |
+| --- | --- |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_kernel_identities.py` | Initial final snapshot **exit0, 11 tests /81.065s**; 129-identity independent table, **258** unconditional signed probes, 129 relation-removal/reverse-citation audits, eight unavailable-source gates; 54 candidate summaries, nine six-repetition scenarios and nine actual CLI redacted/no-publication refusals. final-kernel_identities.log. A strengthened matched-FD-baseline/positive-scenario check is running with separate final log. |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_measurement.py` | **exit0, 84 tests /1.327s**, final-measurement.log. Existing source-specific adapters. |
+| `PERFORMANCE_OFFLINE_NO_NETWORK=1 python3 -B -I -m unittest discover -s tools/performance -p test_offline.py` | **exit0, 9 tests /177.016s, one skipped**; 8142 failure-protocol cases, exact verdict trace/AST (including new catalog compiler), redaction, atomic exclusive publication and cleanup. Loopback self-test NOT_RUN. final-offline.log. |
+| `python3 -B -I tools/performance/validation-output/round4/static-check.py` | Progress **exit0**, 14 AST/compile checks (bytecode confined to owned temporary directory), strict JSON, nine schema refs, scratch-only byte-identical model/schema generation, three fresh-interpreter deterministic summaries, acceptance/review/index preservation. static-progress.log. Final rerun includes historical baseline-resource-sample.json and the last test-only refinement. |
+
+All log/exit artifacts are retained in tools/performance/validation-output/round4.
+Full accounting and mutation results are pending. The earlier accounting-progress
+run exited1, 44 methods/320.023s, only the now-corrected unrepresentable raw PSS
+fixture; it is not claimed as final GREEN. Production arithmetic remained exact;
+only raw PSS test values moved to native-kB representable neighbors.
+
+Final accounting suite: **exit0, 44 tests /340.492s**, final-accounting.log. This
+run used the corrected native-kB raw PSS neighbors and all final production
+semantics. Full mutation suite remains CPU-active/pending; no completion claim.
+
+Strengthened matched-scenario identity file: **exit0, 11 tests /80.974s**,
+final-kernel-identities-matched.log. FD baseline/candidate use the same 2**40
+manifest bound and a positive six-repetition scenario passes first. Added a
+retained lossless reconstruction bundle, fixtures/review-round4.json (nine
+base-plus-patches payloads with canonical SHA256). It is explicitly constructed
+regression input, not recovered reviewer bytes or real evidence. A new replay
+method checks all nine retained hashes and refusals; final twelve-method file
+and final static check are running. These are test/artifact refinements only;
+production and all other test source bytes remain unchanged since their final
+runs. No test-only refinement is claimed as proof about producer authenticity.
+
+Final retained-fixture identity run: **exit0, 12 tests /96.164s**, final-identities.log.
+All 258 independently expected boundary refusals, 129 forward/reverse check
+mutations, eight availability gates, nine retained fixture SHA256 replays, 54
+candidate summaries, nine correctly matched six-repetition scenarios and nine
+CLI subprocess refusal/no-publication cases pass. Baseline positive control
+qualifies first; no FD host-contract mismatch masks the actual finding.
+
+Final static run: **exit0**, final-static.log / static-results.json. **14 Python
+ASTs and explicit temporary-bytecode compiles; 11 strict JSON files**, including
+the catalog, schema/model, both review fixture bundles, synthetic fixture,
+example manifest, three historical baseline/source files and acceptance.
+Historical decimal values are inspected with Decimal, never used in verdicts;
+catalog/schema/model contain no decimal tokens. Nine schema refs resolve;
+scratch-only authoring regenerates schema/model byte-identically. Three fresh
+isolated interpreters produce identical canonical summaries (SHA256
+53d4fe02092e4f9f3ab1de74f0242f3edebf2875f6a4967de8b0042809562e21).
+source-hashes.json binds all final source/test/docs/fixture bytes. The earlier
+source manifest is retained as source-hashes-before-fixture-refinement.json.
+All four reviews and acceptance retain baseline bytes; acceptance SHA256
+3d467451dd03d1663e3c79b24eea6a18aac461f9291f8fdfe1031e1da6e86e97 and
+release_ready=false. Index empty; git diff --check passes. Concurrent lab edits
+are visible and untouched. Full mutation file remains in progress.
+
+Late descriptive-metadata correction: the FD quantity's physical_upper_bound
+still carried the old generic "no universal tighter physical bound" text despite
+its kernel_width and catalog relation correctly describing/enforcing 2**31.
+Corrected that description in the author and regenerated the model. **No guard,
+map, clock contract, relation template or verdict code changed.** Compared every
+quantity field consumed by generated_constraints, all native maps, clock contract
+and all catalog-derived relations against the retained pre-edit model; exact
+structured equality PASS. fd-metadata-equivalence.json and
+pre-metadata-verdict-semantics.json record the comparison; old model and source
+manifest are retained in round4/. Final static manifest/AST/JSON/idempotence and
+fresh-interpreter checks were refreshed. Existing/final in-flight unit results
+apply to these identical executable predicates, not a changed implementation.
+
+### Additional mutation RED: unavailable measured-window anchor
+
+The first full mutation sweep reached the generated-model property and produced
+an ERROR (not a false-PASS): the newly added measured network identity used next()
+inside a context generator without a default. A warm-up boundary beyond the last
+sample caused StopIteration to become RuntimeError under PEP479, escaping the
+pure generated-constraint API's failure protocol. Public structural validation
+already refused that warm-up; the direct generated-constraint API still must not
+crash. Added an explicit behavioral regression before the fix:
+
+`python3 -B -I -m unittest discover -s tools/performance -p test_kernel_identities.py -k unavailable_warmup_anchor`
+-> **exit1, one ERROR /0.111s**, warmup-anchor-red.log. Same command after using an
+explicit missing anchor and ValueError (converted to a failed network predicate)
+-> **exit0, one method /0.121s**, warmup-anchor-green.log. No favorable last/zero
+anchor is inferred. This is a production change, so earlier broad results are
+retained but superseded for final verification.
+
+Stopped the owned old mutation process with TERM; superseded-anchor-mutations.log
+and .exit are retained, never claimed as final PASS. Revalidating accounting,
+identity and offline files after this fix. Mutation file is now run by its three
+independent unittest classes in separate processes, each through the requested
+`python3 -B -I -m unittest discover -s tools/performance -p test_accounting_mutations.py -k CLASS -v`
+interface. Together these cover all 13 methods: ComparatorMutationTests (2),
+PhysicalRegistryTests (5), QuantityModelTests (6). The split removes serial waiting
+between independent test classes, without changing seed/case counts, fixtures,
+assertions or test semantics. No agent/delegate is involved. All post-fix results
+and actual exits use post-anchor-* names. Full final source manifest and static
+check will be rebound after this fix. All real runs remain NOT_RUN; release_ready=false.
+
+Post-anchor broad GREEN checkpoint (all exit0):
+
+| Exact command suffix after `python3 -B -I -m unittest discover -s tools/performance` | Result / final post-fix log |
+| --- | --- |
+| `-p test_kernel_identities.py -v` | **13 tests /81.166s**; post-anchor-identities.log. New unavailable-anchor regression plus all nine reviewer payloads, retained bundle hashes, 258 identity probes and 129 coverage/citation mutations pass. |
+| `-p test_accounting.py -v` | **44 tests /336.517s**; post-anchor-accounting.log. All earlier rounds and exact thresholds/positive controls pass after the production fix. |
+| `-p test_offline.py -v` (`PERFORMANCE_OFFLINE_NO_NETWORK=1`) | **9 tests /165.991s, one skipped**; post-anchor-offline.log. 8142 failure-protocol cases, exactness trace/AST, redaction/atomic publication. Loopback NOT_RUN. |
+| `-p test_accounting_mutations.py -k ComparatorMutationTests -v` | **2 tests /2.867s**; post-anchor-comparator-mutants.log. Existing 29 comparator mutants killed. |
+
+`python3 -B -I tools/performance/validation-output/round4/static-check.py` ->
+**exit0** after the anchor fix; post-anchor-static.log / static-results.json.
+All 14 Python AST/compile checks, 11 strict JSON files, nine refs, exact regenerated
+model/schema, deterministic fresh-interpreter summaries, final source hashes and
+acceptance/review/index checks pass. PhysicalRegistryTests and QuantityModelTests
+remain pending; their class-filtered commands preserve all original methods,
+fixed seeds and case counts. No final completion/acceptance claim yet.
+
+Physical mutation class after the fix is GREEN:
+`python3 -B -I -m unittest discover -s tools/performance -p test_accounting_mutations.py -k PhysicalRegistryTests -v`
+-> **exit0, 5 tests /766.594s**, post-anchor-physical-mutants.log. **6108 numeric
+schema boundary probes /4996 expected registered-or-numeric violations**, all
+176 signed small/large registry witnesses, 44 live enforcement mutations and
+aggregate task controls pass. Only the six-method QuantityModelTests class
+remains pending. No source changes since the anchor fix.
+
+### Review round 4 final GREEN and handoff
+
+All final commands below exited **0** after the last production change (the
+missing measured-window anchor refusal). Each command uses the requested isolated
+Python interpreter. The mutation file's three class-filtered discovery commands
+cover all 13 methods; their results are not represented as a single serial run.
+Logs and actual process exit files are retained under
+`tools/performance/validation-output/round4/`.
+
+| Command | Final result | Log basename (`.log` and `.exit`) |
+| --- | --- | --- |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_kernel_identities.py -v` | 13 tests /81.166s; 258 fixed-seed signed probes, nine reconstructed variants, coverage/citation checks | post-anchor-identities |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting.py -v` | 44 tests /336.517s | post-anchor-accounting |
+| `PERFORMANCE_OFFLINE_NO_NETWORK=1 python3 -B -I -m unittest discover -s tools/performance -p test_offline.py -v` | 9 tests /165.991s, one network test skipped; 8142 malformed-input cases | post-anchor-offline |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting_mutations.py -k ComparatorMutationTests -v` | 2 tests /2.867s; 29 comparator mutants killed | post-anchor-comparator-mutants |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting_mutations.py -k PhysicalRegistryTests -v` | 5 tests /766.594s; 6108 probes, 4996 expected violations | post-anchor-physical-mutants |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting_mutations.py -k QuantityModelTests -v` | 6 tests /1182.170s; 4104 probes, 2042 violations; 129/129 relation-removal and 247/247 quantity-removal mutants killed | post-anchor-quantity-mutants |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_measurement.py` | 84 tests /1.106s | post-anchor-measurement |
+| `python3 -B -I tools/performance/validation-output/round4/static-check.py` | 14 AST/compile checks; 11 strict JSON files; nine schema refs; byte-identical regeneration; three deterministic isolated-interpreter summaries; preservation PASS | final-preservation |
+
+The static result binds the final source/test/docs/fixture hashes in
+source-hashes.json. Acceptance SHA256 remains
+`3d467451dd03d1663e3c79b24eea6a18aac461f9291f8fdfe1031e1da6e86e97`;
+all four review files retain their baseline hashes. HEAD remains
+`eb2f50e3d83fd9439f9f120052e716e9d5f9e95c`. The index is empty and
+`git diff --check` passes. This report's final prose is outside the source hash
+manifest; a final static check follows the report update.
+
+Final task-touched publication inventory (14 owned paths):
+
+- `tools/performance/kernel-identities.json`, `kernel_identities.py`: cited
+  source identity catalog, schema availability and bidirectional coverage audit.
+- `tools/performance/build_quantity_model.py`, `quantity-model.json`,
+  `quantity_model.py`, `accounting.py`: derived relations and generic exact
+  enforcement, native FD parser ceiling and fail-closed missing-window handling.
+- `tools/performance/test_kernel_identities.py`, `fixtures/review-round4.json`:
+  tests-first findings, hashed reconstructed fixtures and independent signed
+  identity witnesses; no original lost scratch bytes are claimed.
+- `tools/performance/test_accounting.py`, `test_accounting_mutations.py`,
+  `test_offline.py`: native-kB raw PSS boundary fixtures and exactness coverage
+  for the catalog compiler.
+- `docs/rust-v2/performance-harness.md`,
+  `docs/rust-v2/performance-measurement.md`, and this report: contracts, evidence,
+  unavailable identities and qualification limits.
+
+Local validation artifacts remain in the owned ignored validation-output tree.
+Concurrent witness/lab files and their report were not edited by this delegate.
+No subagents, network, sudo, VM, Rust, staging, commit or push were used.
+
+Residual limits: the catalog is a documentation-knowledge transcription with
+source citations and explicit acquisition assumptions, not a fetched quotation
+or running-kernel qualification. Completeness is relative to its reviewed
+identity inventory and schema availability; the tests cannot prove that Linux
+has no additional identities. Eight catalog identities remain unavailable
+because the schema does not record their inputs (table above). Raw declarations,
+hashes and arithmetic consistency do not authenticate a producer, establish
+common residual origins, demonstrate atomic aligned collection, or capture
+unobserved transient peaks. PSS is checked at native 1024-byte output granularity;
+no page size is invented. Current RLIMIT_NOFILE and pids.max are not universal
+snapshot ceilings. Real producer, performance, runtime/client/ARM, migration and
+soak qualification remain **NOT_RUN**. Task status stays **PARTIAL pending
+independent re-review**, with **no performance claim** and **release_ready=false**.
+
+
+## Review round 5
+
+IMPLEMENTATION COMPLETE / OFFLINE GREEN, 2026-11-07; independent re-review
+pending. Implementation delegate; no children. Started on `rust/v2` @
+`e016617` with the round-5 harness changes uncommitted in the working tree.
+Read `task-14-rereview4.md` in full, including R5-I1, R5-I2, the catalog audit
+and the Minor notes. Own only `tools/performance/**`, the two performance docs
+and this report. Concurrent witness/lab files, review files and acceptance were
+not edited. No Git stage/commit/push, network (including loopback), sudo, VM,
+Rust or real workload. Python used only `python3 -B -I`. All recordings below
+are constructed input-domain records, never measurements.
+
+### R5-I1 and R5-I2 fixes
+
+R5-I1 is closed with the one-way identity `native_throttle_time_count`:
+`throttled_usec > 0 => nr_throttled > 0`. The converse is **not** asserted.
+The exact rule is evaluated at every domain sample **after the first
+acquisition sample** (`scope: domain_tail`). `cpu.stat` is not read as one
+cross-field atomic snapshot; a single first sample may catch an update between
+fields, so exactly that sample is exempt. A contradiction sustained at later
+samples is not a read-order artifact and is refused. The catalog citation now
+states the cgroup-v2.rst meanings of `nr_periods`, `nr_throttled` and
+`throttled_usec`, the first-sample exemption and its justification; it no longer
+relies on the generic `usage_usec` sentence.
+
+R5-I2 is closed by one surviving one-way containment plus the independent
+absolute-zero policy:
+
+- `native_group_kill_oom_kill`: `oom_group_kill <= oom_kill`, under the
+  documented nonempty-victim group-kill assumption (a group kill selects at
+  least one process).
+
+The round-5 `native_group_kill_oom` (`oom_group_kill <= oom`) identity was
+removed in round 6: `oom` counts limit-reached allocation-failure events, not
+OOM kills, and a system-wide OOM group kill can leave this cgroup's own `oom`
+zero. That counter pair is now an explicit `no_native_relation`. The surviving
+containment is not an ordered partition. `oom_kill <= oom`, `oom <= oom_kill`,
+`oom_group_kill <= oom` and their converses are explicitly not asserted. The
+catalog citations now record the documented `memory.events` meanings and the
+subtree/nonempty-victim assumptions.
+
+The gate policy is fixed independently. `failure_quiet` now requires absolute
+zero for `oom`, `oom_kill` and `oom_group_kill` in every declared cgroup at every
+sample, instead of equality to the first sample. `domain_oom` retains the
+last-minus-first delta but separately retains the absolute first-sample sum in
+the reported OOM metric and adds the explicit
+`oom_baseline_contaminated` reason. A constant pre-existing nonzero OOM count can
+therefore never qualify as a zero baseline. `performance-harness.md` records the
+policy.
+
+### Generic operators and class closure
+
+`quantity_model.py` now compiles two generic catalog operators, with no
+measurement-name switches:
+
+- `implies_positive` with `antecedent`/`consequent`: exact `a > 0 => b > 0`; no
+  converse, no rate bound, fail-closed on non-integer operands (native schema
+  quantities separately reject negative counters).
+- `containment` with `parent`/`children`: `0 <= sum(children) <= parent`; it is
+  one-way and does not claim a complete partition.
+
+`containment` uses the optional-field `when_present` and `presence_pairs`
+guards. `implies_positive` uses a one-way presence rule added in round 6: an
+absent antecedent is vacuous, but a present positive antecedent requires a
+present positive consequent; a symmetric `when_present` gate is not accepted
+there. `domain_tail` adds every domain sample after the first acquisition
+sample. The operators are exercised by a hand-derived truth table
+(not by asking the production predicate) and by the existing per-relation raw
+witness/removal mutants.
+
+The counter-pair class is closed by an explicit catalog table rather than by
+adding only the two reported instances:
+
+- `counter_sources` assigns every recorded monotonic counter to exactly one
+  co-located native source object.
+- `counter_pairs` contains **all 159** within-source pairs. Each is either
+  `identity` (naming the catalog identity whose operands relate the pair) or
+  `no_native_relation` with a source-semantic reason.
+- `kernel_identities.counter_pair_problems()` audits the table at import:
+  exact pair coverage, source membership, no duplicate/extraneous pair, every
+  monotonic counter assigned, identity operands present, and a reason for every
+  no-native decision. Round 6 also refuses a `no_native_relation` label for any
+  pair covered by an identity as parent/child, antecedent/consequent, or two
+  distinct siblings under one partition/containment. Two operands combined
+  inside one child expression are not siblings for this audit.
+  `test_kernel_identities.py` independently repeats the enumeration from the
+  model and catalog and mutates covered pairs to prove the audit catches them.
+
+The audit scope is stated: pairs co-located in one recorded native source
+object. Cross-source pairs are not two observations of one counter object and
+are not claimed to have a native ordering.
+
+| Source | Pairs | Identity | No native relation |
+| --- | ---: | ---: | ---: |
+| `cpu_stat` | 15 | 5 | 10 |
+| `domain_exited_cpu` | 3 | 3 | 0 |
+| `domain_io` | 15 | 3 | 12 |
+| `domain_io_other` | 15 | 3 | 12 |
+| `host_counters` | 78 | 17 | 61 |
+| `memory_events` | 15 | 1 | 14 |
+| `process_counters` | 3 | 0 | 3 |
+| `process_io` | 15 | 3 | 12 |
+| **Total** | **159** | **35** | **124** |
+
+The complete per-pair decision table is in the appendix below. It includes every
+pair that was previously related only by individual monotonicity checks; no pair
+is silently unrelated. The 124 no-native decisions are grouped by reason:
+time vs throttle events, period count vs throttle duration, OOM limit events vs
+killed tasks, OOM limit events vs group kills (a system-wide OOM can group-kill
+without the cgroup's own `oom`), memory threshold crossings, independent
+read/write/discard IO streams,
+idle vs busy/outside populations, outside residual vs a specific busy class,
+full-duplex RX/TX, network/swap/thermal vs unrelated counters, independent
+swap-in/out, independent process CPU classes, and wakeups vs CPU. None of these
+is a kernel inequality, so none is invented.
+
+### Event-counter gate baseline sweep
+
+Every event counter consumed by a zero/qualification gate was checked for the
+same constant-nonzero-baseline blind spot:
+
+| Event counter(s) | Gate consumer | Absolute baseline treatment |
+| --- | --- | --- |
+| cgroup `memory_events.oom`, `oom_kill`, `oom_group_kill` | `failure_quiet`, `domain_oom`, reported `oom_events` metric | **Fixed**: absolute zero at every sample; first-sample sum kept separately; `oom_baseline_contaminated` |
+| `traffic.oom_events`, `monitor_misses`, `unexpected_restarts` | direct zero gate in `evaluate_metrics` | Already absolute; nonzero fails regardless of history |
+| all `failure_domains.*` signals (`memory_oom_kills`, `kernel_oom_kills`, `unexpected_restarts`, `monitor_misses`, `missing_samples`) | per-domain loop adds `measured_domain_failure` | Already absolute; each nonzero value is summed and refused |
+| runtime proof `monitoring.deadline_misses`, `unexpected_restarts`, `oom_events` | proof/traffic equality and zero gate | Absolute; equality to a nonzero proof value still fails the zero gate, mismatch is `invalid_runtime_evidence` |
+| host `thermal_throttle_count` | `thermal_quiet` | Already absolute `== 0` |
+| host `swap_in_pages`, `swap_out_pages`, `swap_used_bytes` | `swap_quiet` | Already absolute `== 0` |
+| process `wakeups` | monotonic-only check | Not a zero gate; no baseline blind spot |
+
+The only constant-baseline blind spot was the cgroup `memory_events` family; it
+is now closed by the policy above. `low`, `high` and `max` are not consumed by a
+qualification gate and therefore are outside this gate sweep; they remain
+monotonic counters with no invented ordering.
+
+### Tests-first RED evidence
+
+The two finding reproductions and the generic-operator truth table were written
+before any production change. The containment-satisfying group-baseline variant
+was added during the class sweep and is covered by the same GREEN run; its
+pre-fix behavior is included in the supplementary scratch reconstruction.
+
+`python3 -B -I -m unittest discover -s tools/performance -p test_kernel_identities.py -k ReviewRoundFive -v`
+-> **exit 1**, 4 tests / 0.880 s, **4 failures + 3 errors**. Log:
+`tools/performance/validation-output/round5/red-r5-findings.log`, exit in
+`red-r5-findings.exit`.
+
+- R5-I1 constant: `summarize` **PASS** in the primary RED; the supplementary
+  reconstruction also returns a six-repetition scenario **PASS**.
+- R5-I1 increasing: `summarize` **PASS** in the primary RED; the supplementary
+  reconstruction also returns a six-repetition scenario **PASS**.
+- R5-I2 `oom_group_kill=1, oom=oom_kill=0`: `summarize` **PASS** in the primary
+  RED; the supplementary reconstruction also returns a scenario **PASS**.
+- R5-I2 `oom=oom_kill=1, oom_group_kill=2`: `summarize` **PASS** in the primary
+  RED; the supplementary reconstruction also returns a scenario **PASS**.
+- Constant `oom=oom_kill=1, oom_group_kill=0`, `oom=0, oom_kill=1,
+  oom_group_kill=0` and `oom=oom_kill=oom_group_kill=1`: the test first required
+  the (then absent) containment identities, producing explicit errors on the
+  first two; the legacy equality-to-first and delta gates were otherwise blind.
+  The third variant satisfied both round-5 containments at the pre-fix state,
+  so only the absolute-baseline policy could refuse it; the pre-fix scratch
+  reproduction confirms PASS. Round 6 removed the invalid `oom` containment;
+  the variant still satisfies the surviving one.
+- The pair-coverage test errored on the absent `counter_sources`, not on a
+  passing production predicate.
+
+Because a failing `subTest` aborts its remaining statements, the primary RED log
+reaches the `summarize` assertion (and, where the absent relation raised, the
+relation lookup) but not the scenario or CLI assertion. A supplementary
+reconstruction removes exactly the round-5 enforcement additions from a scratch
+copy (three identities, counter tables, import audit and gate policy; scratch
+catalog returns to 137 identities / 129 relations). In that copy, all seven
+constructed variants (the six finding/gate variants plus the
+containment-satisfying group baseline) return `summarize` **PASS**, a
+six-repetition **PASS** scenario with all eight gates PASS and empty reasons
+(`prefix-compare-red.json`), and the real `offline.py summarize` CLI exits
+**0**, publishing a **PASS** summary with empty reasons and empty stderr
+(`prefix-cli-red.json`). The positive control also PASSes. These are scratch
+reconstructions, not recovered pre-edit bytes and not real evidence.
+
+`python3 -B -I -m unittest discover -s tools/performance -p test_accounting_mutations.py -k new_operator_truth_tables -v`
+-> **exit 1**, 1 test / 0.006 s, one error: `compile_relation` had no
+`implies_positive`/`containment` operator and raised `KeyError: 'parent'`.
+Log `red-r5-operators.log`, exit `red-r5-operators.exit`.
+
+### GREEN evidence
+
+Targeted new tests before the broad runs:
+
+| Command suffix after `python3 -B -I -m unittest discover -s tools/performance` | Result |
+| --- | --- |
+| `-p test_kernel_identities.py -k ReviewRoundFive -v` | **exit 0**, 5 tests / 14.910 s; 159 explicit pairs / 36 identity pairs; first-sample tearing and no-converse valid half-space PASS |
+| `-p test_accounting_mutations.py -k new_operator_truth_tables -v` | **exit 0**, 1 test / 0.000 s; exact implication/containment truth tables |
+
+Broad files after the round-5 production changes (historical round-5 state;
+current counts and identities are superseded by Review round 6):
+
+| Command | Result / log |
+| --- | --- |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_kernel_identities.py -v` | **exit 0**, 18 tests / 103.583 s; **132 applicable identities**, eight unavailable, 132 removal/reverse-citation mutants, **264 signed boundary probes**, 159 pair decisions; `progress-kernel-identities.log` |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting.py -v` | **exit 0**, 44 tests / 333.894 s; `progress-accounting.log` |
+| `PERFORMANCE_OFFLINE_NO_NETWORK=1 python3 -B -I -m unittest discover -s tools/performance -p test_offline.py -v` | **exit 0**, 9 tests / 164.927 s, one loopback test skipped (network prohibited); 8,142 failure-protocol cases; exactness trace, atomic exclusive publication; `progress-offline.log` |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_measurement.py -v` | **exit 0**, 84 tests / 1.157 s; `progress-measurement.log` |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting_mutations.py -v` | **exit 0**, 14 tests / 1989.944 s; numeric schema boundary probes: 6108 registered/number violations: 4996; model fixed-seed +/-1/zero/huge/absent/duplicate probes: 4104 generated violations: 2046; model relation removal mutants killed: 132; model numeric entries and killed entry removals: 247. `final-accounting-mutations.log`. |
+
+The mutation file covers all three classes in one run. Its relation-removal and
+quantity-removal mutants now include the three new identities; the operator
+truth tables are independent of the production predicate.
+
+Static/AST/JSON validation was run with `python3 -B -I` over all 14 Python files
+in `tools/performance` (parse + in-memory compile) and seven strict JSON
+documents (duplicate keys, decimals, nonfinite values rejected). All nine schema
+`$ref` values resolve. `accounting.py`, `quantity_model.py`,
+`kernel_identities.py` and `offline.py` contain no float constants or `float()`
+calls. Log `static-check.log`, exit 0. Regenerating `run-schema.json` and
+`quantity-model.json` from the catalog in place produced byte-identical files
+(SHA256 check `OK` for both).
+
+Fresh-interpreter determinism: three isolated runs of the same constructed
+summary produced identical SHA256
+`4ce862452e0286cd0ba3be9c8002d9161a8d2a894cd45a85200afaafd73a553b`
+(`determinism.log`). Atomic exclusive publication, fsync ordering, refusal to
+overwrite and symlink/path refusal remain covered by `test_offline.py`.
+
+### New and changed identities
+
+| Identity | Check | Scope / guard | Generated rules |
+| --- | --- | --- | --- |
+| `native_throttle_time_count` | `implies_positive` | `domain_tail`, one-way presence | 1 |
+| `native_group_kill_oom_kill` | `containment` | `domain`, both fields present | 1 |
+
+Round 6 removed `native_group_kill_oom`; it was not a kernel identity because a
+system-wide OOM group kill can occur with this cgroup's own `oom` count zero.
+Catalog totals are **139 identities, 131 available/generated relations, eight
+explicitly unavailable source identities, 247 numeric model positions and 159
+counter-pair decisions (35 identity, 124 no-native)**.
+`counter_pair_problems()` is part of the import-time catalog audit; removing the
+audit call, any pair decision, or labelling a covered pair (including two
+siblings under one partition) as no-native is caught by the coverage and
+mutation tests.
+
+### Documentation
+
+`performance-harness.md` records the exact one-way throttle rule, its one-way
+presence rule, the first-sample exemption and its torn-read justification, the
+surviving OOM-kill containment and nonempty-victim assumption, the
+`memory.events` no-exemption over-refusal, the absolute event-baseline policy,
+the counter-pair table and the residual `pid_max` one-unit looseness and
+normalized idle/iowait smoothing requirement. `performance-measurement.md`
+carries the updated 139/131/159 counts, the removal of the false
+`oom_group_kill <= oom` identity and the same one-way/containment policy. The catalog
+source list now also names `man getrlimit(2)` (Minor citation metadata), and the
+`cpu.stat` throttling rows cite the specific `nr_periods`/`nr_throttled`/
+`throttled_usec` definitions rather than only the generic `usage_usec` sentence.
+Both documents retain **no performance claim**, real runs **NOT_RUN** and
+`release_ready=false`.
+
+### Preservation
+
+`git diff --check` passes; the index stays empty; branch `rust/v2` and HEAD
+`e016617` are unchanged. No review file or acceptance file was edited. The only
+new repository writes in this round are under the owned paths above. All
+retained logs and exits are under
+`tools/performance/validation-output/round5/`.
+
+### Residual limits
+
+The catalog remains a documentation-knowledge transcription, not a fetched
+quotation, running-kernel proof or proof that no other Linux identity exists.
+The 124 `no_native_relation` decisions are reasoned judgments; they are explicit
+and audited for coverage, not a proof of absence of every conceivable kernel
+relation. The throttle rule exempts the first sample by policy: a torn read at a
+later sample would be refused (deliberate over-refusal), while a persistent
+contradiction is refused as required. The one-way presence rule refuses
+`throttled_usec > 0` with `nr_throttled` absent but accepts `nr_throttled > 0`
+with `throttled_usec` absent. `oom_group_kill <= oom_kill` depends on the
+nonempty-victim group-kill assumption. The `memory.events` containments have no
+first-sample read-order exemption: a one-sample `oom_group_kill`/`oom_kill` tear
+would be refused, accepted over-refusal because any nonzero OOM event is already
+refused by the absolute-zero policy. `oom_group_kill <= oom` is not asserted:
+`oom` is a limit-reached allocation-failure event, and a system-wide OOM group
+kill can leave it zero. Any cgroup with a nonzero pre-existing OOM
+count in the measured window is now deliberately treated as contaminated and
+cannot qualify; a clean-window producer must start from zero counters.
+`pid_max` is still one unit looser than the native PID wrap, normalized idle
+still requires producer iowait smoothing, and native page size, current
+RLIMIT_NOFILE, pids.max, transient peaks, producer authenticity/alignment and
+statistical independence remain unqualified. No real performance, release,
+producer, runtime, client, ARM, migration or soak acceptance follows from this
+round; all such gates remain **NOT_RUN** with **no performance claim** and
+**release_ready=false**.
+
+### Appendix: complete co-located counter-pair decision table
+
+| Source | Pairs | Identity | No native relation |
+| --- | ---: | ---: | ---: |
+| `cpu_stat` | 15 | 5 | 10 |
+| `domain_exited_cpu` | 3 | 3 | 0 |
+| `domain_io` | 15 | 3 | 12 |
+| `domain_io_other` | 15 | 3 | 12 |
+| `host_counters` | 78 | 17 | 61 |
+| `memory_events` | 15 | 2 | 13 |
+| `process_counters` | 3 | 0 | 3 |
+| `process_io` | 15 | 3 | 12 |
+
+| Source | Pair | Decision |
+| --- | --- | --- |
+| `cpu_stat` | `usage_usec / user_usec` | identity: `domain_parts` |
+| `cpu_stat` | `usage_usec / system_usec` | identity: `domain_parts` |
+| `cpu_stat` | `usage_usec / nr_periods` | no native relation: `cpu_time_vs_throttle_events` |
+| `cpu_stat` | `usage_usec / nr_throttled` | no native relation: `cpu_time_vs_throttle_events` |
+| `cpu_stat` | `usage_usec / throttled_usec` | no native relation: `cpu_time_vs_throttle_events` |
+| `cpu_stat` | `user_usec / system_usec` | identity: `domain_parts` |
+| `cpu_stat` | `user_usec / nr_periods` | no native relation: `cpu_time_vs_throttle_events` |
+| `cpu_stat` | `user_usec / nr_throttled` | no native relation: `cpu_time_vs_throttle_events` |
+| `cpu_stat` | `user_usec / throttled_usec` | no native relation: `cpu_time_vs_throttle_events` |
+| `cpu_stat` | `system_usec / nr_periods` | no native relation: `cpu_time_vs_throttle_events` |
+| `cpu_stat` | `system_usec / nr_throttled` | no native relation: `cpu_time_vs_throttle_events` |
+| `cpu_stat` | `system_usec / throttled_usec` | no native relation: `cpu_time_vs_throttle_events` |
+| `cpu_stat` | `nr_periods / nr_throttled` | identity: `native_throttled_periods` |
+| `cpu_stat` | `nr_periods / throttled_usec` | no native relation: `period_vs_throttle_duration` |
+| `cpu_stat` | `nr_throttled / throttled_usec` | identity: `native_throttle_time_count` |
+| `domain_exited_cpu` | `cpu_exited_usec / cpu_exited_user_usec` | identity: `exited_parts` |
+| `domain_exited_cpu` | `cpu_exited_usec / cpu_exited_system_usec` | identity: `exited_parts` |
+| `domain_exited_cpu` | `cpu_exited_user_usec / cpu_exited_system_usec` | identity: `exited_parts` |
+| `memory_events` | `low / high` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `low / max` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `low / oom` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `low / oom_kill` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `low / oom_group_kill` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `high / max` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `high / oom` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `high / oom_kill` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `high / oom_group_kill` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `max / oom` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `max / oom_kill` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `max / oom_group_kill` | no native relation: `threshold_counts_independent` |
+| `memory_events` | `oom / oom_kill` | no native relation: `oom_events_vs_killed_tasks` |
+| `memory_events` | `oom / oom_group_kill` | no native relation: `oom` limit events vs `oom_group_kill` (a system-wide OOM group kill can leave this cgroup's `oom` zero; round 6 removed the false identity) |
+| `memory_events` | `oom_kill / oom_group_kill` | identity: `native_group_kill_oom_kill` |
+| `domain_io` | `rbytes / wbytes` | no native relation: `io_streams_independent` |
+| `domain_io` | `rbytes / rios` | identity: `io_read` |
+| `domain_io` | `rbytes / wios` | no native relation: `io_streams_independent` |
+| `domain_io` | `rbytes / dbytes` | no native relation: `io_streams_independent` |
+| `domain_io` | `rbytes / dios` | no native relation: `io_streams_independent` |
+| `domain_io` | `wbytes / rios` | no native relation: `io_streams_independent` |
+| `domain_io` | `wbytes / wios` | identity: `io_write` |
+| `domain_io` | `wbytes / dbytes` | no native relation: `io_streams_independent` |
+| `domain_io` | `wbytes / dios` | no native relation: `io_streams_independent` |
+| `domain_io` | `rios / wios` | no native relation: `io_streams_independent` |
+| `domain_io` | `rios / dbytes` | no native relation: `io_streams_independent` |
+| `domain_io` | `rios / dios` | no native relation: `io_streams_independent` |
+| `domain_io` | `wios / dbytes` | no native relation: `io_streams_independent` |
+| `domain_io` | `wios / dios` | no native relation: `io_streams_independent` |
+| `domain_io` | `dbytes / dios` | identity: `io_discard` |
+| `domain_io_other` | `rbytes / wbytes` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `rbytes / rios` | identity: `io_read` |
+| `domain_io_other` | `rbytes / wios` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `rbytes / dbytes` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `rbytes / dios` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `wbytes / rios` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `wbytes / wios` | identity: `io_write` |
+| `domain_io_other` | `wbytes / dbytes` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `wbytes / dios` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `rios / wios` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `rios / dbytes` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `rios / dios` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `wios / dbytes` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `wios / dios` | no native relation: `io_streams_independent` |
+| `domain_io_other` | `dbytes / dios` | identity: `io_discard` |
+| `process_io` | `rbytes / wbytes` | no native relation: `io_streams_independent` |
+| `process_io` | `rbytes / rios` | identity: `io_read` |
+| `process_io` | `rbytes / wios` | no native relation: `io_streams_independent` |
+| `process_io` | `rbytes / dbytes` | no native relation: `io_streams_independent` |
+| `process_io` | `rbytes / dios` | no native relation: `io_streams_independent` |
+| `process_io` | `wbytes / rios` | no native relation: `io_streams_independent` |
+| `process_io` | `wbytes / wios` | identity: `io_write` |
+| `process_io` | `wbytes / dbytes` | no native relation: `io_streams_independent` |
+| `process_io` | `wbytes / dios` | no native relation: `io_streams_independent` |
+| `process_io` | `rios / wios` | no native relation: `io_streams_independent` |
+| `process_io` | `rios / dbytes` | no native relation: `io_streams_independent` |
+| `process_io` | `rios / dios` | no native relation: `io_streams_independent` |
+| `process_io` | `wios / dbytes` | no native relation: `io_streams_independent` |
+| `process_io` | `wios / dios` | no native relation: `io_streams_independent` |
+| `process_io` | `dbytes / dios` | identity: `io_discard` |
+| `host_counters` | `busy_ticks / user_ticks` | identity: `host_parts` |
+| `host_counters` | `busy_ticks / system_ticks` | identity: `host_parts` |
+| `host_counters` | `busy_ticks / irq_ticks` | identity: `host_parts` |
+| `host_counters` | `busy_ticks / softirq_ticks` | identity: `host_parts` |
+| `host_counters` | `busy_ticks / steal_ticks` | identity: `host_parts` |
+| `host_counters` | `busy_ticks / idle_ticks` | identity: `host_clock` |
+| `host_counters` | `busy_ticks / other_cpu_usec` | identity: `outside_cpu_snapshot` |
+| `host_counters` | `busy_ticks / network_rx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `busy_ticks / network_tx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `busy_ticks / swap_in_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `busy_ticks / swap_out_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `busy_ticks / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `host_counters` | `user_ticks / system_ticks` | identity: `host_parts` |
+| `host_counters` | `user_ticks / irq_ticks` | identity: `host_parts` |
+| `host_counters` | `user_ticks / softirq_ticks` | identity: `host_parts` |
+| `host_counters` | `user_ticks / steal_ticks` | identity: `host_parts` |
+| `host_counters` | `user_ticks / idle_ticks` | no native relation: `idle_is_busy_complement` |
+| `host_counters` | `user_ticks / other_cpu_usec` | no native relation: `outside_bounded_by_busy_only` |
+| `host_counters` | `user_ticks / network_rx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `user_ticks / network_tx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `user_ticks / swap_in_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `user_ticks / swap_out_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `user_ticks / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `host_counters` | `system_ticks / irq_ticks` | identity: `host_parts` |
+| `host_counters` | `system_ticks / softirq_ticks` | identity: `host_parts` |
+| `host_counters` | `system_ticks / steal_ticks` | identity: `host_parts` |
+| `host_counters` | `system_ticks / idle_ticks` | no native relation: `idle_is_busy_complement` |
+| `host_counters` | `system_ticks / other_cpu_usec` | no native relation: `outside_bounded_by_busy_only` |
+| `host_counters` | `system_ticks / network_rx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `system_ticks / network_tx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `system_ticks / swap_in_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `system_ticks / swap_out_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `system_ticks / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `host_counters` | `irq_ticks / softirq_ticks` | identity: `host_parts` |
+| `host_counters` | `irq_ticks / steal_ticks` | identity: `host_parts` |
+| `host_counters` | `irq_ticks / idle_ticks` | no native relation: `idle_is_busy_complement` |
+| `host_counters` | `irq_ticks / other_cpu_usec` | no native relation: `outside_bounded_by_busy_only` |
+| `host_counters` | `irq_ticks / network_rx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `irq_ticks / network_tx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `irq_ticks / swap_in_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `irq_ticks / swap_out_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `irq_ticks / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `host_counters` | `softirq_ticks / steal_ticks` | identity: `host_parts` |
+| `host_counters` | `softirq_ticks / idle_ticks` | no native relation: `idle_is_busy_complement` |
+| `host_counters` | `softirq_ticks / other_cpu_usec` | no native relation: `outside_bounded_by_busy_only` |
+| `host_counters` | `softirq_ticks / network_rx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `softirq_ticks / network_tx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `softirq_ticks / swap_in_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `softirq_ticks / swap_out_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `softirq_ticks / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `host_counters` | `steal_ticks / idle_ticks` | no native relation: `idle_is_busy_complement` |
+| `host_counters` | `steal_ticks / other_cpu_usec` | no native relation: `outside_bounded_by_busy_only` |
+| `host_counters` | `steal_ticks / network_rx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `steal_ticks / network_tx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `steal_ticks / swap_in_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `steal_ticks / swap_out_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `steal_ticks / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `host_counters` | `idle_ticks / other_cpu_usec` | no native relation: `idle_vs_outside_populations` |
+| `host_counters` | `idle_ticks / network_rx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `idle_ticks / network_tx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `idle_ticks / swap_in_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `idle_ticks / swap_out_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `idle_ticks / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `host_counters` | `other_cpu_usec / network_rx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `other_cpu_usec / network_tx_bytes` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `other_cpu_usec / swap_in_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `other_cpu_usec / swap_out_pages` | no native relation: `swap_vs_cpu_network_thermal` |
+| `host_counters` | `other_cpu_usec / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `host_counters` | `network_rx_bytes / network_tx_bytes` | no native relation: `network_directions_independent` |
+| `host_counters` | `network_rx_bytes / swap_in_pages` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `network_rx_bytes / swap_out_pages` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `network_rx_bytes / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `host_counters` | `network_tx_bytes / swap_in_pages` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `network_tx_bytes / swap_out_pages` | no native relation: `network_vs_cpu_swap_thermal` |
+| `host_counters` | `network_tx_bytes / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `host_counters` | `swap_in_pages / swap_out_pages` | no native relation: `swap_directions_independent` |
+| `host_counters` | `swap_in_pages / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `host_counters` | `swap_out_pages / thermal_throttle_count` | no native relation: `thermal_vs_other_counters` |
+| `process_counters` | `utime_ticks / stime_ticks` | no native relation: `process_cpu_classes_independent` |
+| `process_counters` | `utime_ticks / wakeups` | no native relation: `process_wakeups_vs_cpu` |
+| `process_counters` | `stime_ticks / wakeups` | no native relation: `process_wakeups_vs_cpu` |
+
+## Review round 6
+
+IMPLEMENTATION COMPLETE / OFFLINE GREEN, 2026-11-07; independent re-review
+pending. Implementation delegate; no children. Started on `rust/v2` @
+`e01661755097452952c1e4ca89dc4097d67c771f` with the rounds 5+6 harness changes
+uncommitted in the working tree. Read `task-14-rereview5.md` in full, including
+R6-I1, R6-M1 to R6-M6, the kernel semantics audit, the counter-pair audit and
+the disposition. Own only `tools/performance/**`, the two performance documents
+and this report. No review file, acceptance file, Git index, branch or HEAD was
+modified. No network (including loopback), sudo, VM, Rust or real workload was
+run. Python used only `python3 -B -I`; the offline suite used
+`PERFORMANCE_OFFLINE_NO_NETWORK=1`. Every recording below is a constructed
+input-domain record, never a measurement. Real Python/Rust performance,
+producer/runtime/client/ARM/migration/soak/release qualification remain
+**NOT_RUN / OPEN**, with **no performance claim** and `release_ready=false`.
+
+### R6-I1: remove the false `oom_group_kill <= oom` identity
+
+The identity, its generated relation and its counter-pair `identity` decision
+were removed. The `memory.events.oom / oom_group_kill` pair is now an explicit
+`no_native_relation` whose reason records the documented `oom` meaning: the
+number of times the cgroup's memory usage reached the limit and the allocation
+was about to fail (a single event, not per process). It is not an OOM-kill
+count. During a system-wide OOM the OOM killer can select this cgroup and, with
+`memory.oom.group=1`, kill the whole group without this cgroup's own limit being
+reached, so `oom_group_kill` can increase while `oom` stays zero.
+`native_group_kill_oom_kill` (`oom_group_kill <= oom_kill`) remains under the
+documented nonempty-victim assumption, as does the independent absolute-zero
+OOM policy.
+
+Every citation and document was corrected, not just the deleted identity: the
+`native_group_kill_oom_kill` citation, the six `memory.events` counter rows,
+the `oom / oom_kill` no-native reason, `performance-harness.md`,
+`performance-measurement.md`, this report's round-5 claim and its appendix.
+The catalogue totals changed from 140/132/36/123 to
+**139 identities / 131 generated relations / 35 identity pairs / 124 no-native
+pairs**; 159 pairs, 247 quantities and eight unavailable identities are
+unchanged. The witness table, availability audit and mutation tests were
+updated: **131 applicable identities and 262 signed boundary probes**.
+
+Evidence. The constructed valid global-OOM group-kill records
+`oom=0, oom_kill=1, oom_group_kill=1` (SHA256
+`8104ca6536a4318a24ed1eb991ba5309a19736c5a8a5625361023c71d8b21b6a`) and
+`oom=0, oom_kill=2, oom_group_kill=1` (SHA256
+`c33c7e5b6252a54a398b28807a322e15580a131d4dfe7c8b0d23405c6b15a861`) both
+summarize **INSUFFICIENT_DATA** with reasons
+`['measured_domain_failure', 'oom_baseline_contaminated']` and reported
+`oom_events` 2 and 3. Neither record contains
+`quantity_model:relation:native_group_kill_oom`; the surviving
+`native_group_kill_oom_kill` relation is satisfied and is not a reason. This is
+still a refusal by the OOM policy, not by a false native contradiction.
+
+### R6-M1: one-way presence in `implies_positive`
+
+`quantity_model.py` now implements one-way presence for `implies_positive`: an
+absent antecedent is vacuous; a present nonpositive antecedent is vacuous; a
+present positive antecedent requires a present positive consequent; a present
+positive antecedent with an absent consequent **fails**. The converse presence
+requirement is not asserted, so the valid half-space `nr_throttled > 0` with
+`throttled_usec` absent still PASSes. The catalog check now records
+`presence_rule: positive_antecedent_requires_present_positive_consequent` and no
+longer relies on a symmetric `when_present` gate. The compiler rejects a
+`when_present` field on `implies_positive` rather than silently ignoring it.
+
+Evidence. A constructed record with `throttled_usec=1000000` and both
+`nr_throttled` and `nr_periods` absent at every control sample was a false PASS
+before the change (the reproduced R6-M1); it is now INSUFFICIENT_DATA with the
+single relation reason `quantity_model:relation:native_throttle_time_count`
+(no other relation masks it). The valid half-space `nr_periods=1,
+nr_throttled=1, throttled_usec` absent PASSes, as does the both-absent and
+all-zero forms. The independent operator truth table covers all presence
+combinations: antecedent absent (consequent absent/zero/positive) vacuous;
+antecedent zero (consequent absent/zero/positive) vacuous; antecedent positive
+with consequent absent or zero refused; antecedent positive with consequent
+positive accepted.
+
+### R6-M2: generate presence-operand `relation_checks`
+
+`build_quantity_model.py` now includes `antecedent` and `consequent` in the
+machine-readable relation cross-reference scan, in addition to `parent`,
+`children` and `path`. `samples.*.domains.*.cpu.nr_throttled` and
+`samples.*.domains.*.cpu.throttled_usec` now list `native_throttle_time_count`
+in `relation_checks`. `run-schema.json` and `quantity-model.json` were
+regenerated only with `python3 -B -I build_quantity_model.py`; the schema was
+byte-identical, and repeated regeneration produced byte-identical files
+(SHA256 `c2bf1f470134a032dbcc7a317b5921b65cfb831ef0b071a2ab6aa365cbd74e5a`
+and `8eced2f8a1c14ec59f7a1d1df00899f089c86c042e1d8ea8df0a3227e3976b77 (corrected per review R7-M1; the round-6 value was stale)`).
+
+### R6-M3: audit covered sibling counter pairs
+
+`kernel_identities.counter_pair_problems()` now treats a pair as covered when
+its two operands are one parent-side and one child-side operand of a check, one
+antecedent and one consequent, or two distinct siblings under one
+partition/containment. A `no_native_relation` decision for any covered pair is
+reported as `counter_pair_unrelated_but_identity`. Two operands summed inside
+one child expression (process `utime_ticks`+`stime_ticks` inside one usage
+child) are deliberately not treated as siblings; the existing
+`process_cpu_classes_independent` decision remains valid. A scratch-catalog
+mutation test changes four covered pairs (host `user_ticks`/`system_ticks`
+siblings, `nr_periods`/`nr_throttled` parent/child, `nr_throttled`/
+`throttled_usec` antecedent/consequent, `oom_kill`/`oom_group_kill`
+containment) from `identity` to `no_native_relation` and requires all four to
+be caught. The overstated round-5 report sentence "any pair decision is caught"
+was replaced with the exact covered-pair scope above.
+
+### R6-M4 and R6-M5: torn-read policy documented
+
+`performance-harness.md` now states explicitly that the `cpu.stat` throttle
+implication exempts exactly the first acquisition sample; a later single-sample
+tear is deliberately over-refused because the policy does not infer read
+ordering beyond that documented exemption. It also states that the
+`memory.events` containments have **no** first-sample read-order exemption: a
+one-sample `oom_group_kill`/`oom_kill` tear would be refused, and that
+over-refusal is accepted because the independent absolute-zero OOM policy
+already prevents any nonzero OOM event from PASSing. The same limits are
+recorded in this report's residual limits.
+
+### R6-M6: correct the arithmetic table
+
+The arithmetic table now labels the raw-record control-PSS boundary as a
+**1 KiB quantum**, because `smaps_rollup` prints integer kB; the direct metric
+API retains the abstract ±1 B boundaries. The raw-record test and the report
+table now agree.
+
+### RED evidence
+
+Tests were written before the production changes and run with
+`python3 -B -I -m unittest discover -s tools/performance`:
+
+| RED command suffix | Exit | Result / log |
+| --- | ---: | --- |
+| `-p test_kernel_identities.py -k ReviewRoundSix -v` | 1 | 4 tests, **6 failures / 0.698 s**: both global-OOM variants exposed the false `native_group_kill_oom` row; the missing-consequent record was **PASS**; both throttle `relation_checks` lacked `native_throttle_time_count`; the sibling-pair mutation returned no problem. `/tmp/opencode/task14-r6/red-r6-kernel.log` |
+| `-p test_accounting_mutations.py -k test_new_operator_truth_tables -v` | 1 | 1 test, **6 errors / 0.001 s**: absent-antecedent and absent-consequent contexts raised `KeyError('a')`/`KeyError('b')` instead of the one-way presence result. `/tmp/opencode/task14-r6/red-r6-truth.log` |
+
+No production file was changed before these RED runs. The RED kernel log
+includes the reproduced R6-M1 false PASS, the false `oom_group_kill <= oom`
+row, the missing cross-reference and the uncaught sibling mutation, matching
+the re-review's four findings.
+
+### GREEN evidence
+
+Targeted runs after the production, catalog and regeneration changes:
+
+| Command suffix | Exit | Result / log |
+| --- | ---: | --- |
+| `-p test_kernel_identities.py -k ReviewRoundSix -v` | 0 | 4 tests / 4.777 s; R6-I1 (including the six-repetition and CLI OOM-policy refusals), M1, M2, M3 pass; `/tmp/opencode/task14-r6/green-r6-kernel-six.log` |
+| `-p test_kernel_identities.py -k ReviewRoundFive -v` | 0 | 5 tests / 13.744 s; 159 pairs / **35 identity pairs**; first-sample tearing and valid half-spaces still PASS; `/tmp/opencode/task14-r6/green-r6-kernel-five.log` |
+| `-p test_accounting_mutations.py -k test_new_operator_truth_tables -v` | 0 | 1 test / 0.000 s; presence truth table passes; `/tmp/opencode/task14-r6/green-r6-truth.log` |
+
+Every test file was then run to completion:
+
+| Full command | Exit | Result / log |
+| --- | ---: | --- |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_kernel_identities.py -v` | 0 | **22 tests / 99.638 s**; 131 applicable identities, eight unavailable, 131 removal/reverse-citation mutants, **262 signed boundary probes**, 159 pair decisions; `/tmp/opencode/task14-r6/green-kernel-full.log` |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting.py -v` | 0 | **44 tests / 313.066 s** (5m13.144 s wall); `/tmp/opencode/task14-r6/green-accounting.log` |
+| `PERFORMANCE_OFFLINE_NO_NETWORK=1 python3 -B -I -m unittest discover -s tools/performance -p test_offline.py -v` | 0 | **9 tests / 158.452 s** (2m38.500 s wall), **one loopback test skipped and NOT_RUN**; 8,142 failure-protocol cases; `/tmp/opencode/task14-r6/green-offline.log` |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_measurement.py -v` | 0 | **84 tests / 1.033 s**; `/tmp/opencode/task14-r6/green-measurement.log` |
+| `python3 -B -I -m unittest discover -s tools/performance -p test_accounting_mutations.py -v` | 0 | **14 tests / 1,880.763 s** (31m20.843 s wall); numeric schema probes 6,108 registered / 4,996 violations; model fixed-seed probes 4,104 generated / 2,046 violations; **131 relation-removal mutants killed** and 247 quantity-removal mutants; `/tmp/opencode/task14-r6/green-accounting-mutations.log` |
+
+Static/AST/strict-JSON check (`/tmp/opencode/task14-r6/static_check.py`, exit 0):
+14 Python files parsed and compiled, seven performance JSON documents decoded
+strictly (duplicate keys, decimals and nonfinite values rejected), all nine
+schema `$ref` values resolved, no float constants or `float()` calls in
+`accounting.py`, `quantity_model.py`, `kernel_identities.py`, `offline.py` or
+`build_quantity_model.py`, and `catalog_coverage()` returned `[]`. Regenerating
+`run-schema.json` and `quantity-model.json` twice produced byte-identical files;
+three fresh interpreters produced identical constructed-summary SHA256
+`53d4fe02092e4f9f3ab1de74f0242f3edebf2875f6a4967de8b0042809562e21`.
+
+### Documentation
+
+Both performance documents now state the corrected `oom` meaning, the removed
+`oom_group_kill <= oom` identity, the surviving `oom_group_kill <= oom_kill`
+containment, the one-way presence rule, the two torn-read policies, the
+covered-pair audit scope and the updated 139/131/35/124/159 counts. Both retain
+**no performance claim**, real runs **NOT_RUN** and `release_ready=false`.
+`acceptance.json` was not edited.
+
+### Preservation
+
+`git diff --check` exits 0; the Git index is empty; branch `rust/v2` and HEAD
+`e01661755097452952c1e4ca89dc4097d67c771f` are unchanged. No Git
+stage/commit/push, review-file edit, acceptance edit or new unowned repository
+write was made. All logs and evidence above are outside the repository under
+`/tmp/opencode/task14-r6/`.
+
+### Residual limits
+
+The `oom` definitions and the system-wide OOM group-kill path are paraphrases
+from knowledge of `Documentation/admin-guide/cgroup-v2.rst` and the kernel
+implementation; they were not fetched or version-verified, so a future
+reviewer must re-check them for the target kernel. Removing the false identity
+does not add any new positive claim about `oom` versus `oom_kill` or
+`oom_group_kill`. The covered-pair audit is finite and within-source: it does
+not prove that every conceivable cross-source kernel relation is absent. The
+`cpu.stat` first-sample exemption still over-refuses a later single-sample
+tear; the `memory.events` containments have no read-order exemption and
+deliberately over-refuse a one-sample tear; `oom_group_kill <= oom_kill` still
+depends on the nonempty-victim assumption. Any cgroup with a nonzero
+pre-existing or in-window OOM event remains contaminated and cannot qualify.
+`pid_max` remains one unit looser than the native PID wrap, normalized idle
+still requires producer iowait smoothing, and native page size, current
+RLIMIT_NOFILE, pids.max, transient peaks, producer authenticity/alignment and
+statistical independence remain unqualified. No real performance, release,
+producer, runtime, client, ARM, migration or soak acceptance follows from this
+round; all such gates remain **NOT_RUN** with **no performance claim** and
+**release_ready=false**.
+
+## Review round 7 disposition (controller, 2026-11-07)
+
+Independent re-review `task-14-rereview6.md` (OpenCode DeepSeek v4.1 flash max): **PASS** — R6-I1
+and R6-M1..M6 closed by reproduction; no Critical/Important findings. Minor findings fixed by the
+controller:
+
+- R7-M1: report hash for the round-6 `quantity-model.json` corrected above.
+- R7-M2: `build_quantity_model.py` `relation_checks` now use exact operand extraction
+  (`relation_operands`: dotted references, path rules, `present_sum` key lists) instead of substring
+  matching; test `test_R7_M2_relation_checks_are_exact_operand_matches` (RED before, GREEN after).
+  Regenerated `quantity-model.json` SHA256
+  `c6a6b5ac1a592044b1601ec014c230b17ce7a23fbb90d58b356b6466e6a1a5f7`, byte-identical on regeneration;
+  `run-schema.json` unchanged (`c2bf1f47...`).
+- R7-M3: `test_R7_M3_import_time_coverage_runs_the_counter_pair_audit` asserts the import-time
+  `coverage()` path reports a mutated covered pair; RED with the `counter_pair_problems` call removed,
+  GREEN restored.
+- R7-M4: the second presence policy (symmetric `presence_pairs`) is now documented in
+  `performance-harness.md`.
+
+The harness remains an offline preparation layer: no performance claim; real runs NOT_RUN;
+release_ready=false.

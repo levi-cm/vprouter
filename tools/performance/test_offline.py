@@ -26,7 +26,7 @@ class Boundaries(unittest.TestCase):
         import sys
         from unittest.mock import patch
         o=module('offline');t=module('test_accounting')
-        for name in ('offline.py','accounting.py','quantity_model.py'):
+        for name in ('offline.py','accounting.py','quantity_model.py','kernel_identities.py'):
             tree=ast.parse((ROOT/name).read_text())
             self.assertFalse(any(isinstance(n,ast.Constant) and type(n.value) is float for n in ast.walk(tree)))
             self.assertFalse(any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='float' for n in ast.walk(tree)))

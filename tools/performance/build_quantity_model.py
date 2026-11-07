@@ -1,6 +1,6 @@
 """Author the closed schema inventory and declarative quantity model, offline.
 
-Run with python3 -B -I. Changes to semantics require editing this authoring table,
+Run with python3 -B -I. Relations are derived from kernel-identities.json. Quantity changes require
 reviewing the generated JSON diff, and updating independent mutation witnesses.
 This tool is never invoked by the analyzer or its completeness tests.
 """
@@ -14,6 +14,19 @@ CPU=('usage_usec','user_usec','system_usec','nr_periods','nr_throttled','throttl
 MEMORY=('anon','file','kernel','sock','shmem','anon_thp','file_thp','shmem_thp','kernel_stack','pagetables','sec_pagetables','percpu','vmalloc','slab','slab_reclaimable','slab_unreclaimable','file_mapped','file_dirty','file_writeback')
 EVENTS=('low','high','max','oom','oom_kill','oom_group_kill')
 IO=('rbytes','wbytes','rios','wios','dbytes','dios')
+
+
+def relation_operands(rule):
+    """Exact final field names a relation reads (dotted refs, path rules, present_sum keys)."""
+    def names(node):
+        if type(node) is str:
+            if node.startswith('/'):return {node.split('/')[-1]}
+            return {node.split('.')[-1]} if '.' in node else set()
+        if type(node) is list and node:
+            if node[0]=='present_sum':return names(node[1])|set(node[2])
+            return set().union(*(names(value) for value in node))
+        return set()
+    return set().union(*(names(rule.get(k)) for k in ('parent','children','path','antecedent','consequent')))
 
 
 def author():
@@ -144,7 +157,10 @@ def author():
         if unit=='tick':native_width='unsigned long, 64-bit host required'
         if key in ('pid','threads','pid_max') or path.endswith('/member_pids/*'):
             native_width='Linux signed 32-bit pid/task integer';width=31
-        if unit=='byte' and ('smaps_rollup' in source):native_width='unsigned long 64-bit kB, checked multiply by 1024 into u64'
+        if unit=='byte' and ('smaps_rollup' in source):native_width='unsigned long 64-bit integer kB, checked multiply by 1024 into u64; normalized quantum 1024 bytes'
+        if key=='fds':
+            native_width='count of distinct nonnegative signed-int descriptor numbers, cardinality <= INT_MAX+1'
+            bound='native descriptor namespace cardinality <= 2**31, plus reviewed max_fd_entries; shared file descriptions are not distinct entries'
         entry=dict(name=name,path=path,source={'file':source,'field':path},kind=kind,unit=unit,width=width,rust_width='u64 recorded representation',kernel_width=native_width,
                    monotonic=monotonic,parent_total=parent,sibling_set=siblings,physical_upper_bound=bound,absence_allowed=optional,
                    minimum=node.get('minimum',node.get('const',0)),maximum=node.get('maximum',node.get('const',U64)),
@@ -157,82 +173,15 @@ def author():
     entries=list({entry['path']:entry for entry in entries}.values())
     for entry in entries:
         entry['object_alternative']=any(other['path'].startswith(entry['path']+'/') for other in entries)
-    rules=[]
-    def partition(id,scope,parent,children,tol=0,lower=None,when=(),pairs=()):
-        rules.append(dict(id=id,scope=scope,operator='partition',parent=parent,children=children,upper_tolerance=tol,
-                          lower_tolerance=tol if lower is None else lower,when_present=list(when),presence_pairs=list(pairs),
-                          derivation='endpoint CPU quantization/read skew' if tol!=0 else 'exact aligned partition' if lower is None else 'subset: omitted siblings are nonnegative and at most the whole parent',
-                          mutation_test='QuantityModelTests.test_relation_boundaries_and_consumer_mutations'))
-    def subset(id,scope,parent,child,tol=0,when=(),pairs=()):partition(id,scope,parent,[child],tol,lower=parent,when=when,pairs=pairs)
-    add=lambda *xs:['add',*xs]
-    mul=lambda *xs:['mul',*xs]
-    sub=lambda x,y:['sub',x,y]
-    div=lambda x,y:['div',x,y]
-    delta=lambda x:['delta',x]
-    sm=lambda collection,field:['sum',collection,field]
-    sd=lambda collection,field:['sum_delta',collection,field]
-    # w0+w1 = 2*w1 - delta(width).
-    widths=sub(mul(2,sub('s.read_end_ns','s.mono_ns')),sub(delta('s.read_end_ns'),delta('s.mono_ns')))
-    skew=div(mul(widths,'h.logical_cpus'),1000)
-    outer=sub('s.read_end_ns',['sub','s.mono_ns',delta('s.mono_ns')])
-    capacity=div(mul(outer,'h.logical_cpus','h.tick_hz'),10**9)
-    partition('host_clock','interval',capacity,[delta('c.busy_ticks'),delta('c.idle_ticks')],add(mul(16,'h.logical_cpus'),div(mul(widths,'h.logical_cpus','h.tick_hz'),10**9)))
-    # Boot capacity is only an upper bound: no uptime-online history is claimed.
-    subset('host_boot','sample',add(div(mul('s.read_end_ns','h.tick_hz','h.logical_cpus'),10**9),mul(16,'h.logical_cpus')),add('c.busy_ticks','c.idle_ticks'))
-    partition('host_parts','sample','c.busy_ticks',['c.'+k for k in ('user_ticks','system_ticks','irq_ticks','softirq_ticks','steal_ticks')])
-    for cls,hostfield in [('usage','busy'),('user','user'),('system','system')]:
-        field={'usage':'usage_usec','user':'user_usec','system':'system_usec'}[cls]
-        host=div(mul('c.'+hostfield+'_ticks',10**6),'h.tick_hz')
-        tol=add(div(mul(4 if cls!='usage' else 12,'h.logical_cpus',10**6),'h.tick_hz'),div(mul(sub('s.read_end_ns','s.mono_ns'),'h.logical_cpus'),1000))
-        subset('snapshot_domain_cpu' if cls=='usage' else 'snapshot_domain_'+cls,'sample',host,sm('groups','item.cpu.'+field),tol)
-        ps=sm('processes','item.utime_ticks') if cls=='user' else sm('processes','item.stime_ticks') if cls=='system' else add(sm('processes','item.utime_ticks'),sm('processes','item.stime_ticks'))
-        subset('snapshot_process_'+cls,'sample','c.'+hostfield+'_ticks',ps,add(mul(4 if cls!='usage' else 12,'h.logical_cpus'),div(mul(sub('s.read_end_ns','s.mono_ns'),'h.logical_cpus','h.tick_hz'),10**9)))
-    for field in ('pss_bytes','uss_bytes'):subset('sum_'+field,'sample','h.memory_total_bytes',sm('processes','item.'+field))
-    subset('sum_charges','sample','h.memory_total_bytes',sm('groups','item.memory_current_bytes'))
-    subset('sum_threads','sample','h.pid_max',sm('processes','item.threads'))
-    subset('swap_host','sample','h.swap_total_bytes','c.swap_used_bytes')
-    subset('swap_pss','sample','c.swap_used_bytes',sm('processes','item.swap_pss_bytes'))
-    subset('swap_charges','sample','c.swap_used_bytes',sm('groups','item.swap_current_bytes'))
-    for id,parent,child in [('uss_pss','p.pss_bytes','p.uss_bytes'),('pss_rss','p.rss_bytes','p.pss_bytes'),('rss_ram','h.memory_total_bytes','p.rss_bytes'),('swap_order','p.swap_bytes','p.swap_pss_bytes'),('fd_limit','h.max_fd_entries','p.fds'),('pid_limit','h.pid_max','p.pid'),('thread_limit','h.pid_max','p.threads'),('process_start',div(mul('s.read_end_ns','h.tick_hz'),10**9),'p.start_ticks')]:subset(id,'process',parent,child)
-    lifetime=sub(div(mul('s.read_end_ns','h.tick_hz'),10**9),'p.start_ticks')
-    subset('process_lifetime','process',add(mul(lifetime,'h.logical_cpus'),mul(2,'h.logical_cpus')),add('p.utime_ticks','p.stime_ticks'))
-    partition('domain_parts','domain','d.cpu.usage_usec',['d.cpu.user_usec','d.cpu.system_usec'],2)
-    partition('exited_parts','domain','d.cpu_exited_usec',['d.cpu_exited_user_usec','d.cpu_exited_system_usec'])
-    partition('memory_parts','domain','d.memory_current_bytes',['d.memory_stat.'+k for k in ('anon','file','kernel')]+['d.memory_stat_other_bytes'])
-    partition('memory_charge','domain','d.memory_current_bytes',[sm('members','item.uss_bytes'),'d.memory_other_bytes'])
-    partition('pids','domain','d.pids_current',[sm('members','item.threads')])
-    subset('domain_boot','domain',div(mul('s.read_end_ns','h.logical_cpus'),1000),'d.cpu.usage_usec')
-    subset('native_sock','domain','d.memory_current_bytes','d.memory_stat.sock')
-    for key,parent in memory_parent.items():subset('native_'+key,'domain','d.memory_stat.'+parent,'d.memory_stat.'+key,when=['d.memory_stat.'+key])
-    subset('native_slab_subset','domain','d.memory_stat.slab',['present_sum','d.memory_stat',['slab_reclaimable','slab_unreclaimable']],when=['d.memory_stat.slab'])
-    # Overlapping byte subsets are not siblings. These disjoint native pieces
-    # are partitions only when all members are present.
-    partition('native_slab_parts','domain','d.memory_stat.slab',['d.memory_stat.slab_reclaimable','d.memory_stat.slab_unreclaimable'],when=['d.memory_stat.slab','d.memory_stat.slab_reclaimable','d.memory_stat.slab_unreclaimable'])
-    subset('native_kernel_components','domain','d.memory_stat.kernel',['present_sum','d.memory_stat',['kernel_stack','pagetables','sec_pagetables','percpu','vmalloc','slab']])
-    subset('native_throttled_periods','domain','d.cpu.nr_periods','d.cpu.nr_throttled',when=['d.cpu.nr_periods','d.cpu.nr_throttled'],pairs=[{'object':'d.cpu','keys':['nr_periods','nr_throttled']}])
-    subset('native_throttled_period_deltas','domain_interval',delta('d.cpu.nr_periods'),delta('d.cpu.nr_throttled'),when=['d.cpu.nr_periods','d.cpu.nr_throttled'])
-    for id,prefix in [('io_read','r'),('io_write','w'),('io_discard','d')]:
-        for scope,suffix in [('io',''),('io_interval','_delta')]:
-            byte='io.'+prefix+'bytes';ops='io.'+prefix+'ios'
-            rules.append(dict(id=id+suffix,scope=scope,operator='completed_io',parent=byte if not suffix else delta(byte),children=[ops if not suffix else delta(ops)],when_present=[byte,ops],presence_pairs=[{'object':'io','keys':[prefix+'bytes',prefix+'ios']}],derivation='each completed data operation transfers at least one byte: 0 <= operations <= bytes, and zero iff zero; no device bandwidth assumption',mutation_test='QuantityModelTests.test_relation_boundaries_and_consumer_mutations'))
-    # Original residuals plus stable member CPU at all anchored endpoints.
-    member_tol=add(div(mul(2,['len','members'],10**6),'h.tick_hz'),skew)
-    for cls in ('usage','user','system'):
-        process_ticks=add(sd('members','item.utime_ticks'),sd('members','item.stime_ticks')) if cls=='usage' else sd('members','item.'+('utime_ticks' if cls=='user' else 'stime_ticks'))
-        exited='d.cpu_exited_'+('' if cls=='usage' else cls+'_')+'usec'
-        partition('member_cpu_'+cls,'domain_interval',delta('d.cpu.'+cls+'_usec'),[div(mul(process_ticks,10**6),'h.tick_hz'),delta(exited)],member_tol)
-    # Express aggregate deltas directly with the generic delta expression.
-    aggregate=lambda expr:sub(expr,['before',expr])
-    partition('host_charge','interval',div(mul(delta('c.busy_ticks'),10**6),'h.tick_hz'),[aggregate(sm('groups','item.cpu.usage_usec')),delta('c.other_cpu_usec')],add(div(mul(12,'h.logical_cpus',10**6),'h.tick_hz'),skew))
-    for cls in ('user','system'):
-        subset('domain_'+cls+'_delta','interval',div(mul(delta('c.'+cls+'_ticks'),10**6),'h.tick_hz'),aggregate(sm('groups','item.cpu.'+cls+'_usec')),add(div(mul(4,'h.logical_cpus',10**6),'h.tick_hz'),skew))
-    subset('domain_capacity','domain_interval',div(mul(outer,'h.logical_cpus'),1000),delta('d.cpu.usage_usec'))
-    for direction in ('rx','tx'):subset('network_'+direction,'interval',div(mul('h.link_capacity_bps',outer),8*10**9),delta('c.network_'+direction+'_bytes'))
-    partition('io_conservation','device_interval',delta(['device_get','d.io']),[delta(['device_get','d.io_other']),aggregate(sm('members',['device_get','item.io']))])
+    # Identity equations are source data, independent of schema inventory.
+    spec=importlib.util.spec_from_file_location('_kernel_catalog_author',ROOT/'kernel_identities.py')
+    identities=importlib.util.module_from_spec(spec);spec.loader.exec_module(identities)
+    rules=identities.derive_relations(schema)
     for entry in entries:
         # Relation links are actual machine-readable cross references, not an
         # assertion that this finite model proves every possible kernel law.
-        entry['relation_checks']=[r['id'] for r in rules if entry['path'].split('/')[-1] in json.dumps([r['parent'],r['children']])]
+        name=entry['path'].split('/')[-1]
+        entry['relation_checks']=[r['id'] for r in rules if name in relation_operands(r)]
     model=dict(schema=1,description='Closed recorded-quantity semantics; finite offline consistency model, no authenticity/performance/release proof.',
                clock_contract=dict(field='cpu_clock_contract',value='constant_online_no_suspend',scope='whole recorded window only; no boot-history lower bound'),quantities=entries,native_maps=maps,relations=rules)
     for name,value in [('run-schema.json',schema),('quantity-model.json',model)]:

@@ -1232,3 +1232,12 @@ guards / 10,714 predicates: 45 enforced, 10,669 pending, 0 certified offline; re
 PASS = honest about what it checks; I15-I18 closed; Minor M6-M10. Controller fixed M7
 (stale lineage IDs refused, RED/GREEN test), M8 wording, M10 RECEIPT-INDEX.json marking
 r1-r5 superseded. Full suite + run410 suites green. Still PARTIAL coverage, not acceptance.
+
+2026-11-08 Task 14 harness rounds 5-7 (round 5 GPT; rounds 6-7 OpenCode DeepSeek v4.1 flash max
+per user preference): cited kernel-identity catalog (139 identities, 131 generated relations,
+8 unavailable), one-way implies_positive and containment operators, absolute-zero OOM policy,
+159-pair counter audit. Reviews: r5 FAIL (R5-I1/I2) -> r6 FAIL (R6-I1 false oom_group_kill<=oom
+identity, from the r5 reviewer's suggestion) -> r7 PASS. Controller fixed R7-M1..M4 (report
+hash, exact relation_checks, audit-call regression test, docs). Final suite: 24/44/9/84/14 OK.
+DeepSeek passed the user's quality gate (zero code corrections; findings closed in one round).
+Still offline preparation only: no performance claim, real runs NOT_RUN, release_ready=false.

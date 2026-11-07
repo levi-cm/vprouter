@@ -31,6 +31,7 @@ CONTROL = {'supervision','workers','guard','init_shim'}
 SERVICE = CONTROL | {'container','tailscaled'}
 COMPONENTS = SERVICE | {'observer','workload'}
 SCENARIOS = [(n, mode) for n in (1,5,6) for mode in ('steady','load')]
+OOM_EVENTS = ('oom','oom_kill','oom_group_kill')
 
 # Legacy redundant physical/accounting registry. The quantity model is now the
 # completeness basis; these independent older checks remain defense in depth.
@@ -198,7 +199,7 @@ def parse_wakeups(raw):
 def parse_fd_entries(names):
     require(type(names) is list and len(names)<=65536,'fd_bound')
     require(all(type(n) is str for n in names) and len(set(names))==len(names),'fd_duplicate')
-    for name in names: unsigned(name)
+    for name in names: unsigned(name,maximum=2**31-1)
     return len(names)
 
 
@@ -397,10 +398,12 @@ def physical_constraints(run):
     yield row('coverage',len({tuple(d['native_identity']) for d in run['domains']})==len(scopes) and
               not any(p[:len(q)]==q or q[:len(p)]==p for i,p in enumerate(scopes) for q in scopes[i+1:]) and
               set().union(*(set(d['components']) for d in run['domains']))==COMPONENTS)
+    # Absolute zero, not equality to the first sample: a constant pre-existing
+    # OOM/oom_kill/oom_group_kill count is contamination, not a zero baseline.
     yield row('failure_quiet',all(v==0 for signals in run['failure_domains'].values() for v in signals.values()) and
               all(run['traffic'][k]==0 for k in ('monitor_misses','unexpected_restarts','oom_events')) and
-              all(d['memory_events'].get(k,0)==samples[0]['domains'][name]['memory_events'].get(k,0)
-                  for s in samples for name,d in s['domains'].items() for k in ('oom','oom_kill','oom_group_kill')))
+              all(d['memory_events'].get(k,0)==0
+                  for s in samples for name,d in s['domains'].items() for k in OOM_EVENTS))
     yield row('sample_clock',samples[-1]['mono_ns']-samples[0]['mono_ns']==run['duration_ns'])
     yield row('sample_clock',max(s['wall_before_ns']-s['read_end_ns'] for s in samples)<=min(s['wall_after_ns']-s['mono_ns'] for s in samples) and
               any(s['mono_ns']-samples[0]['mono_ns']==run['warmup_discard_ns'] for s in samples))
@@ -764,9 +767,17 @@ def _summarize(run):
             require(proof['latency_ns']['values_ns']==latencies,'runtime_latency_mismatch')
             for k,p in [('monitor_misses',proof['monitoring']['deadline_misses']),('unexpected_restarts',proof['unexpected_restarts']),('oom_events',proof['oom_events'])]: require(traffic[k]==p,'runtime_event_mismatch')
         except (ValueError,KeyError,TypeError,IndexError,OverflowError,AttributeError,StopIteration): reasons.add('invalid_runtime_evidence')
+    # Counter nonregression makes the first sample the smallest value. Retain
+    # the absolute pre-existing baseline separately: a constant nonzero OOM
+    # count is otherwise invisible to a last-minus-first delta. It is reported
+    # as contamination rather than accepted as a zero baseline.
+    baseline_oom=sum(samples[0]['domains'][n]['memory_events'].get(k,0)
+                     for n in ids for k in OOM_EVENTS)
     domain_oom=sum(samples[-1]['domains'][n]['memory_events'].get(k,0)-samples[0]['domains'][n]['memory_events'].get(k,0)
-                   for n in ids for k in ('oom','oom_kill','oom_group_kill'))
-    metrics['oom_events']=integer(max(metrics['oom_events'],domain_oom,failure_totals['memory_oom_kills'],failure_totals['kernel_oom_kills']))
+                   for n in ids for k in OOM_EVENTS)
+    if baseline_oom: reasons.add('oom_baseline_contaminated')
+    metrics['oom_events']=integer(max(metrics['oom_events'],baseline_oom,domain_oom,
+                                     failure_totals['memory_oom_kills'],failure_totals['kernel_oom_kills']))
     for k in ('monitor_misses','unexpected_restarts'):
         metrics[k]=integer(max(metrics[k],failure_totals[k]))
     if any(metrics[k] for k in ('oom_events','monitor_misses','unexpected_restarts')): reasons.add('measured_domain_failure')

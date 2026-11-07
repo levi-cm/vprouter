@@ -507,3 +507,38 @@ Independent re-review is pending. Real runs remain **NOT_RUN**, this work makes
 no performance claim, and `release_ready=false`. Sampled memory maxima do not
 prove native peak accounting. See performance-harness.md for model derivations,
 mutation/completeness coverage and remaining producer/platform limits.
+
+
+Review round 6 derives the accounting relations from
+[`kernel-identities.json`](../../tools/performance/kernel-identities.json):
+139 source identities, 131 available checks, eight explicitly unavailable source
+identities, and 159 explicitly decided co-located counter pairs (35 identity
+pairs, 124 documented no-native-relation pairs). Source citations are
+documentation paraphrases from knowledge, without network/version verification.
+Native facts and stricter aligned acquisition contracts are distinguished. The
+model now contains cumulative CPU and per-device IO residuals within their
+parent totals, a two-sided cumulative host residual definition, socket
+containment in kernel+residual, the native descriptor namespace, integer-kB
+smaps normalization, and the one-way `throttled_usec > 0 => nr_throttled > 0`
+relation after the first acquisition sample with a one-way presence rule: a
+positive `throttled_usec` requires a present positive `nr_throttled`, while the
+converse presence and value implications are not asserted. `oom` is the
+cgroup-limit allocation-failure event, not an OOM-kill count; a system-wide OOM
+can group-kill this cgroup while its own `oom` stays zero. The invalid
+`oom_group_kill <= oom` identity is therefore removed and that counter pair is an
+explicit `no_native_relation`; only `oom_group_kill <= oom_kill` survives under
+the nonempty-victim assumption. The containments have no first-sample read-order
+exemption, so a one-sample tear is over-refused; any nonzero OOM event is already
+refused. It never infers current RLIMIT_NOFILE or pids.max snapshot bounds from
+unrecorded history. A nonzero absolute first-sample OOM/oom_kill/oom_group_kill
+count is contamination and cannot PASS; equality to the first sample is not a
+zero baseline.
+
+Independent source-derived signed boundary witnesses and bidirectional
+catalog/schema/check audits complement numeric-position inventory tests. They
+remain finite offline consistency checks; the harness is PARTIAL pending
+independent re-review and must not qualify a real run yet. Producer authenticity,
+epoch/alignment review, kernel-version semantics, native page sizes/peaks,
+transients and the Python direct baseline remain open. Real benchmarks and
+runtime/release gates remain **NOT_RUN**, with **no performance claim** and
+`release_ready=false`. See performance-harness.md for identities and limits.

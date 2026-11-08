@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import secrets
@@ -44,9 +45,35 @@ def generate_pair(used: set[str] | None = None) -> dict[str, str]:
 
 
 def load_used_nonces(path: str | pathlib.Path) -> set[str]:
-    """Read one nonce per line from ``path``; reject malformed entries."""
+    """Read one nonce per line from ``path``; reject malformed entries.
+
+    A missing file is created empty with mode 0600 and treated as "nothing used
+    yet", so the documented first ``--pair`` invocation works on a fresh tree.
+    A nonce that is already listed is still refused by the CLI; this function
+    never fabricates or forgets an existing entry.
+    """
+    used_path = pathlib.Path(path)
     try:
-        text = pathlib.Path(path).read_text(encoding="utf-8")
+        text = used_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        try:
+            fd = os.open(used_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            text = used_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise policy_mod.PolicyError(
+                f"cannot create used-nonces file: {exc}"
+            ) from exc
+        else:
+            try:
+                os.fchmod(fd, 0o600)
+            except OSError as exc:
+                raise policy_mod.PolicyError(
+                    f"cannot set used-nonces file mode: {exc}"
+                ) from exc
+            finally:
+                os.close(fd)
+            return set()
     except OSError as exc:
         raise policy_mod.PolicyError(f"cannot read used-nonces file: {exc}") from exc
     used: set[str] = set()

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:vprouter:leak-lab:policy:1",
   "title": "vprlab external leak-monitor policy",
-  "description": "Shape mirror for tools/leak-lab/policy.py. The Python loader is the binding validator: it also rejects duplicate JSON keys, duplicate labels/endpoints, a positive-control endpoint that differs from gateway_ipv4 or overlaps an allowed flow, non-unicast addresses/MACs, and addresses owned by the fixed lab subnet 10.250.0.0/24.",
+  "description": "Shape mirror for tools/leak-lab/policy.py. The Python loader is the binding validator: it also rejects duplicate JSON keys, duplicate labels/endpoints, a positive-control endpoint that differs from gateway_ipv4 or overlaps an allowed flow, non-unicast addresses/MACs, non-public destination addresses, well-known service ports, a gateway_mac equal to vm_wan_mac, and a gateway other than the plan's fixed 10.250.0.1.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,6 +14,25 @@
     "allow_arp",
     "positive_control",
     "ipv6_allowed"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "allow_arp": {
+            "const": true
+          }
+        },
+        "required": [
+          "allow_arp"
+        ]
+      },
+      "then": {
+        "required": [
+          "gateway_mac"
+        ]
+      }
+    }
   ],
   "properties": {
     "schema_version": {
@@ -29,7 +48,13 @@
     },
     "gateway_ipv4": {
       "$ref": "#/$defs/lab_host",
-      "description": "Host bridge address; must differ from vm_wan_ipv4."
+      "const": "10.250.0.1",
+      "description": "Must be exactly 10.250.0.1, the bridge address the host plan configures; must differ from vm_wan_ipv4."
+    },
+    "gateway_mac": {
+      "type": "string",
+      "description": "The host bridge MAC (ip link show vprlab0). Required when allow_arp is true; gateway-to-VM ARP is allowed only from this MAC. Must be unicast, non-zero and different from vm_wan_mac.",
+      "pattern": "^[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}$"
     },
     "allowed": {
       "type": "array",
@@ -48,10 +73,36 @@
             "const": "udp"
           },
           "dst_ipv4": {
-            "$ref": "#/$defs/unicast_ipv4"
+            "allOf": [
+              {
+                "$ref": "#/$defs/unicast_ipv4"
+              },
+              {
+                "not": {
+                  "pattern": "^(?:10\\.|100\\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.|127\\.|169\\.254\\.|172\\.(?:1[6-9]|2[0-9]|3[01])\\.|192\\.0\\.0\\.|192\\.0\\.2\\.|192\\.168\\.|198\\.(?:18|19)\\.|198\\.51\\.100\\.|203\\.0\\.113\\.|22[4-9]\\.|23[0-9]\\.|24[0-9]\\.|25[0-5]\\.)"
+                }
+              }
+            ],
+            "description": "A public unicast address. RFC1918, CGNAT/Tailscale 100.64.0.0/10, 192.0.0.0/24, 192.0.2.0/24, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, loopback, link-local, multicast and reserved space are rejected by the binding Python loader."
           },
           "dst_port": {
-            "$ref": "#/$defs/port"
+            "allOf": [
+              {
+                "$ref": "#/$defs/port"
+              },
+              {
+                "not": {
+                  "enum": [
+                    53,
+                    853,
+                    123,
+                    5353,
+                    5355
+                  ]
+                }
+              }
+            ],
+            "description": "DNS, DoT, NTP, mDNS and LLMNR ports are rejected: an allowed relay flow must never whitelist a plaintext service leak."
           },
           "label": {
             "$ref": "#/$defs/label"
@@ -72,7 +123,7 @@
       "properties": {
         "sink_ipv4": {
           "$ref": "#/$defs/lab_host",
-          "description": "Must equal gateway_ipv4."
+          "description": "Must equal gateway_ipv4 (10.250.0.1)."
         },
         "sink_udp_port": {
           "$ref": "#/$defs/port"

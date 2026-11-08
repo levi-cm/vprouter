@@ -6,14 +6,24 @@ outside the VM (on the host tap) and classifies every frame by the declared VM
 WAN MAC/IP.  Anything that is not an explicitly allowed WireGuard UDP flow (or
 an exact gateway ARP exchange when enabled) is a leak finding.
 
-Evidence rules (M1):
+Evidence rules (M1, round 2):
 
 * a tcpdump stats file is mandatory; every summary line is parsed, every drop
-  counter must be zero, and ``packets captured`` must equal the number of
-  complete pcap records;
+  counter must be zero, ``packets received by filter`` must equal ``packets
+  captured`` (otherwise ``unread_capture_tail``), and ``captured`` must equal the
+  number of complete pcap records.  The stats banner must name
+  ``vprlab-tap0`` with ``link-type EN10MB``;
+* the capture argv supplied with ``--capture-argv-file`` must equal the exact
+  argv ``netplan.py`` prints, except for the ``-w`` file path; its hash is bound
+  into the report;
 * exactly one ``control-before`` and one ``control-after`` nonce are mandatory,
   they must differ, each must be seen exactly once, ``ts(before) < ts(after)``,
-  and every non-control record must lie strictly between them;
+  and record timestamps must never decrease;
+* all records are classified.  Allowed flows that fall outside the control
+  window are counted as ``outside_window_allowed`` instead of invalidating the
+  capture; any finding anywhere in the capture is still ``LEAK``;
+* ``--expect-tunnel up`` requires allowed traffic in both directions inside the
+  window, ``--expect-tunnel down`` requires no inbound allowed flow;
 * any leak finding makes the verdict ``LEAK`` even when the capture is also
   invalid (``invalid_reasons`` reports the capture defects alongside);
 * a complete record with a malformed frame is a ``malformed_frame`` finding and
@@ -38,6 +48,7 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
+import netplan as netplan_mod
 import policy as policy_mod
 
 MAX_FINDINGS = 200
@@ -68,6 +79,14 @@ _PCAP_MAGIC: dict[bytes, tuple[str, int, str, str]] = {
     b"\x4d\x3c\xb2\xa1": ("<", 1_000_000_000, "nanosecond", "little"),
 }
 
+#: The exact tcpdump banner the host plan's capture command emits.  Anything
+#: else (wrong interface, wrong link type, no banner) leaves the capture
+#: provenance unproven.
+REQUIRED_STATS_BANNER = "listening on vprlab-tap0, link-type EN10MB"
+
+#: Expected tunnel evidence values for ``--expect-tunnel``.
+EXPECT_TUNNEL_VALUES = ("up", "down", "any")
+
 _STATS_LINE_RE = re.compile(
     r"^\s*(\d+)\s+packets?\s+"
     r"(captured|received by filter|dropped by kernel|dropped by interface)"
@@ -81,6 +100,14 @@ _STATS_COUNTER_NAME = {
     "dropped by interface": "dropped_interface",
 }
 _STATS_COUNTER_SHAPE_RE = re.compile(r"^\s*\d+\s+packets?\b", re.IGNORECASE)
+#: tcpdump's one-line SIGUSR1 summary:
+#: ``tcpdump: 2 packets captured, 5 packets received by filter, 3 packets dropped by kernel``
+_STATS_ONELINE_RE = re.compile(
+    r"^\s*tcpdump:\s*(\d+)\s+packets?\s+captured,\s*"
+    r"(\d+)\s+packets?\s+received by filter,\s*"
+    r"(\d+)\s+packets?\s+dropped by kernel\s*$",
+    re.IGNORECASE,
+)
 _STATS_ERROR_RE = re.compile(
     r"(?:error|pcap_loop|disappeared|went down|permission denied|"
     r"no such device|biocsetif failed)",
@@ -153,11 +180,14 @@ def parse_tcpdump_stats(text: str) -> tuple[dict[str, int | None], str | None]:
       counter;
     * a nonzero kernel or interface drop counter (checked over every summary);
     * the same counter reported with two different values (concatenated or
-      stale summaries are contradictory evidence).
-
-    ``received by filter`` is recorded but is not required to equal
-    ``captured + drops``: libpcap receive-counter semantics can differ while
-    packets are still queued.
+      stale summaries are contradictory evidence);
+    * ``received by filter`` unequal to ``captured``.  On the supported Linux
+      capture path (TPACKET_V3 tap), packets that passed the filter but were
+      never written are ring entries tcpdump did not read before SIGINT, so
+      they are invisible to classification (``unread_capture_tail``).  The
+      runner drains the capture with ``--immediate-mode``, waits 2 s of quiet
+      after the after-control appears in the file, then sends SIGINT; the
+      resulting counters must agree exactly.
     """
     values: dict[str, set[int]] = {
         "captured": set(),
@@ -167,11 +197,17 @@ def parse_tcpdump_stats(text: str) -> tuple[dict[str, int | None], str | None]:
     }
     error_line = False
     shape_problem = False
+    one_line_kernel_drops = False
     for line in text.splitlines():
         match = _STATS_LINE_RE.match(line)
         if match is not None:
             key = _STATS_COUNTER_NAME[match.group(2).lower()]
             values[key].add(int(match.group(1)))
+            continue
+        one_line = _STATS_ONELINE_RE.match(line)
+        if one_line is not None:
+            if int(one_line.group(3)):
+                one_line_kernel_drops = True
             continue
         if not line.strip():
             continue
@@ -194,8 +230,12 @@ def parse_tcpdump_stats(text: str) -> tuple[dict[str, int | None], str | None]:
         return stats, "stats_incomplete"
     if (stats["dropped_kernel"] or 0) or (stats["dropped_interface"] or 0):
         return stats, "packet_drops"
+    if one_line_kernel_drops:
+        return stats, "packet_drops"
     if any(len(found) > 1 for found in values.values()):
         return stats, "stats_contradictory"
+    if stats["received"] != stats["captured"]:
+        return stats, "unread_capture_tail"
     return stats, None
 
 
@@ -206,17 +246,20 @@ class _Scanner:
         self.after = after
         self.allowed_out = policy.outbound_allowed()
         self.allowed_in = policy.inbound_allowed()
-        self.allowed_counts: dict[str, int] = {
-            flow.label: 0 for flow in policy.allowed
+        self.allowed_counts: dict[str, dict[str, int]] = {
+            flow.label: {"outbound": 0, "inbound": 0} for flow in policy.allowed
         }
         if policy.allow_arp:
-            self.allowed_counts["arp"] = 0
+            self.allowed_counts["arp"] = {"outbound": 0, "inbound": 0}
         self.findings: list[dict[str, Any]] = []
         self.findings_total = 0
         self.packets = 0
         self.first_ts: float | None = None
         self.last_ts: float | None = None
-        self.records: list[tuple[int, float, bool]] = []
+        self.non_monotonic_timestamps = False
+        #: (packet index, timestamp, is_control, allowed label or None,
+        #: direction "outbound"/"inbound" or None, produced a finding)
+        self.records: list[tuple[int, float, bool, str | None, str | None, bool]] = []
         self.control_sightings: dict[str, list[dict[str, Any]]] = {
             "before": [],
             "after": [],
@@ -227,12 +270,23 @@ class _Scanner:
             tuple[str, str, int, int], _FragmentState
         ] = {}
         self._current_is_control = False
+        self._current_allowed: tuple[str, str] | None = None
 
     # ------------------------------------------------------------------ utils
     def observe_timestamp(self, ts: float) -> None:
         if self.first_ts is None:
             self.first_ts = ts
+        elif ts < self.last_ts:  # type: ignore[operator]
+            self.non_monotonic_timestamps = True
         self.last_ts = ts
+
+    def count_allowed(self, label: str, direction: str) -> None:
+        key = "outbound" if direction in ("out", "outbound") else "inbound"
+        counts = self.allowed_counts.setdefault(
+            label, {"outbound": 0, "inbound": 0}
+        )
+        counts[key] += 1
+        self._current_allowed = (label, key)
 
     def add_finding(
         self,
@@ -310,8 +364,20 @@ class _Scanner:
     # --------------------------------------------------------------- Ethernet
     def parse_frame(self, frame: bytes, ts: float, index: int) -> None:
         self._current_is_control = False
+        self._current_allowed = None
+        findings_before = self.findings_total
         self._parse_frame(frame, ts, index)
-        self.records.append((index, ts, self._current_is_control))
+        label, direction = self._current_allowed or (None, None)
+        self.records.append(
+            (
+                index,
+                ts,
+                self._current_is_control,
+                label,
+                direction,
+                self.findings_total > findings_before,
+            )
+        )
 
     def _parse_frame(self, frame: bytes, ts: float, index: int) -> None:
         if len(frame) < 14:
@@ -433,7 +499,7 @@ class _Scanner:
             dst_mac=target_mac,
             arp_operation=operation,
         )
-        allowed = False
+        allowed_direction: str | None = None
         if self.policy.allow_arp and src_mac == sender_mac and operation in (1, 2):
             vm_to_gateway = (
                 sender_mac == self.policy.vm_wan_mac
@@ -441,13 +507,18 @@ class _Scanner:
                 and target_ip == self.policy.gateway_ipv4
             )
             gateway_to_vm = (
-                sender_ip == self.policy.gateway_ipv4
+                self.policy.gateway_mac is not None
+                and sender_mac == self.policy.gateway_mac
+                and sender_ip == self.policy.gateway_ipv4
                 and target_ip == self.policy.vm_wan_ipv4
                 and (operation != 2 or target_mac == self.policy.vm_wan_mac)
             )
-            allowed = vm_to_gateway or gateway_to_vm
-        if allowed:
-            self.allowed_counts["arp"] = self.allowed_counts.get("arp", 0) + 1
+            if vm_to_gateway:
+                allowed_direction = "outbound"
+            elif gateway_to_vm:
+                allowed_direction = "inbound"
+        if allowed_direction is not None:
+            self.count_allowed("arp", allowed_direction)
         else:
             self.add_finding(
                 ts,
@@ -571,6 +642,21 @@ class _Scanner:
                 payload,
                 more_fragments,
                 extra,
+                direction,
+            )
+            return
+
+        if more_fragments and not payload:
+            self.add_finding(
+                ts,
+                src,
+                dst,
+                proto_name,
+                None,
+                None,
+                "zero_payload_fragment",
+                fragment_key=[src, dst, protocol, identification],
+                **extra,
             )
             return
 
@@ -595,7 +681,7 @@ class _Scanner:
                 result,
             )
         if result.label is not None:
-            self.allowed_counts[result.label] += 1
+            self.count_allowed(result.label, direction)
         elif result.reason is not None:
             self.add_finding(
                 ts,
@@ -621,22 +707,34 @@ class _Scanner:
         result: _L4Result,
     ) -> None:
         state = self.fragment_states.get(key)
-        if (
-            state is not None
-            and not state.complete
-            and ts - state.first_ts <= FRAGMENT_WINDOW_SECONDS
-        ):
-            self.add_finding(
-                ts,
-                src,
-                dst,
-                _proto_name(protocol),
-                None,
-                None,
-                "fragment_duplicate_first",
-                fragment_key=list(key),
-            )
-            return
+        if state is not None and not state.complete:
+            if ts - state.first_ts <= FRAGMENT_WINDOW_SECONDS:
+                self.add_finding(
+                    ts,
+                    src,
+                    dst,
+                    _proto_name(protocol),
+                    None,
+                    None,
+                    "fragment_duplicate_first",
+                    fragment_key=list(key),
+                )
+                return
+            # Expiring/replacing an unfinished allowed datagram is itself a
+            # finding: otherwise a new datagram reusing the same key would
+            # erase the fact that the earlier one never completed.
+            if state.label is not None and not state.reported:
+                self.add_finding(
+                    ts,
+                    state.src,
+                    state.dst,
+                    state.proto_name,
+                    None,
+                    None,
+                    "incomplete_fragment",
+                    detail="datagram_not_completed",
+                    fragment_key=list(key),
+                )
         self.fragment_states[key] = _FragmentState(
             first_ts=ts,
             covered_end=payload_length,
@@ -661,11 +759,25 @@ class _Scanner:
         payload: bytes,
         more_fragments: bool,
         extra: dict[str, Any],
+        direction: str,
     ) -> None:
         key = (src, dst, protocol, identification)
         state = self.fragment_states.get(key)
         reason: str | None = None
         detail: str | None = None
+        if not payload:
+            self.add_finding(
+                ts,
+                src,
+                dst,
+                proto_name,
+                None,
+                None,
+                "zero_payload_fragment",
+                fragment_key=list(key),
+                **extra,
+            )
+            return
         if state is None:
             reason = "fragment_without_first"
         elif ts < state.first_ts:
@@ -698,7 +810,7 @@ class _Scanner:
                 if not more_fragments:
                     state.complete = True
                 if state.label is not None:
-                    self.allowed_counts[state.label] += 1
+                    self.count_allowed(state.label, direction)
                 return
         if state is not None:
             state.reported = True
@@ -840,12 +952,13 @@ class _Scanner:
             if label is not None:
                 # A first fragment legitimately declares a UDP length longer
                 # than the bytes present in that fragment; every other allowed
-                # datagram must account for exactly the IP payload.
+                # datagram must account for exactly the IP payload.  With MF
+                # set, the declared length must leave a genuine remainder.
                 length_ok = (
                     udp_length is not None
                     and udp_length >= 8
                     and (
-                        udp_length >= len(payload)
+                        udp_length > len(payload)
                         if fragmented
                         else udp_length == len(payload)
                     )
@@ -1033,6 +1146,8 @@ def scan_capture(
     control_after: str,
     *,
     tcpdump_stats_text: str | None,
+    capture_argv: list[str],
+    expect_tunnel: str = "any",
     stats_error: str | None = None,
     stats_source: str | None = None,
     source: str | None = None,
@@ -1043,6 +1158,8 @@ def scan_capture(
     ``control_before`` and ``control_after`` are mandatory, must be distinct
     valid nonces, and each must be seen exactly once.  ``tcpdump_stats_text``
     is mandatory unless ``stats_error`` records why it could not be read.
+    ``capture_argv`` must equal the exact argv ``netplan.capture_argv`` prints
+    (only the ``-w`` path may differ); its hash is bound into the report.
     """
     if not isinstance(policy, policy_mod.Policy):
         raise TypeError("policy must be a policy.Policy instance")
@@ -1057,6 +1174,10 @@ def scan_capture(
     if tcpdump_stats_text is None and stats_error is None:
         raise ValueError(
             "a tcpdump stats file is required; pass tcpdump_stats_text or stats_error"
+        )
+    if expect_tunnel not in EXPECT_TUNNEL_VALUES:
+        raise ValueError(
+            "expect_tunnel must be one of " + ", ".join(EXPECT_TUNNEL_VALUES)
         )
 
     scanner = _Scanner(policy, control_before, control_after)
@@ -1075,6 +1196,13 @@ def scan_capture(
     stats: dict[str, int | None] | None = None
     stats_problem: str | None = stats_error
     stats_sha256: str | None = None
+    stats_banner_ok = False
+    if tcpdump_stats_text is not None:
+        stats_banner_ok = (
+            tcpdump_stats_text.count(REQUIRED_STATS_BANNER) == 1
+        )
+        if not stats_banner_ok:
+            invalid_reasons.append("capture_banner_mismatch")
     if stats_problem is None and tcpdump_stats_text is not None:
         stats, stats_problem = parse_tcpdump_stats(tcpdump_stats_text)
         stats_sha256 = hashlib.sha256(tcpdump_stats_text.encode("utf-8")).hexdigest()
@@ -1086,8 +1214,31 @@ def scan_capture(
         and stats["captured"] != scanner.packets
     ):
         invalid_reasons.append("stats_packet_count_mismatch")
+
+    argv_problem = netplan_mod.check_capture_argv(capture_argv)
+    if argv_problem is not None:
+        invalid_reasons.append(argv_problem)
+    capture_argv_sha256: str | None = None
+    if isinstance(capture_argv, list) and all(
+        isinstance(item, str) for item in capture_argv
+    ):
+        capture_argv_sha256 = hashlib.sha256(
+            json.dumps(capture_argv, sort_keys=True, separators=(",", ":")).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+
+    if scanner.non_monotonic_timestamps:
+        invalid_reasons.append("non_monotonic_timestamps")
     if scanner.packets == 0:
         invalid_reasons.append("zero_packets")
+
+    flow_labels = {flow.label for flow in policy.allowed}
+    window_counts: dict[str, dict[str, int]] = {
+        label: {"outbound": 0, "inbound": 0} for label in flow_labels
+    }
+    outside_window_allowed: list[int] = []
+    outside_window_other: list[int] = []
 
     before_sightings = scanner.control_sightings["before"]
     after_sightings = scanner.control_sightings["after"]
@@ -1097,13 +1248,38 @@ def scan_capture(
         if not before_ts < after_ts:
             invalid_reasons.append("control_order")
         else:
-            outside = [
-                (index, ts)
-                for index, ts, is_control in scanner.records
-                if not is_control and not (before_ts < ts < after_ts)
-            ]
-            if outside:
+            for index, ts, is_control, label, direction, had_finding in scanner.records:
+                if is_control:
+                    continue
+                if before_ts < ts < after_ts:
+                    if label in window_counts and direction is not None:
+                        window_counts[label][direction] += 1
+                elif label is not None:
+                    outside_window_allowed.append(index)
+                elif not had_finding:
+                    outside_window_other.append(index)
+            if outside_window_other:
                 invalid_reasons.append("outside_control_window")
+
+    outbound_in_window = sum(
+        counts["outbound"] for counts in window_counts.values()
+    )
+    inbound_in_window = sum(counts["inbound"] for counts in window_counts.values())
+    inbound_total = sum(
+        counts["inbound"]
+        for label, counts in scanner.allowed_counts.items()
+        if label != "arp"
+    )
+    if expect_tunnel == "up":
+        tunnel_satisfied = outbound_in_window > 0 and inbound_in_window > 0
+    elif expect_tunnel == "down":
+        # A "down" phase must show no inbound allowed flow anywhere in the
+        # capture: a keepalive after the after-control is still tunnel evidence.
+        tunnel_satisfied = inbound_total == 0
+    else:
+        tunnel_satisfied = True
+    if not tunnel_satisfied:
+        invalid_reasons.append("tunnel_not_observed")
 
     missing = []
     if not before_sightings:
@@ -1135,9 +1311,22 @@ def scan_capture(
             "positive_control_packets": scanner.control_packets,
             "first_ts": scanner.first_ts,
             "last_ts": scanner.last_ts,
+            "non_monotonic_timestamps": scanner.non_monotonic_timestamps,
+            "outside_window_allowed": len(outside_window_allowed),
+            "outside_window_allowed_packets": outside_window_allowed,
+            "tunnel_expectation": {
+                "value": expect_tunnel,
+                "outbound_in_window": outbound_in_window,
+                "inbound_in_window": inbound_in_window,
+                "inbound_total": inbound_total,
+                "satisfied": tunnel_satisfied,
+            },
             "stats": stats,
             "stats_source": stats_source,
             "stats_sha256": stats_sha256,
+            "stats_banner_ok": stats_banner_ok,
+            "capture_argv": capture_argv,
+            "capture_argv_sha256": capture_argv_sha256,
             "invalid_reasons": invalid_reasons,
         }
     )
@@ -1192,6 +1381,18 @@ def main(argv: list[str] | None = None) -> int:
         metavar="STATS.txt",
         help="tcpdump stderr summary written by the capture command",
     )
+    parser.add_argument(
+        "--capture-argv-file",
+        required=True,
+        metavar="ARGV.json",
+        help="JSON list of the exact tcpdump argv from netplan.py (only -w may differ)",
+    )
+    parser.add_argument(
+        "--expect-tunnel",
+        required=True,
+        choices=EXPECT_TUNNEL_VALUES,
+        help="up: require allowed traffic both ways inside the window; down: no inbound; any: report only",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -1233,12 +1434,25 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         stats_error = "stats_unreadable"
 
+    try:
+        capture_argv = json.loads(
+            pathlib.Path(args.capture_argv_file).read_text(encoding="utf-8")
+        )
+    except OSError as exc:
+        print(f"pcapscan: capture argv file: {exc}", file=sys.stderr)
+        return 2
+    except json.JSONDecodeError as exc:
+        print(f"pcapscan: capture argv file is not valid JSON: {exc}", file=sys.stderr)
+        return 2
+
     report = scan_capture(
         data,
         policy,
         args.control_before,
         args.control_after,
         tcpdump_stats_text=stats_text,
+        capture_argv=capture_argv,
+        expect_tunnel=args.expect_tunnel,
         stats_error=stats_error,
         stats_source=args.tcpdump_stats,
         source=args.pcap,

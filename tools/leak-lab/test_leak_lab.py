@@ -7,13 +7,15 @@ Run from the repository root:
 
 Every capture is synthesized in memory with struct; nothing here touches the
 network, a VM, nftables or the host configuration.  Regression tests are named
-after the review finding they close (C1, I1..I8, F-01..F-14, M1..M9).
+after the review finding they close (C1, I1..I8, F-01..F-14, M1..M9 and the
+round-2 gpt/opus/pi identifiers).
 """
 
 from __future__ import annotations
 
 import json
 import pathlib
+import re
 import socket
 import struct
 import subprocess
@@ -37,13 +39,31 @@ VM_MAC = "52:54:00:12:34:56"
 GW_MAC = "52:54:00:65:43:21"
 VM_IP = "10.250.0.2"
 GW_IP = "10.250.0.1"
-WG_IP = "10.64.0.1"
+WG_IP = "185.65.134.10"  # public Mullvad relay endpoint (outer WireGuard peer)
 WG_PORT = 51820
 SINK_IP = GW_IP
 SINK_PORT = 39001
 NONCE_A = "0123456789abcdef" * 2
 NONCE_B = "fedcba9876543210" * 2
 NONCE_C = "11111111111111111111111111111111"
+
+#: The exact tcpdump argv `netplan.py` prints (minus the shell redirection).
+CAPTURE_ARGV = [
+    "tcpdump",
+    "-i",
+    "vprlab-tap0",
+    "-nn",
+    "-U",
+    "--immediate-mode",
+    "-s",
+    "0",
+    "-w",
+    "vprlab-capture.pcap",
+]
+CAPTURE_BANNER = (
+    "tcpdump: listening on vprlab-tap0, link-type EN10MB (Ethernet), "
+    "snapshot length 262144 bytes\n"
+)
 
 
 # --------------------------------------------------------------------------
@@ -53,8 +73,9 @@ def policy_document(**overrides):
     document = {
         "schema_version": 1,
         "vm_wan_mac": VM_MAC,
-        "vm_wan_ipv4": VM_IP,
         "gateway_ipv4": GW_IP,
+        "vm_wan_ipv4": VM_IP,
+        "gateway_mac": GW_MAC,
         "allowed": [
             {"proto": "udp", "dst_ipv4": WG_IP, "dst_port": WG_PORT, "label": "mullvad-wg"}
         ],
@@ -242,7 +263,8 @@ def zero_stats(captured, *, received=None, kernel=0, interface=0):
     if received is None:
         received = captured
     return (
-        f"{captured} packets captured\n"
+        CAPTURE_BANNER
+        + f"{captured} packets captured\n"
         f"{received} packets received by filter\n"
         f"{kernel} packets dropped by kernel\n"
         f"{interface} packets dropped by interface\n"
@@ -256,6 +278,8 @@ def phase_frames(*middle, before=NONCE_A, after=NONCE_B):
 def scan(frames, pol=None, *, before=NONCE_A, after=NONCE_B, stats=None, **kwargs):
     if stats is None:
         stats = zero_stats(len(frames))
+    kwargs.setdefault("capture_argv", CAPTURE_ARGV)
+    kwargs.setdefault("expect_tunnel", "any")
     return pcapscan.scan_capture(
         pcap(frames),
         pol if pol is not None else make_policy(),
@@ -268,6 +292,18 @@ def scan(frames, pol=None, *, before=NONCE_A, after=NONCE_B, stats=None, **kwarg
 
 def scan_middle(middle, pol=None, **kwargs):
     return scan(phase_frames(*middle), pol, **kwargs)
+
+
+def scan_bytes(data, pol, before, after, **kwargs):
+    """scan_capture with the mandatory provenance defaults for the fixture."""
+    kwargs.setdefault("capture_argv", CAPTURE_ARGV)
+    kwargs.setdefault("expect_tunnel", "any")
+    return pcapscan.scan_capture(data, pol, before, after, **kwargs)
+
+
+def directions(report, label):
+    counts = report["allowed_counts"][label]
+    return counts["outbound"], counts["inbound"]
 
 
 def reasons(report):
@@ -293,8 +329,9 @@ class PcapScanTests(unittest.TestCase):
         )
         self.assertEqual(report["verdict"], "PASS")
         self.assertEqual(report["packets"], 4)
-        self.assertEqual(report["allowed_counts"]["mullvad-wg"], 2)
-        self.assertEqual(report["allowed_counts"]["arp"], 0)
+        self.assertEqual(directions(report, "mullvad-wg"), (1, 1))
+        self.assertEqual(report["allowed_counts"]["mullvad-wg"]["outbound"], 1)
+        self.assertEqual(report["allowed_counts"]["arp"], {"outbound": 0, "inbound": 0})
         self.assertEqual(report["positive_controls_seen"], [NONCE_A, NONCE_B])
         self.assertEqual(report["findings"], [])
         self.assertEqual(invalid_reasons(report), [])
@@ -333,6 +370,22 @@ class PcapScanTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "LEAK")
         self.assertEqual(report["findings"][0]["reason"], "icmp_not_allowed")
 
+    def test_opus_m5_inbound_icmp_error_is_a_finding(self):
+        # A WAN-path PMTU/unreachable error is indistinguishable from injected
+        # traffic; the phase contract allows only the declared outer UDP flows.
+        error = ipv4_frame(
+            struct.pack("!BBH", 3, 4, 0) + b"\x00" * 8,
+            src_ip="203.0.113.1",
+            dst_ip=VM_IP,
+            src_mac=GW_MAC,
+            dst_mac=VM_MAC,
+            protocol=1,
+        )
+        report = scan_middle([error])
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("icmp_not_allowed", reasons(report))
+        self.assertEqual(report["findings"][0]["src"], "203.0.113.1")
+
     def test_allowed_ip_wrong_port_is_leak(self):
         wrong_port = ipv4_frame(udp_segment(40000, WG_PORT + 1, b"x"))
         report = scan_middle([wrong_port])
@@ -367,7 +420,7 @@ class PcapScanTests(unittest.TestCase):
     def test_8021q_tagged_allowed_wg_passes(self):
         report = scan_middle([wg_outbound(vlan=100), wg_inbound(vlan=100)])
         self.assertEqual(report["verdict"], "PASS")
-        self.assertEqual(report["allowed_counts"]["mullvad-wg"], 2)
+        self.assertEqual(directions(report, "mullvad-wg"), (1, 1))
 
     def test_missing_after_control_is_invalid(self):
         report = scan([control_frame(NONCE_A), wg_outbound()])
@@ -401,7 +454,7 @@ class PcapScanTests(unittest.TestCase):
             (">", True, "nanosecond", "big"),
         ):
             with self.subTest(endian=endian, nsec=nsec):
-                report = pcapscan.scan_capture(
+                report = scan_bytes(
                     pcap(frames, endian=endian, nsec=nsec),
                     make_policy(),
                     NONCE_A,
@@ -415,7 +468,7 @@ class PcapScanTests(unittest.TestCase):
                 self.assertEqual(report["capture_meta"]["endianness"], byte_order)
 
     def test_non_ethernet_linktype_is_invalid(self):
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             pcap([], linktype=101),
             make_policy(),
             NONCE_A,
@@ -426,7 +479,7 @@ class PcapScanTests(unittest.TestCase):
         self.assertIn("unsupported_linktype_101", invalid_reasons(report))
 
     def test_zero_packets_is_invalid(self):
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             pcap([]), make_policy(), NONCE_A, NONCE_B, tcpdump_stats_text=zero_stats(0)
         )
         self.assertEqual(report["verdict"], "INVALID")
@@ -508,7 +561,7 @@ class PcapScanTests(unittest.TestCase):
     def test_f01_valid_prefix_with_larger_captured_count_is_invalid(self):
         frames = phase_frames(wg_outbound())
         prefix = frames[:3]
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             pcap(prefix),
             make_policy(),
             NONCE_A,
@@ -518,12 +571,27 @@ class PcapScanTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "INVALID")
         self.assertIn("stats_packet_count_mismatch", invalid_reasons(report))
 
-    def test_not_requiring_received_to_equal_captured_plus_drops(self):
+    def test_received_must_equal_captured_unread_tail_is_invalid(self):
+        # A ring tail that tcpdump counted as received but never wrote is a
+        # blind spot: the unread packets are not in the pcap and are never
+        # classified.  The controller decision is strict equality.
         report = scan_middle(
             [wg_outbound()],
             stats=zero_stats(3, received=100),
         )
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("unread_capture_tail", invalid_reasons(report))
+        self.assertEqual(report["capture_meta"]["stats"]["received"], 100)
+        self.assertEqual(report["capture_meta"]["stats"]["captured"], 3)
+
+    def test_received_equal_to_captured_passes(self):
+        report = scan_middle([wg_outbound()], stats=zero_stats(3, received=3))
         self.assertEqual(report["verdict"], "PASS")
+
+    def test_received_less_than_captured_is_invalid(self):
+        report = scan_middle([wg_outbound()], stats=zero_stats(3, received=2))
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("unread_capture_tail", invalid_reasons(report))
 
     def test_m1_tcpdump_error_line_is_invalid(self):
         stats = zero_stats(3) + "tcpdump: pcap_loop: The interface disappeared\n"
@@ -531,13 +599,90 @@ class PcapScanTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "INVALID")
         self.assertIn("stats_error_line", invalid_reasons(report))
 
-    def test_tcpdump_listening_banner_is_not_an_error(self):
-        stats = (
-            "tcpdump: listening on vprlab-tap0, link-type EN10MB (Ethernet), "
-            "snapshot length 262144 bytes\n" + zero_stats(3)
+    def test_m3_sigusr1_one_line_with_drops_is_packet_drops(self):
+        stats = zero_stats(3) + (
+            "tcpdump: 3 packets captured, 3 packets received by filter, "
+            "2 packets dropped by kernel\n"
+        )
+        report = scan_middle([wg_outbound()], stats=stats)
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("packet_drops", invalid_reasons(report))
+
+    def test_m3_sigusr1_one_line_with_zero_drops_is_accepted(self):
+        stats = zero_stats(3) + (
+            "tcpdump: 3 packets captured, 3 packets received by filter, "
+            "0 packets dropped by kernel\n"
         )
         report = scan_middle([wg_outbound()], stats=stats)
         self.assertEqual(report["verdict"], "PASS")
+
+    def test_tcpdump_listening_banner_is_not_an_error(self):
+        report = scan_middle([wg_outbound()], stats=zero_stats(3))
+        self.assertEqual(report["verdict"], "PASS")
+        self.assertTrue(report["capture_meta"]["stats_banner_ok"])
+
+    def test_banner_must_name_the_lab_tap_and_ethernet(self):
+        for banner in (
+            "",
+            "tcpdump: listening on eth0, link-type EN10MB (Ethernet), "
+            "snapshot length 262144 bytes\n",
+            "tcpdump: listening on vprlab-tap0, link-type LINUX_SLL (Linux cooked), "
+            "snapshot length 262144 bytes\n",
+        ):
+            with self.subTest(banner=banner):
+                stats = (
+                    banner
+                    + "3 packets captured\n3 packets received by filter\n"
+                    "0 packets dropped by kernel\n0 packets dropped by interface\n"
+                )
+                report = scan_middle([wg_outbound()], stats=stats)
+                self.assertEqual(report["verdict"], "INVALID")
+                self.assertIn("capture_banner_mismatch", invalid_reasons(report))
+
+    def test_banner_must_be_unique(self):
+        stats = zero_stats(3) + CAPTURE_BANNER
+        report = scan_middle([wg_outbound()], stats=stats)
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("capture_banner_mismatch", invalid_reasons(report))
+
+    def test_capture_argv_must_match_netplan_exactly(self):
+        report = scan_middle([wg_outbound()])
+        self.assertEqual(report["verdict"], "PASS")
+        argv = report["capture_meta"]["capture_argv"]
+        self.assertEqual(argv, CAPTURE_ARGV)
+        self.assertEqual(
+            report["capture_meta"]["capture_argv_sha256"],
+            pcapscan.hashlib.sha256(
+                json.dumps(CAPTURE_ARGV, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+        )
+
+    def test_capture_argv_filter_or_wrong_format_is_invalid(self):
+        cases = (
+            CAPTURE_ARGV[:2] + ["udp"] + CAPTURE_ARGV[2:],
+            [item for item in CAPTURE_ARGV if item != "--immediate-mode"],
+            [item for item in CAPTURE_ARGV if item != "-U"],
+            [item for item in CAPTURE_ARGV if item != "-nn"],
+            [item if item != "-s" else "-snaplen" for item in CAPTURE_ARGV],
+            [item if item != "0" else "65535" for item in CAPTURE_ARGV],
+            [item if item != "vprlab-tap0" else "eth0" for item in CAPTURE_ARGV],
+            CAPTURE_ARGV[:-1] + [""],
+            "tcpdump -i vprlab-tap0",
+        )
+        for argv in cases:
+            with self.subTest(argv=argv):
+                report = scan_middle([wg_outbound()], capture_argv=argv)
+                self.assertEqual(report["verdict"], "INVALID")
+                self.assertTrue(
+                    {"capture_argv_invalid", "capture_argv_mismatch"}
+                    & set(invalid_reasons(report))
+                )
+
+    def test_capture_argv_file_path_may_differ(self):
+        argv = CAPTURE_ARGV[:-1] + ["/var/tmp/phase-17.pcap"]
+        report = scan_middle([wg_outbound()], capture_argv=argv)
+        self.assertEqual(report["verdict"], "PASS")
+        self.assertEqual(report["capture_meta"]["capture_argv"][-1], "/var/tmp/phase-17.pcap")
 
     def test_m1_stats_hash_and_source_recorded(self):
         report = scan_middle(
@@ -554,7 +699,7 @@ class PcapScanTests(unittest.TestCase):
 
     def test_f03_api_requires_stats_text(self):
         with self.assertRaises(ValueError):
-            pcapscan.scan_capture(
+            scan_bytes(
                 pcap([control_frame(NONCE_A), control_frame(NONCE_B)]),
                 make_policy(),
                 NONCE_A,
@@ -563,7 +708,7 @@ class PcapScanTests(unittest.TestCase):
             )
 
     def test_stats_unreadable_is_invalid(self):
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             pcap([control_frame(NONCE_A), control_frame(NONCE_B)]),
             make_policy(),
             NONCE_A,
@@ -606,24 +751,148 @@ class PcapScanTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "INVALID")
         self.assertIn("control_order", invalid_reasons(report))
 
-    def test_outside_control_window_is_invalid(self):
+    def test_outside_window_allowed_flow_is_counted_not_invalid(self):
+        # A live tunnel keeps sending keepalives/handshakes outside the marker
+        # window.  Those records are still fully classified, so an allowed one
+        # is informational evidence rather than an invalid capture.
         frames = [wg_outbound(), control_frame(NONCE_A), control_frame(NONCE_B)]
         report = scan(frames)
-        self.assertEqual(report["verdict"], "INVALID")
-        self.assertIn("outside_control_window", invalid_reasons(report))
+        self.assertEqual(report["verdict"], "PASS")
+        self.assertNotIn("outside_control_window", invalid_reasons(report))
+        self.assertEqual(report["capture_meta"]["outside_window_allowed"], 1)
+        self.assertEqual(
+            report["capture_meta"]["outside_window_allowed_packets"], [0]
+        )
+        self.assertEqual(directions(report, "mullvad-wg"), (1, 0))
 
-    def test_trailing_record_outside_window_is_invalid(self):
-        frames = [control_frame(NONCE_A), control_frame(NONCE_B), wg_outbound()]
+    def test_trailing_allowed_record_outside_window_is_counted_not_invalid(self):
+        frames = [control_frame(NONCE_A), control_frame(NONCE_B), wg_inbound()]
         report = scan(frames)
-        self.assertEqual(report["verdict"], "INVALID")
-        self.assertIn("outside_control_window", invalid_reasons(report))
+        self.assertEqual(report["verdict"], "PASS")
+        self.assertEqual(report["capture_meta"]["outside_window_allowed"], 1)
+        self.assertEqual(directions(report, "mullvad-wg"), (0, 1))
 
-    def test_leak_outside_window_is_leak_with_invalid_reason(self):
+    def test_leak_outside_window_is_leak(self):
         frames = [dns_outbound(), control_frame(NONCE_A), control_frame(NONCE_B)]
         report = scan(frames)
         self.assertEqual(report["verdict"], "LEAK")
         self.assertIn("udp_not_allowed", reasons(report))
-        self.assertIn("outside_control_window", invalid_reasons(report))
+        self.assertNotIn("outside_control_window", invalid_reasons(report))
+
+    def test_gpt_i6_cold_neighbour_arp_before_control_is_allowed(self):
+        request = arp_frame(1, VM_MAC, VM_IP, "00:00:00:00:00:00", GW_IP)
+        reply = arp_frame(2, GW_MAC, GW_IP, VM_MAC, VM_IP, dst_mac=VM_MAC)
+        report = scan(
+            [request, reply, control_frame(NONCE_A), wg_outbound(), control_frame(NONCE_B)]
+        )
+        self.assertEqual(report["verdict"], "PASS")
+        self.assertEqual(report["capture_meta"]["outside_window_allowed"], 2)
+        self.assertEqual(
+            report["allowed_counts"]["arp"], {"outbound": 1, "inbound": 1}
+        )
+        self.assertEqual(invalid_reasons(report), [])
+
+    def test_non_monotonic_timestamps_are_invalid(self):
+        frames = [control_frame(NONCE_B), wg_outbound(), control_frame(NONCE_A)]
+        report = scan_bytes(
+            pcap_from_records(
+                [(frame, len(frame), len(frame)) for frame in frames],
+                timestamps=[1_700_000_103.0, 1_700_000_102.0, 1_700_000_101.0],
+            ),
+            make_policy(),
+            NONCE_A,
+            NONCE_B,
+            tcpdump_stats_text=zero_stats(3),
+        )
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("non_monotonic_timestamps", invalid_reasons(report))
+
+    def test_reversed_control_order_with_monotonic_clock_is_control_order(self):
+        frames = [control_frame(NONCE_B), wg_outbound(), control_frame(NONCE_A)]
+        report = scan(frames)
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("control_order", invalid_reasons(report))
+        self.assertNotIn("non_monotonic_timestamps", invalid_reasons(report))
+
+    # --------------------------------------------- tunnel expectation (I-2)
+    def test_expect_tunnel_up_requires_both_directions(self):
+        report = scan_middle(
+            [wg_outbound(), wg_inbound()], expect_tunnel="up"
+        )
+        self.assertEqual(report["verdict"], "PASS")
+        evidence = report["capture_meta"]["tunnel_expectation"]
+        self.assertEqual(evidence["value"], "up")
+        self.assertEqual(evidence["outbound_in_window"], 1)
+        self.assertEqual(evidence["inbound_in_window"], 1)
+        self.assertTrue(evidence["satisfied"])
+
+    def test_expect_tunnel_up_without_inbound_is_invalid(self):
+        report = scan_middle([wg_outbound()], expect_tunnel="up")
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("tunnel_not_observed", invalid_reasons(report))
+        evidence = report["capture_meta"]["tunnel_expectation"]
+        self.assertEqual(evidence["outbound_in_window"], 1)
+        self.assertEqual(evidence["inbound_in_window"], 0)
+        self.assertFalse(evidence["satisfied"])
+
+    def test_expect_tunnel_up_ignores_outside_window_traffic(self):
+        frames = [
+            control_frame(NONCE_A),
+            wg_outbound(),
+            control_frame(NONCE_B),
+            wg_inbound(),
+        ]
+        report = scan(frames, expect_tunnel="up")
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("tunnel_not_observed", invalid_reasons(report))
+        self.assertEqual(report["capture_meta"]["outside_window_allowed"], 1)
+
+    def test_expect_tunnel_down_requires_zero_inbound(self):
+        report = scan_middle(
+            [wg_outbound(), wg_inbound()], expect_tunnel="down"
+        )
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("tunnel_not_observed", invalid_reasons(report))
+
+    def test_expect_tunnel_down_sees_inbound_outside_the_window(self):
+        frames = [
+            control_frame(NONCE_A),
+            wg_outbound(),
+            control_frame(NONCE_B),
+            wg_inbound(),
+        ]
+        report = scan(frames, expect_tunnel="down")
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("tunnel_not_observed", invalid_reasons(report))
+        self.assertEqual(
+            report["capture_meta"]["tunnel_expectation"]["inbound_total"], 1
+        )
+
+    def test_expect_tunnel_down_with_outbound_only_passes(self):
+        report = scan_middle([wg_outbound()], expect_tunnel="down")
+        self.assertEqual(report["verdict"], "PASS")
+        evidence = report["capture_meta"]["tunnel_expectation"]
+        self.assertTrue(evidence["satisfied"])
+
+    def test_expect_tunnel_any_reports_only(self):
+        report = scan([control_frame(NONCE_A), control_frame(NONCE_B)], expect_tunnel="any")
+        self.assertEqual(report["verdict"], "PASS")
+        evidence = report["capture_meta"]["tunnel_expectation"]
+        self.assertEqual(evidence["value"], "any")
+        self.assertTrue(evidence["satisfied"])
+
+    def test_expect_tunnel_rejects_unknown_value(self):
+        with self.assertRaises(ValueError):
+            scan_middle([wg_outbound()], expect_tunnel="sideways")
+
+    def test_arp_is_not_tunnel_evidence(self):
+        request = arp_frame(1, VM_MAC, VM_IP, "00:00:00:00:00:00", GW_IP)
+        reply = arp_frame(2, GW_MAC, GW_IP, VM_MAC, VM_IP, dst_mac=VM_MAC)
+        report = scan_middle([request, reply], expect_tunnel="up")
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("tunnel_not_observed", invalid_reasons(report))
+        self.assertEqual(report["capture_meta"]["tunnel_expectation"]["outbound_in_window"], 0)
+        self.assertEqual(report["capture_meta"]["tunnel_expectation"]["inbound_in_window"], 0)
 
     def test_f13_per_control_timestamps_are_reported(self):
         report = scan_middle([wg_outbound()])
@@ -670,7 +939,7 @@ class PcapScanTests(unittest.TestCase):
             (full[:86], 86, len(full)),
             (control_frame(NONCE_B), len(control_frame(NONCE_B)), len(control_frame(NONCE_B))),
         ]
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             pcap_from_records(records, snaplen=86),
             make_policy(),
             NONCE_A,
@@ -692,7 +961,7 @@ class PcapScanTests(unittest.TestCase):
 
     def test_i3_partial_record_header_is_invalid(self):
         data = pcap([control_frame(NONCE_A), control_frame(NONCE_B)])[:-5]
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             data, make_policy(), NONCE_A, NONCE_B,
             tcpdump_stats_text=zero_stats(2),
         )
@@ -701,7 +970,7 @@ class PcapScanTests(unittest.TestCase):
 
     def test_i3_finding_then_structural_truncation_is_leak(self):
         data = pcap([control_frame(NONCE_A), dns_outbound()]) + b"\x00" * 8
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             data, make_policy(), NONCE_A, NONCE_B,
             tcpdump_stats_text=zero_stats(3),
         )
@@ -712,7 +981,7 @@ class PcapScanTests(unittest.TestCase):
 
     def test_truncated_record_is_invalid(self):
         data = pcap(phase_frames(wg_outbound()))
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             data[:-5], make_policy(), NONCE_A, NONCE_B,
             tcpdump_stats_text=zero_stats(3),
         )
@@ -744,7 +1013,7 @@ class PcapScanTests(unittest.TestCase):
                 report = scan_middle([frame])
                 self.assertEqual(report["verdict"], "LEAK")
                 self.assertIn("malformed_frame", reasons(report))
-                self.assertEqual(report["allowed_counts"]["mullvad-wg"], 0)
+                self.assertEqual(directions(report, "mullvad-wg"), (0, 0))
 
     def test_i3_control_extra_ip_payload_is_rejected(self):
         payload = policy.control_payload(NONCE_A) + b"PLAIN_SECRET"
@@ -808,7 +1077,7 @@ class PcapScanTests(unittest.TestCase):
             [self._first(), ipv4_frame(b"ijklmnop", ident=77, frag_units=2)]
         )
         self.assertEqual(report["verdict"], "PASS")
-        self.assertEqual(report["allowed_counts"]["mullvad-wg"], 2)
+        self.assertEqual(directions(report, "mullvad-wg"), (2, 0))
 
     def test_i4_gap_fragment_is_a_finding(self):
         report = scan_middle(
@@ -854,7 +1123,7 @@ class PcapScanTests(unittest.TestCase):
             control_frame(NONCE_B),
         ]
         times = [1_700_000_000.0, 1_700_000_001.0, 1_700_000_040.0, 1_700_000_041.0]
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             pcap_from_records(
                 [(frame, len(frame), len(frame)) for frame in frames],
                 timestamps=times,
@@ -891,11 +1160,95 @@ class PcapScanTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "LEAK")
         self.assertIn("fragment_duplicate_first", reasons(report))
 
+    # ------------------------- fragment expiry/replacement and zero payload
+    def test_replaced_incomplete_fragment_association_is_a_finding(self):
+        # gpt I2: the earlier datagram at t=101 never completes; a new first
+        # fragment for the same key at t=132 silently overwrote its state.
+        frames = [
+            control_frame(NONCE_A),
+            self._first(),
+            self._first(),
+            ipv4_frame(b"ijklmnop", ident=77, frag_units=2),
+            control_frame(NONCE_B),
+        ]
+        times = [100.0, 101.0, 132.0, 133.0, 134.0]
+        report = scan_bytes(
+            pcap_from_records(
+                [(frame, len(frame), len(frame)) for frame in frames],
+                timestamps=times,
+            ),
+            make_policy(),
+            NONCE_A,
+            NONCE_B,
+            tcpdump_stats_text=zero_stats(5),
+        )
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("incomplete_fragment", reasons(report))
+        self.assertEqual(directions(report, "mullvad-wg"), (3, 0))
+
+    def test_expired_incomplete_fragment_association_is_a_finding(self):
+        frames = [
+            control_frame(NONCE_A),
+            self._first(ident=66),
+            control_frame(NONCE_B),
+        ]
+        times = [100.0, 101.0, 140.0]
+        report = scan_bytes(
+            pcap_from_records(
+                [(frame, len(frame), len(frame)) for frame in frames],
+                timestamps=times,
+            ),
+            make_policy(),
+            NONCE_A,
+            NONCE_B,
+            tcpdump_stats_text=zero_stats(3),
+        )
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("fragment_incomplete", reasons(report))
+
+    def test_zero_payload_final_fragment_is_a_finding(self):
+        # gpt M2: an empty final fragment must not complete or extend a
+        # datagram.
+        report = scan_middle(
+            [self._first(ident=78), ipv4_frame(b"", ident=78, frag_units=2)]
+        )
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("zero_payload_fragment", reasons(report))
+        self.assertEqual(directions(report, "mullvad-wg"), (1, 0))
+
+    def test_zero_payload_middle_fragment_is_a_finding(self):
+        report = scan_middle(
+            [
+                self._first(),
+                ipv4_frame(b"", ident=77, frag_units=2, more_fragments=True),
+                ipv4_frame(b"ijklmnop", ident=77, frag_units=3),
+            ]
+        )
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("zero_payload_fragment", reasons(report))
+
+    def test_zero_payload_first_fragment_is_a_finding(self):
+        report = scan_middle(
+            [ipv4_frame(b"", ident=91, more_fragments=True)]
+        )
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("zero_payload_fragment", reasons(report))
+
+    def test_first_fragment_with_no_remainder_is_a_finding(self):
+        # MF set while the declared UDP length equals the bytes present: the
+        # fragment leaves no genuine remainder and can only be malformed.
+        report = scan_middle(
+            [self._first(ident=92, udp_len=16), ipv4_frame(b"", ident=92, frag_units=2)]
+        )
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("malformed_frame", reasons(report))
+        self.assertEqual(directions(report, "mullvad-wg"), (0, 0))
+
     # ---------------------------------------------------- structural pcap tests
     def test_record_length_inconsistent_is_invalid(self):
         frame = wg_outbound()
         data = pcap_from_records([(frame, len(frame), len(frame) - 1)])
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             data, make_policy(), NONCE_A, NONCE_B,
             tcpdump_stats_text=zero_stats(1),
         )
@@ -905,7 +1258,7 @@ class PcapScanTests(unittest.TestCase):
     def test_record_exceeds_snaplen_is_invalid(self):
         frame = wg_outbound()
         data = pcap_from_records([(frame, len(frame), len(frame))], snaplen=10)
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             data, make_policy(), NONCE_A, NONCE_B,
             tcpdump_stats_text=zero_stats(1),
         )
@@ -913,7 +1266,7 @@ class PcapScanTests(unittest.TestCase):
         self.assertIn("record_exceeds_snaplen", invalid_reasons(report))
 
     def test_zero_snaplen_is_invalid(self):
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             pcap([], snaplen=0), make_policy(), NONCE_A, NONCE_B,
             tcpdump_stats_text=zero_stats(0),
         )
@@ -921,7 +1274,7 @@ class PcapScanTests(unittest.TestCase):
         self.assertIn("invalid_snaplen", invalid_reasons(report))
 
     def test_truncated_global_header_is_invalid(self):
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             b"\xd4\xc3\xb2\xa1", make_policy(), NONCE_A, NONCE_B,
             tcpdump_stats_text=zero_stats(0),
         )
@@ -929,7 +1282,7 @@ class PcapScanTests(unittest.TestCase):
         self.assertIn("truncated_global_header", invalid_reasons(report))
 
     def test_unsupported_magic_is_invalid(self):
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             b"XXXX" + b"\x00" * 40, make_policy(), NONCE_A, NONCE_B,
             tcpdump_stats_text=zero_stats(0),
         )
@@ -938,7 +1291,7 @@ class PcapScanTests(unittest.TestCase):
 
     def test_unsupported_pcap_version_is_invalid(self):
         data = struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 3, 0, 0, 262144, 1)
-        report = pcapscan.scan_capture(
+        report = scan_bytes(
             data, make_policy(), NONCE_A, NONCE_B,
             tcpdump_stats_text=zero_stats(1),
         )
@@ -949,7 +1302,7 @@ class PcapScanTests(unittest.TestCase):
         report = scan_middle(
             [wg_outbound()],
             stats=(
-                "3 packets captured\n3 packets received by filter\n"
+                CAPTURE_BANNER + "3 packets captured\n3 packets received by filter\n"
                 "0 packets dropped by kernel\n"
             ),
         )
@@ -998,13 +1351,13 @@ class PcapScanTests(unittest.TestCase):
         frame = arp_frame(1, VM_MAC, VM_IP, "00:00:00:00:00:00", GW_IP)
         report = scan_middle([frame])
         self.assertEqual(report["verdict"], "PASS")
-        self.assertEqual(report["allowed_counts"]["arp"], 1)
+        self.assertEqual(report["allowed_counts"]["arp"], {"outbound": 1, "inbound": 0})
 
     def test_decision5_gateway_arp_reply_to_vm_is_allowed(self):
         frame = arp_frame(2, GW_MAC, GW_IP, VM_MAC, VM_IP, dst_mac=VM_MAC)
         report = scan_middle([frame])
         self.assertEqual(report["verdict"], "PASS")
-        self.assertEqual(report["allowed_counts"]["arp"], 1)
+        self.assertEqual(report["allowed_counts"]["arp"], {"outbound": 0, "inbound": 1})
 
     def test_decision5_vm_claiming_gateway_ip_is_a_finding(self):
         frame = arp_frame(2, VM_MAC, GW_IP, GW_MAC, GW_IP)
@@ -1069,6 +1422,45 @@ class PcapScanTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "LEAK")
         self.assertIn("arp_not_allowed", reasons(report))
 
+    # --------------------------------------- gateway MAC binding (gpt I3)
+    def test_vm_mac_claiming_gateway_ip_is_a_finding_both_ops(self):
+        for operation in (1, 2):
+            with self.subTest(operation=operation):
+                frame = arp_frame(
+                    operation,
+                    VM_MAC,
+                    GW_IP,
+                    VM_MAC,
+                    VM_IP,
+                    dst_mac=VM_MAC,
+                )
+                report = scan_middle([frame])
+                self.assertEqual(report["verdict"], "LEAK")
+                self.assertIn("arp_not_allowed", reasons(report))
+                self.assertEqual(
+                    report["allowed_counts"]["arp"], {"outbound": 0, "inbound": 0}
+                )
+
+    def test_foreign_mac_claiming_gateway_ip_is_a_finding(self):
+        frame = arp_frame(2, "02:00:00:00:00:01", GW_IP, VM_MAC, VM_IP, dst_mac=VM_MAC)
+        report = scan_middle([frame])
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("arp_not_allowed", reasons(report))
+
+    def test_gateway_mac_claiming_vm_ip_is_a_finding(self):
+        frame = arp_frame(2, GW_MAC, VM_IP, VM_MAC, VM_IP, dst_mac=VM_MAC)
+        report = scan_middle([frame])
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("arp_not_allowed", reasons(report))
+
+    def test_gateway_arp_request_to_vm_is_allowed(self):
+        frame = arp_frame(1, GW_MAC, GW_IP, "00:00:00:00:00:00", VM_IP)
+        report = scan_middle([frame])
+        self.assertEqual(report["verdict"], "PASS")
+        self.assertEqual(
+            report["allowed_counts"]["arp"], {"outbound": 0, "inbound": 1}
+        )
+
     def test_unsupported_arp_hardware_is_a_finding(self):
         body = struct.pack("!HHBBH", 6, 0x86DD, 6, 4, 1) + b"\x00" * 20
         frame = ethernet(body, 0x0806)
@@ -1089,10 +1481,14 @@ class CliTests(unittest.TestCase):
             path.write_text(data, encoding="utf-8")
         return path
 
-    def _command(self, root, pcap_path, stats_path, *, before=NONCE_A, after=NONCE_B):
+    def _command(self, root, pcap_path, stats_path, *, before=NONCE_A, after=NONCE_B,
+                 expect_tunnel="any"):
         policy_path = root / "policy.json"
         if not policy_path.exists():
             self._write(root, "policy.json", json.dumps(policy_document()))
+        argv_path = root / "capture-argv.json"
+        if not argv_path.exists():
+            self._write(root, "capture-argv.json", json.dumps(CAPTURE_ARGV))
         return [
             sys.executable,
             "-B",
@@ -1103,6 +1499,10 @@ class CliTests(unittest.TestCase):
             str(pcap_path),
             "--tcpdump-stats",
             str(stats_path),
+            "--capture-argv-file",
+            str(argv_path),
+            "--expect-tunnel",
+            expect_tunnel,
             "--control-before",
             before,
             "--control-after",
@@ -1181,6 +1581,71 @@ class CliTests(unittest.TestCase):
                 text=True,
                 timeout=30,
             )
+            self.assertEqual(result.returncode, 2)
+
+    def test_cli_expect_tunnel_up_fails_without_inbound(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            stats = self._write(root, "stats.txt", zero_stats(3))
+            cap = self._write(root, "cap.pcap", pcap(phase_frames(wg_outbound())))
+            result = subprocess.run(
+                self._command(root, cap, stats, expect_tunnel="up"),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            parsed = json.loads(result.stdout)
+            self.assertEqual(parsed["verdict"], "INVALID")
+            self.assertIn("tunnel_not_observed", parsed["capture_meta"]["invalid_reasons"])
+
+    def test_cli_requires_capture_argv_and_expect_tunnel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            self._write(root, "policy.json", json.dumps(policy_document()))
+            self._write(root, "cap.pcap", pcap(phase_frames(wg_outbound())))
+            stats = self._write(root, "stats.txt", zero_stats(3))
+            base = [
+                sys.executable,
+                "-B",
+                str(HERE / "pcapscan.py"),
+                "--policy",
+                str(root / "policy.json"),
+                "--pcap",
+                str(root / "cap.pcap"),
+                "--tcpdump-stats",
+                str(stats),
+                "--control-before",
+                NONCE_A,
+                "--control-after",
+                NONCE_B,
+            ]
+            result = subprocess.run(base, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("--capture-argv-file", result.stderr)
+            result = subprocess.run(
+                base
+                + [
+                    "--capture-argv-file",
+                    str(self._write(root, "argv.json", json.dumps(CAPTURE_ARGV))),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("--expect-tunnel", result.stderr)
+
+    def test_cli_rejects_malformed_capture_argv_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            stats = self._write(root, "stats.txt", zero_stats(3))
+            cap = self._write(root, "cap.pcap", pcap(phase_frames(wg_outbound())))
+            argv_path = self._write(root, "argv.json", "not json")
+            command = self._command(root, cap, stats)
+            index = command.index("--capture-argv-file")
+            command[index + 1] = str(argv_path)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 2)
 
     def test_cli_rejects_equal_control_nonces(self):
@@ -1273,7 +1738,7 @@ class PolicyTests(unittest.TestCase):
             policy.parse_policy(document)
         document = policy_document()
         document["allowed"].append(
-            {"proto": "udp", "dst_ipv4": "10.64.0.2", "dst_port": WG_PORT, "label": "mullvad-wg"}
+            {"proto": "udp", "dst_ipv4": "185.65.134.20", "dst_port": WG_PORT, "label": "mullvad-wg"}
         )
         with self.assertRaises(policy.PolicyError):
             policy.parse_policy(document)
@@ -1297,6 +1762,67 @@ class PolicyTests(unittest.TestCase):
         del document["gateway_ipv4"]
         with self.assertRaises(policy.PolicyError):
             policy.parse_policy(document)
+
+    def test_gateway_ipv4_is_exactly_the_plan_bridge_address(self):
+        with self.assertRaises(policy.PolicyError):
+            make_policy(
+                gateway_ipv4="10.250.0.9",
+                positive_control={"sink_ipv4": "10.250.0.9", "sink_udp_port": SINK_PORT},
+            )
+        with self.assertRaises(policy.PolicyError):
+            make_policy(gateway_ipv4="10.250.0.254")
+
+    # ------------------------------------------- gateway MAC (gpt I3)
+    def test_gateway_mac_required_when_arp_is_allowed(self):
+        document = policy_document()
+        del document["gateway_mac"]
+        with self.assertRaises(policy.PolicyError):
+            policy.parse_policy(document)
+
+    def test_gateway_mac_may_be_absent_when_arp_is_disabled(self):
+        document = policy_document(allow_arp=False)
+        del document["gateway_mac"]
+        loaded = policy.parse_policy(document)
+        self.assertFalse(loaded.allow_arp)
+        self.assertIsNone(loaded.gateway_mac)
+
+    def test_gateway_mac_must_be_unicast_and_differ_from_vm(self):
+        for mac in ("ff:ff:ff:ff:ff:ff", "00:00:00:00:00:00", "01:00:5e:00:00:01", VM_MAC, None):
+            with self.subTest(mac=mac):
+                with self.assertRaises(policy.PolicyError):
+                    make_policy(gateway_mac=mac)
+
+    # --------------------------------- public destinations and ports (M-2)
+    def test_allowed_destination_must_be_public_unicast(self):
+        for address in (
+            "10.0.0.1",
+            "172.16.0.1",
+            "192.168.1.1",
+            "100.64.0.1",
+            "100.100.100.100",
+            "192.0.0.8",
+            "192.0.2.10",
+            "198.18.0.1",
+            "198.51.100.10",
+            "203.0.113.10",
+            "127.0.0.1",
+            "169.254.1.1",
+            "224.0.0.1",
+            "240.0.0.1",
+        ):
+            with self.subTest(address=address):
+                document = policy_document()
+                document["allowed"][0]["dst_ipv4"] = address
+                with self.assertRaises(policy.PolicyError):
+                    policy.parse_policy(document)
+
+    def test_allowed_destination_service_ports_are_rejected(self):
+        for port in (53, 853, 123, 5353, 5355):
+            with self.subTest(port=port):
+                document = policy_document()
+                document["allowed"][0]["dst_port"] = port
+                with self.assertRaises(policy.PolicyError):
+                    policy.parse_policy(document)
 
     def test_control_sink_must_equal_gateway(self):
         with self.assertRaises(policy.PolicyError):
@@ -1355,6 +1881,14 @@ class PolicyTests(unittest.TestCase):
         self.assertIn("ipv6_allowed", schema["required"])
         self.assertIn("gateway_ipv4", schema["required"])
         self.assertIn("gateway_ipv4", schema["properties"])
+        self.assertEqual(
+            schema["properties"]["gateway_ipv4"]["const"], "10.250.0.1"
+        )
+        self.assertIn("gateway_mac", schema["properties"])
+        self.assertIn("allOf", schema)
+        self.assertNotIn(
+            "gateway_mac", schema["required"]
+        )
 
 
 # --------------------------------------------------------------------------
@@ -1443,6 +1977,30 @@ CLEAN_ADDRS = _addresses(
 )
 CLEAN_ROUTES = _routes({"dst": "192.0.2.0/24", "dev": "eth0"})
 CLEAN_TABLES = json.dumps({"nftables": [{"metainfo": {"version": "1.1.1"}}]})
+CLEAN_IPTABLES = """# Generated by iptables-save v1.8.9 on Mon Nov  9 00:00:00 2026
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:DOCKER-USER - [0:0]
+-A FORWARD -j DOCKER-USER
+COMMIT
+"""
+DOCKER_DROP_IPTABLES = """*filter
+:INPUT ACCEPT [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+:DOCKER-USER - [0:0]
+-A FORWARD -j DOCKER-USER
+COMMIT
+"""
+DOCKER_DROP_NO_USER = """*filter
+:INPUT ACCEPT [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+-A FORWARD -j DOCKER-USER
+COMMIT
+"""
 
 
 class NetplanTests(unittest.TestCase):
@@ -1464,21 +2022,201 @@ class NetplanTests(unittest.TestCase):
         self.assertNotIn("flush ruleset", plan)
         self.assertNotIn("flush", plan.lower())
 
-    def test_teardown_deletes_only_owned_objects(self):
+    def test_teardown_is_a_standalone_script(self):
+        plan = netplan.render_plan("eth0")
+        self.assertTrue(plan.startswith("#!/bin/sh\n"))
+        self.assertIn("set -eu", plan.splitlines()[1])
+        self.assertIn("# not for interactive paste", plan)
+        self.assertIn("tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w", plan)
+        self.assertIn('if [ "${1:-}" = "teardown" ]; then', plan)
+        self.assertIn("\ndo_teardown\n", plan)
+
+    def test_teardown_deletes_only_owned_objects_with_exact_matches(self):
+        plan = netplan.render_plan("eth0", owner_tag=netplan.OWNER_TAG)
+        teardown = plan.split("# --- 4. teardown ---", 1)[1]
+        # No substring/whole-output matching: the old grep -Fq guard accepted
+        # a rule comment anywhere in the table and an alias suffix on a link.
+        self.assertNotIn("grep", teardown)
+        self.assertIn('tables[0].get("comment") == "vprlab-leak-lab-m1"', teardown)
+        self.assertIn('entries[0].get("alias") == "vprlab-leak-lab-m1"', teardown)
+        self.assertIn('e.get("ifname") == name', teardown)
+        self.assertIn("refusing to delete", teardown)
+
+    def test_owner_tag_defaults_to_the_fixed_static_tag(self):
+        plan = netplan.render_plan("eth0")
+        alias = re.search(r'ip link set dev vprlab0 alias "([^"]+)"', plan)
+        self.assertIsNotNone(alias)
+        self.assertEqual(alias.group(1), netplan.OWNER_TAG)
+        custom = netplan.render_plan("eth0", owner_tag=netplan.OWNER_TAG + "-run1")
+        self.assertIn(
+            f'ip link set dev vprlab0 alias "{netplan.OWNER_TAG}-run1"', custom
+        )
+        with self.assertRaises(netplan.NetplanError):
+            netplan.render_plan("eth0", owner_tag="foreign-tag")
+
+    @staticmethod
+    def _embedded_check(plan, marker):
+        text = plan.split(marker, 1)[1]
+        needle = "python3 -c '"
+        start = text.index(needle) + len(needle)
+        end = text.index("\n'", start)
+        return text[start:end]
+
+    def _run_embedded(self, code, document, *args):
+        return subprocess.run(
+            [sys.executable, "-c", code, *args],
+            input=json.dumps(document),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).returncode
+
+    def test_embedded_ownership_checks_use_exact_structured_fields(self):
+        plan = netplan.render_plan("eth0", owner_tag=netplan.OWNER_TAG)
+        nft_code = self._embedded_check(plan, "nft -j list table inet vprlab 2>/dev/null |")
+        self.assertEqual(
+            self._run_embedded(
+                nft_code,
+                {
+                    "nftables": [
+                        {"table": {"family": "inet", "name": "vprlab", "comment": netplan.OWNER_TAG}}
+                    ]
+                },
+            ),
+            0,
+        )
+        # A comment on a rule elsewhere in the table is not table ownership.
+        self.assertEqual(
+            self._run_embedded(
+                nft_code,
+                {
+                    "nftables": [
+                        {"table": {"family": "inet", "name": "vprlab", "comment": "other"}},
+                        {"rule": {"comment": netplan.OWNER_TAG}},
+                    ]
+                },
+            ),
+            1,
+        )
+        link_code = self._embedded_check(
+            plan, "ip -j -d link show dev vprlab-tap0 2>/dev/null |"
+        )
+        self.assertEqual(
+            self._run_embedded(
+                link_code,
+                [{"ifname": netplan.TAP, "alias": netplan.OWNER_TAG}],
+                netplan.TAP,
+            ),
+            0,
+        )
+        # The old grep accepted any output containing the tag as a substring.
+        self.assertEqual(
+            self._run_embedded(
+                link_code,
+                [{"ifname": netplan.TAP, "alias": "NOT-OWNED-" + netplan.OWNER_TAG + "-backup"}],
+                netplan.TAP,
+            ),
+            1,
+        )
+        self.assertEqual(
+            self._run_embedded(
+                link_code,
+                [{"ifname": "other0", "alias": netplan.OWNER_TAG}],
+                netplan.TAP,
+            ),
+            1,
+        )
+
+    def test_teardown_isolates_tap_before_removing_protection(self):
         plan = netplan.render_plan("eth0")
         teardown = plan.split("# --- 4. teardown ---", 1)[1]
-        self.assertIn("vprlab-leak-lab-m1", teardown)
-        self.assertIn("refusing to delete", teardown)
-        lines = [line.strip() for line in teardown.splitlines()]
-        for index, line in enumerate(lines):
-            if line.startswith("nft delete table") or line.startswith("ip link del"):
-                previous = next(item for item in reversed(lines[:index]) if item)
-                self.assertTrue(
-                    previous.endswith("; then"),
-                    f"delete line {line!r} is not guarded by an ownership check",
-                )
-                self.assertIn("grep -Fq", previous)
-        self.assertIn("Idempotent per object", teardown)
+        down = teardown.index("ip link set dev vprlab-tap0 down")
+        nomaster = teardown.index("ip link set dev vprlab-tap0 nomaster")
+        neigh = teardown.index("ip neigh del")
+        iptables = teardown.index("iptables -D DOCKER-USER")
+        table = teardown.index("nft delete table inet vprlab")
+        tap_del = teardown.index("ip link del vprlab-tap0")
+        bridge_del = teardown.index("ip link del vprlab0")
+        self.assertLess(down, nomaster)
+        self.assertLess(nomaster, neigh)
+        self.assertLess(nomaster, iptables)
+        self.assertLess(iptables, table)
+        self.assertLess(table, tap_del)
+        self.assertLess(tap_del, bridge_del)
+        # Every risky teardown step is guarded so teardown continues after a
+        # failure instead of stopping at the first one.
+        for command in (
+            "ip link set dev vprlab-tap0 down",
+            "ip link set dev vprlab-tap0 nomaster",
+            "iptables -D DOCKER-USER",
+            "nft delete table inet vprlab",
+            "ip link del",
+        ):
+            for line in teardown.splitlines():
+                if command in line and not line.lstrip().startswith("#"):
+                    self.assertIn("||", line, f"unguarded teardown step: {line}")
+
+    def test_docker_user_rules_are_scoped_tagged_and_removed_exactly(self):
+        plan = netplan.render_plan("eno1")
+        insert = [
+            line.strip()
+            for line in plan.splitlines()
+            if line.strip().startswith("iptables -I DOCKER-USER")
+        ]
+        delete = [
+            line.strip()
+            for line in plan.splitlines()
+            if line.strip().startswith("iptables -D DOCKER-USER")
+        ]
+        self.assertEqual(len(insert), 2)
+        self.assertEqual(len(delete), 2)
+        for expected in (
+            "-i vprlab0 -o eno1 -s 10.250.0.0/24",
+            "-i eno1 -o vprlab0 -d 10.250.0.0/24 -m conntrack --ctstate ESTABLISHED,RELATED",
+        ):
+            self.assertTrue(any(expected in line for line in insert), expected)
+            self.assertTrue(any(expected in line for line in delete), expected)
+        for line in insert + delete:
+            self.assertIn("-m comment --comment vprlab-owned", line)
+            self.assertIn("-j ACCEPT", line)
+        # Teardown -D specs must equal the -I specs exactly.
+        for line in insert:
+            spec = line.replace("-I DOCKER-USER", "-D DOCKER-USER")
+            self.assertTrue(any(item.startswith(spec + " ||") for item in delete), spec)
+        teardown = plan.split("# --- 4. teardown ---", 1)[1]
+        self.assertIn("iptables-nft", plan)
+        self.assertIn("DOCKER-USER", plan.split("# --- 2.", 1)[1].split("# --- 3.", 1)[0])
+        self.assertNotIn("iptables -F", plan)
+
+    def test_capture_argv_matches_printed_command(self):
+        plan = netplan.render_plan("eth0", capture_file="phase.pcap")
+        self.assertEqual(
+            netplan.capture_argv("phase.pcap"),
+            [
+                "tcpdump",
+                "-i",
+                "vprlab-tap0",
+                "-nn",
+                "-U",
+                "--immediate-mode",
+                "-s",
+                "0",
+                "-w",
+                "phase.pcap",
+            ],
+        )
+        self.assertIsNone(netplan.check_capture_argv(netplan.capture_argv("x.pcap")))
+        self.assertEqual(
+            netplan.check_capture_argv(
+                ["tcpdump", "-i", "vprlab-tap0", "-nn", "-s", "0", "-w", "x.pcap"]
+            ),
+            "capture_argv_mismatch",
+        )
+        self.assertEqual(
+            netplan.check_capture_argv("tcpdump"),
+            "capture_argv_invalid",
+        )
+        self.assertIn("tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w phase.pcap", plan)
 
     def test_tap_user_option(self):
         plan = netplan.render_plan("eth0", tap_user="vprouterlab")
@@ -1536,7 +2274,7 @@ class NetplanTests(unittest.TestCase):
         self.assertNotIn("nft add table", plan)
 
     def test_links_carry_ownership_marker(self):
-        plan = netplan.render_plan("eth0")
+        plan = netplan.render_plan("eth0", owner_tag=netplan.OWNER_TAG)
         self.assertIn('ip link set dev vprlab0 alias "vprlab-leak-lab-m1"', plan)
         self.assertIn('ip link set dev vprlab-tap0 alias "vprlab-leak-lab-m1"', plan)
 
@@ -1565,7 +2303,7 @@ class NetplanTests(unittest.TestCase):
     def test_clean_preflight(self):
         self.assertEqual(
             netplan.check_name_collisions(
-                CLEAN_LINKS, CLEAN_ADDRS, CLEAN_ROUTES, CLEAN_TABLES, "eth0"
+                CLEAN_LINKS, CLEAN_ADDRS, CLEAN_ROUTES, CLEAN_TABLES, "eth0", CLEAN_IPTABLES
             ),
             [],
         )
@@ -1581,7 +2319,7 @@ class NetplanTests(unittest.TestCase):
             with self.subTest(text=text):
                 with self.assertRaises(netplan.NetplanError):
                     netplan.check_name_collisions(
-                        text, CLEAN_ADDRS, CLEAN_ROUTES, CLEAN_TABLES, "eth0"
+                        text, CLEAN_ADDRS, CLEAN_ROUTES, CLEAN_TABLES, "eth0", CLEAN_IPTABLES
                     )
 
     def test_malformed_tables_inventory_rejected(self):
@@ -1593,7 +2331,7 @@ class NetplanTests(unittest.TestCase):
             with self.subTest(text=text):
                 with self.assertRaises(netplan.NetplanError):
                     netplan.check_name_collisions(
-                        CLEAN_LINKS, CLEAN_ADDRS, CLEAN_ROUTES, text, "eth0"
+                        CLEAN_LINKS, CLEAN_ADDRS, CLEAN_ROUTES, text, "eth0", CLEAN_IPTABLES
                     )
 
     def test_malformed_address_and_route_inventory_rejected(self):
@@ -1604,6 +2342,7 @@ class NetplanTests(unittest.TestCase):
                 CLEAN_ROUTES,
                 CLEAN_TABLES,
                 "eth0",
+                CLEAN_IPTABLES,
             )
         with self.assertRaises(netplan.NetplanError):
             netplan.check_name_collisions(
@@ -1612,6 +2351,7 @@ class NetplanTests(unittest.TestCase):
                 '[{"dst": "not-a-route"}]',
                 CLEAN_TABLES,
                 "eth0",
+                CLEAN_IPTABLES,
             )
 
     def test_altname_collision_is_detected(self):
@@ -1628,7 +2368,7 @@ class NetplanTests(unittest.TestCase):
         )
         self.assertEqual(
             netplan.check_name_collisions(
-                CLEAN_LINKS, CLEAN_ADDRS, routes, CLEAN_TABLES, "eth0"
+                CLEAN_LINKS, CLEAN_ADDRS, routes, CLEAN_TABLES, "eth0", CLEAN_IPTABLES
             ),
             [],
         )
@@ -1644,17 +2384,17 @@ class NetplanTests(unittest.TestCase):
 
         routes = _routes({"dst": "10.250.0.0/16", "dev": "eth0"})
         collisions = netplan.check_name_collisions(
-            CLEAN_LINKS, CLEAN_ADDRS, routes, CLEAN_TABLES, "eth0"
+            CLEAN_LINKS, CLEAN_ADDRS, routes, CLEAN_TABLES, "eth0", CLEAN_IPTABLES
         )
         self.assertTrue(any("10.250.0.0/24" in item for item in collisions))
 
     def test_wan_interface_must_exist_and_not_be_loopback(self):
         collisions = netplan.check_name_collisions(
-            CLEAN_LINKS, CLEAN_ADDRS, CLEAN_ROUTES, CLEAN_TABLES, "lo"
+            CLEAN_LINKS, CLEAN_ADDRS, CLEAN_ROUTES, CLEAN_TABLES, "lo", CLEAN_IPTABLES
         )
         self.assertTrue(any("lo" in item for item in collisions))
         collisions = netplan.check_name_collisions(
-            CLEAN_LINKS, CLEAN_ADDRS, CLEAN_ROUTES, CLEAN_TABLES, "eno9"
+            CLEAN_LINKS, CLEAN_ADDRS, CLEAN_ROUTES, CLEAN_TABLES, "eno9", CLEAN_IPTABLES
         )
         self.assertTrue(any("eno9" in item for item in collisions))
 
@@ -1680,6 +2420,78 @@ class NetplanTests(unittest.TestCase):
         )
         self.assertEqual(len(collisions), 3)
 
+    def test_plan_preflight_collects_all_routing_tables(self):
+        plan = netplan.render_plan("eth0")
+        self.assertIn("ip -j route show table all > routes.json", plan)
+        self.assertNotIn("ip -j route > routes.json", plan)
+
+    def test_empty_route_object_is_rejected(self):
+        for text in ('[{}]', '[{"dst": null}]', '[{"dst": "10.0.0.0/8", "table": 200}, {}]'):
+            with self.subTest(text=text):
+                with self.assertRaises(netplan.NetplanError):
+                    netplan.check_name_collisions(
+                        CLEAN_LINKS, CLEAN_ADDRS, text, CLEAN_TABLES, "eth0",
+                        CLEAN_IPTABLES,
+                    )
+
+    def test_policy_route_table_overlap_is_detected(self):
+        routes = _routes(
+            {"dst": "10.250.0.0/24", "table": 52, "dev": "tailscale0"},
+        )
+        collisions = netplan.check_name_collisions(
+            CLEAN_LINKS, CLEAN_ADDRS, routes, CLEAN_TABLES, "eth0", CLEAN_IPTABLES
+        )
+        self.assertTrue(any("10.250.0.0/24" in item for item in collisions))
+
+    def test_docker_forward_drop_requires_docker_user(self):
+        # Docker sets the FORWARD policy to DROP; without DOCKER-USER the
+        # plan's -I DOCKER-USER fails and the lab has no WAN path.
+        collisions = netplan.check_name_collisions(
+            CLEAN_LINKS, CLEAN_ADDRS, CLEAN_ROUTES, CLEAN_TABLES, "eth0",
+            DOCKER_DROP_NO_USER,
+        )
+        self.assertTrue(any("DOCKER-USER" in item for item in collisions))
+        self.assertTrue(any("FORWARD" in item for item in collisions))
+
+    def test_forward_drop_with_docker_user_is_clean(self):
+        self.assertEqual(
+            netplan.check_name_collisions(
+                CLEAN_LINKS, CLEAN_ADDRS, CLEAN_ROUTES, CLEAN_TABLES, "eth0",
+                DOCKER_DROP_IPTABLES,
+            ),
+            [],
+        )
+
+    def test_malformed_iptables_save_is_rejected(self):
+        for text in ("", "not iptables", "*nat\nCOMMIT\n", "*filter\n-X\nCOMMIT\n"):
+            with self.subTest(text=text):
+                with self.assertRaises(netplan.NetplanError):
+                    netplan.check_name_collisions(
+                        CLEAN_LINKS, CLEAN_ADDRS, CLEAN_ROUTES, CLEAN_TABLES, "eth0",
+                        text,
+                    )
+
+    def test_iptables_summary_reports_forward_policy_and_docker_user(self):
+        summary = netplan.iptables_summary(DOCKER_DROP_IPTABLES)
+        self.assertEqual(summary["forward_policy"], "DROP")
+        self.assertTrue(summary["docker_user"])
+        summary = netplan.iptables_summary(CLEAN_IPTABLES)
+        self.assertEqual(summary["forward_policy"], "ACCEPT")
+        self.assertTrue(summary["docker_user"])
+
+    def test_docs_require_static_neighbours_on_both_sides(self):
+        document = (HERE.parents[1] / "docs/rust-v2/leak-lab.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "ip neigh replace 10.250.0.2 lladdr <vm-mac> dev vprlab0 nud permanent",
+            document,
+        )
+        self.assertIn(
+            "ip neigh replace 10.250.0.1 lladdr <gateway-mac> dev eth0 nud permanent",
+            document,
+        )
+
     def test_check_mode_reads_files_and_returns_status(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -1689,6 +2501,7 @@ class NetplanTests(unittest.TestCase):
                 ("addresses", CLEAN_ADDRS),
                 ("routes", CLEAN_ROUTES),
                 ("tables", CLEAN_TABLES),
+                ("iptables", CLEAN_IPTABLES),
             ):
                 path = root / f"{name}.json"
                 path.write_text(text, encoding="utf-8")
@@ -1711,6 +2524,8 @@ class NetplanTests(unittest.TestCase):
                             str(paths["routes"]),
                             "--tables-json",
                             str(paths["tables"]),
+                            "--iptables-save",
+                            str(paths["iptables"]),
                         ]
                     )
                 return status, output.getvalue()
@@ -1736,6 +2551,49 @@ class NetplanTests(unittest.TestCase):
         with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
             rc = netplan.main(["--check-name-collisions", "--wan-interface", "eth0"])
         self.assertEqual(rc, 2)
+
+    def test_check_mode_requires_iptables_save(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            command = ["--check-name-collisions", "--wan-interface", "eth0"]
+            for name, text in (
+                ("links", CLEAN_LINKS),
+                ("addresses", CLEAN_ADDRS),
+                ("routes", CLEAN_ROUTES),
+                ("tables", CLEAN_TABLES),
+            ):
+                path = root / f"{name}.json"
+                path.write_text(text, encoding="utf-8")
+                command += [f"--{name}-json", str(path)]
+            errors = StringIO()
+            with redirect_stdout(StringIO()), redirect_stderr(errors):
+                rc = netplan.main(command)
+            self.assertEqual(rc, 2)
+            self.assertIn("--iptables-save", errors.getvalue())
+
+    def test_check_mode_reports_docker_forward_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            command = ["--check-name-collisions", "--wan-interface", "eth0"]
+            for name, text in (
+                ("links", CLEAN_LINKS),
+                ("addresses", CLEAN_ADDRS),
+                ("routes", CLEAN_ROUTES),
+                ("tables", CLEAN_TABLES),
+                ("iptables-save", DOCKER_DROP_IPTABLES),
+            ):
+                path = root / f"{name}.txt"
+                path.write_text(text, encoding="utf-8")
+                command += [f"--{name}", str(path)] if name == "iptables-save" else [
+                    f"--{name}-json",
+                    str(path),
+                ]
+            output = StringIO()
+            with redirect_stdout(output), redirect_stderr(StringIO()):
+                rc = netplan.main(command)
+            self.assertEqual(rc, 0)
+            self.assertIn("FORWARD policy DROP", output.getvalue())
+            self.assertIn("DOCKER-USER present", output.getvalue())
 
 
 # --------------------------------------------------------------------------
@@ -1772,6 +2630,35 @@ class ControlTests(unittest.TestCase):
             path = pathlib.Path(directory) / "used.txt"
             path.write_text(f"{NONCE_A}\n\n{NONCE_B}\n", encoding="utf-8")
             self.assertEqual(control.load_used_nonces(path), {NONCE_A, NONCE_B})
+
+    def test_missing_used_nonces_file_is_created_0600(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "used.txt"
+            self.assertEqual(control.load_used_nonces(path), set())
+            self.assertTrue(path.exists())
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            # The created file is then used normally: a nonce in it is refused.
+            path.write_text(NONCE_A + "\n", encoding="utf-8")
+            self.assertEqual(control.load_used_nonces(path), {NONCE_A})
+            output = StringIO()
+            with redirect_stdout(output), redirect_stderr(StringIO()):
+                status = control.main(
+                    [
+                        "--device",
+                        "eth0",
+                        "--vm-ip",
+                        VM_IP,
+                        "--sink-ip",
+                        SINK_IP,
+                        "--sink-port",
+                        str(SINK_PORT),
+                        "--nonce",
+                        NONCE_A,
+                        "--used-nonces",
+                        str(path),
+                    ]
+                )
+            self.assertEqual(status, 2)
 
     def test_cli_refuses_reused_nonce(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1846,6 +2733,34 @@ class ControlTests(unittest.TestCase):
                     bytes.fromhex(document[role]["payload_hex"]),
                     policy.control_payload(document[role]["nonce"]),
                 )
+
+    def test_cli_pair_creates_missing_used_nonces_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            used = pathlib.Path(directory) / "used.txt"
+            self.assertFalse(used.exists())
+            output = StringIO()
+            with redirect_stdout(output):
+                status = control.main(
+                    [
+                        "--device",
+                        "eth0",
+                        "--vm-ip",
+                        VM_IP,
+                        "--sink-ip",
+                        SINK_IP,
+                        "--sink-port",
+                        str(SINK_PORT),
+                        "--pair",
+                        "--used-nonces",
+                        str(used),
+                        "--json",
+                    ]
+                )
+            self.assertEqual(status, 0)
+            self.assertTrue(used.exists())
+            self.assertEqual(used.stat().st_mode & 0o777, 0o600)
+            document = json.loads(output.getvalue())
+            self.assertNotEqual(document["before"]["nonce"], document["after"]["nonce"])
 
     def test_main_prints_command_and_nonce(self):
         with tempfile.TemporaryDirectory() as directory:

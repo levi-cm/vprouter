@@ -26,6 +26,10 @@ SCHEMA_VERSION = 1
 LAB_SUBNET = ipaddress.IPv4Network("10.250.0.0/24")
 LAB_SUBNET_TEXT = "10.250.0.0/24"
 
+#: The host bridge address the host plan always configures.  A policy that
+#: names any other gateway can never receive the positive controls.
+GATEWAY_IPV4 = "10.250.0.1"
+
 #: Address classes that can never be the VM, the gateway or a relay endpoint.
 _SPECIAL_NETWORKS = (
     ipaddress.IPv4Network("0.0.0.0/8"),
@@ -34,6 +38,30 @@ _SPECIAL_NETWORKS = (
     ipaddress.IPv4Network("240.0.0.0/4"),
     ipaddress.IPv4Network("169.254.0.0/16"),
 )
+
+#: Allowed WireGuard relay destinations must be public unicast addresses.
+#: Everything here is rejected explicitly even when ``is_global`` is true on the
+#: running Python (multicast is the notable case).
+_NON_PUBLIC_NETWORKS = (
+    ipaddress.IPv4Network("0.0.0.0/8"),
+    ipaddress.IPv4Network("10.0.0.0/8"),
+    ipaddress.IPv4Network("100.64.0.0/10"),  # CGNAT / Tailscale
+    ipaddress.IPv4Network("127.0.0.0/8"),
+    ipaddress.IPv4Network("169.254.0.0/16"),
+    ipaddress.IPv4Network("172.16.0.0/12"),
+    ipaddress.IPv4Network("192.0.0.0/24"),
+    ipaddress.IPv4Network("192.0.2.0/24"),
+    ipaddress.IPv4Network("192.168.0.0/16"),
+    ipaddress.IPv4Network("198.18.0.0/15"),
+    ipaddress.IPv4Network("198.51.100.0/24"),
+    ipaddress.IPv4Network("203.0.113.0/24"),
+    ipaddress.IPv4Network("224.0.0.0/4"),
+    ipaddress.IPv4Network("240.0.0.0/4"),
+)
+
+#: Well-known service ports (DNS, DoT, NTP, mDNS, LLMNR) must never be declared
+#: as an allowed WireGuard relay flow: that would whitelist a plaintext leak.
+_PROHIBITED_DST_PORTS = frozenset({53, 853, 123, 5353, 5355})
 
 #: Exact positive-control payload prefix.  The full payload is the prefix
 #: followed by 32 lowercase hexadecimal characters (16 random bytes).
@@ -58,12 +86,14 @@ _TOP_KEYS = frozenset(
         "vm_wan_mac",
         "vm_wan_ipv4",
         "gateway_ipv4",
+        "gateway_mac",
         "allowed",
         "allow_arp",
         "positive_control",
         "ipv6_allowed",
     }
 )
+_TOP_REQUIRED = _TOP_KEYS - {"gateway_mac"}
 _FLOW_KEYS = frozenset({"proto", "dst_ipv4", "dst_port", "label"})
 _CONTROL_KEYS = frozenset({"sink_ipv4", "sink_udp_port"})
 
@@ -129,6 +159,7 @@ class Policy:
     vm_wan_mac: str
     vm_wan_ipv4: str
     gateway_ipv4: str
+    gateway_mac: str | None
     allowed: tuple[Flow, ...]
     allow_arp: bool
     positive_control: PositiveControl
@@ -143,7 +174,7 @@ class Policy:
         return {(flow.dst_ipv4, flow.dst_port): flow.label for flow in self.allowed}
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        document: dict[str, Any] = {
             "schema_version": self.schema_version,
             "vm_wan_mac": self.vm_wan_mac,
             "vm_wan_ipv4": self.vm_wan_ipv4,
@@ -153,6 +184,9 @@ class Policy:
             "positive_control": self.positive_control.to_dict(),
             "ipv6_allowed": self.ipv6_allowed,
         }
+        if self.gateway_mac is not None:
+            document["gateway_mac"] = self.gateway_mac
+        return document
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -168,10 +202,17 @@ def _reject_constant(value: str) -> Any:
     raise PolicyError(f"non-finite JSON number {value!r} is not allowed")
 
 
-def _require_closed_object(value: Any, keys: frozenset[str], where: str) -> Mapping[str, Any]:
+def _require_closed_object(
+    value: Any,
+    keys: frozenset[str],
+    where: str,
+    *,
+    required: frozenset[str] | None = None,
+) -> Mapping[str, Any]:
     if not isinstance(value, dict):
         raise PolicyError(f"{where} must be a JSON object")
-    missing = sorted(keys - set(value))
+    required_keys = keys if required is None else required
+    missing = sorted(required_keys - set(value))
     extra = sorted(set(value) - keys)
     if missing:
         raise PolicyError(f"{where} is missing required keys: {', '.join(missing)}")
@@ -214,14 +255,29 @@ def _require_lab_host(value: Any, where: str) -> str:
     return value
 
 
-def _require_unicast_mac(value: Any) -> str:
+def _require_public_unicast(value: Any, where: str) -> str:
+    """Reject every destination that is not a public unicast IPv4 address."""
+    address = ipaddress.IPv4Address(_require_ipv4(value, where))
+    for network in _NON_PUBLIC_NETWORKS:
+        if address in network:
+            raise PolicyError(
+                f"{where} must be a public unicast address; {value} is in {network}"
+            )
+    if not address.is_global:
+        raise PolicyError(
+            f"{where} must be a public unicast address; {value} is not globally routable"
+        )
+    return value
+
+
+def _require_unicast_mac(value: Any, where: str) -> str:
     if not isinstance(value, str) or _MAC_RE.fullmatch(value) is None:
-        raise PolicyError("vm_wan_mac must be six colon-separated hex octets")
+        raise PolicyError(f"{where} must be six colon-separated hex octets")
     octets = bytes.fromhex(value.replace(":", ""))
     if octets[0] & 0x01:
-        raise PolicyError("vm_wan_mac must be a unicast MAC (multicast bit is set)")
+        raise PolicyError(f"{where} must be a unicast MAC (multicast bit is set)")
     if not any(octets):
-        raise PolicyError("vm_wan_mac must not be the all-zero MAC")
+        raise PolicyError(f"{where} must not be the all-zero MAC")
     return value.lower()
 
 
@@ -269,7 +325,9 @@ def _decode_policy(source: bytes | str | Mapping[str, Any]) -> Mapping[str, Any]
 def parse_policy(source: bytes | str | Mapping[str, Any]) -> Policy:
     """Parse and fully validate a policy document."""
     raw = _decode_policy(source)
-    obj = _require_closed_object(raw, _TOP_KEYS, "policy")
+    obj = _require_closed_object(
+        raw, _TOP_KEYS, "policy", required=_TOP_REQUIRED
+    )
 
     schema_version = obj["schema_version"]
     if isinstance(schema_version, bool) or not isinstance(schema_version, int):
@@ -277,16 +335,32 @@ def parse_policy(source: bytes | str | Mapping[str, Any]) -> Policy:
     if schema_version != SCHEMA_VERSION:
         raise PolicyError(f"unsupported schema_version {schema_version!r}; expected 1")
 
-    mac = _require_unicast_mac(obj["vm_wan_mac"])
+    mac = _require_unicast_mac(obj["vm_wan_mac"], "vm_wan_mac")
 
     wan_ipv4 = _require_lab_host(obj["vm_wan_ipv4"], "vm_wan_ipv4")
     gateway_ipv4 = _require_lab_host(obj["gateway_ipv4"], "gateway_ipv4")
+    if gateway_ipv4 != GATEWAY_IPV4:
+        raise PolicyError(
+            f"gateway_ipv4 must be exactly {GATEWAY_IPV4} (the host plan's "
+            f"bridge address), not {gateway_ipv4}"
+        )
     if wan_ipv4 == gateway_ipv4:
         raise PolicyError("vm_wan_ipv4 and gateway_ipv4 must be different hosts")
 
     allow_arp = obj["allow_arp"]
     if not isinstance(allow_arp, bool):
         raise PolicyError("allow_arp must be a JSON boolean")
+
+    gateway_mac: str | None = None
+    if "gateway_mac" in obj:
+        gateway_mac = _require_unicast_mac(obj["gateway_mac"], "gateway_mac")
+        if gateway_mac == mac:
+            raise PolicyError("gateway_mac must differ from vm_wan_mac")
+    elif allow_arp:
+        raise PolicyError(
+            "gateway_mac is required when allow_arp is true: gateway-to-VM ARP "
+            "is allowed only from the declared gateway MAC"
+        )
 
     if obj["ipv6_allowed"] is not False:
         raise PolicyError(
@@ -306,7 +380,7 @@ def parse_policy(source: bytes | str | Mapping[str, Any]) -> Policy:
         flow_obj = _require_closed_object(item, _FLOW_KEYS, where)
         if flow_obj["proto"] != "udp":
             raise PolicyError(f"{where}.proto must be the literal string \"udp\"")
-        dst_ipv4 = _require_unicast_ipv4(
+        dst_ipv4 = _require_public_unicast(
             flow_obj["dst_ipv4"], f"{where}.dst_ipv4"
         )
         if ipaddress.IPv4Address(dst_ipv4) in LAB_SUBNET:
@@ -318,6 +392,11 @@ def parse_policy(source: bytes | str | Mapping[str, Any]) -> Policy:
                 f"{where}.dst_ipv4 must not be the VM or the gateway address"
             )
         dst_port = _require_port(flow_obj["dst_port"], f"{where}.dst_port")
+        if dst_port in _PROHIBITED_DST_PORTS:
+            raise PolicyError(
+                f"{where}.dst_port {dst_port} is a well-known service port "
+                "(DNS/DoT/NTP/mDNS/LLMNR); it must never be an allowed relay flow"
+            )
         label = _require_label(flow_obj["label"], f"{where}.label")
         endpoint = (dst_ipv4, dst_port)
         if endpoint in seen_endpoints:
@@ -350,6 +429,7 @@ def parse_policy(source: bytes | str | Mapping[str, Any]) -> Policy:
         vm_wan_mac=mac,
         vm_wan_ipv4=wan_ipv4,
         gateway_ipv4=gateway_ipv4,
+        gateway_mac=gateway_mac,
         allowed=tuple(flows),
         allow_arp=allow_arp,
         positive_control=PositiveControl(sink_ipv4=sink_ipv4, sink_udp_port=sink_port),

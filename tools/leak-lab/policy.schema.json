@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vprouter:leak-lab:policy:1",
+  "title": "vprlab external leak-monitor policy",
+  "description": "Shape mirror for tools/leak-lab/policy.py. The Python loader is the binding validator: it also rejects duplicate JSON keys, duplicate labels/endpoints, a positive-control endpoint that differs from gateway_ipv4 or overlaps an allowed flow, non-unicast addresses/MACs, and addresses owned by the fixed lab subnet 10.250.0.0/24.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "vm_wan_mac",
+    "vm_wan_ipv4",
+    "gateway_ipv4",
+    "allowed",
+    "allow_arp",
+    "positive_control",
+    "ipv6_allowed"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "vm_wan_mac": {
+      "type": "string",
+      "description": "Unicast, non-zero MAC; six colon-separated hex octets.",
+      "pattern": "^[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}$"
+    },
+    "vm_wan_ipv4": {
+      "$ref": "#/$defs/lab_host"
+    },
+    "gateway_ipv4": {
+      "$ref": "#/$defs/lab_host",
+      "description": "Host bridge address; must differ from vm_wan_ipv4."
+    },
+    "allowed": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "proto",
+          "dst_ipv4",
+          "dst_port",
+          "label"
+        ],
+        "properties": {
+          "proto": {
+            "const": "udp"
+          },
+          "dst_ipv4": {
+            "$ref": "#/$defs/unicast_ipv4"
+          },
+          "dst_port": {
+            "$ref": "#/$defs/port"
+          },
+          "label": {
+            "$ref": "#/$defs/label"
+          }
+        }
+      }
+    },
+    "allow_arp": {
+      "type": "boolean"
+    },
+    "positive_control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sink_ipv4",
+        "sink_udp_port"
+      ],
+      "properties": {
+        "sink_ipv4": {
+          "$ref": "#/$defs/lab_host",
+          "description": "Must equal gateway_ipv4."
+        },
+        "sink_udp_port": {
+          "$ref": "#/$defs/port"
+        }
+      }
+    },
+    "ipv6_allowed": {
+      "const": false
+    }
+  },
+  "$defs": {
+    "ipv4": {
+      "type": "string",
+      "description": "Dotted-quad IPv4 literal only; hostnames and leading-zero octets are rejected.",
+      "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$"
+    },
+    "unicast_ipv4": {
+      "$ref": "#/$defs/ipv4",
+      "description": "Additionally rejects 0.0.0.0/8, 127/8, 224/4, 240/4 and 169.254/16; the Python loader is binding."
+    },
+    "lab_host": {
+      "$ref": "#/$defs/unicast_ipv4",
+      "description": "A usable host address inside 10.250.0.0/24; the Python loader is binding."
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$",
+      "not": {
+        "enum": [
+          "arp",
+          "positive-control"
+        ]
+      }
+    }
+  }
+}

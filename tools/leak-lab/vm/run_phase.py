@@ -1540,6 +1540,18 @@ def record_readiness_refusal(
             state if state in {"STARTING", "BLOCKED", "RECOVERING", "READY"} else "unrecognized"
         )
         readiness["release_health_reason"] = _safe_text(document.get("reason"))
+    try:
+        status = read_tailscale_status(client, name)
+    except Exception:  # noqa: BLE001 - diagnostics only
+        status = None
+    # Our own fixed problem strings, plus booleans only (never guest text).
+    readiness["tailscale_problems"] = tailscale_readiness_problems(status)
+    node = status.get("Self") if isinstance(status, dict) else None
+    if isinstance(node, dict):
+        readiness["tailscale_self"] = {
+            key: node.get(key) if isinstance(node.get(key), bool) else None
+            for key in ("Online", "ExitNodeOption", "ExitNode")
+        }
     record_tailscale_state(record, client, name)
 
 

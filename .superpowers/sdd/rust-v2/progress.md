@@ -1279,3 +1279,7 @@ mapping reached the VM before wg0 existed). No client data, same endpoint and pu
 decision: narrow allowance (ICMP 3/3 to the allowed endpoint quoting a WireGuard-shaped datagram
 from that endpoint:port to the VM; reported as allowed_icmp_quotes, never tunnel evidence; all
 other ICMP stays a LEAK). Re-scan of that real capture: PASS, 0 findings, 1 quote.
+2026-11-09 idle phase x3: leak scans PASS (1,593 / 1,593 / 1,561 frames, 0 findings, 0 drops) but
+INVALID router_not_ready. New diagnostics show why: Tailscale Running and Online, but
+Self.ExitNodeOption=false (exit node not approved in the admin console), so the release stays
+RECOVERING "starting Tailscale" and correctly never reports READY. Waiting on user approval.

@@ -5080,3 +5080,18 @@ class ControllerR4Tests(unittest.TestCase):
         finally:
             child.kill()
             child.wait()
+
+
+class LiveBringUpTests(unittest.TestCase):
+    """Regressions for issues found during the live debdev bring-up."""
+
+    def test_both_boot_modes_name_the_staged_seabios_image(self) -> None:
+        # Live 2026-11-09: "could not load PC BIOS 'bios-256k.bin'".
+        for mode in ("provision", "test"):
+            with self.subTest(mode=mode):
+                argv = guest.build_qemu_argv(mode, pathlib.Path("/var/lib/vprlab/vm-001"))
+                self.assertIn("-bios", argv)
+                self.assertEqual(
+                    argv[argv.index("-bios") + 1],
+                    str(guest.LAB_TOOLS / "usr/share/seabios/bios-256k.bin"),
+                )

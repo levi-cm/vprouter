@@ -38,6 +38,10 @@ GENISOIMAGE = LAB_TOOLS / "usr/bin/genisoimage"
 LAB_LIBRARY_DIR = LAB_TOOLS / "usr/lib/x86_64-linux-gnu"
 QEMU_MODULE_DIR = LAB_LIBRARY_DIR / "qemu"
 QEMU_SHARE_DIR = LAB_TOOLS / "usr/share/qemu"
+#: Debian resolves bios-256k.bin through an absolute system symlink into
+#: /usr/share/seabios, which the staged tree does not carry; name the staged
+#: SeaBIOS image explicitly (found live on 2026-11-09).
+QEMU_BIOS = LAB_TOOLS / "usr/share/seabios/bios-256k.bin"
 
 STATE_ROOT = pathlib.Path("/var/lib/vprlab")
 EVIDENCE_ROOT = STATE_ROOT / "evidence"
@@ -347,6 +351,8 @@ def build_qemu_argv(
         SANDBOX,
         "-L",
         str(QEMU_SHARE_DIR),
+        "-bios",
+        str(QEMU_BIOS),
     ]
     return argv
 

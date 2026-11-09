@@ -25,6 +25,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 
@@ -4513,9 +4514,6 @@ class NetplanInjectionTests(unittest.TestCase):
         self.assertNotIn("SAFETY_INJECTED", plan)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class IcmpQuoteAllowanceTests(unittest.TestCase):
     """User decision 2026-11-09 after the first live LEAK: an ICMP port-
@@ -4527,11 +4525,20 @@ class IcmpQuoteAllowanceTests(unittest.TestCase):
         payload = wg_initiation() if payload is None else payload
         inner = ipv4_packet(quoted_src, quoted_dst, 17, udp_segment(sport, 40410, payload),
                             ihl_bytes=24 if options else None)
+        self._last_inner = inner
         return bytes([icmp_type, code, 0, 0, 0, 0, 0, 0]) + inner
 
-    def _scan(self, icmp, **frame):
+    def _inbound(self, inner):
+        """The endpoint's datagram as the tap sees it arrive at the VM."""
+        return ethernet(inner, 0x0800, src=GW_MAC, dst=VM_MAC)
+
+    def _scan(self, icmp, *, inbound=None, **frame):
+        # The quoted datagram arrives first (r5 review: quotes are bound to a
+        # real inbound frame), then the VM's ICMP answer.
+        inbound = self._last_inner if inbound is None else inbound
         return scan_middle(
-            [ipv4_frame(icmp, protocol=1, **frame),
+            [self._inbound(inbound),
+             ipv4_frame(icmp, protocol=1, **frame),
              ipv4_frame(udp_segment(40000, WG_PORT, wg_initiation())),
              ipv4_frame(udp_segment(WG_PORT, 40000, wg_initiation()), src_ip=WG_IP,
                         dst_ip=VM_IP, src_mac=GW_MAC, dst_mac=VM_MAC)],
@@ -4582,6 +4589,8 @@ class IcmpQuoteAllowanceTests(unittest.TestCase):
                    frag_field=0, unused=b"\x00\x00\x00\x00", trailer=b"",
                    truncate_to=None):
         udp = udp_segment(WG_PORT, 40410, payload, length=udp_length)
+        # the honest datagram on the wire; the quote below may misdescribe it
+        self._last_inner = ipv4_packet(WG_IP, VM_IP, 17, udp_segment(WG_PORT, 40410, payload))
         inner = ipv4_packet(WG_IP, VM_IP, 17, udp, total_length=total_length)
         inner = inner[:6] + struct.pack("!H", frag_field) + inner[8:]
         if truncate_to is not None:
@@ -4641,11 +4650,13 @@ class IcmpQuoteAllowanceTests(unittest.TestCase):
             self._raw_quote(wg_initiation(), trailer=b"REAL_IP=198.51.100.77"),
             protocol=1,
         )
-        good = ipv4_frame(self._quote(), protocol=1)
+        arrived = self._inbound(self._last_inner)
+        good_icmp = ipv4_frame(self._quote(), protocol=1)
+        good = [self._inbound(self._last_inner), good_icmp]
         middle = [wg_outbound(), wg_inbound()]
         orders = {
-            "before": [bad, *phase_frames(*middle)],
-            "after": [*phase_frames(*middle), bad],
+            "before": [arrived, bad, *phase_frames(*middle)],
+            "after": [*phase_frames(*middle), arrived, bad],
         }
         for where, frames in orders.items():
             with self.subTest(where=where):
@@ -4653,6 +4664,111 @@ class IcmpQuoteAllowanceTests(unittest.TestCase):
                 self.assertEqual(report["verdict"], "LEAK")
                 self.assertIn("icmp_not_allowed", reasons(report))
         # an exact quote outside the window stays an allowed, counted packet
-        report = scan([good, *phase_frames(*middle)], expect_tunnel="up")
+        report = scan([*good, *phase_frames(*middle)], expect_tunnel="up")
         self.assertEqual(report["verdict"], "PASS", reasons(report))
-        self.assertEqual(report["capture_meta"]["outside_window_allowed"], 1)
+        self.assertEqual(report["capture_meta"]["outside_window_allowed"], 2)
+        self.assertEqual(report["allowed_icmp_quotes"], {"mullvad-wg": 1})
+
+    # -- round-5 review (Opus F1/M7): the quote must match a real arrival --
+    def _bound_scan(self, frames, timestamps=None):
+        frames = phase_frames(*frames, wg_outbound(), wg_inbound())
+        if timestamps is not None:
+            timestamps = [timestamps[0] - 1, *timestamps,
+                          timestamps[-1] + 1, timestamps[-1] + 2, timestamps[-1] + 3]
+        return scan_bytes(pcap(frames, timestamps=timestamps), make_policy(),
+                          NONCE_A, NONCE_B, tcpdump_stats_text=zero_stats(len(frames)),
+                          expect_tunnel="up")
+
+    def test_quote_without_a_seen_arrival_is_a_leak(self):
+        for expect in ("up", "down", "any"):
+            with self.subTest(expect=expect):
+                frames = phase_frames(ipv4_frame(self._quote(), protocol=1),
+                                      *(() if expect == "down" else
+                                        (wg_outbound(), wg_inbound())))
+                report = scan(frames, expect_tunnel=expect)
+                self.assertEqual(report["verdict"], "LEAK")
+                self.assertIn("icmp_not_allowed", reasons(report))
+
+    def test_quote_must_match_the_arrived_bytes_and_header(self):
+        icmp = self._quote()
+        honest = self._last_inner
+        altered = {
+            "payload byte": honest[:-1] + b"\x01",
+            "ip id": honest[:4] + b"\x00\x09" + honest[6:],
+            "destination port": honest[:22] + b"\x9e\x00" + honest[24:],
+        }
+        for name, arrived in altered.items():
+            with self.subTest(case=name):
+                report = self._bound_scan([self._inbound(arrived),
+                                           ipv4_frame(icmp, protocol=1)])
+                self.assertEqual(report["verdict"], "LEAK", name)
+                self.assertEqual(report["allowed_icmp_quotes"], {}, name)
+
+    def test_ttl_and_checksum_rewrites_are_tolerated(self):
+        self._quote()
+        arrived = self._last_inner
+        # forwarded into the container: TTL decremented, checksums rewritten
+        quoted = arrived[:8] + bytes([arrived[8] - 1]) + arrived[9:10] + b"\x12\x34" + arrived[12:26] + b"\xab\xcd" + arrived[28:]
+        icmp = bytes([3, 3, 0, 0, 0, 0, 0, 0]) + quoted
+        report = self._bound_scan([self._inbound(arrived), ipv4_frame(icmp, protocol=1)])
+        self.assertEqual(report["verdict"], "PASS", reasons(report))
+        self.assertEqual(report["allowed_icmp_quotes"], {"mullvad-wg": 1})
+
+    def test_quote_timing_is_bounded(self):
+        icmp = ipv4_frame(self._quote(), protocol=1)
+        arrived = self._inbound(self._last_inner)
+        base = 1_700_000_010.0
+        cases = {
+            "answer 0.01 s later": ([arrived, icmp], [base, base + 0.01], "PASS"),
+            "answer 3 s later": ([arrived, icmp], [base, base + 3.0], "LEAK"),
+            "answer before arrival": ([icmp, arrived], [base, base + 0.01], "LEAK"),
+        }
+        for name, (frames, stamps, verdict) in cases.items():
+            with self.subTest(case=name):
+                report = self._bound_scan(frames, stamps)
+                self.assertEqual(report["verdict"], verdict, (name, reasons(report)))
+
+    def test_one_arrival_justifies_one_quote(self):
+        icmp = ipv4_frame(self._quote(), protocol=1)
+        base = 1_700_000_010.0
+        report = self._bound_scan([self._inbound(self._last_inner), icmp, icmp],
+                                  [base, base + 0.01, base + 0.02])
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertEqual(report["allowed_icmp_quotes"], {"mullvad-wg": 1})
+
+    def test_remembered_arrivals_are_bounded(self):
+        icmp = ipv4_frame(self._quote(), protocol=1)
+        arrived = self._inbound(self._last_inner)
+        others = [wg_inbound(ident=n) for n in range(2, 5)]
+        base = 1_700_000_010.0
+        stamps = [base + 0.1 * n for n in range(5)]
+        with mock.patch.object(pcapscan, "ICMP_QUOTE_MEMORY", 2):
+            report = self._bound_scan([arrived, *others, icmp], stamps)
+        self.assertEqual(report["verdict"], "LEAK")
+        report = self._bound_scan([arrived, *others, icmp], stamps)
+        self.assertEqual(report["verdict"], "PASS", reasons(report))
+
+    def test_whole_quote_longer_than_the_kernel_limit_is_a_leak(self):
+        icmp = self._raw_quote(wg_data(blocks=88))
+        self.assertGreater(len(icmp) - 8, 548)
+        report = self._scan(icmp)
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertEqual(report["allowed_icmp_quotes"], {})
+
+
+class TestFileLayoutTests(unittest.TestCase):
+    """r5 review M3: a class after the __main__ guard is skipped by `python3 FILE`."""
+
+    def test_main_guard_is_the_last_statement(self):
+        import ast
+        tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"))
+        last = tree.body[-1]
+        self.assertIsInstance(last, ast.If)
+        self.assertIn("__main__", ast.unparse(last.test))
+        guards = [node for node in tree.body
+                  if isinstance(node, ast.If) and "__main__" in ast.unparse(node.test)]
+        self.assertEqual(len(guards), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

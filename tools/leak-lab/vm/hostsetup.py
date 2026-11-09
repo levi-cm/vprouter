@@ -594,6 +594,9 @@ find "$TOOLS_ROOT" -type f -exec chmod go-w {{}} +
 # pcapscan.py from here and verifies this manifest before use.
 copy_named "$LEAKLAB_SOURCE" "$LEAKLAB_ROOT" "$LEAKLAB_ROOT/SHA256SUMS" \\
   "$LEAKLAB_ROOT/SYMLINKS.json" $LEAKLAB_FILES
+# Cached bytecode would shadow the verified sources; run_phase refuses it.
+find "$LEAKLAB_ROOT" \\( -name __pycache__ -o -name '*.pyc' -o -name '*.pyo' \\) \\
+  -prune -exec rm -rf -- {{}} +
 verify_manifest "$LEAKLAB_ROOT" "$LEAKLAB_ROOT/SHA256SUMS" \\
   "$LEAKLAB_ROOT/SYMLINKS.json"
 chown -R root:root "$LEAKLAB_ROOT"

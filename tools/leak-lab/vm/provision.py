@@ -225,6 +225,8 @@ def verify_image_tar_chain(
         entries = document.get("manifests")
         if not isinstance(entries, list) or not entries:
             raise hostcheck.Refusal("image tar: index has no manifests")
+        if not all(isinstance(entry, dict) for entry in entries):
+            raise hostcheck.Refusal("image tar: malformed manifest entry")
         return entries
 
     try:
@@ -252,7 +254,7 @@ def verify_image_tar_chain(
                     if isinstance(config, str):
                         blob(archive, config)
                         configs.add(config)
-    except (OSError, tarfile.TarError, ValueError, KeyError, TypeError) as exc:
+    except (OSError, tarfile.TarError, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise hostcheck.Refusal(f"image tar: {exc.__class__.__name__}") from exc
     if configs != {config_digest}:
         raise hostcheck.Refusal(

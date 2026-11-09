@@ -4958,6 +4958,26 @@ class ScannerClosureTests(unittest.TestCase):
                     repo / "pcapscan.py", installed_root=installed
                 )
 
+    def test_cached_bytecode_in_the_installed_tree_is_refused(self) -> None:
+        # r5 review (Opus M4): a matching .pyc would shadow the verified source.
+        for relative in ("__pycache__/policy.cpython-313.pyc", "vm/__pycache__",
+                         "stale.pyc", "vm/old.pyo"):
+            with self.subTest(path=relative), tempfile.TemporaryDirectory() as temporary:
+                repo, installed = self._tree(pathlib.Path(temporary))
+                target = installed / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if relative.endswith("__pycache__"):
+                    target.mkdir()
+                else:
+                    target.write_bytes(b"bytecode")
+                with self.assertRaises(hostcheck.Refusal) as raised:
+                    run_phase.resolve_pcapscan(repo / "pcapscan.py", installed_root=installed)
+                self.assertIn("bytecode", str(raised.exception))
+
+    def test_scanner_wrapper_writes_no_bytecode(self) -> None:
+        argv = run_phase.scanner_launch_argv(["/usr/bin/python3", "-B", "x.py"])
+        self.assertEqual(argv[1:3], ["-I", "-B"])
+
 
 class AdmissionStateTests(unittest.TestCase):
     def test_state_filesystem_needs_overlay_plus_headroom(self) -> None:
@@ -5012,9 +5032,6 @@ class CaptureWatchIntervalTests(unittest.TestCase):
             finally:
                 os.close(descriptor)
 
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ControllerR4Tests(unittest.TestCase):
@@ -5153,7 +5170,7 @@ class LivePackageTests(unittest.TestCase):
 class ImageTarChainTests(unittest.TestCase):
     """Live 2026-11-09: host containerd-store ID (index) != guest classic ID (config)."""
 
-    def _tar(self, root: pathlib.Path, *, tamper: bool = False):
+    def _tar(self, root: pathlib.Path, *, tamper: bool = False, top_extra=(), inner_extra=()):
         import hashlib, io, tarfile
 
         blobs = {}
@@ -5174,6 +5191,7 @@ class ImageTarChainTests(unittest.TestCase):
             {"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": attest,
              "platform": {"os": "unknown", "architecture": "unknown"},
              "annotations": {"vnd.docker.reference.type": "attestation-manifest"}},
+            *inner_extra,
         ]})
         path = root / "image.tar"
         with tarfile.open(path, "w") as archive:
@@ -5181,7 +5199,7 @@ class ImageTarChainTests(unittest.TestCase):
                 info = tarfile.TarInfo(name)
                 info.size = len(data)
                 archive.addfile(info, io.BytesIO(data))
-            put("index.json", json.dumps({"manifests": [{"digest": index}]}).encode())
+            put("index.json", json.dumps({"manifests": [*top_extra, {"digest": index}]}).encode())
             for digest, data in blobs.items():
                 if tamper and digest == manifest:
                     data = data + b" "
@@ -5201,6 +5219,15 @@ class ImageTarChainTests(unittest.TestCase):
             with self.assertRaises(hostcheck.Refusal):
                 provision.verify_image_tar_chain(path, "sha256:" + "1" * 64, config)
 
+    def test_malformed_manifest_entries_are_a_refusal_not_a_crash(self) -> None:
+        # r5 review (Opus M2): a non-dict entry raised AttributeError.
+        for name, kwargs in {"top": {"top_extra": ["x"]},
+                             "inner": {"inner_extra": [7]}}.items():
+            with self.subTest(where=name), tempfile.TemporaryDirectory() as temporary:
+                path, index, config = self._tar(pathlib.Path(temporary), **kwargs)
+                with self.assertRaises(hostcheck.Refusal):
+                    provision.verify_image_tar_chain(path, index, config)
+
     def test_tampered_blob_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path, index, config = self._tar(pathlib.Path(temporary), tamper=True)
@@ -5217,6 +5244,57 @@ class ReadinessDiagnosticsTests(unittest.TestCase):
             with self.subTest(value=leaky[:12]):
                 self.assertEqual(run_phase._safe_text(leaky), "unrecognized")
         self.assertIsNone(run_phase._safe_text(None))
+
+    def test_safe_text_drops_addresses_hostnames_and_chunked_secrets(self) -> None:
+        # r5 review (Opus M1): each of these used to be recorded verbatim.
+        chunk = "0123456789abcdef012"
+        for leaky in (
+            "public exit 203.0.113.77 via ch-zrh-wg-001.relays.mullvad.net",
+            "2a03:1b20:3:f011::a01f",
+            "fe80::1",
+            "max-vprouter.tail1234.ts.net",
+            "tskey-auth-kAbCdEf123CNTRL-x",
+            "k " + " ".join([chunk] * 4),
+            "node ab12c",
+        ):
+            with self.subTest(value=leaky[:16]):
+                self.assertEqual(run_phase._safe_text(leaky), "unrecognized")
+
+    def test_every_readiness_refusal_survives_the_filter(self) -> None:
+        # Only refusals raised under wait_router_ready reach this diagnostic.
+        problems = run_phase.tailscale_readiness_problems({"BackendState": "Stopped"})
+        problems += run_phase.tailscale_readiness_problems({"BackendState": "Running"})
+        problems += run_phase.tailscale_readiness_problems(None)
+        problems += run_phase.tailscale_readiness_problems(
+            {"BackendState": "Running", "Self": {"Online": False, "ExitNodeOption": False}})
+        self.assertGreaterEqual(len(set(problems)), 4)
+        texts = [
+            "cannot read the guest clock",
+            "the release did not report READY (no status)",
+            "the release did not report READY (status document is not READY)",
+            "the release did not report READY (status exit 1)",
+            "the router unit did not become active",
+            "no fresh WireGuard handshake (age < 180 s) was observed in the router netns",
+            "Tailscale is not a running exit node: " + "; ".join(sorted(set(problems))),
+        ]
+        for text in texts:
+            with self.subTest(text=text[:40]):
+                self.assertEqual(run_phase._safe_text(text), text)
+
+    def test_release_reason_is_a_fixed_vocabulary(self) -> None:
+        for known in ("starting Tailscale", "protected egress verified",
+                      "WireGuard handshake is stale", "TimeoutExpired",
+                      "CalledProcessError", "HTTPError (HTTP 503)"):
+            with self.subTest(value=known):
+                self.assertEqual(run_phase.release_reason(known), known)
+        for unknown in ("public exit 203.0.113.77", "Tailscale is not ready on node ab",
+                        "HTTPError (HTTP 503) at https://x", "httperror", ""):
+            with self.subTest(value=unknown[:16]):
+                recorded = run_phase.release_reason(unknown)
+                self.assertIsInstance(recorded, dict)
+                self.assertEqual(set(recorded), {"unlisted_sha256_12", "length"})
+                self.assertNotIn(unknown or "\0", json.dumps(recorded))
+        self.assertIsNone(run_phase.release_reason(None))
 
     def test_refusal_records_gate_and_release_health(self) -> None:
         class Client:
@@ -5235,3 +5313,21 @@ class ReadinessDiagnosticsTests(unittest.TestCase):
         self.assertEqual(record["readiness"]["release_health_state"], "BLOCKED")
         self.assertEqual(record["readiness"]["release_health_reason"], "Tailscale is not ready")
         self.assertIn("did not report READY", record["readiness"]["refusal"])
+
+
+class TestFileLayoutTests(unittest.TestCase):
+    """r5 review M3: a class after the __main__ guard is skipped by `python3 FILE`."""
+
+    def test_main_guard_is_the_last_statement(self):
+        import ast
+        tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"))
+        last = tree.body[-1]
+        self.assertIsInstance(last, ast.If)
+        self.assertIn("__main__", ast.unparse(last.test))
+        guards = [node for node in tree.body
+                  if isinstance(node, ast.If) and "__main__" in ast.unparse(node.test)]
+        self.assertEqual(len(guards), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

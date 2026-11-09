@@ -829,7 +829,12 @@ What a compromised router VM can and cannot do:
   they declare is valid for the message type; and the ICMP body is either the
   whole quoted datagram or exactly Linux's 548-byte truncation
   (576 - 20 - 8) of a longer one, with nothing after it. Without this, bytes
-  appended after a valid quote were accepted. Such a reply quotes only the
+  appended after a valid quote were accepted. Finally the quote must match a
+  datagram the tap actually saw arrive from that endpoint at most 2 s earlier
+  (same addresses, ports, IP ID and total length, and the same first 520
+  WireGuard bytes; TTL and checksums may differ because the kernel forwards and
+  NAT-rewrites it), and each arrival can justify only one quote. The scanner
+  remembers the latest 4,096 such arrivals. So such a reply quotes only the
   endpoint's own ciphertext and goes only back to it. It is counted in
   `allowed_icmp_quotes`, never as tunnel
   evidence, and is accounted like allowed traffic outside the control window.

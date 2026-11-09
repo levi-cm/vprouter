@@ -293,6 +293,14 @@ def verify_leaklab_manifest(root: pathlib.Path) -> dict[str, str]:
         digests[name] = digest
     if "pcapscan.py" not in digests:
         raise hostcheck.Refusal("installed leak-lab manifest does not list pcapscan.py")
+    # Python would prefer a matching cached .pyc over the verified source
+    # (r5 review M4): the scanner tree must not contain any bytecode.
+    for current, directories, files in os.walk(root, followlinks=False):
+        for name in directories + files:
+            if name == "__pycache__" or name.endswith((".pyc", ".pyo")):
+                raise hostcheck.Refusal(
+                    "installed leak-lab tree contains cached bytecode (re-run hostsetup)"
+                )
     return digests
 
 
@@ -1499,19 +1507,77 @@ def release_status_command(name: str) -> str:
     )
 
 
-_SAFE_TEXT = re.compile(r"[A-Za-z0-9 .,:;()_-]{0,160}")
+_SAFE_TEXT = re.compile(r"[A-Za-z0-9 .,:;()<>_-]{0,240}")
 #: A WireGuard key or any other long token: never recorded.
 _LONG_TOKEN = re.compile(r"[A-Za-z0-9]{20,}")
+#: Shapes of an address, hostname, auth key or chunked secret (r5 review M1).
+_IDENTIFYING = re.compile(
+    r"[A-Za-z0-9]\.[A-Za-z0-9]"  # dotted name or IPv4
+    r"|[0-9A-Fa-f]:[0-9A-Fa-f:]"  # IPv6
+    r"|::"
+    r"|tskey"
+    r"|(?<![A-Za-z0-9])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]{5,}(?![A-Za-z0-9])"  # digit token >= 5
+    , re.IGNORECASE,
+)
 
 
 def _safe_text(value: object) -> str | None:
-    """Return release-authored text only if it is plain and short, else None."""
+    """Return runner-authored text only if it is plain, short and anonymous."""
     if not isinstance(value, str):
         return None
     value = value.strip()
-    if not _SAFE_TEXT.fullmatch(value) or _LONG_TOKEN.search(value):
+    if (
+        not _SAFE_TEXT.fullmatch(value)
+        or _LONG_TOKEN.search(value)
+        or _IDENTIFYING.search(value)
+    ):
         return "unrecognized"
     return value
+
+
+#: Every health reason the deployed release writes itself
+#: (/opt/vprouter/current/router_runtime.py set_health and RuntimeErrorClosed).
+RELEASE_HEALTH_REASONS = frozenset({
+    "firewall",
+    "waiting for WireGuard",
+    "starting Tailscale",
+    "Tailscale authentication or control is unavailable",
+    "protected egress verified",
+    "Tailscale is not ready",
+    "Tailscale health check failed",
+    "stopping",
+    "unexpected or missing router interface",
+    "router must boot with loopback only",
+    "VPN provider did not confirm protected egress",
+    "default route is not exclusively WireGuard",
+    "public IPv6 default route is prohibited",
+    "tailscaled exited during startup",
+    "tailscaled control socket did not become ready",
+    "WireGuard handshake is stale",
+    "Tailscale exit is not approved and online",
+    "tailscaled exited",
+})
+#: ``type(exc).__name__`` and the release's ``HTTPError (HTTP NNN)`` form.
+_RELEASE_REASON_SHAPES = re.compile(
+    r"[A-Z][A-Za-z]{2,40}|HTTPError \(HTTP [1-5][0-9][0-9]\)"
+)
+
+
+def release_reason(value: object) -> str | dict | None:
+    """Map a release health reason to a known string, never free text.
+
+    Anything outside the release's fixed vocabulary is recorded only as its
+    length and a short hash, so a later release cannot put an address,
+    hostname or token into evidence (r5 review M1).
+    """
+    if not isinstance(value, str):
+        return None
+    if value in RELEASE_HEALTH_REASONS or _RELEASE_REASON_SHAPES.fullmatch(value):
+        return value
+    return {
+        "unlisted_sha256_12": hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()[:12],
+        "length": len(value),
+    }
 
 
 def record_readiness_refusal(
@@ -1520,8 +1586,9 @@ def record_readiness_refusal(
     """Record which readiness gate refused and the release's own health.
 
     The refusal text is authored by this runner.  The health file is written
-    by the deployed release (state + reason); both fields pass a strict
-    plain-text filter so a guest cannot smuggle arbitrary bytes through.
+    by the deployed release: the state must be one of four enum values and
+    the reason one of the release's fixed strings, else only its hash and
+    length are kept.
     """
     readiness = record.setdefault("readiness", {})
     readiness["refusal"] = _safe_text(str(exc))
@@ -1539,7 +1606,7 @@ def record_readiness_refusal(
         readiness["release_health_state"] = (
             state if state in {"STARTING", "BLOCKED", "RECOVERING", "READY"} else "unrecognized"
         )
-        readiness["release_health_reason"] = _safe_text(document.get("reason"))
+        readiness["release_health_reason"] = release_reason(document.get("reason"))
     try:
         status = read_tailscale_status(client, name)
     except Exception:  # noqa: BLE001 - diagnostics only
@@ -2022,6 +2089,7 @@ def scanner_launch_argv(
     return [
         sys.executable,
         "-I",
+        "-B",
         "-c",
         SCAN_LIMIT_WRAPPER,
         str(int(limit)),

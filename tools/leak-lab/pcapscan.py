@@ -50,6 +50,7 @@ linktype 1 (Ethernet) only.
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import io
 import ipaddress
@@ -181,6 +182,12 @@ WIREGUARD_DATA_HEADER = 16
 #: Linux ``icmp_send`` quotes at most 576 - 20 (IPv4) - 8 (ICMP) bytes of the
 #: offending datagram (route MTU >= 576, no reply options).
 ICMP_QUOTE_LIMIT = 548
+#: A quoted datagram must be one the tap saw arrive from the endpoint within
+#: this many seconds before the ICMP (r5 review: bind the quote to a real
+#: inbound frame).  The kernel answers immediately.
+ICMP_QUOTE_MAX_DELAY = 2.0
+#: Bound on remembered inbound endpoint datagrams (most recent kept).
+ICMP_QUOTE_MEMORY = 4096
 
 
 def wireguard_payload_problem(payload: bytes, *, complete: bool = True) -> str | None:
@@ -380,6 +387,13 @@ class _Scanner:
         #: datagram from an allowed endpoint (user decision 2026-11-09).
         #: Reported separately; never tunnel evidence.
         self.allowed_icmp_quotes: dict[str, int] = {}
+        #: Recent whole inbound datagrams from allowed endpoints, keyed by
+        #: (src, dst, sport, dport, ip id, ip total length) -> (ts, sha256 of
+        #: the first ICMP_QUOTE_LIMIT - 28 UDP payload bytes).  Bounded; each
+        #: entry can justify at most one ICMP quote.
+        self.recent_inbound: collections.OrderedDict[
+            tuple[str, str, int, int, int, int], tuple[float, bytes]
+        ] = collections.OrderedDict()
         self.allowed_counts: dict[str, dict[str, int]] = {
             flow.label: {"outbound": 0, "inbound": 0} for flow in policy.allowed
         }
@@ -894,6 +908,16 @@ class _Scanner:
             )
         if result.label is not None:
             self.count_allowed(result.label, direction)
+            if (
+                direction == "in"
+                and protocol == IPPROTO_UDP
+                and not more_fragments
+                and fragment_offset == 0
+                and len(payload) >= 8
+            ):
+                self._remember_inbound(
+                    ts, src, dst, payload, identification, total_length
+                )
         elif result.reason is not None:
             if result.reason != "allowed_tuple_wrong_l2":
                 self.add_finding(
@@ -1154,7 +1178,25 @@ class _Scanner:
                 )
 
     # --------------------------------------------------------------- IPv4 L4
-    def _allowed_icmp_quote(self, payload: bytes, src: str, dst: str) -> str | None:
+    def _remember_inbound(
+        self,
+        ts: float,
+        src: str,
+        dst: str,
+        udp: bytes,
+        identification: int,
+        total_length: int,
+    ) -> None:
+        key = (src, dst, _u16(udp, 0), _u16(udp, 2), identification, total_length)
+        digest = hashlib.sha256(udp[8 : ICMP_QUOTE_LIMIT - 20]).digest()
+        self.recent_inbound.pop(key, None)
+        self.recent_inbound[key] = (ts, digest)
+        while len(self.recent_inbound) > ICMP_QUOTE_MEMORY:
+            self.recent_inbound.popitem(last=False)
+
+    def _allowed_icmp_quote(
+        self, ts: float, payload: bytes, src: str, dst: str
+    ) -> str | None:
         """Return the flow label for a narrowly allowed ICMP port-unreachable.
 
         Allowed only when ALL hold (user decision 2026-11-09): ICMP type 3 code
@@ -1187,9 +1229,7 @@ class _Scanner:
         quoted_total = _u16(quoted, 2)
         if quoted_total < 20 + 8 + 4:
             return None
-        if len(quoted) != quoted_total and not (
-            quoted_total > ICMP_QUOTE_LIMIT and len(quoted) == ICMP_QUOTE_LIMIT
-        ):
+        if len(quoted) != min(quoted_total, ICMP_QUOTE_LIMIT):
             return None
         if _u16(quoted, 24) != quoted_total - 20:
             return None
@@ -1207,6 +1247,26 @@ class _Scanner:
         prefix = quoted_udp[8:12]
         if len(prefix) < 4 or prefix[0] not in (1, 2, 3, 4) or prefix[1:4] != b"\x00\x00\x00":
             return None
+        # The quoted datagram must be one the tap actually saw arrive from the
+        # endpoint, just before.  TTL and checksums are not compared: the
+        # kernel may have forwarded and NAT-rewritten it before answering.
+        key = (
+            quoted_src,
+            quoted_dst,
+            quoted_sport,
+            _u16(quoted_udp, 2),
+            _u16(quoted, 4),
+            quoted_total,
+        )
+        seen = self.recent_inbound.get(key)
+        if seen is None:
+            return None
+        seen_ts, digest = seen
+        if not 0.0 <= ts - seen_ts <= ICMP_QUOTE_MAX_DELAY:
+            return None
+        if hashlib.sha256(quoted_udp[8:]).digest() != digest:
+            return None
+        del self.recent_inbound[key]
         return label
 
     def _classify_l4(
@@ -1354,7 +1414,7 @@ class _Scanner:
         if protocol == IPPROTO_ICMP:
             label = None
             if direction == "out" and not fragmented:
-                label = self._allowed_icmp_quote(payload, src, dst)
+                label = self._allowed_icmp_quote(ts, payload, src, dst)
             if label is not None:
                 return _L4Result(icmp_quote_label=label)
             return _L4Result(reason="icmp_not_allowed")

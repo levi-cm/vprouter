@@ -1342,3 +1342,11 @@ size+sha256 final read, LEAK never masked, fixed-code diagnostics, exit peer bou
 VM's own Self.ID/TailscaleIPs, strict client controls, owner-recorded client teardown, two-guest
 admission; drop the IP hash; login URL on stderr accepted (same as router). Fix round dispatched.
 Nothing M3 is live; no client VM provisioned yet.
+2026-11-09 M3 re-review of 605cce8: Opus PASS (all earlier Critical/Important fixed; Minors N-1..N-6),
+GPT disconnected after writing 2 new Critical (unproven traffic stop lets a later leak escape
+the exact snapshot; same-second probes count as post-fault) + 1 Important (a seen LEAK downgraded
+by a later read failure), Pi FAIL (Important = the same-second hole; Minors incl. a blocking
+client-login `tailscale up`, policy-accept base chains, teardown edge). Fix round 2 dispatched:
+proven traffic stop, sequence-number post-fault coverage with a 30 s minimum client hold and
+15 s gap, latched LEAK, end-of-hold exit-node re-check, non-blocking client-login, explicit
+forward drops for vprlab0/vprlab1, neighbour helpers verified against real `ip -j neigh` output.

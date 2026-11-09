@@ -882,8 +882,13 @@ nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@BRIDGE@@" oifnam
 nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname != "@@WAN@@" oifname "@@BRIDGE@@" drop
 nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@BRIDGE@@" meta nfproto ipv6 drop
 nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward oifname "@@BRIDGE@@" meta nfproto ipv6 drop
-nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@BRIDGE@@" oifname "@@WAN@@" accept
-nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@WAN@@" oifname "@@BRIDGE@@" accept
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@BRIDGE@@" oifname "@@WAN@@" ip saddr @@LAB_SUBNET@@ accept
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@WAN@@" oifname "@@BRIDGE@@" ip daddr @@LAB_SUBNET@@ ct state established,related accept
+# Decision 6: the scoped accepts are the only allowed lab->WAN flows.  These
+# explicit drops stop every other forwarded packet from the lab bridge,
+# including a spoofed source outside the subnet and non-conntrack replies.
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@BRIDGE@@" oifname "@@WAN@@" drop
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@WAN@@" oifname "@@BRIDGE@@" drop
 # Host-originated IPv4 toward the lab is dropped as well. ARP is not IPv4, so
 # the host can still answer neighbour discovery; no ICMP unreachable escapes.
 nft create chain @@TABLE_FAMILY@@ @@TABLE_NAME@@ output '{ type filter hook output priority filter; policy accept; }'
@@ -1062,11 +1067,11 @@ def render_plan(
         "  return 0",
         "}",
         "client_neigh_ok() {",
-        '  ip -j neigh show "$1" dev "$2" 2>/dev/null'
+        '  ip -j neigh show 2>/dev/null'
         " | python3 -c '@@NEIGH_CHECK@@' \"$1\" \"$3\"",
         "}",
         "client_neigh_state() {",
-        '  ip -j neigh show "$1" dev "$2" 2>/dev/null'
+        '  ip -j neigh show 2>/dev/null'
         " | python3 -c '@@INVENTORY_NEIGH@@' \"$1\" \"$2\"",
         "}",
         "remove_docker_spec() {",
@@ -1118,7 +1123,11 @@ def render_plan(
             f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{CLIENT_BRIDGE}" meta nfproto ipv6 drop',
             f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward oifname "{CLIENT_BRIDGE}" meta nfproto ipv6 drop',
             f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{CLIENT_BRIDGE}" oifname "{wan}" ip saddr {CLIENT_SUBNET_TEXT} accept',
-            f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{wan}" oifname "{CLIENT_BRIDGE}" ip daddr {CLIENT_SUBNET_TEXT} accept',
+            f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{wan}" oifname "{CLIENT_BRIDGE}" ip daddr {CLIENT_SUBNET_TEXT} ct state established,related accept',
+            # Decision 6: after the scoped accepts, no other forwarded packet
+            # from or to the client bridge may pass, whatever its source.
+            f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{CLIENT_BRIDGE}" oifname "{wan}" drop',
+            f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{wan}" oifname "{CLIENT_BRIDGE}" drop',
             f'nft add rule {TABLE_FAMILY} {TABLE_NAME} output oifname "{CLIENT_BRIDGE}" meta nfproto ipv4 drop',
             f'nft add rule {TABLE_FAMILY} {TABLE_NAME} postrouting ip saddr {CLIENT_SUBNET_TEXT} iifname "{CLIENT_BRIDGE}" oifname "{wan}" masquerade',
         ]
@@ -1173,6 +1182,19 @@ def render_plan(
         "      *) echo \"netplan: cannot inventory links; retaining protection and refusing teardown\" >&2",
         "         failed=1 ;;",
         "    esac",
+        "  else",
+        "    # Fail closed: no owner/plan client inventory, so any client bridge or",
+        "    # tap is residue we cannot attribute.  Refuse before touching anything.",
+        "    for name in vprlab1 vprlab-ctap1 vprlab-ctap2 vprlab-ctap3 vprlab-ctap4 vprlab-ctap5 vprlab-ctap6 vprlab-ctap7 vprlab-ctap8 vprlab-ctap9; do",
+        "      rc=0; link_state \"$name\" || rc=$?",
+        "      case \"$rc\" in",
+        "        0) echo \"netplan: refusing teardown: $name exists but no owner client inventory names it\" >&2",
+        "           failed=1 ;;",
+        "        1) : ;;",
+        "        *) echo \"netplan: cannot inventory links; retaining protection and refusing teardown\" >&2",
+        "           failed=1 ;;",
+        "      esac",
+        "    done",
         "  fi",
     ]
     client_isolate = [

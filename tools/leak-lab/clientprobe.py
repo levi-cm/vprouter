@@ -28,8 +28,13 @@ Verdict rules:
   (``client_marker_not_sent``); it proves the marker really went out;
 * every line must carry this phase's ``r``, a gap-free ``s`` sequence and a
   non-decreasing timestamp inside the observed launch/stop window; probes must
-  keep trying (no gap above 10 s) and at least one exit and one marker attempt
-  must follow the fault action;
+  keep trying (no gap above 15 s) and the post-fault attempts are bound to the
+  sequence number the runner read after the fault action.  At least one exit
+  and one marker attempt must have ``s > S_fault`` and the hold must contain
+  ``floor(hold / 15)`` exit attempts with ``S_fault < s <= S_end``;
+* the guest clocks must be ordered ``clock_start <= fault_epoch <=
+  post_fault_epoch <= clock_stop``; a same-second boundary can never satisfy
+  both sides of the action on its own;
 * otherwise PASS.  Failed probes are expected while an exit node is gone and
   are only counted.
 
@@ -49,7 +54,7 @@ MARKER_RE = re.compile(r"^VPRCLIENTMARK1:[0-9a-f]{32}$")
 RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 MAX_PROBE_LOG_BYTES = 1024 * 1024
 MAX_PROBE_LINE_BYTES = 4096
-MAX_PROBE_GAP_SECONDS = 10
+MAX_PROBE_GAP_SECONDS = 15
 
 _EXIT_KEYS = frozenset({"t", "k", "ok", "m", "r", "s"})
 _MARKER_KEYS = frozenset({"t", "k", "ok", "r", "s"})
@@ -213,10 +218,13 @@ def evaluate_probe_log(
     data: bytes,
     *,
     fault_epoch: int | None = None,
-    run_id: str | None = None,
+    run_id: str,
     clock_start: int | None = None,
     clock_stop: int | None = None,
     post_fault_epoch: int | None = None,
+    fault_sequence: int | None = None,
+    end_sequence: int | None = None,
+    hold_seconds: int | None = None,
     max_gap: int = MAX_PROBE_GAP_SECONDS,
 ) -> dict[str, Any]:
     """Return the client probe verdict, counts and fixed-code reasons.
@@ -226,7 +234,17 @@ def evaluate_probe_log(
     the fault action finished.  ``clock_start``/``clock_stop`` bracket the
     traffic unit's observed life.  All four are guest-clock seconds; host and
     guest clocks may differ and are never compared with each other.
+
+    ``fault_sequence`` is the last complete probe sequence number read through
+    QGA after the fault action and its postcondition finished.  A post-fault
+    attempt must have a strictly greater ``s``; ``end_sequence`` is the last
+    complete sequence number read at the end of the hold.  This binds the
+    coverage to the log itself, so a same-second or frozen guest clock cannot
+    certify a hold in which no probe ran.  ``hold_seconds`` sets the required
+    exit-attempt density (one per ``MAX_PROBE_GAP_SECONDS``).
     """
+    if not isinstance(run_id, str) or RUN_ID_RE.fullmatch(run_id) is None:
+        raise ProbeError("invalid_run_id")
     entries, problems = parse_probe_log_partial(data)
     counts = _empty_counts()
     invalid_reasons: list[str] = []
@@ -252,6 +270,20 @@ def evaluate_probe_log(
     previous_timestamp: int | None = None
     previous_sequence_problem = False
     timestamps: list[int] = []
+
+    def _is_post_fault_attempt(entry: dict[str, Any], value: int) -> bool:
+        """A post-fault attempt is bound by sequence, not only by the clock."""
+        if post_fault_epoch is None or value < int(post_fault_epoch):
+            return False
+        if fault_sequence is None or entry["r"] != run_id:
+            return False
+        sequence = int(entry["s"])
+        if sequence <= int(fault_sequence):
+            return False
+        if end_sequence is not None and sequence > int(end_sequence):
+            return False
+        return True
+
     for number, entry in entries:
         kind = entry["k"]
         value = int(entry["t"])
@@ -286,15 +318,13 @@ def evaluate_probe_log(
                 else:
                     bucket["non_mullvad"] += 1
                     # LEAK is independent of every quality flag: one
-                    # well-formed non-Mullvad success is enough.
+                    # well-formed non-Mullvad success is enough, even when
+                    # its ``r`` does not match (a stale or tampered line is
+                    # also an INVALID binding defect, but never hides a leak).
                     leak = True
             else:
                 bucket["failed"] += 1
-            if (
-                post_fault_epoch is not None
-                and value >= int(post_fault_epoch)
-                and run_matches
-            ):
+            if _is_post_fault_attempt(entry, value):
                 post_fault_exit_attempts += 1
         else:
             if entry["ok"]:
@@ -303,17 +333,19 @@ def evaluate_probe_log(
                     pre_fault_marker = True
             else:
                 bucket["failed"] += 1
-            if (
-                post_fault_epoch is not None
-                and value >= int(post_fault_epoch)
-                and run_matches
-            ):
+            if _is_post_fault_attempt(entry, value):
                 post_fault_marker_attempts += 1
 
     if fault_epoch is None:
         _add_reason(invalid_reasons, "probe_fault_epoch_missing")
     if post_fault_epoch is None:
         _add_reason(invalid_reasons, "probe_post_epoch_missing")
+    if fault_sequence is None:
+        _add_reason(invalid_reasons, "probe_fault_sequence_missing")
+    if end_sequence is None:
+        _add_reason(invalid_reasons, "probe_end_sequence_missing")
+    if hold_seconds is None:
+        _add_reason(invalid_reasons, "probe_hold_missing")
     if clock_start is None or clock_stop is None:
         _add_reason(invalid_reasons, "probe_window_missing")
     else:
@@ -329,6 +361,14 @@ def evaluate_probe_log(
             for earlier, later in zip(ordered, ordered[1:])
         ):
             _add_reason(invalid_reasons, "probe_gap")
+    if None not in (clock_start, clock_stop, fault_epoch, post_fault_epoch):
+        if not (
+            int(clock_start)
+            <= int(fault_epoch)
+            <= int(post_fault_epoch)
+            <= int(clock_stop)
+        ):
+            _add_reason(invalid_reasons, "probe_clock_order")
     if not pre_fault_mullvad:
         _add_reason(invalid_reasons, "client_not_routed")
     if not pre_fault_marker:
@@ -338,6 +378,10 @@ def evaluate_probe_log(
             _add_reason(invalid_reasons, "probe_post_fault_exit_missing")
         if post_fault_marker_attempts == 0:
             _add_reason(invalid_reasons, "probe_post_fault_marker_missing")
+    if hold_seconds is not None:
+        required = max(1, int(hold_seconds) // int(max_gap))
+        if post_fault_exit_attempts < required:
+            _add_reason(invalid_reasons, "probe_hold_coverage")
 
     if leak:
         verdict = "LEAK"
@@ -356,6 +400,9 @@ def evaluate_probe_log(
         "counts": counts,
         "fault_epoch": fault_epoch,
         "post_fault_epoch": post_fault_epoch,
+        "fault_sequence": fault_sequence,
+        "end_sequence": end_sequence,
+        "hold_seconds": hold_seconds,
         "clock_start": clock_start,
         "clock_stop": clock_stop,
         "run_id": run_id,
@@ -403,12 +450,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--probe-log", required=True)
     parser.add_argument("--fault-epoch", type=int, required=True)
     parser.add_argument("--post-fault-epoch", type=int, required=True)
+    parser.add_argument("--fault-sequence", type=int, required=True)
+    parser.add_argument("--end-sequence", type=int, required=True)
+    parser.add_argument("--hold-seconds", type=int, required=True)
     parser.add_argument("--clock-start", type=int, required=True)
     parser.add_argument("--clock-stop", type=int, required=True)
     parser.add_argument("--run-id", required=True)
     args = parser.parse_args(argv)
     if RUN_ID_RE.fullmatch(args.run_id) is None:
         print("clientprobe: invalid run id", file=sys.stderr)
+        return 2
+    if args.hold_seconds < 0 or args.fault_sequence < 0 or args.end_sequence < 0:
+        print("clientprobe: invalid sequence or hold", file=sys.stderr)
         return 2
     try:
         data = pathlib.Path(args.probe_log).read_bytes()
@@ -421,6 +474,9 @@ def main(argv: list[str] | None = None) -> int:
         post_fault_epoch=args.post_fault_epoch,
         clock_start=args.clock_start,
         clock_stop=args.clock_stop,
+        fault_sequence=args.fault_sequence,
+        end_sequence=args.end_sequence,
+        hold_seconds=args.hold_seconds,
         run_id=args.run_id,
     )
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))

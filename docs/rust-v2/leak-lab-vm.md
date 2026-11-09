@@ -180,12 +180,14 @@ only what is provable on the client path:
 `clientprobe.py` parses `client-probe.jsonl` strictly (exact key sets, no
 duplicate keys, bounded 1 MiB/4 KiB lines, `r`/`s` binding).  Verdict: any
 well-formed successful exit probe with `m` not `true` (including `null`) is
-LEAK, even if other lines are malformed or the log is truncated; no pre-fault
-Mullvad success is INVALID `client_not_routed`; no pre-fault successful marker
-probe is INVALID `client_marker_not_sent`; a foreign run id, sequence gap,
-timestamp regression/out-of-window value, probe gap above 10 s, missing
-post-fault exit/marker attempt, overflow line or read-quality problem is
-INVALID.  Failures after the fault are expected and counted only.  The final
+LEAK, even if other lines are malformed or the log is truncated, and a leak is
+latched across later read failures; no pre-fault Mullvad success is INVALID
+`client_not_routed`; no pre-fault successful marker probe is INVALID
+`client_marker_not_sent`; a foreign run id, sequence gap, timestamp
+regression/out-of-window value, probe gap above 15 s, missing post-fault
+exit/marker attempt (`s > S_fault`), fewer than `floor(hold / 15)` post-fault
+exit attempts, an unordered clock window, overflow line or read-quality problem
+is INVALID.  Failures after the fault are expected and counted only.  The final
 phase result is the worst of the router scan, the client scan, the probe
 verdict and runner errors: LEAK > INVALID > PASS; a missing verdict is INVALID.
 

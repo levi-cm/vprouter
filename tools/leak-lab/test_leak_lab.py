@@ -2580,7 +2580,12 @@ if NAME == "ip":
         if action == "replace":
             ip = rest[2]
             mac = after(rest, "lladdr")
-            state["neigh"][ip] = {"lladdr": mac, "permanent": True}
+            neighbour_dev = after(rest, "dev") if "dev" in rest else "vprlab0"
+            state["neigh"][ip] = {
+                "lladdr": mac,
+                "permanent": True,
+                "dev": neighbour_dev,
+            }
             save(state)
             sys.exit(0)
         if action == "del":
@@ -2592,18 +2597,24 @@ if NAME == "ip":
             selected = None
             if len(rest) > 2:
                 selected = rest[2]
+            # Real iproute2 with `dev <name>` omits the "dev" key and exits 1
+            # with "Cannot find device" when that device does not exist.
+            dev_filter = after(rest, "dev") if "dev" in rest else None
+            if dev_filter is not None and dev_filter not in state["links"]:
+                sys.stderr.write('Cannot find device "%s"\\n' % dev_filter)
+                sys.exit(1)
             for ip, entry in state["neigh"].items():
                 if selected is not None and ip != selected:
                     continue
-                entries.append(
-                    {
-                        "dst": ip,
-                        "dev": after(rest, "dev") if "dev" in rest else "vprlab0",
-                        "lladdr": entry["lladdr"],
-                        "nud_state": "permanent",
-                        "state": ["PERMANENT"],
-                    }
-                )
+                neighbour = {
+                    "dst": ip,
+                    "lladdr": entry["lladdr"],
+                    "nud_state": "permanent",
+                    "state": ["PERMANENT"],
+                }
+                if dev_filter is None:
+                    neighbour["dev"] = entry.get("dev", "vprlab0")
+                entries.append(neighbour)
             if "-j" in options:
                 sys.stdout.write(json.dumps(entries) + "\\n")
             sys.exit(0)
@@ -2830,8 +2841,10 @@ class NetplanTests(unittest.TestCase):
             "sysctl -w net.ipv6.conf.vprlab0.disable_ipv6=1",
             'nft create table inet vprlab',
             'nft add rule inet vprlab postrouting ip saddr 10.250.0.0/24 iifname "vprlab0" oifname "eth0" masquerade',
-            'nft add rule inet vprlab forward iifname "vprlab0" oifname "eth0" accept',
-            'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab0" accept',
+            'nft add rule inet vprlab forward iifname "vprlab0" oifname "eth0" ip saddr 10.250.0.0/24 accept',
+            'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab0" ip daddr 10.250.0.0/24 ct state established,related accept',
+            'nft add rule inet vprlab forward iifname "vprlab0" oifname "eth0" drop',
+            'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab0" drop',
             "tcpdump -i vprlab-tap0 -nn -U --immediate-mode -B 8192 -s 0 -w "
             "\"$RUN_DIR\"/'manual-capture.pcap'",
         ):
@@ -2894,8 +2907,8 @@ class NetplanTests(unittest.TestCase):
         self.assertLess(input_drop, output_drop)
         self.assertLess(output_drop, masquerade)
         for command in (
-            'nft add rule inet vprlab forward iifname "vprlab0" oifname "eth0" accept',
-            'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab0" accept',
+            'nft add rule inet vprlab forward iifname "vprlab0" oifname "eth0" ip saddr 10.250.0.0/24 accept',
+            'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab0" ip daddr 10.250.0.0/24 ct state established,related accept',
         ):
             self.assertLess(body.index(command), masquerade)
         self.assertLess(masquerade, docker)
@@ -3234,8 +3247,12 @@ class NetplanTests(unittest.TestCase):
             state = _owned_state(owner)
             # Older duplicate copies of this run's exact owned rules.
             state["rules"] = state["rules"] * 3
-            result, _log, state_after, owner_path = self._run_lab(
-                root, netplan.render_plan("eth0"), state, args=("teardown",)
+            result, _log, state_after, owner_path = NetplanTests._run_lab(
+                self,
+                root,
+                netplan.render_plan("eth0"),
+                state,
+                args=("teardown",),
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(state_after["rules"], [])
@@ -4806,7 +4823,9 @@ class ClientNetplanTests(unittest.TestCase):
             'nft add rule inet vprlab input iifname "vprlab1" drop',
             'nft add rule inet vprlab postrouting ip saddr 10.251.0.0/24 iifname "vprlab1" oifname "eth0" masquerade',
             'nft add rule inet vprlab forward iifname "vprlab1" oifname "eth0" ip saddr 10.251.0.0/24 accept',
-            'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab1" ip daddr 10.251.0.0/24 accept',
+            'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab1" ip daddr 10.251.0.0/24 ct state established,related accept',
+            'nft add rule inet vprlab forward iifname "vprlab1" oifname "eth0" drop',
+            'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab1" drop',
             f"iptables -I DOCKER-USER -i vprlab1 -o eth0 -s 10.251.0.0/24",
             "delete_link \"$(client_tap_name \"$n\")\" tun",
             "delete_link \"vprlab1\" bridge",
@@ -4830,6 +4849,41 @@ class ClientNetplanTests(unittest.TestCase):
             plan.index("iptables -I DOCKER-USER -i vprlab1"),
             plan.index("ip link set vprlab1 up"),
         )
+        # Decision 6: the scoped accepts are followed by explicit drops, so a
+        # spoofed source outside the lab subnet is not accepted by the
+        # policy-accept base chain.
+        for accept, drop in (
+            (
+                'nft add rule inet vprlab forward iifname "vprlab0" oifname "eth0" ip saddr 10.250.0.0/24 accept',
+                'nft add rule inet vprlab forward iifname "vprlab0" oifname "eth0" drop',
+            ),
+            (
+                'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab0" ip daddr 10.250.0.0/24 ct state established,related accept',
+                'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab0" drop',
+            ),
+            (
+                'nft add rule inet vprlab forward iifname "vprlab1" oifname "eth0" ip saddr 10.251.0.0/24 accept',
+                'nft add rule inet vprlab forward iifname "vprlab1" oifname "eth0" drop',
+            ),
+            (
+                'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab1" ip daddr 10.251.0.0/24 ct state established,related accept',
+                'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab1" drop',
+            ),
+        ):
+            self.assertLess(plan.index(accept), plan.index(drop), accept)
+
+    def test_client_neighbour_helpers_use_the_complete_inventory(self) -> None:
+        plan = netplan.render_plan("eth0", clients=(1,))
+        # `ip -j neigh show <ip> dev <bridge>` omits the "dev" key and exits 1
+        # for a missing device; the helpers use the unfiltered inventory and
+        # filter in Python exactly like the router neigh_state helper.
+        for needle in (
+            "client_neigh_ok() {\n  ip -j neigh show 2>/dev/null",
+            "client_neigh_state() {\n  ip -j neigh show 2>/dev/null",
+        ):
+            self.assertIn(needle, plan)
+        self.assertNotIn('neigh show "$1" dev "$2"', plan)
+        self.assertIn('client_neigh_state "$ip" vprlab1', plan)
 
     def test_router_plan_is_unchanged_without_clients(self) -> None:
         plan = netplan.render_plan("eth0")
@@ -4989,6 +5043,149 @@ class ClientNetplanTests(unittest.TestCase):
             self.assertEqual(state_after["rules"], [])
             self.assertFalse(owner_after.exists())
             self.assertIn("vprlab-ctap1", log)
+
+    @staticmethod
+    def _client_residue(owner):
+        state = _owned_state(owner)
+        state["links"]["vprlab1"] = {
+            "ifalias": owner,
+            "operstate": "UP",
+            "kind": "bridge",
+            "tap_type": None,
+            "master": None,
+            "address": "52:54:00:76:71:01",
+        }
+        state["links"]["vprlab-ctap1"] = {
+            "ifalias": owner,
+            "operstate": "DOWN",
+            "kind": "tun",
+            "tap_type": "tap",
+            "master": "vprlab1",
+            "address": "52:54:00:76:71:02",
+        }
+        state["neigh"]["10.251.0.2"] = {
+            "lladdr": "52:54:00:76:71:02",
+            "permanent": True,
+            "dev": "vprlab1",
+        }
+        state["rules"] += [
+            "DOCKER-USER -i vprlab1 -o eth0 -s 10.251.0.0/24 -m comment "
+            "--comment " + owner + " -j ACCEPT",
+            "DOCKER-USER -i eth0 -o vprlab1 -d 10.251.0.0/24 -m conntrack "
+            "--ctstate ESTABLISHED,RELATED -m comment --comment " + owner
+            + " -j ACCEPT",
+        ]
+        return state
+
+    def test_teardown_refuses_unattributed_client_residue(self) -> None:
+        # An old owner record (no "clients" key) plus client residue must fail
+        # closed before any mutation: the fixed tool cannot know it owns it.
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            owner = _valid_owner(root)
+            state = self._client_residue(owner)
+            result, _log, state_after, owner_path = NetplanTests._run_lab(
+                self,
+                root,
+                netplan.render_plan("eth0"),
+                state,
+                args=("teardown",),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("no owner client inventory", result.stderr)
+            self.assertIn("aborted without changes", result.stderr)
+            self.assertTrue(owner_path.exists())
+            self.assertEqual(state_after, state)
+
+    def test_teardown_tolerates_a_missing_client_bridge(self) -> None:
+        # The filtered `ip neigh show ... dev` form fails with "Cannot find
+        # device" when the bridge is gone; the unfiltered helper reports the
+        # neighbour absent instead and teardown can finish.
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            owner = _valid_owner(root)
+            owner_path = root / "run" / "owner.json"
+            document = json.loads(owner_path.read_text(encoding="utf-8"))
+            document["clients"] = [1]
+            owner_path.write_text(json.dumps(document), encoding="utf-8")
+            state = _owned_state(owner)
+            result, _log, state_after, owner_after = NetplanTests._run_lab(
+                self,
+                root,
+                netplan.render_plan("eth0", clients=(1,)),
+                state,
+                args=("teardown",),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("Cannot find device", result.stderr)
+            self.assertNotIn("vprlab0", state_after["links"])
+            self.assertFalse(owner_after.exists())
+
+    def test_stub_ip_neigh_matches_iproute2_filtered_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            bin_dir, _script = _prepare_stub_lab(root, "#!/bin/sh\n")
+            environment, _log, state_path = _stub_env(root, bin_dir)
+            _write_state(
+                state_path,
+                {
+                    "links": {"vprlab1": {"kind": "bridge"}},
+                    "neigh": {
+                        "10.251.0.2": {
+                            "lladdr": "52:54:00:76:71:02",
+                            "permanent": True,
+                            "dev": "vprlab1",
+                        }
+                    },
+                    "rules": [],
+                },
+            )
+            filtered = subprocess.run(
+                [
+                    str(bin_dir / "ip"),
+                    "-j",
+                    "neigh",
+                    "show",
+                    "10.251.0.2",
+                    "dev",
+                    "vprlab1",
+                ],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(filtered.returncode, 0, filtered.stderr)
+            entries = json.loads(filtered.stdout)
+            self.assertEqual(len(entries), 1)
+            self.assertNotIn("dev", entries[0])
+            self.assertEqual(entries[0]["dst"], "10.251.0.2")
+            missing = subprocess.run(
+                [
+                    str(bin_dir / "ip"),
+                    "-j",
+                    "neigh",
+                    "show",
+                    "10.251.0.2",
+                    "dev",
+                    "vprlab-missing",
+                ],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(missing.returncode, 1)
+            self.assertIn("Cannot find device", missing.stderr)
+            unfiltered = subprocess.run(
+                [str(bin_dir / "ip"), "-j", "neigh", "show"],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(unfiltered.returncode, 0, unfiltered.stderr)
+            self.assertEqual(json.loads(unfiltered.stdout)[0]["dev"], "vprlab1")
 
 
 class ClientHostcheckTests(unittest.TestCase):
@@ -5395,6 +5592,9 @@ class ClientProbeTests(unittest.TestCase):
             clock_start=90,
             clock_stop=110,
             run_id=self.RUN_ID,
+            fault_sequence=2,
+            end_sequence=1000,
+            hold_seconds=15,
         )
         values.update(kwargs)
         return clientprobe.evaluate_probe_log(data, **values)
@@ -5538,6 +5738,88 @@ class ClientProbeTests(unittest.TestCase):
         report = self.evaluate(data)
         self.assertIn("probe_post_fault_exit_missing", report["invalid_reasons"])
         self.assertIn("probe_post_fault_marker_missing", report["invalid_reasons"])
+
+    def test_same_second_boundary_never_certifies_a_hold(self) -> None:
+        # Pre-fault rows at t=100, fault and post clocks also 100, and no row
+        # after the fault sequence.  The old timestamp-only rule PASSed.
+        data = (
+            client_probe_line(1, 100, mullvad=True)
+            + client_probe_line(2, 100, kind="marker")
+        )
+        report = self.evaluate(
+            data,
+            fault_epoch=100,
+            post_fault_epoch=100,
+            clock_start=99,
+            clock_stop=105,
+            fault_sequence=2,
+            end_sequence=2,
+            hold_seconds=30,
+        )
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("probe_post_fault_exit_missing", report["invalid_reasons"])
+        self.assertIn("probe_hold_coverage", report["invalid_reasons"])
+
+    def test_hold_coverage_requires_an_exit_attempt_per_gap(self) -> None:
+        data = (
+            client_probe_line(1, 100, mullvad=True)
+            + client_probe_line(2, 101, kind="marker")
+            + client_probe_line(3, 106, ok=False, mullvad=None)
+            + client_probe_line(4, 107, kind="marker", ok=False)
+        )
+        report = self.evaluate(data, hold_seconds=60, end_sequence=4)
+        self.assertIn("probe_hold_coverage", report["invalid_reasons"])
+        report = self.evaluate(data, hold_seconds=15, end_sequence=4)
+        self.assertEqual(report["verdict"], "PASS", report["invalid_reasons"])
+
+    def test_clock_boundaries_must_be_ordered(self) -> None:
+        data = client_probe_log()
+        report = self.evaluate(
+            data,
+            fault_epoch=103,
+            post_fault_epoch=100,
+            clock_start=99,
+            clock_stop=105,
+        )
+        self.assertIn("probe_clock_order", report["invalid_reasons"])
+
+    def test_run_id_is_required(self) -> None:
+        with self.assertRaises(TypeError):
+            clientprobe.evaluate_probe_log(
+                client_probe_log(), fault_epoch=105, post_fault_epoch=105
+            )
+
+    def test_probe_gap_allowance_is_fifteen_seconds(self) -> None:
+        def log(gap: int) -> bytes:
+            return (
+                client_probe_line(1, 100, mullvad=True)
+                + client_probe_line(2, 101, kind="marker")
+                + client_probe_line(3, 101 + gap, ok=False, mullvad=None)
+                + client_probe_line(4, 102 + gap, kind="marker", ok=False)
+            )
+
+        report = self.evaluate(
+            log(15),
+            fault_epoch=105,
+            post_fault_epoch=105,
+            clock_start=90,
+            clock_stop=130,
+            fault_sequence=2,
+            end_sequence=4,
+            hold_seconds=15,
+        )
+        self.assertEqual(report["verdict"], "PASS", report["invalid_reasons"])
+        report = self.evaluate(
+            log(16),
+            fault_epoch=105,
+            post_fault_epoch=105,
+            clock_start=90,
+            clock_stop=130,
+            fault_sequence=2,
+            end_sequence=4,
+            hold_seconds=15,
+        )
+        self.assertIn("probe_gap", report["invalid_reasons"])
 
     def test_overflow_line_is_invalid(self) -> None:
         overflow = (

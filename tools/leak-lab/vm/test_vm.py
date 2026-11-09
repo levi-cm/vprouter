@@ -5896,6 +5896,18 @@ class ClientExitBindingTests(unittest.TestCase):
             ),
             [],
         )
+        # A present but non-string HostName never falls back to the DNS label.
+        self.assertTrue(
+            run_phase.client_identity_problems(
+                self.status(
+                    Self={
+                        "HostName": 123,
+                        "DNSName": guest.client_name(1) + ".tailnet.ts.net.",
+                    }
+                ),
+                guest.client_name(1),
+            )
+        )
 
     def test_truncated_exact_read_keeps_readable_leak_evidence(self) -> None:
         leak = (
@@ -5930,6 +5942,9 @@ class ClientExitBindingTests(unittest.TestCase):
             clock_start=90,
             clock_stop=110,
             run_id="a" * 32,
+            fault_sequence=0,
+            end_sequence=1,
+            hold_seconds=30,
         )
         self.assertEqual(report["verdict"], "LEAK")
 
@@ -6005,6 +6020,67 @@ class ClientAdmissionTests(unittest.TestCase):
                 client_overlay=True,
             )
 
+    def test_login_only_reserves_only_its_own_resources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            cap = 1024 * 1024 * 1024
+            state_required = (
+                guest.CLIENT_OVERLAY_VIRTUAL_SIZE + run_phase.DISK_HEADROOM
+            )
+            # No capture and no router overlay: only headroom and the client
+            # overlay are reserved.
+            run_phase.check_admission(
+                root,
+                cap,
+                state_root=root,
+                mem_available=8 * 1024 ** 3,
+                free_bytes=run_phase.DISK_HEADROOM,
+                state_free_bytes=state_required,
+                client_memory_mib=guest.CLIENT_MEMORY_MIB,
+                capture_count=0,
+                client_overlay=True,
+                router_overlay=False,
+            )
+            with self.assertRaises(hostcheck.Refusal):
+                run_phase.check_admission(
+                    root,
+                    cap,
+                    mem_available=8 * 1024 ** 3,
+                    free_bytes=run_phase.DISK_HEADROOM - 1,
+                    capture_count=0,
+                )
+            with self.assertRaises(hostcheck.Refusal):
+                run_phase.check_admission(
+                    root,
+                    cap,
+                    state_root=root,
+                    mem_available=8 * 1024 ** 3,
+                    free_bytes=run_phase.DISK_HEADROOM,
+                    state_free_bytes=state_required - 1,
+                    client_memory_mib=guest.CLIENT_MEMORY_MIB,
+                    capture_count=0,
+                    client_overlay=True,
+                    router_overlay=False,
+                )
+
+
+def client_leak_suffix(client) -> bytes:
+    """Append one well-formed current-run non-Mullvad success to a fake log."""
+    import json as _json
+
+    client.sequence += 1
+    document = {
+        "k": "exit",
+        "m": False,
+        "ok": True,
+        "r": client.run_id,
+        "s": client.sequence,
+        "t": client.clock,
+    }
+    return (
+        _json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+
 
 class ClientRunPhaseTests(unittest.TestCase):
     """M3 orchestration with fake router and client VMs."""
@@ -6044,7 +6120,7 @@ class ClientRunPhaseTests(unittest.TestCase):
         self.client_pcap: pathlib.Path | None = None
         self.probe_log = b""
 
-    def _arguments(self, phase="idle", duration=0.0, **overrides):
+    def _arguments(self, phase="idle", duration=30.0, **overrides):
         descriptor = os.open(self.profile, os.O_RDONLY)
         self.addCleanup(os.close, descriptor)
         values = dict(
@@ -6075,7 +6151,7 @@ class ClientRunPhaseTests(unittest.TestCase):
         values.update(overrides)
         return argparse.Namespace(**values)
 
-    def _run(self, phase="idle", duration=0.0, *, client_kwargs=None,
+    def _run(self, phase="idle", duration=30.0, *, client_kwargs=None,
              client_capture_dead=False, **overrides):
         arguments = self._arguments(phase, duration, **overrides)
         self.events.clear()
@@ -6190,14 +6266,30 @@ class ClientRunPhaseTests(unittest.TestCase):
                 ["setpriv", "--", f"qemu-{label}"],
             )
 
+        fake_clock = [1_000_000.0]
+
         def fake_sleep(seconds):
             if seconds == run_phase.QUIET_SECONDS:
                 self.events.append(("quiet",))
+            remaining = max(0.0, float(seconds))
+            while remaining > 0:
+                step = min(1.0, remaining)
+                fake_clock[0] += step
+                remaining -= step
+                if client.traffic_active and not client.silent_hold:
+                    client.maybe_probe(fake_clock[0])
+
+        def fake_monotonic():
+            return fake_clock[0]
 
         class ClientQGA:
             def __init__(self, *, marker_fail=False, leak_only=False,
                          truncate_cat=False, truncate_final_cat=False,
-                         stop_suffix=b""):
+                         stop_suffix=b"", stop_fail_at=None, stop_lies_at=None,
+                         silent_hold=False, cat_exit=0,
+                         advertise_routes=None,
+                         login_blocks_until_authenticated=False,
+                         frozen_clock=False, digest_fail=False):
                 self.exit_node_active = False
                 self.log = b""
                 self.commands = []
@@ -6211,6 +6303,29 @@ class ClientRunPhaseTests(unittest.TestCase):
                 self.truncate_cat = truncate_cat
                 self.truncate_final_cat = truncate_final_cat
                 self.stop_suffix = stop_suffix
+                self.stop_fail_at = stop_fail_at
+                self.stop_lies_at = stop_lies_at
+                self.stop_count = 0
+                self.silent_hold = silent_hold
+                self.cat_exit = cat_exit
+                self.advertise_routes = list(advertise_routes or ())
+                self.login_blocks_until_authenticated = (
+                    login_blocks_until_authenticated
+                )
+                self.authenticated = not login_blocks_until_authenticated
+                self.login_url_reads = 0
+                self.next_probe_at = None
+                self.frozen_clock = frozen_clock
+                self.digest_fail = digest_fail
+
+            def maybe_probe(self, now):
+                """Model the 1 Hz traffic loop while the fake hold runs."""
+                if self.next_probe_at is None:
+                    self.next_probe_at = now
+                while now >= self.next_probe_at:
+                    self.clock += 1
+                    self.probe_pair()
+                    self.next_probe_at += 1.0
 
             def append_probe(self, kind, **fields):
                 self.sequence += 1
@@ -6243,7 +6358,9 @@ class ClientRunPhaseTests(unittest.TestCase):
                     "TailscaleIPs": ["100.64.0.9"],
                 }
                 document = {
-                    "BackendState": "Running",
+                    "BackendState": (
+                        "Running" if self.authenticated else "NeedsLogin"
+                    ),
                     "Self": {
                         "ID": "peer-client",
                         "HostName": client_name,
@@ -6284,6 +6401,10 @@ class ClientRunPhaseTests(unittest.TestCase):
                     self.log = b""
                     self.sequence = 0
                     return ExecResult(0, b"", b"")
+                if "systemd-run" in command and guest.CLIENT_LOGIN_UNIT in command:
+                    events.append(("client_up",))
+                    self.login_unit_active = True
+                    return ExecResult(0, b"", b"")
                 if "systemd-run" in command:
                     events.append(("traffic_start",))
                     match = re.search(r"VPRCLIENTMARK1:([0-9a-f]{32})", command)
@@ -6291,34 +6412,57 @@ class ClientRunPhaseTests(unittest.TestCase):
                         self.run_id = match.group(1)
                     self.sequence = 0
                     self.traffic_active = True
+                    self.next_probe_at = None
                     self.probe_pair()
                     return ExecResult(0, b"", b"")
                 if "systemctl is-active --quiet" in command:
-                    if self.traffic_active:
-                        self.probe_pair()
-                        return ExecResult(0, b"", b"")
-                    return ExecResult(3, b"", b"")
+                    return (
+                        ExecResult(0, b"", b"")
+                        if self.traffic_active
+                        else ExecResult(3, b"", b"")
+                    )
+                if "systemctl is-active" in command:
+                    state = "active" if self.traffic_active else "inactive"
+                    return ExecResult(
+                        0 if self.traffic_active else 3,
+                        state.encode() + b"\n",
+                        b"",
+                    )
                 if "systemctl stop vprlab-client-traffic" in command:
-                    events.append(("traffic_stop",))
+                    self.stop_count += 1
+                    events.append(("traffic_stop", self.stop_count))
+                    if self.stop_fail_at == self.stop_count:
+                        return ExecResult(1, b"", b"")
+                    if self.stop_lies_at == self.stop_count:
+                        return ExecResult(0, b"", b"")
+                    if self.traffic_active:
+                        suffix = (
+                            self.stop_suffix(self)
+                            if callable(self.stop_suffix)
+                            else self.stop_suffix
+                        )
+                        self.log += suffix
                     self.traffic_active = False
-                    self.log += self.stop_suffix
-                    if self.truncate_final_cat:
+                    if self.truncate_final_cat and self.stop_count >= 2:
                         self.truncate_cat = True
                     return ExecResult(0, b"", b"")
                 if command.startswith("stat -c %s"):
                     return ExecResult(0, str(len(self.log)).encode() + b"\n", b"")
                 if command.startswith("sha256sum "):
+                    if self.digest_fail:
+                        return ExecResult(1, b"", b"")
                     digest = hashlib.sha256(self.log).hexdigest()
                     return ExecResult(0, (digest + "  " + guest.CLIENT_PROBE_LOG + "\n").encode(), b"")
                 if command.strip() == f"cat {guest.CLIENT_PROBE_LOG}":
                     if self.truncate_cat and self.log:
                         prefix = self.log.rsplit(b"\n", 2)[0] + b"\n"
-                        return ExecResult(0, prefix, b"")
-                    return ExecResult(0, self.log, b"")
+                        return ExecResult(self.cat_exit, prefix, b"")
+                    return ExecResult(self.cat_exit, self.log, b"")
                 if "/sys/class/net" in command:
                     return ExecResult(0, b"eth0\n", b"")
                 if command.strip() == "date +%s":
-                    self.clock += 1
+                    if not self.frozen_clock:
+                        self.clock += 1
                     return ExecResult(0, f"{self.clock}\n".encode(), b"")
                 if "VPRLEAKCTL1:" in command:
                     match = re.search(r"VPRLEAKCTL1:([0-9a-f]{32})", command)
@@ -6327,10 +6471,22 @@ class ClientRunPhaseTests(unittest.TestCase):
                         self._append_client_pcap(payload)
                         events.append(("client_control", match.group(1)))
                     return ExecResult(0, b"", b"")
+                if "tailscale debug prefs" in command:
+                    document = {"AdvertiseRoutes": self.advertise_routes}
+                    return ExecResult(
+                        0, json.dumps(document).encode(), b""
+                    )
                 if "tailscale up" in command:
                     events.append(("client_up",))
                     return ExecResult(0, b"", b"")
                 if "journalctl" in command:
+                    self.login_url_reads += 1
+                    if (
+                        self.login_blocks_until_authenticated
+                        and self.login_url_reads >= 2
+                    ):
+                        self.authenticated = True
+                        events.append(("client_authenticated",))
                     return ExecResult(0, b"https://login.tailscale.com/a/abcdef0123456789\n", b"")
                 if "tailscale set --exit-node= " in command:
                     return ExecResult(0, b"", b"")
@@ -6499,6 +6655,11 @@ class ClientRunPhaseTests(unittest.TestCase):
                 )
             )
             enter(mock.patch.object(run_phase.time, "sleep", side_effect=fake_sleep))
+            enter(
+                mock.patch.object(
+                    run_phase.time, "monotonic", side_effect=fake_monotonic
+                )
+            )
             enter(mock.patch.object(run_phase, "CAPTURE_WATCH_INTERVAL", 0.01))
             enter(mock.patch.object(run_phase, "AFTER_CAPTURE_TIMEOUT", 0.05))
             enter(mock.patch.object(run_phase, "ROUTER_ACTIVE_TIMEOUT", 0.05))
@@ -6657,12 +6818,16 @@ class ClientRunPhaseTests(unittest.TestCase):
         self.assertTrue((evidence / guest.CLIENT_PROBE_FILE).stat().st_size > 0)
 
     def test_truncated_final_probe_read_is_invalid_never_pass(self) -> None:
+        # Pi M-G: the truncation is armed at the end-of-hold stop, so the
+        # pre-fault control completed and the exact FINAL read is truncated.
         code, record, _client, _events, _out, _err, _evidence = self._run(
             "idle", client_kwargs={"truncate_final_cat": True}
         )
         self.assertEqual(code, 2)
         self.assertEqual(record["result"], "INVALID")
         self.assertIn("probe_log_truncated", record["errors"])
+        self.assertTrue(record["client"]["pre_fault_mullvad"])
+        self.assertIsNotNone(record["client"]["fault_sequence"])
 
     def test_pre_fault_real_ip_leak_returns_leak_and_collects_the_log(self) -> None:
         code, record, _client, events, _out, _err, evidence = self._run(
@@ -6684,6 +6849,191 @@ class ClientRunPhaseTests(unittest.TestCase):
         self.assertIn("phase_exception:RuntimeError", record["errors"])
         self.assertTrue(record["client"]["probe_collected"])
         self.assertTrue((evidence / guest.CLIENT_PROBE_FILE).stat().st_size > 0)
+
+    def test_failed_stop_never_certifies_a_later_cleanup_snapshot(self) -> None:
+        # GPT C1: the end-of-hold stop fails, the unit keeps running and the
+        # leak line is only appended when the cleanup stop finally kills it.
+        # The old masked stop collected the earlier log and PASSed.
+        code, record, _client, _events, _out, _err, evidence = self._run(
+            "idle",
+            client_kwargs={
+                "stop_fail_at": 2,
+                "stop_suffix": client_leak_suffix,
+            },
+        )
+        self.assertEqual(code, 1, record["result_reason"])
+        self.assertEqual(record["result"], "LEAK")
+        self.assertIn("client_traffic_stop_failed", record["errors"])
+        self.assertTrue(record["client"]["probe_leak_observed"])
+        self.assertFalse(record["client"]["probe_snapshot_trusted"])
+        self.assertNotEqual(record["client"].get("probe_log_read"), "exact")
+        self.assertIn(b'"m":false', (evidence / guest.CLIENT_PROBE_FILE).read_bytes())
+
+    def test_stop_returning_success_while_active_is_invalid(self) -> None:
+        # A stop exit status of 0 is not proof; the unit is still active and
+        # is-active must force INVALID.
+        code, record, _client, _events, _out, _err, _evidence = self._run(
+            "idle", client_kwargs={"stop_lies_at": 2}
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("client_traffic_stop_failed", record["errors"])
+        self.assertFalse(record["client"]["probe_snapshot_trusted"])
+
+    def test_prefault_leak_survives_a_final_read_failure(self) -> None:
+        # GPT I1 / Opus N-1 / Pi M-N: the leak is seen by the tolerant read;
+        # the exact final read then fails.  LEAK must still win.
+        with mock.patch.object(
+            run_phase,
+            "read_client_probe_log_exact",
+            return_value=(None, "probe_log_unreadable"),
+        ):
+            code, record, _client, _events, _out, _err, _evidence = self._run(
+                "idle", client_kwargs={"leak_only": True}
+            )
+        self.assertEqual(code, 1, record["result_reason"])
+        self.assertEqual(record["result"], "LEAK")
+        self.assertTrue(record["client"]["probe_leak_observed"])
+        self.assertIn("client_real_ip", record["errors"])
+
+    def test_nonzero_cat_keeps_a_readable_leak(self) -> None:
+        # GPT I1: `cat` exits 1 but returns the whole leak-bearing log.  The
+        # bytes are kept, parsed tolerantly and LEAK wins.
+        code, record, _client, _events, _out, _err, evidence = self._run(
+            "idle",
+            client_kwargs={
+                "cat_exit": 1,
+                "stop_suffix": client_leak_suffix,
+            },
+        )
+        self.assertEqual(code, 1, record["result_reason"])
+        self.assertEqual(record["result"], "LEAK")
+        self.assertTrue(record["client"]["probe_leak_observed"])
+        self.assertIn("probe_log_unreadable", record["errors"])
+        self.assertIn(b'"m":false', (evidence / guest.CLIENT_PROBE_FILE).read_bytes())
+
+    def test_digest_failure_keeps_a_readable_leak(self) -> None:
+        # GPT I1 variant: sha256sum fails, the bounded cat bytes still carry
+        # the leak and must not be discarded.
+        code, record, _client, _events, _out, _err, evidence = self._run(
+            "idle",
+            client_kwargs={
+                "digest_fail": True,
+                "stop_suffix": client_leak_suffix,
+            },
+        )
+        self.assertEqual(code, 1, record["result_reason"])
+        self.assertEqual(record["result"], "LEAK")
+        self.assertTrue(record["client"]["probe_leak_observed"])
+        self.assertIn("probe_log_unreadable", record["errors"])
+        self.assertIn(b'"m":false', (evidence / guest.CLIENT_PROBE_FILE).read_bytes())
+
+    def test_end_of_hold_exit_node_loss_is_invalid(self) -> None:
+        # Opus N-2: ExitNodeStatus must still name the router peer at the end
+        # of the hold, before traffic is stopped.
+        original = run_phase.read_client_status
+
+        def wrong(client):
+            document = original(client)
+            if client.traffic_active:
+                document["ExitNodeStatus"] = {
+                    "ID": "some-other-exit",
+                    "Online": True,
+                    "TailscaleIPs": ["100.64.0.99"],
+                }
+            return document
+
+        with mock.patch.object(
+            run_phase, "read_client_status", side_effect=wrong
+        ):
+            code, record, _client, _events, _out, _err, _evidence = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("client_exit_node_lost", record["errors"])
+
+    def test_silent_active_unit_never_certifies_the_hold(self) -> None:
+        # Pi M-H / Pi I-1: an active unit that writes no probes during the
+        # hold leaves the end sequence equal to the fault sequence.
+        code, record, _client, _events, _out, _err, _evidence = self._run(
+            "idle", client_kwargs={"silent_hold": True}
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertEqual(
+            record["client"]["fault_sequence"],
+            record["client"]["hold_sequence_end"],
+        )
+        self.assertIn("probe_post_fault_exit_missing", record["client"]["probe"]["invalid_reasons"])
+
+    def test_frozen_clock_silent_hold_never_certifies(self) -> None:
+        # Pi I-1: with a frozen guest clock the pre-fault pair satisfies
+        # every timestamp comparison; only the sequence boundary proves that
+        # nothing ran during the hold.
+        code, record, _client, _events, _out, _err, _evidence = self._run(
+            "idle", client_kwargs={"silent_hold": True, "frozen_clock": True}
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertEqual(
+            record["client"]["fault_sequence"],
+            record["client"]["hold_sequence_end"],
+        )
+        self.assertEqual(
+            record["client"]["probe"]["post_fault_exit_attempts"], 0
+        )
+
+    def test_client_phase_refuses_a_hold_shorter_than_thirty_seconds(self) -> None:
+        with mock.patch.object(run_phase, "require_root"):
+            with self.assertRaises(hostcheck.Refusal):
+                run_phase.run_phase(self._arguments("idle", 29.0))
+
+    def test_evidence_inside_either_state_directory_is_refused(self) -> None:
+        for state in (self.router_state, self.client_state):
+            with self.subTest(state=state.name):
+                with self.assertRaises(hostcheck.Refusal):
+                    self._run("idle", evidence_root=str(state / "evidence"))
+
+    def test_read_quality_downgrades_a_pass_probe_object(self) -> None:
+        original = run_phase.read_client_probe_log_exact
+
+        def bad(client):
+            data, _problem = original(client)
+            return data, "probe_log_hash_mismatch"
+
+        with mock.patch.object(
+            run_phase, "read_client_probe_log_exact", side_effect=bad
+        ):
+            code, record, _client, _events, _out, _err, _evidence = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertEqual(record["client"]["probe"]["verdict"], "INVALID")
+        self.assertEqual(
+            record["client"]["probe"]["reason"], "probe_log_read_quality"
+        )
+
+    def test_client_advertising_a_route_is_invalid(self) -> None:
+        code, record, _client, _events, _out, _err, _evidence = self._run(
+            "idle", client_kwargs={"advertise_routes": ["0.0.0.0/0"]}
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("client_advertises_routes", record["errors"])
+        self.assertFalse(
+            any(entry[0] == "traffic_start" for entry in _events)
+        )
+
+    def test_login_unit_does_not_block_and_is_polled(self) -> None:
+        code, record, client, events, _stdout, _stderr, evidence = self._run(
+            "client-login",
+            30.0,
+            client_kwargs={"login_blocks_until_authenticated": True},
+        )
+        self.assertEqual(code, 0, record["result_reason"])
+        self.assertEqual(record["client"]["login_unit"], "started")
+        self.assertTrue(any(entry[0] == "client_authenticated" for entry in events))
+        commands = [command for command in client.commands if "systemd-run" in command]
+        self.assertTrue(commands)
+        self.assertIn(guest.CLIENT_LOGIN_UNIT, commands[0])
+        url = (evidence / "login-url.txt").read_text()
+        self.assertTrue(url.startswith("https://login.tailscale.com/a/"))
 
     def test_wrong_exit_peer_status_and_self_boolean_is_invalid(self) -> None:
         original = run_phase.read_client_status
@@ -6812,7 +7162,7 @@ class ClientRunPhaseTests(unittest.TestCase):
 
     def test_client_login_boots_only_the_client_and_writes_the_url(self) -> None:
         code, record, client, events, _stdout, stderr, evidence = self._run(
-            "client-login", 0.0
+            "client-login", 30.0
         )
         self.assertEqual(code, 0, record["result_reason"])
         self.assertEqual(record["result"], "PASS")

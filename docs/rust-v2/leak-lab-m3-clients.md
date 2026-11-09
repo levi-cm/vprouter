@@ -61,9 +61,14 @@ The client VM must not share a bridge with the router VM. Any client frame on
   - `inet vprlab` masquerade and forward for 10.251.0.0/24 to the WAN only,
     with conntrack for the return path; both forward accepts are source or
     destination scoped to 10.251.0.0/24;
+  - after the scoped accepts, explicit drops for every other packet from or
+    to the client bridge (decision 6);
   - the Docker `DOCKER-USER` exceptions;
   - IPv6 disabled on the bridge;
   - static neighbours.
+- The same scoped-accept-plus-explicit-drop rule applies to `vprlab0`: the
+  router VM only needs its own subnet to the WAN and conntrack return traffic.
+  Nothing else from either lab bridge may be forwarded.
 - Add an explicit **drop** between `vprlab0` and `vprlab1` in both directions,
   plus a test that proves the rule exists.
 - Setup writes the client indexes it created into `owner.json`. Teardown reads
@@ -71,6 +76,12 @@ The client VM must not share a bridge with the router VM. Any client frame on
   object even when it was rendered without `--client`, verifying ownership
   first. The collision preflight always inventories every fixed client object
   (`vprlab1`, `vprlab-ctap1..9`), so residue is visible to a no-client plan.
+  If the owner record lists no clients but `vprlab1` or any `vprlab-ctapN`
+  exists, teardown refuses before touching anything (fail closed).
+- The client neighbour helpers read the complete `ip -j neigh` inventory and
+  filter `dst`/`dev` in Python, exactly like the router helper. The filtered
+  `ip ... dev` form omits the `dev` key and fails with `Cannot find device`
+  when the bridge is gone, so it cannot prove absence.
 - Setup, teardown, the inventory and the "refuse if not ours" checks cover the
   new objects the same way as the old ones.
 - Everything else about the host stays untouched. In particular, do not
@@ -155,9 +166,15 @@ Every line carries:
 ## Phase flow with `--client N`
 
 `run_phase.py --phase <p> --client N` accepts every phase except `login`. A new
-phase `client-login` (with `--client N`) boots only the client VM, shows the
-login URL the way the router login phase does, and waits for
-`BackendState == Running`.
+phase `client-login` (with `--client N`) boots only the client VM, starts
+`tailscale up ...` in a transient unit instead of blocking inside QGA, shows the
+login URL the way the router login phase does, polls `BackendState`, and waits
+for `BackendState == Running`. Its admission reserves no capture and no router
+overlay, only the client overlay and headroom.
+
+A `--client` phase requires `--duration >= 30` seconds, including
+`client-login`. A shorter timing window cannot be observed by the probe loop
+(and a login that short is not useful), so it is refused.
 
 1. **Admission.** Host `MemAvailable` must cover the router plus the client
    plus the existing headroom.
@@ -173,8 +190,10 @@ login URL the way the router login phase does, and waits for
 4. **Client Tailscale.**
    - Refuse (INVALID) if the client's own `Self.HostName` is not exactly
      `zz-vprclient-NN-do-not-use`; a present but different `DNSName` is also a
-     refusal (no DNS fallback may hide a conflicting HostName).
+     refusal (no DNS fallback may hide a conflicting HostName). A present but
+     non-string HostName is refused; DNS is used only when it is missing.
    - Refuse if the client advertises an exit node or a default route.
+   - Refuse if `tailscale debug prefs` reports a non-empty `AdvertiseRoutes`.
 5. **Router boot.** Boot the router and set it up to READY, unchanged.
 6. **Client exit node.**
    - Read the router's own `tailscale status --json` through the router QGA
@@ -192,15 +211,26 @@ login URL the way the router login phase does, and waits for
      marker really went out;
    - otherwise the phase is INVALID (`client_not_routed` /
      `client_marker_not_sent`). A successful exit probe with `m` not `true`
-     is returned immediately as LEAK; the final collection still runs.
+     is latched as a LEAK and returned immediately; the final collection still
+     runs.
 8. **Traffic.** Apply the fault and prove it took effect, exactly as today.
-   Hold for `--duration`.
+   After the action and its postcondition finish, read the log's last complete
+   line through QGA and record its sequence number `S_fault`; then hold for
+   `--duration`. At the end of the hold, before stopping traffic:
+   - re-read `ExitNodeStatus` and require the router's own `Self.ID`, the
+     selected IP and `Online`; otherwise INVALID (`client_exit_node_lost`);
+   - record the last complete sequence number `S_end`.
 9. **Collect.**
    - Require the traffic unit to be `systemctl is-active` at the end of the
-     hold, then stop it explicitly.
+     hold. Then `systemctl stop` it *without masking the result* and require a
+     separate `systemctl is-active` read to report `inactive`/`failed` (unit
+     gone) before any exact snapshot. If termination cannot be proven, the
+     phase is INVALID, the snapshot is marked untrusted, and a later cleanup
+     stop never validates it; the bytes are still kept for LEAK parsing.
    - Read the probe log through QGA in full; require the guest-reported size
      and SHA-256 to match the bytes read and the file to end with a newline.
-     Truncation is INVALID; no valid prefix is accepted.
+     Truncation is INVALID; no valid prefix is accepted. The bounded stdout of
+     a `cat` that exited non-zero is still parsed for a LEAK.
    - Collect the log on every exit path from `finally`, while the client VM is
      still up.
    - Clear the exit node and send the **client after-control**.
@@ -217,14 +247,20 @@ login URL the way the router login phase does, and waits for
       bridge MAC and IPv4 with the exact payload. A duplicated control is
       INVALID unless the marker independently proves a leak.
     - Probe verdict:
-      - LEAK on any well-formed `ok && m != true` line, even when other lines
-        are malformed or the log is truncated;
+      - LEAK is latched on any well-formed `ok && m != true` line, seen in the
+        pre-fault wait, a mid-phase boundary read, the final read, or the
+        bounded bytes of a failed `cat`; it survives every later read or
+        quality problem and the combined result is LEAK;
       - INVALID if there was no pre-fault Mullvad success, no pre-fault
         successful marker probe, a missing/gapped `s`, a foreign `r`, a
         timestamp regression or out-of-window timestamp, a probe gap above
-        10 s, no post-fault exit/marker attempt, an overflow line, or any read
+        15 s, no post-fault exit/marker attempt with `s > S_fault`, fewer than
+        `floor(hold / 15)` exit attempts with `S_fault < s <= S_end`, an
+        unordered clock window (`clock_start <= fault_epoch <=
+        post_fault_epoch <= clock_stop`), an overflow line, or any read
         quality problem;
-      - otherwise PASS.
+      - otherwise PASS. A read-quality problem never leaves a PASS probe
+        object behind.
     - Record per-kind counts: total, ok, Mullvad, non-Mullvad and failed,
       before and after the fault. Diagnostics carry fixed error codes and
       line numbers only; guest keys, values and text never reach `phase.json`,
@@ -246,6 +282,8 @@ Each phase evidence directory gains:
 - the name, memory and nonces;
 - the resolved probe IPs;
 - the counts and the client verdict;
+- the latched `probe_leak_observed` flag, `fault_sequence`,
+  `hold_sequence_end`, `traffic_stop_proven` and `probe_snapshot_trusted`;
 - the combined result.
 
 The rules of the existing evidence directory apply to all of it: root-only,
@@ -257,13 +295,17 @@ pre-existing documented risk is retained rather than changing the shared login
 behaviour. The URL remains root-only in `login-url.txt`.
 
 Admission reserves both capture caps on the evidence filesystem and both
-overlays (router 4 GiB + client 2 GiB) plus headroom on the state filesystem.
+overlays (router 4 GiB + client 2 GiB) plus headroom on the state filesystem
+for a traffic phase. `client-login` reserves no capture and no router overlay:
+only the client 2 GiB overlay and the shared headroom.
 
 ## Tests (offline, required)
 
 - Netplan/hostsetup: the `vprlab1` objects exist; the `vprlab0` and `vprlab1`
-  drop rules exist in both directions; teardown and the refusal checks cover
-  `vprlab1`; the router plan is unchanged when no client is configured.
+  drop rules exist in both directions; the scoped accepts for both bridges are
+  followed by explicit drops; teardown and the refusal checks cover
+  `vprlab1`; an owner with no clients plus any client object refuses teardown;
+  the router plan is unchanged when no client is configured.
 - Provision: refuses a tarball with the wrong sha256; the client name and
   address are validated; the overlay is at most 2 GiB.
 - Client scan: a pcap with the marker in clear is LEAK (inside the window,
@@ -277,23 +319,29 @@ overlays (router 4 GiB + client 2 GiB) plus headroom on the state filesystem.
   - no pre-fault Mullvad success is INVALID;
   - no pre-fault successful marker probe is INVALID;
   - failures only after the fault give PASS when the post-fault attempts are
-    present;
+    present and dense enough for the hold;
+  - a same-second fault/post-fault pair with no `s > S_fault` is INVALID;
   - malformed, oversized or duplicate-key lines are INVALID, but never mask a
-    well-formed LEAK line;
+    well-formed LEAK line; a LEAK seen before a later read failure is latched;
   - stale logs, wrong `r`, sequence gaps, timestamp regressions/out-of-window
-    values, gaps above 10 s and missing post-fault attempts are INVALID.
+    values, gaps above 15 s, missing post-fault attempts, an unordered clock
+    window and insufficient hold coverage are INVALID.
 - Combined verdict precedence across router and client, including a missing
-  verdict as INVALID unless another side is LEAK.
+  verdict as INVALID unless another side is LEAK, and the latched leak flag.
 - Run-phase orchestration with fakes for both VMs and the **real** client
   scanner over the crafted pcaps:
   - the order of the steps above;
-  - the exit node cleared before both controls;
+  - the exit node cleared before both controls and re-verified at the end of
+    the hold;
   - both captures outlive both QEMUs, and a dead client tcpdump trips its
     capture guard;
   - the client never runs without `--client`;
-  - `login` with `--client` is refused;
-  - an inactive traffic unit, a truncated final read, a stale/foreign probe
-    log and a pre-fault leak behave as above.
+  - `login` with `--client` is refused; `client-login` uses a transient unit
+    and does not block on an interactive login;
+  - an inactive or unkillable traffic unit, a stop that lies, a truncated
+    final read after a successful pre-fault control, a stale/foreign probe
+    log, a pre-fault leak followed by a failed final read, a client route
+    advertisement and a hold shorter than 30 s behave as above.
 
 ## Out of scope
 

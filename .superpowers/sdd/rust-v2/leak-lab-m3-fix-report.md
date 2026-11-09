@@ -173,3 +173,147 @@ python3 -B tools/leak-lab/clientprobe.py --probe-log <file> \
   binding design; unchanged accepted false-negative.
 - **Pi M9 / GPT I5 — login URL on stderr.** Accepted risk (decision 12),
   documented rather than changed.
+
+---
+
+# Fix round 2
+
+Milestone: M3 — fix round for the three re-reviews of `605cce8`
+(`leak-lab-m3-rereview-gpt.md`, `-opus.md`, `-pi.md`).
+Repository: `/DATA/AppData/vprouter-rust-v2` (branch `rust/v2`).
+Date: 2026-11-09.
+
+All work is in the working tree; nothing was staged, committed or pushed.  No
+privileged command (sudo, QEMU, tcpdump, `ip`, `nft`, `iptables`, docker,
+useradd, `systemctl` or network execution) was run.  Generated shell ran only
+through the repository stub harness.  Scratch `/var/tmp/leaklab-m3-fix2`,
+including an extracted `605cce8` tree used for the regression checks, was
+deleted at the end.
+
+## Finding-to-fix map
+
+Line numbers are from the fixed working tree.
+
+### New Criticals and Importants
+
+| ID | Fix |
+|---|---|
+| GPT C1 — failed stop leaves a leak outside the snapshot | `stop_client_traffic` no longer masks the stop: the shell `|| true; ...; true` is gone, and the postcondition is a separate `systemctl is-active` read that must report `inactive`/`failed`/`unknown` before any exact read (`vm/run_phase.py:3236`, `:3225`).  The end-of-hold stop failure is a phase error (`:4481`); the finally path keeps `traffic_stop_proven=False` sticky so a later cleanup stop can never make the snapshot exact (`:4540-4578`); the boot-time stale-unit stop must also be proven (`:4086-4092`).  Tests: `test_vm.py:6850` (failed stop, leak appended on the later cleanup stop, result LEAK), `:6869` (stop returns 0 while active, INVALID). |
+| GPT C2 / Pi I-1 — same-second or frozen clock certifies an unobserved hold | The runner records `S_fault` (last complete sequence after the action and its postcondition, `vm/run_phase.py:4426-4435`) and `S_end` (end of the hold, `:4462-4471`).  `evaluate_probe_log` counts a post-fault attempt only with `s > S_fault` (and `t >= post_fault_epoch`), requires at least one exit and one marker attempt, and requires `floor(hold / 15)` exit attempts with `S_fault < s <= S_end` (`clientprobe.py:270-290`, `:378-382`).  It also validates `clock_start <= fault_epoch <= post_fault_epoch <= clock_stop` (`:361-369`).  The gap allowance is 15 s (`clientprobe.py:57`).  A `--client` phase shorter than 30 s is refused (`vm/run_phase.py:138`, `:3762-3765`).  Tests: `test_leak_lab.py:5742`, `:5763`, `:5775`, `:5792` (parser); `test_vm.py:6949` (frozen clock, silent unit), `:6935` (active silent unit), `:6966` (duration refusal). |
+| GPT I1 / Opus N-1 / Pi M-N — a seen LEAK is downgraded by a later read failure | A recognised non-Mullvad success is latched in `record["client"]["probe_leak_observed"]` whenever it is seen: pre-fault wait (`vm/run_phase.py:4358`), mid-phase boundary reads (`:4432`, `:4468`), tolerant/nonzero-`cat` bytes persisted by collection (`:3429`, `:4725`), and the final evaluation (`:4738`).  `combine_verdicts(..., leak_observed=True)` returns LEAK before every quality check (`:3707-3728`, call `:4768`).  `read_client_probe_log`/`read_client_probe_log_exact` keep the bounded stdout of a `cat` that exited non-zero (`:3278`, `:3308`), and the exact read still `cat`s and returns bounded bytes when the digest read failed (`:3330-3345`).  Tests: `test_vm.py:6880` (pre-fault leak + failed exact read), `:6896` (nonzero `cat` with a readable leak), `:6915` (sha256 failure still keeps the leak bytes). |
+| Opus N-2 — exit node not re-verified at the end of the hold | Before stopping traffic, `ExitNodeStatus` must still name the router's own `Self.ID`, the selected IP and `Online`; otherwise `client_exit_node_lost` / INVALID (`vm/run_phase.py:4451-4459`).  Test: `test_vm.py:6912` (the fake switches to `some-other-exit` once traffic is active). |
+| Opus N-3 — zero/short client hold PASSes | Minimum `--client` duration 30 s (`vm/run_phase.py:138`, `:3759`), plus the sequence-density requirement above.  Test: `test_vm.py:6966`. |
+| Opus N-4 / Pi M-C — filtered `ip neigh` helpers, old-owner teardown edge | `client_neigh_ok`/`client_neigh_state` now read the complete unfiltered `ip -j neigh` inventory and filter `dst`/`dev` in Python, exactly like `neigh_state` (`netplan.py:1069-1076`).  The repository stub now models iproute2: the filtered form omits `dev` and a missing device exits 1 with `Cannot find device` (`test_leak_lab.py:5124`).  A no-client teardown refuses before mutation when `vprlab1` or any `vprlab-ctapN` exists without an owner/plan client inventory (`netplan.py:1185-1200`).  Tests: `test_leak_lab.py:4875` (helper shape), `:5080` (fail closed), `:5100` (missing bridge tolerated). |
+| Opus N-5 — 10 s gap budget too tight | `MAX_PROBE_GAP_SECONDS = 15` and the hold density uses the same value (`clientprobe.py:57`, `:378`).  Test: `test_leak_lab.py:5792`. |
+| Pi M-D — blocking `tailscale up` in `client-login` | `client-login` starts `tailscale up --reset ...` in the transient unit `vprlab-client-login` (`guest.py:87`, `vm/run_phase.py:4120-4135`) and `login_phase_wait` polls the URL and `BackendState` (`:1729-1778`), returning early once Running.  The fake blocks until authenticated and then releases (`test_vm.py:7004`). |
+| Pi M-I — `client-login` over-reserves | `check_admission` gained `router_overlay` and allows `capture_count=0` (`vm/run_phase.py:1894-1941`); `client-login` passes 0 captures and no router overlay (`:3806-3808`).  Test: `test_vm.py:6023`. |
+
+### Smaller items
+
+| ID | Fix |
+|---|---|
+| Pi M-A — `evaluate_probe_log` silent `run_id=None` | `run_id` is a required keyword and is validated (`clientprobe.py:217-220`, `:247-248`).  Test: `test_leak_lab.py:5786`. |
+| Pi M-B — present non-string HostName falls back to DNS | A present non-string `HostName` is refused (`vm/run_phase.py:2872-2875`); test added to `ClientExitBindingTests.test_client_identity_rejects_a_conflicting_hostname_and_dns`. |
+| Pi M-G — truncation test armed at the wrong stop | The fake arms `truncate_cat` at the end-of-hold stop (`stop_count >= 2`), after the pre-fault control; the test asserts the control succeeded and the final read was truncated (`vm/test_vm.py:6817`). |
+| Pi M-H — no slow/hung active-unit test | `silent_hold` models an active unit that writes nothing (`vm/test_vm.py:6935`); the frozen-clock variant is `:6949`. |
+| Pi M-J — evidence-inside-state checks only the client | Both router and client state are checked (`vm/run_phase.py:3869-3881`).  Test: `test_vm.py:6971`. |
+| Pi M-K — scoped accepts were not drops | After the scoped accepts, explicit drops for both bridges: `netplan.py:885-893` (vprlab0) and `:1126-1133` (vprlab1); the return accepts are conntrack-scoped.  Plan tests assert the ordering (`test_leak_lab.py:4820-4868`). |
+| Pi M-L — PASS probe object with a read problem | A PASS probe report is downgraded to INVALID `probe_log_read_quality` when the final read was not exact; LEAK still wins (`vm/run_phase.py:4740-4747`).  Test: `test_vm.py:6977`. |
+| Pi M-M — no `AdvertiseRoutes` check | `tailscale debug prefs` is read and a non-empty `AdvertiseRoutes` is refused (`vm/run_phase.py:2917-2948`), in both the traffic and login paths (`:4218`, `:4150`).  Test: `test_vm.py:6994`. |
+| Pi M-F — runtime nft rule verification | **Skipped: deferred by controller decision 8**, consistent with the router path.  The generated-plan tests and the live table/chain/ownership checks remain; a modified plan is still caught by review and the plan tests. |
+| Opus N-6 — nft source scoping did nothing | Addressed by decision 6: explicit drops after the scoped accepts for both bridges, so the `policy accept` base chain no longer accepts unscoped forwarded packets.  Runtime rule verification stays deferred (Pi M-F). |
+
+### Interpretation notes
+
+- The leak latch is keyed to the phase log, not to a matching `r`: a
+  well-formed non-Mullvad success in this run's (cleared, launch-bound) log is
+  LEAK even if its `r` is foreign.  A foreign `r` is additionally
+  `probe_run_mismatch` / INVALID, but INVALID never masks the leak.  This is
+  the conservative reading of "LEAK is never masked".
+- The 30 s minimum applies to every `--client` invocation, including
+  `client-login` (controller decision 2 wording), not only phases with a
+  traffic hold.
+
+## Regression checks against `605cce8`
+
+An extracted `git archive 605cce8` tree was used to rerun the new phase-level
+reproducers (new `vm/test_vm.py` against the old code; only the
+`CLIENT_LOGIN_UNIT` constant was added so the shared fake imports, no behaviour
+changed).  All six fail on `605cce8` and pass on the fixed tree:
+
+| Reproducer | `605cce8` | Fixed |
+|---|---|---|
+| GPT C1 failed stop, leak on the later cleanup stop | exit 0 PASS | LEAK, `client_traffic_stop_failed`, snapshot untrusted |
+| Stop returns 0 while the unit stays active | exit 0 PASS | INVALID, `client_traffic_stop_failed` |
+| GPT I1/Opus N-1/Pi M-N pre-fault leak + failed final read | exit 2 INVALID | LEAK |
+| GPT I1 nonzero `cat` with a readable leak | exit 2 INVALID | LEAK |
+| Opus N-2 exit node switches at the end of the hold | exit 0 PASS | INVALID, `client_exit_node_lost` |
+| Pi I-1 frozen clock + silent active unit | exit 0 PASS | INVALID, zero post-fault attempts |
+
+Parser reproducer (old API): the same-second pair with
+`fault_epoch=post_fault_epoch=100`, clock 99..105 returns **PASS** on
+`605cce8`; the new sequence-bound evaluator returns INVALID.  The old
+unordered-clock fixture (`fault_epoch=103`, `post_fault_epoch=100`) also
+returns PASS on `605cce8`; the new evaluator returns `probe_clock_order`.
+Host-safety reproducers: on `605cce8` the un-scoped plan has no decision-6
+drops (`test_client_plan_...` fails), a no-client teardown with old-owner
+client residue exits 0 (`test_teardown_refuses_...` fails), and a missing
+`vprlab1` aborts teardown on `Cannot find device`
+(`test_teardown_tolerates_...` fails).  All three pass on the fixed tree.
+
+## Tests run (all pass)
+
+From `tools/leak-lab`:
+
+- `python3 -B -W error -m unittest test_leak_lab` — **329 tests, OK**
+  (was 320)
+- `python3 -B -W error -m unittest vm.test_vm` — **266 tests, OK**
+  (was 252)
+- `python3 -B -m py_compile` on `clientprobe.py`, `clientscan.py`,
+  `netplan.py`, `vm/guest.py`, `vm/provision.py`, `vm/run_phase.py`,
+  `vm/test_vm.py`, `test_leak_lab.py` — OK
+- `sh -n` on rendered no-client and `--client 1` plans — OK
+- `git diff --check` — OK
+
+Router-only verification: AST comparison against `605cce8` shows
+`_run_phase_locked`, `scan_evidence`, `start_capture`, `stop_capture`,
+`run_phase`, `run_router_fault` and `wait_router_ready` unchanged;
+`login_phase_wait`, `check_admission` and `combine_verdicts` changed only by
+defaults/default-off keywords.  The host plan changes are the decision-6
+scoped accepts/drops and the decision-6 teardown/neighbour helpers.
+
+## Updated operator commands
+
+The probe-log CLI now also requires the two sequence boundaries and the hold
+length:
+
+```sh
+python3 -B tools/leak-lab/clientprobe.py --probe-log <file> \
+  --fault-epoch <guest-sec> --post-fault-epoch <guest-sec> \
+  --fault-sequence <s> --end-sequence <s> --hold-seconds <n> \
+  --clock-start <guest-sec> --clock-stop <guest-sec> --run-id <32 hex>
+```
+
+A client phase (including `client-login`) needs at least 30 s:
+
+```sh
+python3 -B tools/leak-lab/vm/run_phase.py \
+  --phase idle --client 1 --duration 120 --index 1 \
+  --profile-file /root/vprouter-lab.conf \
+  --used-nonces /root/leaklab-used-nonces.txt
+
+python3 -B tools/leak-lab/vm/run_phase.py \
+  --phase client-login --client 1 --duration 900 \
+  --used-nonces /root/leaklab-used-nonces.txt
+```
+
+Host plan: `--client N` still creates the client objects; the forward chain
+now has the decision-6 drops, and teardown refuses old-owner client residue:
+
+```sh
+python3 -B tools/leak-lab/netplan.py \
+  --wan-interface <wan> --client 1 > /root/vprlab-lab.sh
+sh /root/vprlab-lab.sh setup
+# ... phases ...
+sh /root/vprlab-lab.sh teardown
+```

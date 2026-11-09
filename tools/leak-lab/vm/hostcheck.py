@@ -16,6 +16,9 @@ from typing import Any
 
 from guest import (
     BRIDGE,
+    CLIENT_BRIDGE,
+    CLIENT_BRIDGE_MAC,
+    CLIENT_GATEWAY_IPV4,
     GATEWAY_IPV4,
     GATEWAY_MAC,
     QEMU_USER,
@@ -321,6 +324,124 @@ def verify_host_network(
                 )
             if "PERMANENT" not in _decode(permanent.get("state")):
                 problems.append(f"host neighbor for {vm_ipv4} is not PERMANENT")
+    return problems
+
+
+def verify_client_network(
+    links_document: object,
+    neighbor_document: object,
+    *,
+    addresses_document: object = None,
+    owner_token: str | None = None,
+    owner_tag: str | None = None,
+    bridge: str = CLIENT_BRIDGE,
+    bridge_mac: str = CLIENT_BRIDGE_MAC,
+    gateway_ipv4: str = CLIENT_GATEWAY_IPV4,
+    taps: dict[str, tuple[str, str]] | None = None,
+    tap_user: str | None = QEMU_USER,
+) -> list[str]:
+    """Return every problem with the M3 client bridge and its taps.
+
+    ``taps`` maps a tap name to ``(client IPv4, client MAC)`` and is required
+    for every client that is expected to be configured.  The same exact
+    ownership rule as the router bridge applies: every existing object must
+    carry ``vprlab-owned:<token>``.
+    """
+    problems: list[str] = []
+    links = _links(links_document)
+    if owner_token is not None:
+        expected_ifalias = expected_owner_tag(owner_token)
+    elif owner_tag is not None:
+        expected_ifalias = owner_tag
+    else:
+        expected_ifalias = None
+        problems.append("owner token is required to verify the client network")
+    taps = dict(taps or {})
+
+    bridge_entry = links.get(bridge)
+    if bridge_entry is None:
+        problems.append(f"client bridge {bridge} is missing")
+    else:
+        if _link_kind(bridge_entry) != "bridge":
+            problems.append(f"{bridge} is not a bridge")
+        if str(bridge_entry.get("address", "")).lower() != bridge_mac:
+            problems.append(
+                f"{bridge} MAC is not the fixed client gateway MAC {bridge_mac}"
+            )
+        if "UP" not in _decode(bridge_entry.get("flags")):
+            problems.append(f"{bridge} is not up")
+        if (
+            expected_ifalias is not None
+            and bridge_entry.get("ifalias") != expected_ifalias
+        ):
+            problems.append(f"{bridge} does not carry the lab ownership ifalias")
+        addresses = None
+        if addresses_document is not None and isinstance(addresses_document, list):
+            for entry in addresses_document:
+                if (
+                    isinstance(entry, dict)
+                    and entry.get("ifname") == bridge
+                    and isinstance(entry.get("addr_info"), list)
+                ):
+                    addresses = entry["addr_info"]
+                    break
+        if addresses is None:
+            addresses = bridge_entry.get("addr_info")
+        expected = {"family": "inet", "local": gateway_ipv4, "prefixlen": 24}
+        if not isinstance(addresses, list) or not any(
+            isinstance(address, dict)
+            and all(address.get(key) == value for key, value in expected.items())
+            for address in addresses
+        ):
+            problems.append(f"{bridge} does not carry {gateway_ipv4}/24")
+
+    for tap, (client_ipv4, client_mac) in sorted(taps.items()):
+        tap_entry = links.get(tap)
+        if tap_entry is None:
+            problems.append(f"client tap {tap} is missing")
+            continue
+        if not _is_tap(tap_entry):
+            problems.append(f"{tap} is not a tap")
+        if "UP" not in _decode(tap_entry.get("flags")):
+            problems.append(f"{tap} is not up")
+        if (
+            expected_ifalias is not None
+            and tap_entry.get("ifalias") != expected_ifalias
+        ):
+            problems.append(f"{tap} does not carry the lab ownership ifalias")
+        if tap_entry.get("master") != bridge:
+            problems.append(f"{tap} is not enslaved to {bridge}")
+        if tap_user is not None:
+            problem = validate_tap_owner(tap_entry, tap_user)
+            if problem is not None:
+                problems.append(problem)
+        if not isinstance(neighbor_document, list):
+            problems.append("ip -j neigh output must be a JSON array")
+            break
+        permanent = next(
+            (
+                entry
+                for entry in neighbor_document
+                if isinstance(entry, dict)
+                and entry.get("dst") == client_ipv4
+                and entry.get("dev") == bridge
+            ),
+            None,
+        )
+        if permanent is None:
+            problems.append(
+                f"host static neighbor for {client_ipv4} on {bridge} is missing"
+            )
+        else:
+            if str(permanent.get("lladdr", "")).lower() != client_mac:
+                problems.append(
+                    f"host neighbor for {client_ipv4} does not use the client MAC "
+                    f"{client_mac}"
+                )
+            if "PERMANENT" not in _decode(permanent.get("state")):
+                problems.append(
+                    f"host neighbor for {client_ipv4} is not PERMANENT"
+                )
     return problems
 
 

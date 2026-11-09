@@ -14,6 +14,7 @@ round-2 gpt/opus/pi identifiers).
 from __future__ import annotations
 
 import json
+import io
 import os
 import pathlib
 import re
@@ -37,6 +38,8 @@ if str(VM_TOOLS) not in sys.path:
     sys.path.insert(0, str(VM_TOOLS))
 
 import control  # noqa: E402
+import clientprobe  # noqa: E402
+import clientscan  # noqa: E402
 import hostcheck  # noqa: E402
 import netplan  # noqa: E402
 import pcapscan  # noqa: E402
@@ -4754,6 +4757,507 @@ class IcmpQuoteAllowanceTests(unittest.TestCase):
         report = self._scan(icmp)
         self.assertEqual(report["verdict"], "LEAK")
         self.assertEqual(report["allowed_icmp_quotes"], {})
+
+
+class ClientTsnamesTests(unittest.TestCase):
+    def test_client_names_are_fixed_and_validated(self) -> None:
+        self.assertEqual(tsnames.generate_client(1), "zz-vprclient-01-do-not-use")
+        self.assertEqual(tsnames.generate_client(99), "zz-vprclient-99-do-not-use")
+        self.assertTrue(tsnames.is_client_node("zz-vprclient-01-do-not-use"))
+        self.assertEqual(tsnames.client_index("zz-vprclient-07-do-not-use"), 7)
+        for bad in (
+            "zz-vprclient-1-do-not-use",
+            "zz-vprclient-01-do-not-use-extra",
+            "zz-vprclient-00-do-not-use",
+            "zz-vprclient-100-do-not-use",
+            "zz-vprtest-01-do-not-use",
+            "zz-vprclient-01-do-not-use.tailnet.ts.net",
+        ):
+            with self.subTest(bad=bad):
+                self.assertFalse(tsnames.is_client_node(bad))
+                self.assertIsNone(tsnames.client_index(bad))
+        for index in (0, 100, True, "1"):
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                tsnames.generate_client(index)
+        self.assertFalse(tsnames.is_test_node("zz-vprclient-01-do-not-use"))
+        self.assertFalse(tsnames.is_client_node("zz-vprtest-01-do-not-use"))
+        with redirect_stdout(StringIO()):
+            self.assertEqual(tsnames.main(["--client-index", "3"]), 0)
+            self.assertEqual(
+                tsnames.main(["--check-client", "zz-vprclient-03-do-not-use"]), 0
+            )
+            self.assertEqual(
+                tsnames.main(["--check-client", "zz-vprtest-03-do-not-use"]), 1
+            )
+
+
+class ClientNetplanTests(unittest.TestCase):
+    def test_client_plan_has_the_client_bridge_tap_rules_and_nat(self) -> None:
+        plan = netplan.render_plan("eth0", clients=(1,))
+        for expected in (
+            "ip link add vprlab1 type bridge",
+            "ip link set vprlab1 address 52:54:00:76:71:01",
+            "ip tuntap add dev vprlab-ctap1 mode tap user vprlab-qemu",
+            "ip link set dev vprlab-ctap1 master vprlab1",
+            "sysctl -w net.ipv6.conf.vprlab1.disable_ipv6=1",
+            "sysctl -w net.ipv6.conf.vprlab-ctap1.disable_ipv6=1",
+            "ip addr add 10.251.0.1/24 dev vprlab1",
+            "ip neigh replace 10.251.0.2 lladdr 52:54:00:76:71:02 dev vprlab1 nud permanent",
+            'nft add rule inet vprlab input iifname "vprlab1" drop',
+            'nft add rule inet vprlab postrouting ip saddr 10.251.0.0/24 iifname "vprlab1" oifname "eth0" masquerade',
+            'nft add rule inet vprlab forward iifname "vprlab1" oifname "eth0" accept',
+            'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab1" accept',
+            f"iptables -I DOCKER-USER -i vprlab1 -o eth0 -s 10.251.0.0/24",
+            "delete_link \"vprlab-ctap1\" tun",
+            "delete_link \"vprlab1\" bridge",
+        ):
+            self.assertIn(expected, plan)
+        # The explicit vprlab0 <-> vprlab1 drop exists in both directions.
+        self.assertIn(
+            'nft add rule inet vprlab forward iifname "vprlab0" oifname "vprlab1" drop',
+            plan,
+        )
+        self.assertIn(
+            'nft add rule inet vprlab forward iifname "vprlab1" oifname "vprlab0" drop',
+            plan,
+        )
+        # Protections exist before the client links come up.
+        self.assertLess(
+            plan.index('nft add rule inet vprlab forward iifname "vprlab1" oifname "vprlab0" drop'),
+            plan.index("ip link set vprlab-ctap1 up"),
+        )
+        self.assertLess(
+            plan.index("iptables -I DOCKER-USER -i vprlab1"),
+            plan.index("ip link set vprlab1 up"),
+        )
+
+    def test_router_plan_is_unchanged_without_clients(self) -> None:
+        plan = netplan.render_plan("eth0")
+        for absent in ("vprlab1", "vprlab-ctap", "10.251.0"):
+            self.assertNotIn(absent, plan)
+        self.assertIn("ip link add vprlab0 type bridge", plan)
+        self.assertNotIn("@@", plan)
+
+    def test_teardown_verifies_client_objects_before_mutation(self) -> None:
+        plan = netplan.render_plan("eth0", clients=(1,))
+        teardown = plan.split("# --- 4. teardown ---", 1)[1]
+        verify_function = plan.split("verify_ownership() {", 1)[1].split(
+            "\nisolate_tap() {", 1
+        )[0]
+        for needle in (
+            'link_owned "vprlab-ctap1" tun',
+            'link_owned "vprlab1" bridge',
+            'client_neigh_ok 10.251.0.2 vprlab1 52:54:00:76:71:02',
+        ):
+            self.assertIn(needle, verify_function)
+        self.assertNotIn("ip link set", verify_function)
+        self.assertNotIn("nft delete", verify_function)
+        verify_call = teardown.index("if ! verify_ownership; then")
+        client_isolation = teardown.index("if ! isolate_client_taps; then")
+        self.assertLess(verify_call, client_isolation)
+        self.assertIn('ip neigh del 10.251.0.2 dev vprlab1', teardown)
+        self.assertIn("remove_docker_spec -i vprlab1", teardown)
+
+    def test_collision_check_covers_client_names_and_subnet(self) -> None:
+        links = json.dumps([{"ifname": "vprlab1"}, {"ifname": "eth0", "altnames": ["vprlab-ctap1"]}])
+        addresses = json.dumps([{"ifname": "eth0", "addr_info": [
+            {"family": "inet", "local": "10.251.0.7", "prefixlen": 24}
+        ]}])
+        routes = json.dumps([])
+        tables = json.dumps({"nftables": []})
+        collisions = netplan.check_name_collisions(
+            links, addresses, routes, tables, "eth0", clients=(1,)
+        )
+        self.assertTrue(any("vprlab1" in item for item in collisions))
+        self.assertTrue(any("vprlab-ctap1" in item for item in collisions))
+        self.assertTrue(any("10.251.0.0/24" in item for item in collisions))
+        # Without clients the same inventories are clean for the router lab.
+        self.assertEqual(
+            netplan.check_name_collisions(links, addresses, routes, tables, "eth0"),
+            [],
+        )
+
+    def test_client_capture_argv_is_bound_to_the_client_tap(self) -> None:
+        argv = netplan.capture_argv("/e/client.pcap", "vprlab-ctap1")
+        self.assertEqual(argv[argv.index("-i") + 1], "vprlab-ctap1")
+        self.assertIsNone(
+            netplan.check_capture_argv(argv, "/e/client.pcap", interface="vprlab-ctap1")
+        )
+        router_argv = netplan.capture_argv("/e/client.pcap")
+        self.assertEqual(
+            netplan.check_capture_argv(
+                router_argv, "/e/client.pcap", interface="vprlab-ctap1"
+            ),
+            "capture_argv_mismatch",
+        )
+        with self.assertRaises(netplan.NetplanError):
+            netplan.capture_argv("/e/client.pcap", "vprlab-ctap10")
+
+    def test_generated_client_setup_and_teardown_run_under_stubs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            result, log, state, owner_path = NetplanTests._run_lab(
+                self,
+                root,
+                netplan.render_plan("eth0", clients=(1,)),
+                {},
+                args=("setup",),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("vprlab1", state["links"])
+            self.assertIn("vprlab-ctap1", state["links"])
+            self.assertEqual(state["links"]["vprlab1"]["address"], netplan.CLIENT_BRIDGE_MAC)
+            self.assertEqual(state["neigh"]["10.251.0.2"]["lladdr"], "52:54:00:76:71:02")
+            self.assertTrue(any("vprlab1" in rule for rule in state["rules"]))
+            self.assertTrue(owner_path.exists())
+
+            second = tempfile.TemporaryDirectory()
+            self.addCleanup(second.cleanup)
+            teardown_root = pathlib.Path(second.name)
+            (teardown_root / "run").mkdir()
+            (teardown_root / "run" / "owner.json").write_bytes(
+                owner_path.read_bytes()
+            )
+            result, _log, state_after, owner_after = NetplanTests._run_lab(
+                self,
+                teardown_root,
+                netplan.render_plan("eth0", clients=(1,)),
+                state,
+                args=("teardown",),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("vprlab1", state_after["links"])
+            self.assertNotIn("vprlab-ctap1", state_after["links"])
+            self.assertNotIn("10.251.0.2", state_after["neigh"])
+            self.assertEqual(state_after["rules"], [])
+            self.assertFalse(owner_after.exists())
+
+
+class ClientHostcheckTests(unittest.TestCase):
+    def _documents(self):
+        owner = "vprlab-owned:" + "a" * 32
+        links = [
+            {
+                "ifname": "vprlab1",
+                "address": "52:54:00:76:71:01",
+                "flags": ["UP"],
+                "ifalias": owner,
+                "addr_info": [
+                    {"family": "inet", "local": "10.251.0.1", "prefixlen": 24}
+                ],
+                "linkinfo": {"info_kind": "bridge", "info_data": {}},
+            },
+            {
+                "ifname": "vprlab-ctap1",
+                "flags": ["UP"],
+                "ifalias": owner,
+                "master": "vprlab1",
+                "linkinfo": {"info_kind": "tun", "info_data": {"type": "tap"}},
+            },
+        ]
+        neighbors = [
+            {
+                "dst": "10.251.0.2",
+                "dev": "vprlab1",
+                "lladdr": "52:54:00:76:71:02",
+                "state": ["PERMANENT"],
+            }
+        ]
+        return links, neighbors, owner
+
+    def test_valid_client_network_has_no_problems(self) -> None:
+        links, neighbors, owner = self._documents()
+        self.assertEqual(
+            hostcheck.verify_client_network(
+                links,
+                neighbors,
+                owner_token=owner[13:],
+                taps={"vprlab-ctap1": ("10.251.0.2", "52:54:00:76:71:02")},
+            ),
+            [],
+        )
+
+    def test_every_client_field_mutation_is_refused(self) -> None:
+        links, neighbors, owner = self._documents()
+        token = owner[13:]
+        mutations = []
+        import copy
+
+        bad = copy.deepcopy(links)
+        bad[0]["ifalias"] = "foreign"
+        mutations.append(("bridge alias", bad, neighbors))
+        bad = copy.deepcopy(links)
+        bad[1]["master"] = "vprlab0"
+        mutations.append(("tap master", bad, neighbors))
+        bad = copy.deepcopy(links)
+        bad[1]["linkinfo"]["info_data"]["type"] = "tun"
+        mutations.append(("tap kind", bad, neighbors))
+        bad = copy.deepcopy(neighbors)
+        bad[0]["lladdr"] = "52:54:00:76:71:03"
+        mutations.append(("neigh mac", links, bad))
+        bad = copy.deepcopy(neighbors)
+        bad[0]["state"] = ["REACHABLE"]
+        mutations.append(("neigh state", links, bad))
+        for name, link_doc, neighbor_doc in mutations:
+            with self.subTest(case=name):
+                problems = hostcheck.verify_client_network(
+                    link_doc,
+                    neighbor_doc,
+                    owner_token=token,
+                    taps={"vprlab-ctap1": ("10.251.0.2", "52:54:00:76:71:02")},
+                )
+                self.assertTrue(problems, name)
+        missing = hostcheck.verify_client_network(
+            links,
+            neighbors,
+            owner_token=token,
+            taps={"vprlab-ctap2": ("10.251.0.3", "52:54:00:76:71:03")},
+        )
+        self.assertTrue(any("vprlab-ctap2" in problem for problem in missing))
+
+
+CLIENT_TAP = "vprlab-ctap1"
+CLIENT_IP = "10.251.0.2"
+CLIENT_MAC = "52:54:00:76:71:02"
+CLIENT_GW = "10.251.0.1"
+CLIENT_GW_MAC = "52:54:00:76:71:01"
+CLIENT_MARKER = "VPRCLIENTMARK1:" + "ab" * 16
+
+
+def client_control_frame(nonce, **kwargs):
+    payload = b"VPRLEAKCTL1:" + nonce.encode("ascii")
+    return ipv4_frame(
+        udp_segment(40000, 39001, payload),
+        src_ip=CLIENT_IP,
+        dst_ip=CLIENT_GW,
+        src_mac=CLIENT_MAC,
+        dst_mac=CLIENT_GW_MAC,
+        **kwargs,
+    )
+
+
+def client_stats_text(count, *, interface=CLIENT_TAP, captured=None, received=None,
+                      kernel=0, interface_drops=0):
+    if captured is None:
+        captured = count
+    if received is None:
+        received = captured
+    lines = [
+        f"tcpdump: listening on {interface}, link-type EN10MB (Ethernet), "
+        "snapshot length 262144 bytes",
+        f"{captured} packets captured",
+        f"{received} packets received by filter",
+        f"{kernel} packets dropped by kernel",
+    ]
+    if interface_drops:
+        lines.append(f"{interface_drops} packets dropped by interface")
+    return "\n".join(lines) + "\n"
+
+
+def scan_client(
+    frames,
+    router_frames=None,
+    *,
+    stats=None,
+    before=NONCE_A,
+    after=NONCE_B,
+    marker=CLIENT_MARKER,
+    argv=None,
+    path="/e/client-capture.pcap",
+):
+    if router_frames is None:
+        router_frames = [wg_outbound()]
+    if stats is None:
+        stats = client_stats_text(len(frames))
+    if argv is None:
+        argv = netplan.capture_argv(path, CLIENT_TAP)
+    return clientscan.scan_client_capture(
+        io.BytesIO(pcap(frames)),
+        io.BytesIO(pcap(router_frames)),
+        interface=CLIENT_TAP,
+        marker=marker,
+        control_before=before,
+        control_after=after,
+        client_stats_text=stats,
+        client_capture_argv=argv,
+        client_pcap_path=path,
+    )
+
+
+class ClientScanTests(unittest.TestCase):
+    def _marker_frame(self, **kwargs):
+        values = dict(
+            src_ip=CLIENT_IP,
+            dst_ip="93.184.216.34",
+            src_mac=CLIENT_MAC,
+            dst_mac=CLIENT_GW_MAC,
+        )
+        values.update(kwargs)
+        return ipv4_frame(
+            udp_segment(50000, 80, b"GET /?vprlab=" + CLIENT_MARKER.encode()),
+            **values,
+        )
+
+    def test_clean_client_capture_passes(self) -> None:
+        report = scan_client(
+            [client_control_frame(NONCE_A), client_control_frame(NONCE_B)]
+        )
+        self.assertEqual(report["verdict"], "PASS", report["capture_meta"]["invalid_reasons"])
+        self.assertEqual(report["controls"]["before"]["packets"], 1)
+        self.assertEqual(report["controls"]["after"]["packets"], 1)
+
+    def test_marker_in_clear_is_leak_before_inside_and_after_the_window(self) -> None:
+        cases = {
+            "before controls": [self._marker_frame(), client_control_frame(NONCE_A), client_control_frame(NONCE_B)],
+            "inside window": [client_control_frame(NONCE_A), self._marker_frame(), client_control_frame(NONCE_B)],
+            "after controls": [client_control_frame(NONCE_A), client_control_frame(NONCE_B), self._marker_frame()],
+        }
+        for name, frames in cases.items():
+            with self.subTest(case=name):
+                report = scan_client(frames)
+                self.assertEqual(report["verdict"], "LEAK", name)
+                self.assertEqual(report["findings"][0]["reason"], "marker_in_clear")
+
+    def test_marker_on_the_router_tap_is_leak(self) -> None:
+        router = [self._marker_frame(src_mac=VM_MAC, dst_mac=GW_MAC)]
+        report = scan_client(
+            [client_control_frame(NONCE_A), client_control_frame(NONCE_B)],
+            router_frames=router,
+        )
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertEqual(report["marker_occurrences"][0]["capture"], "router")
+
+    def test_marker_split_across_two_frames_is_out_of_scope(self) -> None:
+        first = CLIENT_MARKER[:12].encode()
+        second = CLIENT_MARKER[12:].encode()
+        frames = [
+            client_control_frame(NONCE_A),
+            ipv4_frame(udp_segment(50000, 80, first), src_ip=CLIENT_IP,
+                       dst_ip="93.184.216.34", src_mac=CLIENT_MAC, dst_mac=CLIENT_GW_MAC),
+            ipv4_frame(udp_segment(50000, 80, second), src_ip=CLIENT_IP,
+                       dst_ip="93.184.216.34", src_mac=CLIENT_MAC, dst_mac=CLIENT_GW_MAC),
+            client_control_frame(NONCE_B),
+        ]
+        report = scan_client(frames)
+        self.assertEqual(report["verdict"], "PASS", report["capture_meta"]["invalid_reasons"])
+
+    def test_missing_controls_are_invalid(self) -> None:
+        report = scan_client([client_control_frame(NONCE_A)])
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("missing_client_controls", report["capture_meta"]["invalid_reasons"])
+
+    def test_out_of_order_controls_are_invalid(self) -> None:
+        report = scan_client([client_control_frame(NONCE_B), client_control_frame(NONCE_A)])
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("client_control_order", report["capture_meta"]["invalid_reasons"])
+
+    def test_replayed_control_is_leak(self) -> None:
+        report = scan_client(
+            [client_control_frame(NONCE_A), client_control_frame(NONCE_A),
+             client_control_frame(NONCE_B)]
+        )
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("client_control_replayed", [f["reason"] for f in report["findings"]])
+
+    def test_drops_and_banner_mismatch_are_invalid(self) -> None:
+        frames = [client_control_frame(NONCE_A), client_control_frame(NONCE_B)]
+        report = scan_client(frames, stats=client_stats_text(2, kernel=1))
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("packet_drops", report["capture_meta"]["invalid_reasons"])
+        report = scan_client(frames, stats=client_stats_text(2, interface="vprlab-tap0"))
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("capture_banner_mismatch", report["capture_meta"]["invalid_reasons"])
+
+    def test_stats_count_must_equal_the_record_count(self) -> None:
+        frames = [client_control_frame(NONCE_A), client_control_frame(NONCE_B)]
+        report = scan_client(frames, stats=client_stats_text(3))
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("stats_packet_count_mismatch", report["capture_meta"]["invalid_reasons"])
+
+    def test_client_capture_argv_must_name_the_client_tap(self) -> None:
+        frames = [client_control_frame(NONCE_A), client_control_frame(NONCE_B)]
+        report = scan_client(
+            frames, argv=netplan.capture_argv("/e/client-capture.pcap")
+        )
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("capture_argv_mismatch", report["capture_meta"]["invalid_reasons"])
+
+    def test_router_zero_packets_is_invalid(self) -> None:
+        frames = [client_control_frame(NONCE_A), client_control_frame(NONCE_B)]
+        report = scan_client(frames, router_frames=[])
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("router_zero_packets", report["capture_meta"]["invalid_reasons"])
+
+
+class ClientProbeTests(unittest.TestCase):
+    def line(self, payload):
+        return json.dumps(payload, separators=(",", ":")).encode() + b"\n"
+
+    def test_ok_with_mullvad_true_is_pass(self) -> None:
+        data = self.line({"t": 100, "k": "exit", "ok": True, "m": True})
+        report = clientprobe.evaluate_probe_log(data, fault_epoch=200)
+        self.assertEqual(report["verdict"], "PASS")
+        self.assertTrue(report["pre_fault_mullvad"])
+        self.assertEqual(report["counts"]["exit"]["before"]["mullvad"], 1)
+
+    def test_ok_with_mullvad_false_is_leak(self) -> None:
+        data = (
+            self.line({"t": 100, "k": "exit", "ok": True, "m": True})
+            + self.line({"t": 150, "k": "exit", "ok": True, "m": False})
+        )
+        report = clientprobe.evaluate_probe_log(data, fault_epoch=200)
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("client_real_ip", report["reason"])
+
+    def test_ok_with_null_mullvad_is_leak(self) -> None:
+        data = (
+            self.line({"t": 100, "k": "exit", "ok": True, "m": True})
+            + self.line({"t": 150, "k": "exit", "ok": True, "m": None})
+        )
+        report = clientprobe.evaluate_probe_log(data, fault_epoch=200)
+        self.assertEqual(report["verdict"], "LEAK")
+
+    def test_no_pre_fault_mullvad_success_is_invalid(self) -> None:
+        data = self.line({"t": 300, "k": "exit", "ok": True, "m": True})
+        report = clientprobe.evaluate_probe_log(data, fault_epoch=200)
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertEqual(report["reason"], "client_not_routed")
+        self.assertEqual(report["counts"]["exit"]["after"]["mullvad"], 1)
+
+    def test_failures_only_after_the_fault_are_pass(self) -> None:
+        data = (
+            self.line({"t": 100, "k": "exit", "ok": True, "m": True})
+            + self.line({"t": 300, "k": "exit", "ok": False, "m": None})
+            + self.line({"t": 301, "k": "marker", "ok": False})
+        )
+        report = clientprobe.evaluate_probe_log(data, fault_epoch=200)
+        self.assertEqual(report["verdict"], "PASS")
+        self.assertEqual(report["counts"]["exit"]["after"]["failed"], 1)
+
+    def test_malformed_and_duplicate_key_lines_are_invalid(self) -> None:
+        for data in (
+            b'not json\n',
+            b'{"t":1,"k":"exit","ok":true,"m":true,"extra":1}\n',
+            b'{"t":1,"t":2,"k":"exit","ok":true,"m":true}\n',
+            b'{"t":true,"k":"exit","ok":true,"m":true}\n',
+            b'{"t":1,"k":"exit","ok":1,"m":true}\n',
+            b'{"t":1,"k":"bogus","ok":true}\n',
+        ):
+            with self.subTest(data=data):
+                report = clientprobe.evaluate_probe_log(data)
+                self.assertEqual(report["verdict"], "INVALID")
+                self.assertEqual(report["reason"], "probe_log_malformed")
+
+    def test_oversized_log_and_line_are_invalid(self) -> None:
+        report = clientprobe.evaluate_probe_log(b"x" * (1024 * 1024 + 1))
+        self.assertEqual(report["verdict"], "INVALID")
+        report = clientprobe.evaluate_probe_log(b"x" * 5000 + b"\n")
+        self.assertEqual(report["verdict"], "INVALID")
+
+    def test_marker_prefix_is_fixed(self) -> None:
+        self.assertTrue(clientprobe.is_marker(CLIENT_MARKER))
+        self.assertFalse(clientprobe.is_marker("VPRCLIENTMARK1:" + "A" * 32))
+        self.assertFalse(clientprobe.is_marker("VPRLEAKCTL1:" + "a" * 32))
 
 
 class TestFileLayoutTests(unittest.TestCase):

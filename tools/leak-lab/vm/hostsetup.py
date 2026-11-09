@@ -83,6 +83,8 @@ RUN_ROOT = "/run/vprlab"
 #: Runtime modules installed below ``LEAKLAB_ROOT``.  They are the only files
 #: ``run_phase.py`` is allowed to execute as the scanner.
 LEAK_LAB_FILES = (
+    "clientprobe.py",
+    "clientscan.py",
     "control.py",
     "netplan.py",
     "pcapscan.py",
@@ -272,6 +274,26 @@ def check_layout(
         parsed = _mode_text(record.get("mode"))
         if parsed != 0o700:
             problems.append(f"{vm_path} mode is not 0700")
+
+    # M3 client state (client-NNN) follows the same ownership rule whenever it
+    # is present; provisioning creates it exclusively.
+    for path, record in stats.items():
+        if not isinstance(path, str) or re.fullmatch(
+            re.escape(STATE_ROOT) + r"/client-[0-9]{3}", path
+        ) is None:
+            continue
+        if not isinstance(record, dict):
+            problems.append(f"{path} record is not an object")
+            continue
+        if record.get("type") != "dir":
+            problems.append(f"{path} is not a directory")
+            continue
+        if qemu_uid is not None and record.get("uid") != qemu_uid:
+            problems.append(f"{path} is not owned by the QEMU user")
+        if qemu_gid is not None and record.get("gid") != qemu_gid:
+            problems.append(f"{path} is not in the QEMU user's group")
+        if _mode_text(record.get("mode")) != 0o700:
+            problems.append(f"{path} mode is not 0700")
 
     for path, record in stats.items():
         if not isinstance(path, str):
@@ -498,6 +520,7 @@ teardown() {{
   fi
   rm -rf -- "$IMAGES_ROOT" "$TOOLS_ROOT"
   rm -rf -- "$STATE_ROOT"/vm-[0-9][0-9][0-9]
+  rm -rf -- "$STATE_ROOT"/client-[0-9][0-9][0-9]
   for index in $INDICES; do
     suffix=$(printf '%03d' "$index")
     rm -rf -- "$STATE_ROOT/vm-$suffix"

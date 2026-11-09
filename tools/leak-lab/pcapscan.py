@@ -109,6 +109,25 @@ _STATS_BANNER_RE = re.compile(
 )
 _STATS_BANNER_LIKE_RE = re.compile(r"listening on", re.IGNORECASE)
 
+
+def stats_banner_re(interface: str = "vprlab-tap0") -> re.Pattern[str]:
+    """Return the exact banner pattern for one lab capture interface.
+
+    The interface is a fixed lab constant (``vprlab-tap0`` or
+    ``vprlab-ctapN``); it is interpolated into a regular expression, so it is
+    refused unless it has the fixed lab shape.
+    """
+    if not isinstance(interface, str) or re.fullmatch(
+        r"vprlab-(?:c?tap[0-9]{1,2})", interface
+    ) is None:
+        raise ValueError("capture interface must be vprlab-tap0 or vprlab-ctapN")
+    return re.compile(
+        r"^tcpdump: listening on "
+        + re.escape(interface)
+        + r", link-type EN10MB \(Ethernet\)"
+        r"(?:, snapshot length [0-9]+ bytes)?$"
+    )
+
 #: Expected tunnel evidence values for ``--expect-tunnel``.
 EXPECT_TUNNEL_VALUES = ("up", "down", "any")
 
@@ -240,24 +259,27 @@ def _proto_name(protocol: int) -> str:
     return "ipv4"
 
 
-def check_stats_banner(text: str) -> bool:
+def check_stats_banner(text: str, interface: str = "vprlab-tap0") -> bool:
     """Validate the capture banner line as a whole.
 
-    tcpdump writes exactly one ``listening on vprlab-tap0, link-type EN10MB
+    tcpdump writes exactly one ``listening on <interface>, link-type EN10MB
     (Ethernet), snapshot length ...`` line and it is the first non-empty line
     of stderr.  A banner for another interface/link type, a banner that is not
     first, or any additional ``listening on`` line (including the same banner
     repeated or a foreign line containing that text) fails provenance.
     """
+    pattern = stats_banner_re(interface)
     nonempty = [line.strip() for line in text.splitlines() if line.strip()]
     if not nonempty:
         return False
-    if _STATS_BANNER_RE.fullmatch(nonempty[0]) is None:
+    if pattern.fullmatch(nonempty[0]) is None:
         return False
     return not any(_STATS_BANNER_LIKE_RE.search(line) for line in nonempty[1:])
 
 
-def parse_tcpdump_stats(text: str) -> tuple[dict[str, int | None], str | None]:
+def parse_tcpdump_stats(
+    text: str, interface: str = "vprlab-tap0"
+) -> tuple[dict[str, int | None], str | None]:
     """Parse every tcpdump 4.99 stderr summary line.
 
     Returns ``(stats, problem)``.  A non-empty ``problem`` is an INVALID reason.
@@ -289,6 +311,7 @@ def parse_tcpdump_stats(text: str) -> tuple[dict[str, int | None], str | None]:
     any_drop = False
     error_line = False
     shape_problem = False
+    banner_pattern = stats_banner_re(interface)
 
     def flush() -> None:
         nonlocal current, current_conflict
@@ -301,7 +324,7 @@ def parse_tcpdump_stats(text: str) -> tuple[dict[str, int | None], str | None]:
         stripped = line.strip()
         if not stripped:
             continue
-        if _STATS_BANNER_RE.fullmatch(stripped) is not None:
+        if banner_pattern.fullmatch(stripped) is not None:
             continue
         match = _STATS_LINE_RE.match(line)
         if match is not None:
@@ -1509,16 +1532,22 @@ def _read_exact(stream, length: int) -> bytes:
     return b"".join(chunks)
 
 
-def _read_pcap_stream(stream, scanner: _Scanner, meta: dict[str, Any], digest) -> None:
-    """Classify every record from ``stream`` without loading the file.
+def iter_pcap_records(stream, *, digest=None, meta: dict[str, Any] | None = None):
+    """Yield ``(index, timestamp, frame)`` from a classic pcap stream.
 
-    ``digest`` is updated with the exact bytes consumed, so the runner can
-    bind the report to the capture it hashed.
+    The file is never loaded: one global header, one 16-byte record header and
+    one frame are held at a time.  ``digest`` (a ``hashlib`` object) is updated
+    with the exact bytes consumed.  Structural damage raises
+    :class:`CaptureInvalid` exactly like the classifier path; a caller that
+    only needs raw frames gets the same strict pcap checks.
     """
+    if meta is None:
+        meta = {}
 
     def consumed(length: int) -> bytes:
         data = _read_exact(stream, length)
-        digest.update(data)
+        if digest is not None:
+            digest.update(data)
         return data
 
     header = consumed(24)
@@ -1549,6 +1578,7 @@ def _read_pcap_stream(stream, scanner: _Scanner, meta: dict[str, Any], digest) -
     if network != 1:
         raise CaptureInvalid(f"unsupported_linktype_{network}")
 
+    index = 0
     while True:
         record_header = consumed(16)
         if not record_header:
@@ -1572,10 +1602,28 @@ def _read_pcap_stream(stream, scanner: _Scanner, meta: dict[str, Any], digest) -
             # not a frame-content problem: stop and mark the evidence INVALID.
             raise CaptureInvalid("snaplen_truncated_record")
         ts = float(ts_sec) + (ts_frac / divisor)
-        index = scanner.packets
-        scanner.packets += 1
-        scanner.observe_timestamp(ts)
-        scanner.parse_frame(frame, ts, index)
+        yield index, ts, frame
+        index += 1
+    meta["packets_read"] = index
+
+
+def _read_pcap_stream(stream, scanner: _Scanner, meta: dict[str, Any], digest) -> None:
+    """Classify every record from ``stream`` without loading the file.
+
+    ``digest`` is updated with the exact bytes consumed, so the runner can
+    bind the report to the capture it hashed.
+    """
+    index = 0
+    try:
+        for index, ts, frame in iter_pcap_records(stream, digest=digest, meta=meta):
+            scanner.packets = index + 1
+            scanner.observe_timestamp(ts)
+            scanner.parse_frame(frame, ts, index)
+    except BaseException:
+        # ``iter_pcap_records`` writes packets_read only on a clean end; keep
+        # the partial count visible for diagnostics on a structural failure.
+        meta.setdefault("packets_read", scanner.packets)
+        raise
     meta["packets_read"] = scanner.packets
 
 
@@ -1608,6 +1656,7 @@ def scan_capture_stream(
     source: str | None = None,
     policy_sha256: str | None = None,
     capture_argv_file_sha256: str | None = None,
+    interface: str = netplan_mod.TAP,
 ) -> dict[str, Any]:
     """Scan a classic pcap from a stream and return the canonical report.
 
@@ -1657,11 +1706,11 @@ def scan_capture_stream(
     stats_sha256: str | None = None
     stats_banner_ok = False
     if tcpdump_stats_text is not None:
-        stats_banner_ok = check_stats_banner(tcpdump_stats_text)
+        stats_banner_ok = check_stats_banner(tcpdump_stats_text, interface)
         if not stats_banner_ok:
             invalid_reasons.append("capture_banner_mismatch")
     if stats_problem is None and tcpdump_stats_text is not None:
-        stats, stats_problem = parse_tcpdump_stats(tcpdump_stats_text)
+        stats, stats_problem = parse_tcpdump_stats(tcpdump_stats_text, interface)
         stats_sha256 = hashlib.sha256(tcpdump_stats_text.encode("utf-8")).hexdigest()
     if stats_problem is not None:
         invalid_reasons.append(stats_problem)
@@ -1672,7 +1721,9 @@ def scan_capture_stream(
     ):
         invalid_reasons.append("stats_packet_count_mismatch")
 
-    argv_problem = netplan_mod.check_capture_argv(capture_argv, pcap_path)
+    argv_problem = netplan_mod.check_capture_argv(
+        capture_argv, pcap_path, interface=interface
+    )
     if argv_problem is not None:
         invalid_reasons.append(argv_problem)
     # Evidence hashes always cover the exact file bytes.  The controller
@@ -1767,6 +1818,7 @@ def scan_capture_stream(
     meta.update(
         {
             "source": source,
+            "interface": interface,
             "source_sha256": source_sha256,
             "policy_sha256": policy_sha256,
             "control_before": control_before,

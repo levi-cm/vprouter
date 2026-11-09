@@ -1,9 +1,9 @@
 # Leak-lab VM (M2: silent Debian guest for the deployed legacy release)
 
-Status: M2 tooling. Everything in `tools/leak-lab/vm/` is offline code plus a
-fake-agent unit test suite. Nothing in this directory has been run against
-QEMU, the tap, nftables, Docker or a network by this milestone. The controller
-runs `provision.py` and `run_phase.py` later, as root on debdev.
+Status: M2 + M3 tooling. Everything in `tools/leak-lab/vm/` is offline code
+plus a fake-agent unit test suite. Nothing in this directory has been run
+against QEMU, the tap, nftables, Docker or a network by this milestone. The
+controller runs `provision.py` and `run_phase.py` later, as root on debdev.
 
 M2 does **not** test `rust/v2`. It copies the currently deployed legacy release
 from `/opt/vprouter/current` unchanged, runs its host orchestration inside a
@@ -39,6 +39,133 @@ The host is the only capture point. The VM never sees `vprlab-tap0`; it sees a
 virtio NIC whose MAC is fixed to `52:54:00:76:70:02` in test boots. The host
 bridge and the VM use permanent neighbours in both directions, so the monitor
 runs `allow_arp: false`: no ARP frame is legitimate.
+
+## M3: real client traffic through the test exit node
+
+M3 adds one real Tailscale client VM that sends traffic through the router's
+test exit node while the existing router fault phases run.  The client has its
+own bridge; it never shares `vprlab0` and never advertises an exit node or
+routes.
+
+```
+ debdev host
+ ┌────────────────────────────────────────────────────────────────────┐
+ │ vprlab1  10.251.0.1/24  MAC 52:54:00:76:71:01                     │
+ │    │      explicit nft drop to/from vprlab0 in both directions      │
+ │ vprlab-ctap1 (tap owned by vprlab-qemu)                            │
+ │    │  tcpdump -i vprlab-ctap1 ...                                  │
+ └────┼───────────────────────────────────────────────────────────────┘
+      │
+ ┌────┴───────────────────────────────┐
+ │ client VM (untrusted), 256M 1 vCPU │
+ │ eth0 10.251.0.2/24, gw 10.251.0.1  │
+ │ tailscaled + pinned tailscale      │
+ │ /usr/local/sbin/vprlab-client-     │
+ │   traffic (HTTPS exit + HTTP       │
+ │   marker probes)                   │
+ └────────────────────────────────────┘
+```
+
+Fixed client facts: tap `vprlab-ctapN`, address `10.251.0.(N+1)`, MAC
+`52:54:00:76:71:(N+1, two hex digits)`, provisioning MAC
+`52:54:00:76:71:99`, state `/var/lib/vprlab/client-NNN`, qcow2 overlay
+`2G`, test boot 256 MiB, provisioning boot 384 MiB.  `N` is 1..9; the client
+name is exactly `zz-vprclient-NN-do-not-use` (no suffix).
+
+### Client provisioning and login
+
+Provisioning reuses the router's online cloud-init path but installs no Docker
+and no release.  It installs the pinned static tarball (sha256
+`720cbbcc...ad7bf7`) to `/usr/local/sbin`, enables a `tailscaled.service` with
+`--state=/var/lib/tailscale/tailscaled.state --port=41641`, writes the
+MAC-matched static networkd file, masks the router's silence list, and writes
+`/usr/local/sbin/vprlab-client-traffic`:
+
+```sh
+# once, online (root, debdev).  The tarball hash is verified on the host
+# before it is staged on the payload ISO; a wrong hash is a hard refusal.
+python3 -B tools/leak-lab/vm/provision.py --client --index 1 \
+  --tailscale-tar /root/vprlab/tailscale_1.104.5_amd64.tgz
+```
+
+Interactive login boots only the client VM, runs
+`tailscale up --reset --hostname=zz-vprclient-01-do-not-use --shields-up
+--accept-routes=false`, prints the fixed-shape login URL, and passes only when
+`BackendState == Running` at the end:
+
+```sh
+python3 -B tools/leak-lab/vm/run_phase.py \
+  --phase client-login --client 1 --duration 900 \
+  --used-nonces /root/leaklab-used-nonces.txt
+```
+
+Approve the client machine in the Tailscale admin console like any other
+machine.  The client is **not** an exit node; do not approve it as one.
+
+### Running a phase with a client
+
+`run_phase.py --client N` accepts every phase except `login` (`login` with
+`--client` is refused; use `client-login`).  `--client N` boots the client
+first and the router second:
+
+```sh
+python3 -B tools/leak-lab/vm/run_phase.py \
+  --phase idle --client 1 --duration 120 --index 1 \
+  --profile-file /root/vprouter-lab.conf \
+  --used-nonces /root/leaklab-used-nonces.txt
+```
+
+Flow: admission (`MemAvailable` must cover 1536 MiB + the client's 256 MiB;
+the measured value is recorded); start both captures (`vprlab-tap0` unchanged
+and `vprlab-ctap1` with the same flags); boot the client; run
+`tailscale set --exit-node=`; send the client before-control
+(`VPRLEAKCTL1:<nonce>`) to `10.251.0.1:39001`; require the client to be
+Running with its fixed name and no advertised exit node; boot the router and
+make it READY; select the router peer by HostName `zz-vprtest-01-do-not-use`,
+`ExitNodeOption: true`, online; `tailscale set --exit-node=<peer IPv4>
+--exit-node-allow-lan-access=false`; wait until the client reports it active;
+start the transient traffic unit and require a pre-fault Mullvad success
+within 90 s (`client_not_routed` otherwise); hold for `--duration`; stop the
+unit; clear the exit node; send the client after-control; send the router
+after-control; shut both VMs down and stop both captures only after both QEMUs
+exited; then scan.
+
+For every accepted phase the router is made READY before the fault, including
+`start-router` (whose action is then an idempotent `systemctl start`), because
+a pre-fault client success is only possible with a working exit node.
+`reboot-with-router-enabled` uses the same boot-control unit and before-nonce
+transport as M2.
+
+### Client evidence and verdict
+
+The evidence directory gains `client-capture.pcap`,
+`client-capture.pcap.stderr`, `client-capture-argv.json`,
+`client-probe.jsonl` and `client-scan.json`; `phase.json` gains a `client`
+object with the index/name/memory/tap/nonces, resolved probe IPs, probe
+counts, exit-node booleans, the client scan/probe verdicts and the combined
+result.  The client's own Tailscale state, auth keys, login URL (beyond
+`login-url.txt`) and any non-Mullvad IP are never recorded; the exit probe
+keeps only `mullvad_exit_ip` and at most the first 12 hex of the reported IP's
+SHA-256.
+
+`clientscan.py` (invoked by the runner through the retained evidence fd) checks
+only what is provable on the client path:
+
+- client tcpdump stats: exact banner for `vprlab-ctapN`, zero drops,
+  `captured == received`, final count equals the record count, and the exact
+  client capture argv;
+- exactly one client before-control and one after-control in the client pcap,
+  in order (missing/reordered is INVALID, a replay is LEAK);
+- the per-phase plaintext marker `VPRCLIENTMARK1:<32 hex>` in no frame of the
+  client **or** router capture (raw bytes of every record; a split marker is
+  out of scope).  One clear occurrence is LEAK `marker_in_clear`.
+
+`clientprobe.py` parses `client-probe.jsonl` strictly (exact key sets, no
+duplicate keys, bounded 1 MiB/4 KiB lines).  Verdict: any successful exit
+probe with `m` not `true` (including `null`) is LEAK; no pre-fault Mullvad
+success is INVALID `client_not_routed`; failures after the fault are expected
+and counted only.  The final phase result is the worst of the router scan, the
+client scan, the probe verdict and runner errors: LEAK > INVALID > PASS.
 
 ### Host layout: the M1 plan plus hostsetup
 
@@ -78,9 +205,10 @@ The script creates:
   `libresolv.so.2`).  The check uses a small in-tree ELF dynamic-section
   reader, not `readelf`;
 - `/opt/vprlab-tools/leaklab` (root:root, files 0644) with the runtime copy of
-  `control.py`, `netplan.py`, `pcapscan.py`, `policy.py`, `tsnames.py` and the
-  `vm/*.py` modules plus their `SHA256SUMS` manifest.  `run_phase.py` executes
-  the scanner from this root-owned copy after verifying its manifest, and
+  `clientprobe.py`, `clientscan.py`, `control.py`, `netplan.py`, `pcapscan.py`,
+  `policy.py`, `tsnames.py` and the `vm/*.py` modules plus their `SHA256SUMS`
+  manifest.  `run_phase.py` executes the scanner from this root-owned copy after
+  verifying its manifest, and
   compares **every manifest-listed file** (the scanner and all modules it can
   import) byte-for-byte with the repository copy.  If any file differs it
   refuses unless the explicit `--allow-repo-scanner` developer override is
@@ -398,10 +526,11 @@ expects `up`.  Readiness is now a precondition, not a recorded field:
 netns reports an age below 180 s using the guest's own clock.  "Exit node
 advertised" means `tailscale status --json` has `Self.ExitNodeOption: true` or
 `0.0.0.0/0` in `Self.AdvertisedRoutes`.  `phase.json` records
-`certifies: "server_side_no_client_traffic"`: these phases certify the
-server-side window and capture, not client traffic through the exit node.
-Client stimulus and a client-side data-path assertion are milestone M3; the
-docs must not read a PASS here as client-path certification.
+`certifies: "server_side_no_client_traffic"` for router-only phases: these
+phases certify the server-side window and capture, not client traffic through
+the exit node.  M3 phases run with `--client N` and record
+`certifies: "client_traffic_through_test_exit_node"`; the docs must not read an
+M2 PASS as client-path certification.
 
 Setup phases (`idle`, `login`, `stop-router`, `kill-wireguard`,
 `kill-container`, `restart-docker`) first start `vprouter@NAME.service`
@@ -828,13 +957,28 @@ sh /root/vprlab-hostsetup.sh
 python3 -B tools/leak-lab/vm/provision.py --index 1 \
   --image-tar /root/vprouter-image.tar
 
-# M1, root: setup-only (no second unbounded capture)
+# once, online (root, debdev): M3 client; verifies the pinned tarball hash
+python3 -B tools/leak-lab/vm/provision.py --client --index 1 \
+  --tailscale-tar /root/vprlab/tailscale_1.104.5_amd64.tgz
+
+# M1, root: setup-only (no second unbounded capture).  Add --client 1 for M3.
 python3 -B tools/leak-lab/netplan.py --wan-interface <wan> > /root/vprlab-lab.sh
 sh /root/vprlab-lab.sh setup
 
 # a phase (root, debdev); the capture stays alive until the guest exits
 python3 -B tools/leak-lab/vm/run_phase.py \
   --phase start-router --duration 120 --index 1 \
+  --profile-file /root/vprouter-lab.conf \
+  --used-nonces /root/leaklab-used-nonces.txt
+
+# M3 client login (boots only the client; no profile)
+python3 -B tools/leak-lab/vm/run_phase.py \
+  --phase client-login --client 1 --duration 900 \
+  --used-nonces /root/leaklab-used-nonces.txt
+
+# M3 phase with the client VM and the router VM
+python3 -B tools/leak-lab/vm/run_phase.py \
+  --phase idle --client 1 --duration 120 --index 1 \
   --profile-file /root/vprouter-lab.conf \
   --used-nonces /root/leaklab-used-nonces.txt
 
@@ -845,6 +989,7 @@ sh /root/vprlab-hostsetup.sh teardown
 
 # offline tests
 python3 -B -W error -m unittest discover -s tools/leak-lab/vm -p 'test_*.py' -v
+python3 -B -W error -m unittest tools/leak-lab/test_leak_lab.py -v
 ```
 
 `run_phase.py` executes `pcapscan.py` from
@@ -853,13 +998,16 @@ is missing, or differs from the repository's current `pcapscan.py`, the phase
 refuses.  `--allow-repo-scanner` is the explicit developer override for a
 working-tree scanner; do not use it for a certification run.
 
-The suite has 188 tests, including an integration test that runs the real
+The suite has 227 tests, including an integration test that runs the real
 `pcapscan.py` CLI over evidence written by the real `rootfs` writers through an
 inherited directory fd.  It executes the real phase runner and provision
 helpers with fake process/QGA/scanner layers, the generated hostsetup script
 with every privileged command stubbed in a scratch directory, plus a fake
 unix-socket guest agent; it never runs QEMU, tcpdump, ip, nft, iptables,
-docker, qemu-img, genisoimage or a network command.
+docker, qemu-img, genisoimage or a network command.  The M3 classes add client
+provisioning, client guest scripts, the client scan/probe verdicts and a fake
+two-VM `run_phase.py --client N` harness.  The separate host-side scanner suite
+(`tools/leak-lab/test_leak_lab.py`) has 301 tests.
 
 ## What the release code required (findings)
 

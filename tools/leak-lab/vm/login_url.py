@@ -47,35 +47,18 @@ def _valid(url: object) -> bool:
     return isinstance(url, str) and LOGIN_URL_RE.fullmatch(url) is not None
 
 
-def find_login_url_result(client, name: str) -> tuple[str | None, bool]:
-    """Return ``(url, unrecognized)`` from guest status/log text.
-
-    ``url`` is only ever the fixed-shape URL.  ``unrecognized`` is True when
-    the guest did advertise a login-tailscale URL of another shape; the
-    caller records ``login_url_unrecognized`` and writes nothing.
-    """
+def _candidates_from(status_stdout: bytes, log_bytes: bytes) -> tuple[str | None, bool]:
     candidates: list[str] = []
-    status = client.execute(
-        "/bin/sh",
-        ["-c", f"docker exec {name} tailscale status --json 2>/dev/null || true"],
-        timeout=20.0,
-    )
-    if status.stdout:
+    if status_stdout:
         try:
-            document = json.loads(status.stdout.decode("utf-8", "replace"))
+            document = json.loads(status_stdout.decode("utf-8", "replace"))
         except json.JSONDecodeError:
             document = None
         if isinstance(document, dict):
             auth_url = document.get("AuthURL")
             if isinstance(auth_url, str) and auth_url.strip():
                 candidates.append(auth_url.strip())
-
-    logs = client.execute(
-        "/bin/sh",
-        ["-c", f"docker logs --tail 400 {name} 2>&1 || true"],
-        timeout=30.0,
-    )
-    text = logs.stdout.decode("utf-8", "replace")
+    text = log_bytes.decode("utf-8", "replace")
     candidates.extend(match.group(0) for match in LOGIN_CANDIDATE_RE.finditer(text))
     unrecognized = False
     for candidate in candidates:
@@ -83,6 +66,54 @@ def find_login_url_result(client, name: str) -> tuple[str | None, bool]:
             return candidate, unrecognized
         unrecognized = True
     return None, unrecognized
+
+
+def find_login_url_result(client, name: str) -> tuple[str | None, bool]:
+    """Return ``(url, unrecognized)`` from guest status/log text.
+
+    ``url`` is only ever the fixed-shape URL.  ``unrecognized`` is True when
+    the guest did advertise a login-tailscale URL of another shape; the
+    caller records ``login_url_unrecognized`` and writes nothing.
+    """
+    status = client.execute(
+        "/bin/sh",
+        ["-c", f"docker exec {name} tailscale status --json 2>/dev/null || true"],
+        timeout=20.0,
+    )
+    logs = client.execute(
+        "/bin/sh",
+        ["-c", f"docker logs --tail 400 {name} 2>&1 || true"],
+        timeout=30.0,
+    )
+    return _candidates_from(status.stdout, logs.stdout)
+
+
+def find_client_login_url_result(client) -> tuple[str | None, bool]:
+    """Return ``(url, unrecognized)`` for the native M3 client tailscaled.
+
+    The client has no Docker; status and the unit journal are read directly.
+    The same fixed URL shape applies, so a compromised client cannot use the
+    path as an arbitrary secret channel.
+    """
+    status = client.execute(
+        "/bin/sh",
+        ["-c", "tailscale status --json 2>/dev/null || true"],
+        timeout=20.0,
+    )
+    logs = client.execute(
+        "/bin/sh",
+        [
+            "-c",
+            "journalctl -u tailscaled.service --no-pager -n 400 2>&1 || true",
+        ],
+        timeout=30.0,
+    )
+    return _candidates_from(status.stdout, logs.stdout)
+
+
+def find_client_login_url(client) -> str | None:
+    url, _unrecognized = find_client_login_url_result(client)
+    return url
 
 
 def find_login_url(client, name: str) -> str | None:

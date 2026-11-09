@@ -65,6 +65,34 @@ GATEWAY_IPV4 = "10.250.0.1"
 WAN_DEVICE = "eth0"
 VM_SUBNET = ipaddress.IPv4Network("10.250.0.0/24")
 
+#: M3 client lab.  A client never shares the router bridge and never
+#: advertises an exit node or routes.  It runs at 256 MiB and one vCPU.
+CLIENT_BRIDGE = "vprlab1"
+CLIENT_TAP_PREFIX = "vprlab-ctap"
+CLIENT_BRIDGE_MAC = "52:54:00:76:71:01"
+CLIENT_PROVISION_MAC = "52:54:00:76:71:99"
+CLIENT_SUBNET = ipaddress.IPv4Network("10.251.0.0/24")
+CLIENT_GATEWAY_IPV4 = "10.251.0.1"
+CLIENT_MEMORY_MIB = 256
+CLIENT_PROVISION_MEMORY_MIB = 384
+CLIENT_OVERLAY_SIZE = "2G"
+CLIENT_OVERLAY_VIRTUAL_SIZE = 2 * 1024 * 1024 * 1024
+MAX_CLIENT_INDEX = 9
+DEFAULT_CLIENT_INDEX = 1
+CLIENT_DEFAULT_NAME = "zz-vprclient-01-do-not-use"
+CLIENT_PROBE_DIR = "/var/lib/vprlab"
+CLIENT_PROBE_LOG = "/var/lib/vprlab/client-probe.jsonl"
+CLIENT_TRAFFIC_SCRIPT = "/usr/local/sbin/vprlab-client-traffic"
+CLIENT_TRAFFIC_UNIT = "vprlab-client-traffic"
+CLIENT_TAILSCALED = "/usr/local/sbin/tailscaled"
+CLIENT_TAILSCALE = "/usr/local/sbin/tailscale"
+CLIENT_TAILSCALE_STATE = "/var/lib/tailscale/tailscaled.state"
+TAILSCALE_TARBALL_NAME = "tailscale_1.104.5_amd64.tgz"
+TAILSCALE_TARBALL_SHA256 = (
+    "720cbbccbfc03d8b55df72afc19e5a72e31b0f65934700aa6fa38074d4ad7bf7"
+)
+MIB = 1024 * 1024
+
 DEFAULT_NAME = "zz-vprtest-01-do-not-use"
 DEFAULT_INDEX = 1
 #: The deployed host runs Docker 29 with the containerd image store, whose
@@ -104,6 +132,14 @@ CAPTURE_STATS_FILE = "capture.pcap.stderr"
 CAPTURE_ARGV_FILE = "capture-argv.json"
 SCAN_REPORT_FILE = "scan.json"
 PHASE_RECORD_FILE = "phase.json"
+
+#: M3 client evidence.  The client capture is bound exactly like the router
+#: capture, and its report is a separate root-only file.
+CLIENT_CAPTURE_FILE = "client-capture.pcap"
+CLIENT_CAPTURE_STATS_FILE = "client-capture.pcap.stderr"
+CLIENT_CAPTURE_ARGV_FILE = "client-capture-argv.json"
+CLIENT_PROBE_FILE = "client-probe.jsonl"
+CLIENT_SCAN_REPORT_FILE = "client-scan.json"
 
 SANDBOX = "on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny"
 
@@ -241,6 +277,39 @@ def state_path(index: int = DEFAULT_INDEX, root: pathlib.Path = STATE_ROOT) -> p
     return pathlib.Path(root) / f"vm-{index:03d}"
 
 
+def validate_client_index(index: int) -> int:
+    """Validate client N (1..9): tap names, MACs and addresses derive from it."""
+    if isinstance(index, bool) or not isinstance(index, int):
+        raise GeneratorError("client index must be an integer in 1..9")
+    if not 1 <= index <= MAX_CLIENT_INDEX:
+        raise GeneratorError(f"client index must be in 1..{MAX_CLIENT_INDEX}")
+    return index
+
+
+def client_state_path(
+    index: int = DEFAULT_CLIENT_INDEX, root: pathlib.Path = STATE_ROOT
+) -> pathlib.Path:
+    validate_client_index(index)
+    return pathlib.Path(root) / f"client-{index:03d}"
+
+
+def client_tap(index: int = DEFAULT_CLIENT_INDEX) -> str:
+    return f"{CLIENT_TAP_PREFIX}{validate_client_index(index)}"
+
+
+def client_mac(index: int = DEFAULT_CLIENT_INDEX) -> str:
+    return f"52:54:00:76:71:{validate_client_index(index) + 1:02x}"
+
+
+def client_ipv4(index: int = DEFAULT_CLIENT_INDEX) -> str:
+    return f"10.251.0.{validate_client_index(index) + 1}"
+
+
+def client_name(index: int = DEFAULT_CLIENT_INDEX) -> str:
+    validate_client_index(index)
+    return f"zz-vprclient-{index:02d}-do-not-use"
+
+
 # ---------------------------------------------------------------------------
 # QEMU
 
@@ -276,16 +345,26 @@ def build_qemu_argv(
     *,
     name: str = DEFAULT_NAME,
     tap: str = TAP,
+    memory_mib: int = 512,
+    mac: str = VM_MAC,
+    provision_mac: str = PROVISION_MAC,
 ) -> list[str]:
     """Return the exact QEMU argv for ``provision`` or ``test`` mode.
 
     Provision mode has only a user-mode netdev and is never attached to the
     lab tap.  Test mode has only the pre-created tap and never a user netdev,
-    seed or payload ISO.
+    seed or payload ISO.  Client boots pass their own memory size and MACs;
+    the defaults are the unchanged router lab.
     """
     if mode not in {"provision", "test"}:
         raise GeneratorError("mode must be 'provision' or 'test'")
     validate_name(name)
+    if isinstance(memory_mib, bool) or not isinstance(memory_mib, int):
+        raise GeneratorError("memory_mib must be an integer")
+    if not 64 <= memory_mib <= 16384:
+        raise GeneratorError("memory_mib must be in 64..16384")
+    mac = validate_mac(mac)
+    provision_mac = validate_mac(provision_mac)
     state = pathlib.Path(state)
     overlay = state / OVERLAY_FILE
 
@@ -302,7 +381,7 @@ def build_qemu_argv(
         "-smp",
         "1",
         "-m",
-        "512",
+        str(memory_mib),
         "-name",
         f"vprlab-{name}",
         "-drive",
@@ -323,7 +402,7 @@ def build_qemu_argv(
             "-netdev",
             "user,id=wan",
             "-device",
-            f"virtio-net-pci,netdev=wan,romfile=,mac={PROVISION_MAC}",
+            f"virtio-net-pci,netdev=wan,romfile=,mac={provision_mac}",
             "-drive",
             f"file={state / SEED_ISO},media=cdrom,readonly=on",
             # The payload ISO is a plain read-only virtio disk, independent of
@@ -338,7 +417,7 @@ def build_qemu_argv(
             "-netdev",
             f"tap,id=wan,ifname={tap},script=no,downscript=no",
             "-device",
-            f"virtio-net-pci,netdev=wan,romfile=,mac={VM_MAC}",
+            f"virtio-net-pci,netdev=wan,romfile=,mac={mac}",
         ]
 
     # Test boots write no serial file at all: the guest is untrusted and a
@@ -502,7 +581,11 @@ def build_launch_argv(
     return build_setpriv_argv(list(qemu_argv), int(uid), int(gid), setpriv=setpriv)
 
 
-def build_qemu_img_create_argv(base: pathlib.Path, overlay: pathlib.Path) -> list[str]:
+def build_qemu_img_create_argv(
+    base: pathlib.Path, overlay: pathlib.Path, *, size: str = "4G"
+) -> list[str]:
+    if not isinstance(size, str) or re.fullmatch(r"[1-9][0-9]{0,3}[GgMm]", size) is None:
+        raise GeneratorError("overlay size must be a positive size such as 2G")
     return [
         str(QEMU_IMG),
         "create",
@@ -513,7 +596,7 @@ def build_qemu_img_create_argv(base: pathlib.Path, overlay: pathlib.Path) -> lis
         "-b",
         str(base),
         str(overlay),
-        "4G",
+        size,
     ]
 
 
@@ -621,6 +704,16 @@ def networkd_text() -> str:
         .replace("@@VM_IPV4@@", VM_IPV4)
         .replace("@@GATEWAY_IPV4@@", GATEWAY_IPV4)
         .replace("@@GATEWAY_MAC@@", GATEWAY_MAC)
+    )
+
+
+def client_networkd_text(index: int = DEFAULT_CLIENT_INDEX) -> str:
+    """Return the MAC-matched static network file for one client VM."""
+    return (
+        _NETWORK_TEXT.replace("@@VM_MAC@@", client_mac(index))
+        .replace("@@VM_IPV4@@", client_ipv4(index))
+        .replace("@@GATEWAY_IPV4@@", CLIENT_GATEWAY_IPV4)
+        .replace("@@GATEWAY_MAC@@", CLIENT_BRIDGE_MAC)
     )
 
 
@@ -797,6 +890,365 @@ def boot_control_spec(
         )
         + "\n"
     )
+
+
+_CLIENT_TRAFFIC_SCRIPT = r'''#!/usr/bin/env python3
+"""vprlab M3 client traffic: continuous HTTPS exit and HTTP marker probes.
+
+Every loop appends at most two JSON lines to the probe log.  It never records
+the reported IP or location: the exit probe keeps only the Mullvad boolean and
+at most the first 12 hex characters of the IP's SHA-256.
+"""
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+LOG = "@@PROBE_LOG@@"
+MAX_LOG = 1024 * 1024
+MARKER_RE = re.compile(r"^VPRCLIENTMARK1:[0-9a-f]{32}$")
+
+
+def append(document):
+    payload = (
+        json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("ascii")
+    descriptor = os.open(LOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        if os.fstat(descriptor).st_size + len(payload) <= MAX_LOG:
+            os.write(descriptor, payload)
+    finally:
+        os.close(descriptor)
+
+
+def exit_probe(ip):
+    command = [
+        "curl", "-sS", "-m", "5", "--resolve",
+        "am.i.mullvad.net:443:" + ip, "https://am.i.mullvad.net/json",
+    ]
+    try:
+        result = subprocess.run(
+            command, capture_output=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {"ok": False, "m": None}
+    if result.returncode != 0:
+        return {"ok": False, "m": None}
+    try:
+        document = json.loads(result.stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"ok": False, "m": None}
+    if not isinstance(document, dict):
+        return {"ok": False, "m": None}
+    flag = document.get("mullvad_exit_ip")
+    if not isinstance(flag, bool):
+        return {"ok": False, "m": None}
+    line = {"ok": True, "m": flag}
+    reported = document.get("ip")
+    if isinstance(reported, str) and reported:
+        line["h"] = hashlib.sha256(reported.encode("utf-8")).hexdigest()[:12]
+    return line
+
+
+def marker_probe(marker, ip):
+    command = [
+        "curl", "-sS", "-m", "5", "--resolve", "example.com:80:" + ip,
+        "-H", "X-Vprlab-Marker: " + marker,
+        "http://example.com/?vprlab=" + marker,
+    ]
+    try:
+        result = subprocess.run(
+            command, capture_output=True, timeout=10, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {"ok": False}
+    return {"ok": result.returncode == 0}
+
+
+def main():
+    if len(sys.argv) != 4:
+        raise SystemExit("usage: vprlab-client-traffic MARKER HTTPS-IP HTTP-IP")
+    marker, https_ip, http_ip = sys.argv[1:4]
+    if MARKER_RE.fullmatch(marker) is None:
+        raise SystemExit("invalid marker")
+    for value in (https_ip, http_ip):
+        if re.fullmatch(r"(?:[0-9]{1,3}\.){3}[0-9]{1,3}", value) is None:
+            raise SystemExit("invalid probe address")
+    descriptor = os.open(
+        LOG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
+    )
+    os.close(descriptor)
+    while True:
+        stamp = int(time.time())
+        append({"t": stamp, "k": "exit", **exit_probe(https_ip)})
+        append({"t": stamp, "k": "marker", **marker_probe(marker, http_ip)})
+        time.sleep(1.0)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def client_traffic_script_text() -> str:
+    """Return the guest traffic script (no argument is baked into it)."""
+    return _CLIENT_TRAFFIC_SCRIPT.replace("@@PROBE_LOG@@", CLIENT_PROBE_LOG)
+
+
+_CLIENT_PROVISION_SCRIPT = r'''#!/bin/sh
+# vprlab M3 client provisioning: tailscale, static network, silencing, traffic
+# script, then power off.  Runs once, online, from cloud-init.
+set -eu
+
+EXPECTED_TAILSCALE_SHA256="$1"
+PAYLOAD_LABEL='@@PAYLOAD_LABEL@@'
+TAILSCALE_TARBALL='@@TAILSCALE_TARBALL@@'
+PINNED_TAILSCALE_SHA256='@@TAILSCALE_SHA256@@'
+
+log() { printf 'vprlab-client-provision: %s\n' "$*" >&2; }
+fail() {
+    printf 'VPRLAB-CLIENT-PROVISION-FAILED: %s\n' "$*" >/dev/console
+    if [ -w /dev/ttyS0 ]; then
+        printf 'VPRLAB-CLIENT-PROVISION-FAILED: %s\n' "$*" > /dev/ttyS0
+    fi
+    log "$*"
+    sync || true
+    systemctl poweroff >/dev/null 2>&1 || true
+    exit 1
+}
+
+[ "${#EXPECTED_TAILSCALE_SHA256}" -eq 64 ] || fail "tailscale sha256 has the wrong length"
+case "$EXPECTED_TAILSCALE_SHA256" in
+    *[!0-9a-f]*) fail "tailscale sha256 is not lowercase hex" ;;
+esac
+[ "$EXPECTED_TAILSCALE_SHA256" = "$PINNED_TAILSCALE_SHA256" ] \
+    || fail "tailscale sha256 does not match the pinned build"
+
+log "installing the small package set (no recommends)"
+printf '%s\n' \
+    'APT::Install-Recommends "false";' \
+    'APT::Install-Suggests "false";' \
+    > /etc/apt/apt.conf.d/99-vprlab-norecommends
+DEBIAN_FRONTEND=noninteractive apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    qemu-guest-agent ca-certificates curl python3-minimal iproute2 util-linux
+
+log "mounting the read-only payload"
+install -d -m 0755 /mnt/vprlab-payload
+n=0
+while [ ! -e "/dev/disk/by-label/$PAYLOAD_LABEL" ]; do
+    n=$((n + 1))
+    [ "$n" -lt 120 ] || fail "payload ISO did not appear"
+    sleep 1
+done
+mount -o ro "/dev/disk/by-label/$PAYLOAD_LABEL" /mnt/vprlab-payload
+tarball="/mnt/vprlab-payload/$TAILSCALE_TARBALL"
+[ -f "$tarball" ] || fail "tailscale tarball missing from the payload"
+printf '%s  %s\n' "$EXPECTED_TAILSCALE_SHA256" "$tarball" | sha256sum -c - \
+    || fail "tailscale tarball sha256 mismatch"
+
+log "installing the pinned tailscale binaries"
+install -d -m 0700 -o root -g root /tmp/vprlab-ts
+tar -xzf "$tarball" -C /tmp/vprlab-ts
+tailscaled=$(find /tmp/vprlab-ts -type f -name tailscaled | head -n 1)
+tailscale=$(find /tmp/vprlab-ts -type f -name tailscale | head -n 1)
+[ -n "$tailscaled" ] || fail "tailscaled missing from the tarball"
+[ -n "$tailscale" ] || fail "tailscale missing from the tarball"
+install -m 0755 "$tailscaled" @@CLIENT_TAILSCALED@@
+install -m 0755 "$tailscale" @@CLIENT_TAILSCALE@@
+rm -rf /tmp/vprlab-ts
+install -d -m 0700 -o root -g root /var/lib/tailscale
+cat > /etc/systemd/system/tailscaled.service <<'UNIT'
+[Unit]
+Description=Tailscale node agent (vprlab client)
+After=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=simple
+ExecStart=@@CLIENT_TAILSCALED@@ --state=@@CLIENT_TAILSCALE_STATE@@ --port=41641
+Restart=on-failure
+RuntimeDirectory=tailscale
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+chmod 0644 /etc/systemd/system/tailscaled.service
+systemctl daemon-reload
+systemctl enable tailscaled.service
+systemctl start tailscaled.service || fail "tailscaled did not start"
+tailscale version >/dev/null 2>&1 || fail "tailscale binary is not runnable"
+
+log "installing the static network configuration"
+systemctl enable systemd-networkd.service >/dev/null 2>&1 || true
+for artifact in \
+    /etc/systemd/network/50-cloud-init.network \
+    /etc/systemd/network/10-cloud-init.network \
+    /etc/network/interfaces.d/50-cloud-init \
+    /etc/network/interfaces.d/50-cloud-init.cfg \
+    /etc/netplan/50-cloud-init.yaml \
+    /etc/netplan/90-cloud-init.yaml; do
+    rm -f "$artifact"
+done
+rm -f /etc/systemd/network/*cloud-init*.network
+rm -f /etc/network/interfaces.d/*cloud-init*
+rm -f /etc/netplan/*cloud-init*
+for config in /etc/systemd/network/*.network; do
+    [ -e "$config" ] || continue
+    [ "$config" = /etc/systemd/network/10-vprlab-client.network ] && continue
+    mv "$config" "$config.vprlab-disabled"
+done
+install -d -m 0755 /etc/systemd/network
+cat > /etc/systemd/network/10-vprlab-client.network <<'EOF'
+@@NETWORK@@EOF
+chmod 0644 /etc/systemd/network/10-vprlab-client.network
+
+rm -f /etc/resolv.conf
+printf '# vprlab leak lab: DNS intentionally disabled\n' > /etc/resolv.conf
+chmod 0644 /etc/resolv.conf
+
+log "silencing the OS"
+swapoff -a >/dev/null 2>&1 || true
+if [ -f /etc/fstab ]; then
+    sed -i -E 's/^([^#].*[[:space:]]swap[[:space:]].*)$/#vprlab-disabled \1/' /etc/fstab
+fi
+for unit in \
+    systemd-timesyncd.service \
+    apt-daily.timer apt-daily.service \
+    apt-daily-upgrade.timer apt-daily-upgrade.service \
+    unattended-upgrades.timer unattended-upgrades.service \
+    man-db.timer e2scrub_all.timer e2scrub_reap.service fstrim.timer \
+    systemd-resolved.service \
+    ssh.service ssh.socket sshd.service \
+    dhclient.service dhcpcd.service \
+    NetworkManager.service NetworkManager-wait-online.service \
+    networking.service ifupdown-wait-online.service ifup@.service \
+    chrony.service chronyd.service ntp.service ntpsec.service openntpd.service; do
+    systemctl disable --now "$unit" >/dev/null 2>&1 || true
+    systemctl mask "$unit" >/dev/null 2>&1 || true
+done
+touch /etc/cloud/cloud-init.disabled
+for unit in \
+    cloud-init.service cloud-init-local.service cloud-init-main.service \
+    cloud-init-network.service cloud-config.service cloud-final.service \
+    cloud-init-hotplugd.service cloud-init-hotplugd.socket; do
+    systemctl disable --now "$unit" >/dev/null 2>&1 || true
+    systemctl mask "$unit" >/dev/null 2>&1 || true
+done
+
+install -d -m 0755 /etc/systemd/resolved.conf.d
+cat > /etc/systemd/resolved.conf.d/99-vprlab.conf <<'EOF'
+@@RESOLVED@@EOF
+chmod 0644 /etc/systemd/resolved.conf.d/99-vprlab.conf
+
+install -d -m 0755 /etc/sysctl.d
+cat > /etc/sysctl.d/99-vprlab-ipv6.conf <<'EOF'
+@@IPV6_SYSCTL@@EOF
+chmod 0644 /etc/sysctl.d/99-vprlab-ipv6.conf
+sysctl --system >/dev/null 2>&1 || true
+
+install -d -m 0755 /etc/default/grub.d
+cat > /etc/default/grub.d/99-vprlab-silence.cfg <<'EOF'
+@@GRUB@@EOF
+chmod 0644 /etc/default/grub.d/99-vprlab-silence.cfg
+update-grub
+
+log "installing the client traffic script"
+install -d -m 0700 -o root -g root @@CLIENT_PROBE_DIR@@
+cat > @@CLIENT_TRAFFIC_SCRIPT@@ <<'PY'
+@@CLIENT_TRAFFIC_PY@@PY
+chmod 0755 @@CLIENT_TRAFFIC_SCRIPT@@
+
+log "enabling the guest agent"
+systemctl enable qemu-guest-agent.service
+systemctl start qemu-guest-agent.service
+
+umount /mnt/vprlab-payload || true
+sync
+log "client provisioning complete"
+if [ -w /dev/ttyS0 ]; then
+    printf 'VPRLAB-CLIENT-PROVISION-OK %s\n' "$EXPECTED_TAILSCALE_SHA256" > /dev/ttyS0
+fi
+printf 'VPRLAB-CLIENT-PROVISION-OK %s\n' "$EXPECTED_TAILSCALE_SHA256" > /dev/console
+systemctl poweroff
+'''
+
+
+def client_provision_script(
+    index: int = DEFAULT_CLIENT_INDEX,
+    *,
+    tailscale_sha256: str = TAILSCALE_TARBALL_SHA256,
+) -> str:
+    """Return the guest-side client provisioning script."""
+    validate_client_index(index)
+    if (
+        not isinstance(tailscale_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", tailscale_sha256) is None
+    ):
+        raise GeneratorError("tailscale sha256 must be 64 lowercase hex characters")
+    script = _CLIENT_PROVISION_SCRIPT
+    replacements = {
+        "@@PAYLOAD_LABEL@@": PAYLOAD_LABEL,
+        "@@TAILSCALE_TARBALL@@": TAILSCALE_TARBALL_NAME,
+        "@@TAILSCALE_SHA256@@": tailscale_sha256,
+        "@@NETWORK@@": client_networkd_text(index),
+        "@@RESOLVED@@": resolved_dropin_text(),
+        "@@IPV6_SYSCTL@@": ipv6_sysctl_text(),
+        "@@GRUB@@": grub_dropin_text("netns-safe"),
+        "@@CLIENT_TRAFFIC_PY@@": client_traffic_script_text(),
+        "@@CLIENT_PROBE_DIR@@": CLIENT_PROBE_DIR,
+        "@@CLIENT_TRAFFIC_SCRIPT@@": CLIENT_TRAFFIC_SCRIPT,
+        "@@CLIENT_TAILSCALED@@": CLIENT_TAILSCALED,
+        "@@CLIENT_TAILSCALE@@": CLIENT_TAILSCALE,
+        "@@CLIENT_TAILSCALE_STATE@@": CLIENT_TAILSCALE_STATE,
+    }
+    for token, value in replacements.items():
+        script = script.replace(token, value)
+    if "@@" in script:
+        raise GeneratorError("unexpanded client provisioning template token")
+    return script
+
+
+def build_client_user_data(
+    *,
+    hostname: str,
+    index: int = DEFAULT_CLIENT_INDEX,
+    tailscale_sha256: str = TAILSCALE_TARBALL_SHA256,
+) -> str:
+    """Return a cloud-init NoCloud user-data document for a client VM."""
+    if not re.fullmatch(r"[a-z][a-z0-9-]{2,49}", hostname):
+        raise GeneratorError("hostname must be a short lowercase DNS label")
+    config = {
+        "hostname": hostname,
+        "preserve_hostname": False,
+        "manage_etc_hosts": True,
+        "disable_root": True,
+        "ssh_pwauth": False,
+        "package_update": False,
+        "package_upgrade": False,
+        "package_reboot_if_required": False,
+        "write_files": [
+            {
+                "path": "/usr/local/sbin/vprlab-client-provision.sh",
+                "owner": "root:root",
+                "permissions": "0755",
+                "content": client_provision_script(
+                    index, tailscale_sha256=tailscale_sha256
+                ),
+            }
+        ],
+        "runcmd": [
+            [
+                "/usr/local/sbin/vprlab-client-provision.sh",
+                tailscale_sha256,
+            ]
+        ],
+    }
+    return "#cloud-config\n" + json.dumps(config, indent=2, sort_keys=True) + "\n"
 
 
 _PROVISION_SCRIPT = r'''#!/bin/sh
@@ -1267,6 +1719,108 @@ owner=$(stat -c '%u' /opt/vprouter/current 2>/dev/null || echo missing)
 [ "$owner" = 0 ] && ok release_owned_root || bad "release_owner:$owner"
 [ "$(stat -c '%a' /opt/vprouter/current 2>/dev/null || echo 0)" = 755 ] \
     && ok release_mode || bad release_mode
+
+if [ "$fail" -eq 0 ]; then
+    printf 'SILENCE-OK\\n'
+    exit 0
+fi
+printf 'SILENCE-FAILED\\n'
+exit 1
+'''
+
+
+def client_silence_check_script(index: int = DEFAULT_CLIENT_INDEX) -> str:
+    """Return the pre-phase silence check for one client VM."""
+    validate_client_index(index)
+    mac = client_mac(index)
+    ipv4 = client_ipv4(index)
+    masked = " ".join(SILENCE_MASK_UNITS)
+    return f'''#!/bin/sh
+# vprlab M3 client silence check.  Any deviation fails the phase.
+set -u
+fail=0
+ok() {{ printf 'CHECK-OK %s\\n' "$*"; }}
+bad() {{ printf 'CHECK-FAIL %s\\n' "$*"; fail=1; }}
+
+if [ -e /proc/sys/net/ipv6 ]; then
+    all_off=$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null || echo 0)
+    default_off=$(cat /proc/sys/net/ipv6/conf/default/disable_ipv6 2>/dev/null || echo 0)
+    if [ "$all_off" = 1 ] && [ "$default_off" = 1 ]; then
+        ok ipv6_netns_disabled
+    else
+        bad ipv6_netns_enabled
+    fi
+else
+    grep -q 'ipv6.disable=1' /proc/cmdline \\
+        && ok cmdline_ipv6_disable || bad cmdline_ipv6_disable
+fi
+if [ "$(awk 'NR > 1' /proc/swaps | wc -l)" -eq 0 ]; then
+    ok swap_off
+else
+    bad swap_active
+fi
+
+for unit in {masked}; do
+    state=$(systemctl is-enabled "$unit" 2>/dev/null || true)
+    case "$state" in
+        masked) ok "masked:$unit" ;;
+        ""|not-found) ok "absent:$unit" ;;
+        *) bad "unit_not_masked:$unit=$state" ;;
+    esac
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+        bad "unit_active:$unit"
+    fi
+done
+[ -f /etc/cloud/cloud-init.disabled ] && ok cloud_init_disabled || bad cloud_init_enabled
+
+interface=""
+for directory in /sys/class/net/*; do
+    [ -e "$directory/address" ] || continue
+    [ "$(cat "$directory/address")" = "{mac}" ] && interface="${{directory##*/}}"
+done
+if [ -n "$interface" ]; then
+    ok "interface:$interface"
+    ip -4 -o addr show dev "$interface" | grep -q "inet {ipv4}/24" \\
+        && ok static_address || bad static_address
+    ip -4 -o route show default | grep -q "default via {CLIENT_GATEWAY_IPV4} dev $interface" \\
+        && ok static_gateway || bad static_gateway
+    ip -4 -o neigh show dev "$interface" | grep -F "{CLIENT_GATEWAY_IPV4}" \\
+        | grep -Fi "lladdr {CLIENT_BRIDGE_MAC}" | grep -q PERMANENT \\
+        && ok static_neighbor || bad static_neighbor
+    ip -6 -o addr show dev "$interface" 2>/dev/null | grep -q inet6 \\
+        && bad ipv6_address || ok ipv6_address_absent
+    network_file=/etc/systemd/network/10-vprlab-client.network
+    if [ -f "$network_file" ] \\
+        && grep -Eq '^[[:space:]]*DHCP=no[[:space:]]*$' "$network_file"; then
+        ok dhcp_off_network_file
+    else
+        bad dhcp_network_file
+    fi
+else
+    bad "interface_missing:{mac}"
+fi
+
+systemctl is-active --quiet tailscaled.service \\
+    && ok tailscaled_active || bad tailscaled_inactive
+systemctl is-active --quiet qemu-guest-agent.service \\
+    && ok guest_agent_active || bad guest_agent_inactive
+[ -x {CLIENT_TRAFFIC_SCRIPT} ] && ok traffic_script \
+    || bad traffic_script_missing
+[ -d {CLIENT_PROBE_DIR} ] && ok probe_dir || bad probe_dir_missing
+if grep -Eq '^[[:space:]]*nameserver' /etc/resolv.conf 2>/dev/null; then
+    bad resolv_conf_nameserver
+else
+    ok resolv_conf_no_nameserver
+fi
+
+for command_file in /proc/[0-9]*/comm; do
+    [ -r "$command_file" ] || continue
+    process=$(cat "$command_file")
+    case "$process" in
+        dhclient|dhcpcd|udhcpc|dhcp6c|NetworkManager) bad "dhcp_client_running:$process" ;;
+        chronyd|ntpd|openntpd|systemd-timesyncd) bad "time_sync_running:$process" ;;
+    esac
+done
 
 if [ "$fail" -eq 0 ]; then
     printf 'SILENCE-OK\\n'

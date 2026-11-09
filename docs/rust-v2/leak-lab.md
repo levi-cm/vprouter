@@ -685,6 +685,35 @@ A JSON snapshot is a preflight, not ownership proof; the exclusive owner
 record, `nft create`, and the per-run `vprlab-owned:<token>` checks are the
 runtime guards.
 
+### M3 client network (`--client N`)
+
+The M3 client VM must never share a bridge with the router.  `netplan.py
+--client N` (N = 1..9) therefore adds a second, independent lab segment to the
+same reviewed script:
+
+- bridge `vprlab1`, address `10.251.0.1/24`, MAC `52:54:00:76:71:01`;
+- tap `vprlab-ctapN` (owned by `vprlab-qemu`, enslaved to `vprlab1`);
+- client VM address `10.251.0.(N+1)` with MAC
+  `52:54:00:76:71:(N+1, two hex digits)` and the permanent host neighbour;
+- the same input/output/forward protection, IPv6 silencing, scoped masquerade
+  and `DOCKER-USER` accepts as `vprlab0`, in the same `inet vprlab` table;
+- an explicit `forward` drop between `vprlab0` and `vprlab1` in **both**
+  directions before the bridge-to-WAN accepts, so neither guest can reach the
+  other over the lab L2 path.
+
+```sh
+python3 -B tools/leak-lab/netplan.py \
+  --wan-interface eno1 --client 1 > /root/vprlab-lab.sh
+# add --client 1 to the --check-name-collisions preflight as well
+```
+
+Every client object carries the same per-run `vprlab-owned:<token>` ifalias or
+table membership.  Teardown verifies the client bridge, tap and neighbour
+before any mutation, isolates each client tap before removing protections, and
+deletes the client objects with the router objects.  With no `--client` option
+the generated plan is exactly the unchanged M2 router plan: no `vprlab1` or
+`vprlab-ctapN` name is referenced.
+
 Capture command printed by the plan (note `--immediate-mode` and `-s 0`, full
 frames; `-B 8192` enlarges the kernel capture ring, because a 58-minute phase
 lost 3 frames to kernel drops with the default and any drop makes the phase
@@ -907,3 +936,9 @@ record on failure, signal trap), the generated M1 setup state as accepted by
 the M2 `hostcheck` (with every single-field mutation refused), streaming
 scanner memory bounds over 50k records, fragment-table overflow and
 outside-window index caps, and control nonce freshness.
+
+M3 adds `test_leak_lab.py` classes for client names, the `vprlab1` plan and
+teardown ownership, the client scan (marker in clear on either tap, control
+order/replay, stats and argv binding) and the strict client probe-log verdict
+(`ok` with a non-Mullvad or unparsed exit is LEAK; no pre-fault Mullvad success
+is INVALID).  The two-VM orchestration tests live in `tools/leak-lab/vm/`.

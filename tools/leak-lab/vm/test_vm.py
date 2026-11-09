@@ -5391,6 +5391,755 @@ class ReadinessDiagnosticsTests(unittest.TestCase):
         self.assertIn("did not report READY", record["readiness"]["refusal"])
 
 
+class ClientGuestTests(unittest.TestCase):
+    def test_client_fixed_facts_and_validation(self) -> None:
+        self.assertEqual(guest.client_tap(1), "vprlab-ctap1")
+        self.assertEqual(guest.client_mac(1), "52:54:00:76:71:02")
+        self.assertEqual(guest.client_mac(9), "52:54:00:76:71:0a")
+        self.assertEqual(guest.client_ipv4(1), "10.251.0.2")
+        self.assertEqual(guest.client_ipv4(9), "10.251.0.10")
+        self.assertEqual(guest.client_name(1), "zz-vprclient-01-do-not-use")
+        self.assertEqual(
+            guest.client_state_path(1), pathlib.Path("/var/lib/vprlab/client-001")
+        )
+        self.assertEqual(guest.CLIENT_MEMORY_MIB, 256)
+        self.assertEqual(guest.CLIENT_PROVISION_MEMORY_MIB, 384)
+        for index in (0, 10, True, "1"):
+            with self.subTest(index=index), self.assertRaises(guest.GeneratorError):
+                guest.validate_client_index(index)
+        self.assertEqual(guest.CLIENT_OVERLAY_SIZE, "2G")
+        self.assertEqual(guest.TAILSCALE_TARBALL_SHA256[:8], "720cbbcc")
+
+    def test_client_qemu_boot_is_256_mib_with_its_own_mac(self) -> None:
+        argv = guest.build_qemu_argv(
+            "test",
+            pathlib.Path("/state"),
+            name=guest.client_name(1),
+            tap=guest.client_tap(1),
+            memory_mib=guest.CLIENT_MEMORY_MIB,
+            mac=guest.client_mac(1),
+        )
+        self.assertEqual(argv[argv.index("-m") + 1], "256")
+        joined = " ".join(argv)
+        self.assertIn("ifname=vprlab-ctap1", joined)
+        self.assertIn("mac=52:54:00:76:71:02", joined)
+        self.assertIn(guest.SANDBOX, argv)
+        self.assertNotIn("-qmp", argv)
+        provision = guest.build_qemu_argv(
+            "provision",
+            pathlib.Path("/state"),
+            name=guest.client_name(1),
+            memory_mib=guest.CLIENT_PROVISION_MEMORY_MIB,
+            mac=guest.client_mac(1),
+            provision_mac=guest.CLIENT_PROVISION_MAC,
+        )
+        self.assertEqual(provision[provision.index("-m") + 1], "384")
+        self.assertIn("mac=" + guest.CLIENT_PROVISION_MAC, " ".join(provision))
+        self.assertIn("user,id=wan", provision)
+
+    def test_client_networkd_matches_the_client_bridge(self) -> None:
+        text = guest.client_networkd_text(1)
+        self.assertIn("MACAddress=52:54:00:76:71:02", text)
+        self.assertIn("Address=10.251.0.2/24", text)
+        self.assertIn("Gateway=10.251.0.1", text)
+        self.assertIn("LinkLayerAddress=52:54:00:76:71:01", text)
+        self.assertIn("DHCP=no", text)
+        self.assertIn("IPv6AcceptRA=no", text)
+
+    def test_client_traffic_script_uses_curl_resolve_and_never_records_the_ip(self) -> None:
+        script = guest.client_traffic_script_text()
+        self.assertIn("am.i.mullvad.net:443:", script)
+        self.assertIn("https://am.i.mullvad.net/json", script)
+        self.assertIn("example.com:80:", script)
+        self.assertIn("X-Vprlab-Marker:", script)
+        self.assertIn('"h"', script)
+        self.assertIn("hashlib.sha256", script)
+        self.assertIn("VPRCLIENTMARK1", script)
+        self.assertIn('"k": "exit"', script)
+        self.assertIn('"k": "marker"', script)
+        self.assertNotIn("@ip", script)  # parses only the boolean/json, not a raw IP field
+
+    def test_client_provision_script_installs_pinned_tailscale_and_silences(self) -> None:
+        text = guest.client_provision_script(1)
+        self.assertIn(guest.TAILSCALE_TARBALL_NAME, text)
+        self.assertIn(guest.TAILSCALE_TARBALL_SHA256, text)
+        self.assertIn("sha256sum -c -", text)
+        self.assertIn("--port=41641", text)
+        self.assertIn(guest.CLIENT_TAILSCALE_STATE, text)
+        for package in (
+            "qemu-guest-agent",
+            "ca-certificates",
+            "curl",
+            "python3-minimal",
+        ):
+            self.assertIn(package, text)
+        self.assertIn("--no-install-recommends", text)
+        self.assertIn("VPRLAB-CLIENT-PROVISION-OK", text)
+        self.assertIn(guest.CLIENT_TRAFFIC_SCRIPT, text)
+        self.assertNotIn("docker.io", text)
+        self.assertNotIn("@@", text)
+        user_data = guest.build_client_user_data(
+            hostname="vprlab-client-001", index=1
+        )
+        self.assertTrue(user_data.startswith("#cloud-config\n"))
+        self.assertIn("vprlab-client-provision.sh", user_data)
+
+    def test_client_silence_check_names_the_client_network(self) -> None:
+        script = guest.client_silence_check_script(1)
+        self.assertIn("SILENCE-OK", script)
+        self.assertIn("tailscaled.service", script)
+        self.assertIn(guest.CLIENT_TRAFFIC_SCRIPT, script)
+        self.assertIn("10.251.0.2/24", script)
+        self.assertIn("10.251.0.1", script)
+        self.assertIn("52:54:00:76:71:01", script)
+        self.assertIn("52:54:00:76:71:02", script)
+        self.assertNotIn("vprouter@", script)
+
+    def test_client_overlay_is_two_gibibytes(self) -> None:
+        argv = guest.build_qemu_img_create_argv(
+            pathlib.Path("/base.qcow2"),
+            pathlib.Path("/client.qcow2"),
+            size=guest.CLIENT_OVERLAY_SIZE,
+        )
+        self.assertEqual(argv[-1], "2G")
+        self.assertEqual(guest.CLIENT_OVERLAY_VIRTUAL_SIZE, 2 * 1024 ** 3)
+
+
+class ProvisionClientTests(unittest.TestCase):
+    def test_tailscale_tarball_hash_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            good = root / guest.TAILSCALE_TARBALL_NAME
+            good.write_bytes(b"tailscale")
+            import hashlib
+
+            with mock.patch.object(
+                guest,
+                "TAILSCALE_TARBALL_SHA256",
+                hashlib.sha256(b"tailscale").hexdigest(),
+            ):
+                self.assertEqual(
+                    provision.verify_tailscale_tarball(good),
+                    hashlib.sha256(b"tailscale").hexdigest(),
+                )
+            with self.assertRaises(hostcheck.Refusal):
+                provision.verify_tailscale_tarball(good)
+            link = root / "link.tgz"
+            link.symlink_to(good)
+            with self.assertRaises(hostcheck.Refusal):
+                provision.verify_tailscale_tarball(link)
+            with self.assertRaises(hostcheck.Refusal):
+                provision.verify_tailscale_tarball(root / "missing.tgz")
+
+    def test_client_name_and_address_are_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            arguments = argparse.Namespace(
+                client=True,
+                index=11,
+                name="zz-vprclient-11-do-not-use",
+                state_root=str(root),
+                run_lock=str(root / "run.lock"),
+            )
+            with mock.patch.object(provision, "require_root"), self.assertRaises(
+                hostcheck.Refusal
+            ):
+                provision.provision(arguments)
+            arguments.index = 1
+            arguments.name = "zz-vprclient-02-do-not-use"
+            with mock.patch.object(provision, "require_root"), self.assertRaises(
+                hostcheck.Refusal
+            ):
+                provision.provision(arguments)
+
+    def test_client_provision_uses_a_two_gibibyte_overlay(self) -> None:
+        calls = []
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            base = root / "base.qcow2"
+            base.write_bytes(b"base")
+            overlay = root / "client-001" / guest.OVERLAY_FILE
+            with mock.patch.object(provision, "_run_generator") as generator:
+                generator.side_effect = lambda argv, **kwargs: calls.append(argv)
+                provision._run_generator(
+                    guest.build_qemu_img_create_argv(
+                        base, overlay, size=guest.CLIENT_OVERLAY_SIZE
+                    ),
+                    uid=1,
+                    gid=1,
+                    what="qemu-img create",
+                    timeout=1,
+                )
+        self.assertEqual(calls[0][-1], "2G")
+
+    def test_client_provision_pipeline_is_384_mib_and_two_gibibytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            state_root = root / "state-root"
+            base = root / "base.qcow2"
+            base.write_bytes(b"base")
+            manifest = root / "manifest"
+            manifest.write_text("", encoding="utf-8")
+            tarball = root / guest.TAILSCALE_TARBALL_NAME
+            tarball.write_bytes(b"tailscale")
+            arguments = argparse.Namespace(
+                client=True,
+                index=1,
+                name=guest.client_name(1),
+                state_root=str(state_root),
+                image_id=guest.DEPLOYED_IMAGE_ID,
+                image_tar=None,
+                release_dir=str(root),
+                base_image=str(base),
+                checksum_manifest=str(manifest),
+                qemu_user=guest.QEMU_USER,
+                ipv6_mode="netns-safe",
+                run_lock=str(root / "run.lock"),
+                tailscale_tar=str(tarball),
+            )
+            calls: list[list[str]] = []
+            marker = "c" * 64
+
+            def fake_run(argv, **kwargs):
+                del kwargs
+                calls.append(list(argv))
+                return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+            class FakeQemu:
+                returncode = None
+                pid = 9100
+
+                def __init__(self, argv, **kwargs):
+                    del argv, kwargs
+                    state = state_root / "client-001"
+                    (state / guest.SERIAL_FILE).write_text(
+                        f"VPRLAB-CLIENT-PROVISION-OK {marker}\n",
+                        encoding="utf-8",
+                    )
+
+                def poll(self):
+                    return self.returncode
+
+                def wait(self, timeout=None):
+                    del timeout
+                    self.returncode = 0
+                    return 0
+
+            with contextlib.ExitStack() as stack:
+                enter = stack.enter_context
+                enter(mock.patch.object(provision, "require_root"))
+                enter(mock.patch.object(provision.guest, "verify_base_image", return_value="0" * 128))
+                enter(mock.patch.object(provision, "verify_tailscale_tarball", return_value=marker))
+                enter(mock.patch.object(provision.hostcheck, "refuse_if_qemu_running"))
+                enter(mock.patch.object(provision, "_require_tool"))
+                enter(mock.patch.object(provision, "_qemu_identity", return_value=(os.geteuid(), os.getegid())))
+                enter(mock.patch.object(provision, "check_provision_admission"))
+                enter(mock.patch.object(provision.os, "chown"))
+                enter(mock.patch.object(provision.subprocess, "run", side_effect=fake_run))
+                enter(mock.patch.object(provision.subprocess, "Popen", FakeQemu))
+                enter(mock.patch.object(provision.time, "sleep"))
+                enter(contextlib.redirect_stdout(io.StringIO()))
+                code = provision.provision(arguments)
+            self.assertEqual(code, 0)
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(calls[0][-1], guest.CLIENT_OVERLAY_SIZE)
+            self.assertTrue(any(part.startswith("--reuid=") for part in calls[0]))
+            state = state_root / "client-001"
+            record = json.loads((state / "provision.json").read_text())
+            self.assertEqual(record["role"], "client")
+            self.assertEqual(record["memory_mib"], 384)
+            self.assertEqual(record["test_memory_mib"], 256)
+            self.assertEqual(record["overlay_size"], "2G")
+            self.assertEqual(record["test_status"], "PROVISIONED_OFFLINE_READY")
+            qemu_argv = record["qemu_argv"]
+            self.assertEqual(qemu_argv[qemu_argv.index("-m") + 1], "384")
+            self.assertIn(f"mac={guest.CLIENT_PROVISION_MAC}", " ".join(qemu_argv))
+
+
+class CombinedVerdictTests(unittest.TestCase):
+    def test_worst_verdict_wins(self) -> None:
+        self.assertEqual(run_phase.combine_verdicts("PASS", "PASS", "PASS"), "PASS")
+        self.assertEqual(run_phase.combine_verdicts("PASS", "INVALID", "PASS"), "INVALID")
+        self.assertEqual(run_phase.combine_verdicts("LEAK", "INVALID", "PASS"), "LEAK")
+        self.assertEqual(run_phase.combine_verdicts("PASS", "PASS", "LEAK"), "LEAK")
+        self.assertEqual(
+            run_phase.combine_verdicts("PASS", "PASS", "PASS", errors=["x"]), "INVALID"
+        )
+        self.assertEqual(run_phase.combine_verdicts(None, None, None), "INVALID")
+
+
+class ClientRunPhaseTests(unittest.TestCase):
+    """M3 orchestration with fake router and client VMs."""
+
+    def setUp(self) -> None:
+        self._temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self._temporary.cleanup)
+        self.root = pathlib.Path(self._temporary.name)
+        self.router_state = self.root / "vm-001"
+        self.router_state.mkdir()
+        self.client_state = self.root / "client-001"
+        self.client_state.mkdir()
+        self.used = self.root / "used-nonces.txt"
+        self.used.write_text("", encoding="ascii")
+        os.chmod(self.used, 0o600)
+        self.profile = self.root / "profile.conf"
+        self.profile.write_bytes(SECRET_TEXT)
+        os.chmod(self.profile, 0o600)
+        self.evidence = self.root / "evidence"
+        self.lock = self.root / "run.lock"
+        self.scanner_root = self.root / "leaklab"
+        self.scanner_root.mkdir()
+        import hashlib
+
+        for name in ("pcapscan.py", "clientscan.py"):
+            source = (
+                pathlib.Path(__file__).resolve().parent.parent / name
+            ).read_bytes()
+            (self.scanner_root / name).write_bytes(source)
+        lines = []
+        for name in ("pcapscan.py", "clientscan.py"):
+            digest = hashlib.sha256((self.scanner_root / name).read_bytes()).hexdigest()
+            lines.append(f"{digest}  {name}\n")
+        (self.scanner_root / "SHA256SUMS").write_text("".join(lines), encoding="utf-8")
+        self.events: list = []
+        self.router_pcap: pathlib.Path | None = None
+        self.client_pcap: pathlib.Path | None = None
+        self.probe_log = b""
+
+    def _arguments(self, phase="idle", duration=0.0, **overrides):
+        descriptor = os.open(self.profile, os.O_RDONLY)
+        self.addCleanup(os.close, descriptor)
+        values = dict(
+            phase=phase,
+            duration=duration,
+            profile_fd=descriptor,
+            profile_file=None,
+            used_nonces=str(self.used),
+            name=guest.DEFAULT_NAME,
+            index=1,
+            client=1,
+            state=str(self.router_state),
+            state_root=str(self.root),
+            image_id=guest.DEPLOYED_IMAGE_ID,
+            base_image=str(self.root / "base.qcow2"),
+            checksum_manifest=str(self.root / "manifest"),
+            qemu_user="opsec",
+            tap=guest.TAP,
+            bridge=guest.BRIDGE,
+            tcpdump="tcpdump",
+            evidence_root=str(self.evidence),
+            capture_size_cap=2 * 1024 * 1024 * 1024,
+            run_lock=str(self.lock),
+            owner_file=str(self.root / "owner.json"),
+            scanner_root=str(self.scanner_root),
+            allow_repo_scanner=False,
+        )
+        values.update(overrides)
+        return argparse.Namespace(**values)
+
+    def _run(self, phase="idle", duration=0.0, *, client_kwargs=None, **overrides):
+        arguments = self._arguments(phase, duration, **overrides)
+        self.events.clear()
+        events = self.events
+        client_name = guest.client_name(1)
+        client_tap = guest.client_tap(1)
+        client_kwargs = dict(client_kwargs or {})
+
+        class FakeProcess:
+            def __init__(self, label):
+                self.label = label
+                self.returncode = None
+                self.pid = 7000 if label == "router" else 7001
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):
+                self.returncode = 0
+                events.append(("qemu_exit", self.label))
+                return 0
+
+        class FakeCaptureProcess:
+            def __init__(self, label):
+                self.label = label
+                self.pid = 5100 if label == "router" else 5101
+                self.returncode = None
+
+            def poll(self):
+                return None
+
+            def send_signal(self, _signum):
+                events.append(("capture_sigint", self.label))
+
+            def wait(self, timeout=None):
+                return 0
+
+        def start_capture(interface, pcap, stats, *, tcpdump, evidence_fd=None,
+                          popen=None, timeout=15.0, file_size_limit=None):
+            del tcpdump, evidence_fd, popen, timeout, file_size_limit
+            label = "router" if interface == guest.TAP else "client"
+            self.events.append(("capture_start", label, interface))
+            path = pathlib.Path(pcap)
+            path.write_bytes(b"\xd4\xc3\xb2\xa1" + b"\x00" * 20)
+            pathlib.Path(stats).write_text(
+                f"tcpdump: listening on {interface}, link-type EN10MB "
+                "(Ethernet), snapshot length 262144 bytes\n",
+                encoding="utf-8",
+            )
+            if label == "router":
+                self.router_pcap = path
+                slot = [path]
+                self._router_slot = slot
+            else:
+                self.client_pcap = path
+                self._client_slot = [path]
+            return run_phase.Capture(
+                process=FakeCaptureProcess(label),
+                argv=guest.tcpdump_argv(interface, path),
+                pcap=path,
+                stats=pathlib.Path(stats),
+            )
+
+        def stop_capture(capture, timeout=20.0, evidence_fd=None):
+            del timeout, evidence_fd
+            label = "router" if capture.pcap == self.router_pcap else "client"
+            self.events.append(("capture_stop", label))
+            return 0
+
+        def start_vm(state, *, name, tap, qemu_user, uid, gid, log_path=None,
+                     log_fd=None, memory_mib=512, mac=guest.VM_MAC):
+            del state, tap, qemu_user, uid, gid
+            label = "client" if name == client_name else "router"
+            self.events.append(("vm_start", label, memory_mib, mac))
+            if log_fd is not None:
+                os.write(log_fd, label.encode() + b"\n")
+            else:
+                pathlib.Path(log_path).write_text(label, encoding="utf-8")
+            return (
+                FakeProcess(label),
+                [f"qemu-{label}", "-m", str(memory_mib)],
+                ["setpriv", "--", f"qemu-{label}"],
+            )
+
+        def fake_sleep(seconds):
+            if seconds == run_phase.QUIET_SECONDS:
+                self.events.append(("quiet",))
+
+        class ClientQGA:
+            def __init__(self):
+                self.exit_node_active = False
+                self.log = b""
+                self.commands = []
+                self.clock = 1_700_000_000
+
+            def status(self):
+                peer = {
+                    "ID": "peer-router",
+                    "HostName": guest.DEFAULT_NAME,
+                    "ExitNodeOption": True,
+                    "Online": True,
+                    "TailscaleIPs": ["100.64.0.9"],
+                }
+                document = {
+                    "BackendState": "Running",
+                    "Self": {
+                        "HostName": client_name,
+                        "DNSName": client_name + ".tailnet.ts.net.",
+                        "ExitNodeOption": False,
+                        "AdvertisedRoutes": [],
+                    },
+                    "Peer": {guest.DEFAULT_NAME: peer},
+                }
+                if self.exit_node_active:
+                    document["ExitNodeStatus"] = {
+                        "ID": "peer-router",
+                        "Online": True,
+                        "TailscaleIPs": ["100.64.0.9"],
+                    }
+                return document
+
+            def execute(self, program, args=(), timeout=60.0, **kwargs):
+                del program, timeout, kwargs
+                command = args[-1] if args else ""
+                self.commands.append(command)
+                events.append(("client_exec", command))
+                if "SILENCE-OK" in command:
+                    return ExecResult(0, b"SILENCE-OK\n", b"")
+                if "tailscale status --json" in command:
+                    return ExecResult(0, json.dumps(self.status()).encode(), b"")
+                if "tailscale set --exit-node=" in command:
+                    if "--exit-node= " not in command and command.rstrip().endswith("--exit-node="):
+                        self.exit_node_active = False
+                        events.append(("client_exit_cleared",))
+                        return ExecResult(0, b"", b"")
+                    self.exit_node_active = True
+                    events.append(("client_exit_set",))
+                    return ExecResult(0, b"", b"")
+                if "systemd-run" in command:
+                    events.append(("traffic_start",))
+                    stamp = self.clock
+                    self.log = (
+                        json.dumps({"t": stamp, "k": "exit", "ok": True, "m": True}).encode()
+                        + b"\n"
+                        + json.dumps({"t": stamp, "k": "marker", "ok": True}).encode()
+                        + b"\n"
+                    )
+                    return ExecResult(0, b"", b"")
+                if "systemctl stop vprlab-client-traffic" in command:
+                    events.append(("traffic_stop",))
+                    return ExecResult(0, b"", b"")
+                if command.startswith("stat -c %s"):
+                    return ExecResult(0, str(len(self.log)).encode() + b"\n", b"")
+                if command.strip() == f"cat {guest.CLIENT_PROBE_LOG}":
+                    return ExecResult(0, self.log, b"")
+                if "/sys/class/net" in command:
+                    return ExecResult(0, b"eth0\n", b"")
+                if command.strip() == "date +%s":
+                    return ExecResult(0, f"{self.clock}\n".encode(), b"")
+                if "VPRLEAKCTL1:" in command:
+                    match = re.search(r"VPRLEAKCTL1:([0-9a-f]{32})", command)
+                    if match:
+                        payload = b"VPRLEAKCTL1:" + match.group(1).encode()
+                        self._append_client_pcap(payload)
+                        events.append(("client_control", match.group(1)))
+                    return ExecResult(0, b"", b"")
+                if "tailscale up" in command:
+                    events.append(("client_up",))
+                    return ExecResult(0, b"", b"")
+                if "journalctl" in command:
+                    return ExecResult(0, b"https://login.tailscale.com/a/abcdef0123456789\n", b"")
+                if "tailscale set --exit-node= " in command:
+                    return ExecResult(0, b"", b"")
+                return ExecResult(0, b"", b"")
+
+            def _append_client_pcap(self, payload):
+                if getattr(self, "pcap_slot", None):
+                    path = self.pcap_slot[0]
+                    path.write_bytes(path.read_bytes() + payload)
+
+            def write_file(self, path, data, timeout=60.0):
+                del path, data, timeout
+
+            def shutdown(self, mode="powerdown", *, timeout=5.0):
+                del mode, timeout
+                events.append(("client_shutdown",))
+
+            def close(self):
+                pass
+
+        client = ClientQGA(**client_kwargs)
+
+        def wait_for_qga_or_exit(socket_path, process, *, timeout=run_phase.QGA_BOOT_TIMEOUT):
+            del timeout
+            if str(socket_path).startswith(str(self.client_state)):
+                client.pcap_slot = getattr(self, "_client_slot", None)
+                return client
+            router = HarnessQGA(
+                self.events,
+                getattr(self, "_router_slot", [None]),
+            )
+            self._router_client = router
+            return router
+
+        def fake_run(argv, **kwargs):
+            del kwargs
+            text = " ".join(str(part) for part in argv)
+            if "pcapscan.py" not in text and "clientscan.py" not in text:
+                raise AssertionError(f"unexpected subprocess.run: {text}")
+
+            def option(name):
+                return argv[argv.index(name) + 1]
+
+            def digest(path):
+                hasher = __import__("hashlib").sha256()
+                with open(path, "rb") as stream:
+                    for chunk in iter(lambda: stream.read(65536), b""):
+                        hasher.update(chunk)
+                return hasher.hexdigest()
+
+            if "clientscan.py" in text:
+                report = {
+                    "verdict": "PASS",
+                    "capture_meta": {
+                        "source_sha256": digest(option("--client-pcap")),
+                        "router_source_sha256": digest(option("--router-pcap")),
+                        "stats_sha256": digest(option("--client-tcpdump-stats")),
+                        "capture_argv_sha256": digest(option("--client-capture-argv-file")),
+                        "controls": {
+                            "before": {"nonce": option("--client-control-before")},
+                            "after": {"nonce": option("--client-control-after")},
+                        },
+                    },
+                }
+                self.events.append(("client_scan",))
+                return subprocess.CompletedProcess(argv, 0, json.dumps(report).encode(), b"")
+            report = {
+                "verdict": "PASS",
+                "control_before": option("--control-before"),
+                "control_after": option("--control-after"),
+                "capture_meta": {
+                    "source_sha256": digest(option("--pcap")),
+                    "stats_sha256": digest(option("--tcpdump-stats")),
+                    "capture_argv_sha256": digest(option("--capture-argv-file")),
+                    "policy_sha256": digest(option("--policy")),
+                },
+            }
+            self.events.append(("router_scan",))
+            return subprocess.CompletedProcess(argv, 0, json.dumps(report).encode(), b"")
+
+        def fake_poweroff(client_arg, process, *, state=None, tap=None):
+            del client_arg, state, tap
+            if process is not None:
+                process.wait()
+            return (0, False, False)
+
+        with contextlib.ExitStack() as stack:
+            enter = stack.enter_context
+            enter(mock.patch.object(run_phase, "require_root"))
+            enter(mock.patch.object(run_phase.hostcheck, "refuse_if_qemu_running"))
+            enter(mock.patch.object(run_phase, "check_admission"))
+            enter(mock.patch.object(run_phase, "read_mem_available", return_value=8 * 1024 ** 3))
+            enter(mock.patch.object(run_phase.guest, "resolve_unprivileged_user", return_value=(1000, 1000)))
+            enter(mock.patch.object(run_phase.guest, "verify_base_image", return_value="0" * 128))
+            enter(mock.patch.object(run_phase, "verify_state"))
+            enter(mock.patch.object(run_phase, "verify_host_lab"))
+            enter(mock.patch.object(run_phase.shutil, "which", return_value="/usr/bin/tcpdump"))
+            client_pairs = iter(
+                [
+                    {"before": NONCE_A, "after": NONCE_B},
+                    {"before": "c" * 32, "after": "d" * 32},
+                ]
+            )
+            enter(
+                mock.patch.object(
+                    run_phase,
+                    "fresh_pair",
+                    side_effect=lambda used: next(client_pairs),
+                )
+            )
+            enter(mock.patch.object(run_phase.time, "sleep", side_effect=fake_sleep))
+            enter(mock.patch.object(run_phase, "CAPTURE_WATCH_INTERVAL", 0.01))
+            enter(mock.patch.object(run_phase, "AFTER_CAPTURE_TIMEOUT", 0.05))
+            enter(mock.patch.object(run_phase, "ROUTER_ACTIVE_TIMEOUT", 0.05))
+            enter(mock.patch.object(run_phase, "ROUTER_HANDSHAKE_TIMEOUT", 0.05))
+            enter(mock.patch.object(run_phase, "CLIENT_READY_TIMEOUT", 0.05))
+            enter(mock.patch.object(run_phase, "CLIENT_ROUTED_TIMEOUT", 0.05))
+            enter(mock.patch.object(run_phase, "start_capture", side_effect=start_capture))
+            enter(mock.patch.object(run_phase, "stop_capture", side_effect=stop_capture))
+            enter(mock.patch.object(run_phase, "start_vm", side_effect=start_vm))
+            enter(mock.patch.object(run_phase, "wait_for_qga_or_exit", side_effect=wait_for_qga_or_exit))
+            enter(mock.patch.object(run_phase, "poweroff_vm", side_effect=fake_poweroff))
+            enter(mock.patch.object(run_phase, "resolve_probe_ips", return_value={"https": "1.2.3.4", "http": "5.6.7.8"}))
+            enter(mock.patch.object(run_phase.subprocess, "run", side_effect=fake_run))
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                code = run_phase.run_phase(arguments)
+        evidence_dirs = [path for path in self.evidence.iterdir() if path.is_dir()]
+        self.assertEqual(len(evidence_dirs), 1)
+        record = json.loads((evidence_dirs[0] / guest.PHASE_RECORD_FILE).read_text())
+        return code, record, client, self.events, stdout.getvalue(), stderr.getvalue(), evidence_dirs[0]
+
+    def test_client_idle_passes_with_both_captures_and_the_probe_log(self) -> None:
+        code, record, client, events, _stdout, _stderr, evidence = self._run("idle")
+        self.assertEqual(code, 0, record["result_reason"])
+        self.assertEqual(record["result"], "PASS")
+        self.assertEqual(record["client"]["index"], 1)
+        self.assertEqual(record["client"]["memory_mib"], 256)
+        self.assertEqual(record["client"]["probe"]["verdict"], "PASS")
+        self.assertEqual(record["client"]["scan"]["verdict"], "PASS")
+        self.assertEqual(record["scan"]["verdict"], "PASS")
+        self.assertEqual(record["client"]["combined"], "PASS")
+        for name in (
+            guest.CLIENT_CAPTURE_FILE,
+            guest.CLIENT_CAPTURE_STATS_FILE,
+            guest.CLIENT_CAPTURE_ARGV_FILE,
+            guest.CLIENT_PROBE_FILE,
+            guest.CLIENT_SCAN_REPORT_FILE,
+        ):
+            self.assertTrue((evidence / name).is_file(), name)
+        self.assertEqual(stat.S_IMODE((evidence / guest.CLIENT_PROBE_FILE).stat().st_mode), 0o600)
+        labels = [entry[0] for entry in events]
+        # Captures start before either VM; both outlive both QEMUs.
+        self.assertLess(labels.index("capture_start"), labels.index("vm_start"))
+        self.assertEqual(labels.count("qemu_exit"), 2)
+        last_exit = max(i for i, e in enumerate(events) if e[0] == "qemu_exit")
+        for index, entry in enumerate(events):
+            if entry[0] == "capture_stop":
+                self.assertLess(last_exit, index)
+        # Both captures were stopped.
+        self.assertEqual(labels.count("capture_stop"), 2)
+        # The exit node was cleared before both controls were sent.
+        clear_index = labels.index("client_exit_cleared")
+        control_indexes = [
+            index for index, entry in enumerate(events) if entry[0] == "client_control"
+        ]
+        self.assertTrue(control_indexes)
+        self.assertLess(clear_index, min(control_indexes))
+        client_before = min(control_indexes)
+        router_control = [
+            index for index, entry in enumerate(events)
+            if entry[0] == "exec" and "VPRLEAKCTL1:" in str(entry[1])
+        ]
+        self.assertTrue(router_control)
+        self.assertLess(clear_index, min(router_control))
+        # Client boots before the router, and the client before-control is
+        # sent before the router exists.
+        vm_starts = [entry for entry in events if entry[0] == "vm_start"]
+        self.assertEqual([entry[1] for entry in vm_starts], ["client", "router"])
+        router_boot = next(
+            index
+            for index, entry in enumerate(events)
+            if entry[0] == "vm_start" and entry[1] == "router"
+        )
+        self.assertLess(client_before, router_boot)
+        self.assertLess(client_before, min(router_control))
+        # Traffic starts only after the router is ready, and the fault follows.
+        self.assertLess(client_before, labels.index("traffic_start"))
+        start_index = labels.index("traffic_start")
+        stop_index = next(
+            index for index, label in enumerate(labels)
+            if label == "traffic_stop" and index > start_index
+        )
+        self.assertLess(start_index, stop_index)
+        # Client after-control precedes the router after-control.
+        client_after = next(
+            index for index, entry in enumerate(events)
+            if entry[0] == "client_control" and entry[1] == "d" * 32
+        )
+        router_after = next(
+            index for index, entry in enumerate(events)
+            if entry[0] == "exec" and "VPRLEAKCTL1:" + "b" * 32 in str(entry[1])
+        )
+        self.assertLess(client_after, router_after)
+
+    def test_client_login_is_refused_with_login_phase(self) -> None:
+        arguments = self._arguments("login")
+        with mock.patch.object(run_phase, "require_root"), self.assertRaises(
+            hostcheck.Refusal
+        ):
+            run_phase.run_phase(arguments)
+        arguments = self._arguments("client-login", client=None)
+        with mock.patch.object(run_phase, "require_root"), self.assertRaises(
+            hostcheck.Refusal
+        ):
+            run_phase.run_phase(arguments)
+
+    def test_client_login_boots_only_the_client_and_writes_the_url(self) -> None:
+        code, record, client, events, _stdout, _stderr, evidence = self._run(
+            "client-login", 0.0
+        )
+        self.assertEqual(code, 0, record["result_reason"])
+        self.assertEqual(record["result"], "PASS")
+        labels = [entry[0] for entry in events]
+        self.assertEqual(labels.count("vm_start"), 1)
+        self.assertIn("client_up", labels)
+        url = (evidence / "login-url.txt").read_text()
+        self.assertTrue(url.startswith("https://login.tailscale.com/a/"))
+        self.assertEqual(stat.S_IMODE((evidence / "login-url.txt").stat().st_mode), 0o600)
+        self.assertEqual(record["client"]["running"], True)
+
+
 class TestFileLayoutTests(unittest.TestCase):
     """r5 review M3: a class after the __main__ guard is skipped by `python3 FILE`."""
 

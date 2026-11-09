@@ -8,6 +8,12 @@ Execute as root on debdev:
         --profile-file /root/vprouter-lab.conf \
         --used-nonces /root/leaklab-used-nonces.txt --index 1
 
+M3 adds ``--client N``: a second, 256 MiB client VM on its own ``vprlab1``
+bridge sends traffic through the router's test exit node while the router
+phase runs.  ``--phase client-login --client N`` boots only the client for an
+interactive login.  The router-only argv, capture, evidence and verdict paths
+are unchanged.
+
 The runner refuses to start unless exactly one guest can run (it holds the
 global ``/run/vprlab/run.lock``), the host lab network exists with the M1
 ownership token, gateway MAC and static neighbour, the state overlay is backed
@@ -59,6 +65,7 @@ if str(_LEAK_LAB_DIR) not in sys.path:
     sys.path.insert(0, str(_LEAK_LAB_DIR))
 
 import control as control_mod  # noqa: E402  (read-only import of reviewed module)
+import clientprobe  # noqa: E402
 import policy as policy_mod  # noqa: E402
 import tsnames  # noqa: E402
 
@@ -73,6 +80,7 @@ PHASES = (
     "start-router",
     "idle",
     "login",
+    "client-login",
     "reboot-with-router-enabled",
     "stop-router",
     "kill-wireguard",
@@ -96,6 +104,7 @@ PHASE_EXPECTATIONS = {
     "start-router": "up",
     "idle": "up",
     "login": "up",
+    "client-login": "up",
     "reboot-with-router-enabled": "up",
     "stop-router": "up",
     "kill-wireguard": "up",
@@ -119,6 +128,13 @@ EVIDENCE_ROOT = guest.EVIDENCE_ROOT
 MAX_PHASE_DURATION = 3600.0
 HANDSHAKE_MAX_AGE_SECONDS = 180.0
 MIN_MEMORY_AVAILABLE = 1536 * 1024 * 1024
+#: One client VM adds its 256 MiB to the router + headroom admission floor.
+CLIENT_MEMORY_MIB = guest.CLIENT_MEMORY_MIB
+MIN_CLIENT_MEMORY_AVAILABLE = MIN_MEMORY_AVAILABLE + CLIENT_MEMORY_MIB * guest.MIB
+CLIENT_ROUTED_TIMEOUT = 90.0
+CLIENT_READY_TIMEOUT = 180.0
+CLIENT_TRAFFIC_RUNTIME_MARGIN = 120
+CLIENT_PROBE_READ_LIMIT = 1024 * 1024
 DISK_HEADROOM = 1024 * 1024 * 1024
 DEFAULT_CAPTURE_SIZE_CAP = 2 * 1024 * 1024 * 1024
 CAPTURE_WATCH_INTERVAL = 0.1
@@ -657,7 +673,12 @@ def fresh_pair(
     return {"before": before, "after": after}
 
 
-def append_used_nonces(path: pathlib.Path, nonces: dict[str, str]) -> None:
+def append_used_nonces(
+    path: pathlib.Path,
+    nonces: dict[str, str],
+    *,
+    extra: tuple[str, ...] = (),
+) -> None:
     path = pathlib.Path(path)
     flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
     if hasattr(os, "O_NOFOLLOW"):
@@ -668,7 +689,8 @@ def append_used_nonces(path: pathlib.Path, nonces: dict[str, str]) -> None:
         raise hostcheck.Refusal(f"used-nonces file is not writable: {exc.__class__.__name__}") from exc
     try:
         os.fchmod(descriptor, USED_NONCES_MODE)
-        payload = "".join(f"{nonces[role]}\n" for role in ("before", "after"))
+        values = [nonces[role] for role in ("before", "after")] + list(extra)
+        payload = "".join(f"{value}\n" for value in values)
         os.write(descriptor, payload.encode("ascii"))
         os.fsync(descriptor)
     finally:
@@ -1219,6 +1241,23 @@ def emit_control(
     return result.exitcode
 
 
+def emit_client_control(
+    client: QGAClient, nonce: str, client_index: int, device: str
+) -> int | None:
+    """Send one client positive control to the client bridge gateway sink."""
+    command = control_mod.build_command(
+        nonce,
+        device,
+        guest.client_ipv4(client_index),
+        guest.CLIENT_GATEWAY_IPV4,
+        SINK_UDP_PORT,
+    )
+    result = client.execute("/bin/sh", ["-c", command], timeout=30.0)
+    if result.exitcode != 0:
+        raise hostcheck.Refusal("client positive control did not exit zero")
+    return result.exitcode
+
+
 def resolve_wan_device(client: QGAClient, mac: str = guest.VM_MAC) -> str:
     """Find the test NIC by MAC; the control must bind to the real name."""
     script = (
@@ -1684,8 +1723,13 @@ def login_phase_wait(
     record: dict,
     guard: CaptureGuard | None = None,
     note=None,
+    client_login: bool = False,
 ) -> None:
-    """Poll the login URL through the runner's own QGA connection."""
+    """Poll the login URL through the runner's own QGA connection.
+
+    ``client_login`` reads the native client tailscaled status/journal instead
+    of the router container.
+    """
     url_path = evidence.path / "login-url.txt"
     deadline = time.monotonic() + duration
     found: str | None = None
@@ -1694,7 +1738,10 @@ def login_phase_wait(
         if guard is not None:
             guard.raise_if_exceeded()
         try:
-            url, unrecognized = login_url_mod.find_login_url_result(client, name)
+            if client_login:
+                url, unrecognized = login_url_mod.find_client_login_url_result(client)
+            else:
+                url, unrecognized = login_url_mod.find_login_url_result(client, name)
         except (QGAError, OSError):
             url, unrecognized = None, False
         if unrecognized:
@@ -1833,19 +1880,22 @@ def check_admission(
     mem_available: int | None = None,
     free_bytes: int | None = None,
     state_free_bytes: int | None = None,
+    client_memory_mib: int = 0,
 ) -> None:
     """Refuse to boot a guest without host memory and disk headroom.
 
     The evidence filesystem must hold the pcap cap plus 1 GiB.  The state
     filesystem is separate evidence-wise and must hold the guest's 4 GiB
     overlay plus the same 1 GiB headroom; a guest can fill its own disk
-    without sending a single packet.
+    without sending a single packet.  ``client_memory_mib`` adds the second
+    (client) VM's memory to the admission floor.
     """
     available = read_mem_available() if mem_available is None else mem_available
-    if available < MIN_MEMORY_AVAILABLE:
+    required_memory = MIN_MEMORY_AVAILABLE + max(0, int(client_memory_mib)) * guest.MIB
+    if available < required_memory:
         raise hostcheck.Refusal(
             "host MemAvailable is below "
-            f"{MIN_MEMORY_AVAILABLE // (1024 * 1024)} MiB; refusing to boot"
+            f"{required_memory // (1024 * 1024)} MiB; refusing to boot"
         )
     if free_bytes is None:
         free_bytes = _free_bytes(evidence_root)
@@ -1912,6 +1962,12 @@ class CaptureGuard:
         self.kill_error: str | None = None
         self.capture_process = capture_process
         self.qemu_process = qemu_process
+        self.capture_processes: list = (
+            [capture_process] if capture_process is not None else []
+        )
+        self.qemu_processes: list = (
+            [qemu_process] if qemu_process is not None else []
+        )
         self.capture_ended_early_at: str | None = None
         self._stopping_capture = False
         self._descriptor: int | None = None
@@ -1921,9 +1977,13 @@ class CaptureGuard:
 
     def attach_capture(self, process) -> None:
         self.capture_process = process
+        if process is not None and process not in self.capture_processes:
+            self.capture_processes.append(process)
 
     def attach_qemu(self, process) -> None:
         self.qemu_process = process
+        if process is not None and process not in self.qemu_processes:
+            self.qemu_processes.append(process)
 
     def mark_capture_stopping(self) -> None:
         """A normal SIGINT shutdown is about to happen; ignore that exit."""
@@ -1965,27 +2025,26 @@ class CaptureGuard:
         # A tap-down does not stop a compromised guest from writing its
         # overlay/serial/qemu.log.  Kill the verified QEMU we own as well; the
         # ordered cleanup still runs and records INVALID.
-        if self.qemu_process is not None and reason in (
-            "capture_size_cap",
-            "capture_disk_low",
-        ):
-            try:
-                kill_qemu(self.qemu_process)
-            except BaseException as exc:  # noqa: BLE001
-                self.kill_error = exc.__class__.__name__
+        if reason in ("capture_size_cap", "capture_disk_low"):
+            for process in self.qemu_processes:
+                try:
+                    kill_qemu(process)
+                except BaseException as exc:  # noqa: BLE001
+                    self.kill_error = exc.__class__.__name__
 
     def _capture_liveness(self) -> str | None:
-        if self.capture_process is None or self._stopping_capture:
+        if not self.capture_processes or self._stopping_capture:
             return None
-        try:
-            status = self.capture_process.poll()
-        except BaseException:  # noqa: BLE001 - a broken handle is not liveness
-            return None
-        if status is None:
-            return None
-        if self.capture_ended_early_at is None:
-            self.capture_ended_early_at = utc_now()
-        return "capture_ended_early"
+        for process in self.capture_processes:
+            try:
+                status = process.poll()
+            except BaseException:  # noqa: BLE001 - a broken handle is not liveness
+                continue
+            if status is not None:
+                if self.capture_ended_early_at is None:
+                    self.capture_ended_early_at = utc_now()
+                return "capture_ended_early"
+        return None
 
     def check(self) -> str | None:
         if self.reason is None:
@@ -2106,6 +2165,7 @@ def verify_host_lab(
     bridge: str,
     owner_file: str | pathlib.Path = hostcheck.OWNER_FILE,
     qemu_user: str | None = None,
+    client_index: int | None = None,
 ) -> None:
     if os.geteuid() == 0:
         try:
@@ -2158,12 +2218,27 @@ def verify_host_lab(
         owner_token=token,
         tap_user=qemu_user,
     )
+    if client_index is not None:
+        tap_name = guest.client_tap(client_index)
+        problems += hostcheck.verify_client_network(
+            links,
+            neighbors,
+            addresses_document=addresses,
+            owner_token=token,
+            taps={tap_name: (guest.client_ipv4(client_index), guest.client_mac(client_index))},
+            tap_user=qemu_user,
+        )
     if problems:
         raise hostcheck.Refusal("; ".join(problems))
 
 
 def verify_state(
-    state: pathlib.Path, *, qemu_uid: int, base: pathlib.Path, qemu_gid: int | None = None
+    state: pathlib.Path,
+    *,
+    qemu_uid: int,
+    base: pathlib.Path,
+    qemu_gid: int | None = None,
+    max_virtual_size: int | None = None,
 ) -> None:
     if os.geteuid() == 0:
         try:
@@ -2221,6 +2296,18 @@ def verify_state(
     except json.JSONDecodeError as exc:
         raise hostcheck.Refusal("qemu-img returned non-JSON output") from exc
     guest.verify_overlay_chain(document, overlay, base)
+    if max_virtual_size is not None:
+        top = document[0] if isinstance(document, list) and document else None
+        size = top.get("virtual-size") if isinstance(top, dict) else None
+        if (
+            isinstance(size, bool)
+            or not isinstance(size, int)
+            or size <= 0
+            or size > max_virtual_size
+        ):
+            raise hostcheck.Refusal(
+                "state overlay virtual size exceeds the client limit"
+            )
 
 
 def qemu_gid_for(uid: int) -> int:
@@ -2246,6 +2333,8 @@ def start_vm(
     gid: int,
     log_path: pathlib.Path | None = None,
     log_fd: int | None = None,
+    memory_mib: int = 512,
+    mac: str = guest.VM_MAC,
 ) -> tuple[subprocess.Popen, list[str], list[str]]:
     if (log_path is None) == (log_fd is None):
         raise hostcheck.Refusal("exactly one of log_path and log_fd is required")
@@ -2254,7 +2343,9 @@ def start_vm(
             (state / stale).unlink()
         except OSError:
             pass
-    qemu_argv = guest.build_qemu_argv("test", state, name=name, tap=tap)
+    qemu_argv = guest.build_qemu_argv(
+        "test", state, name=name, tap=tap, memory_mib=memory_mib, mac=mac
+    )
     launch_argv = guest.build_launch_argv(qemu_argv, qemu_user, uid=uid, gid=gid)
     if log_fd is None:
         flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
@@ -2701,13 +2792,549 @@ def scan_evidence(
     )
 
 
-def run_phase(arguments: argparse.Namespace) -> int:
-    require_root()
-    install_signal_handlers()
+# ---------------------------------------------------------------------------
+# M3 client helpers
+
+
+def client_status_command() -> str:
+    return f"{guest.CLIENT_TAILSCALE} status --json 2>/dev/null || true"
+
+
+def read_client_status(client: QGAClient) -> dict | None:
+    result = client.execute("/bin/sh", ["-c", client_status_command()], timeout=20.0)
+    try:
+        document = json.loads(result.stdout.decode("utf-8", "replace"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return document if isinstance(document, dict) else None
+
+
+def _bare_hostname(document: dict) -> str | None:
+    node = document.get("Self")
+    if not isinstance(node, dict):
+        return None
+    hostname = node.get("HostName")
+    if isinstance(hostname, str) and tsnames.is_client_node(hostname):
+        return hostname
+    dns_name = node.get("DNSName")
+    if isinstance(dns_name, str) and dns_name:
+        label = dns_name.split(".", 1)[0]
+        if tsnames.is_client_node(label):
+            return label
+    return None
+
+
+def client_readiness_problems(
+    document: object, expected_name: str
+) -> list[str]:
+    """Return fixed-string problems for a client status document."""
+    if not isinstance(document, dict):
+        return ["client status is unavailable"]
+    problems: list[str] = []
+    if document.get("BackendState") != "Running":
+        problems.append("the client Tailscale backend is not Running")
+    if _bare_hostname(document) != expected_name:
+        problems.append("the client name is not the expected client label")
+    node = document.get("Self")
+    if isinstance(node, dict):
+        if node.get("ExitNodeOption") is True:
+            problems.append("the client advertises an exit node")
+        routes = node.get("AdvertisedRoutes")
+        if isinstance(routes, list) and any(
+            route in ("0.0.0.0/0", "::/0") for route in routes
+        ):
+            problems.append("the client advertises a default route")
+    return problems
+
+
+def wait_client_running(
+    client: QGAClient,
+    expected_name: str,
+    *,
+    timeout: float | None = None,
+) -> dict:
+    if timeout is None:
+        timeout = CLIENT_READY_TIMEOUT
+    deadline = time.monotonic() + timeout
+    last = "client status is unavailable"
+    while time.monotonic() < deadline:
+        check_interrupt()
+        document = read_client_status(client)
+        problems = client_readiness_problems(document, expected_name)
+        if not problems:
+            return document
+        # Name/exit-node advertising are role violations, not startup delays.
+        for problem in problems:
+            if problem in (
+                "the client name is not the expected client label",
+                "the client advertises an exit node",
+                "the client advertises a default route",
+            ):
+                raise hostcheck.Refusal(problem)
+        last = "; ".join(problems)
+        time.sleep(1.0)
+    raise hostcheck.Refusal(f"the client did not become ready ({last})")
+
+
+def client_find_router_peer(
+    document: object, router_name: str
+) -> dict | None:
+    """Find the online test exit-node peer and its first IPv4 address.
+
+    The returned document is host-side only and never recorded: the peer's
+    Tailscale address is a non-Mullvad IP.
+    """
+    if not isinstance(document, dict):
+        return None
+    peers = document.get("Peer")
+    if not isinstance(peers, dict):
+        return None
+    for peer in peers.values():
+        if not isinstance(peer, dict):
+            continue
+        if peer.get("HostName") != router_name:
+            continue
+        if peer.get("ExitNodeOption") is not True or peer.get("Online") is not True:
+            continue
+        addresses = peer.get("TailscaleIPs")
+        if not isinstance(addresses, list):
+            continue
+        for address in addresses:
+            if not isinstance(address, str):
+                continue
+            try:
+                parsed = ipaddress.IPv4Address(address)
+            except ValueError:
+                continue
+            if parsed.is_global or parsed in ipaddress.IPv4Network("100.64.0.0/10"):
+                return peer
+    return None
+
+
+def client_peer_ipv4(peer: dict) -> str:
+    for address in peer.get("TailscaleIPs") or ():
+        if isinstance(address, str):
+            try:
+                ipaddress.IPv4Address(address)
+            except ValueError:
+                continue
+            return address
+    raise hostcheck.Refusal("the router exit-node peer has no IPv4 address")
+
+
+def client_peer_is_active(document: object, peer: dict) -> bool:
+    if not isinstance(document, dict):
+        return False
+    expected_id = peer.get("ID")
+    expected_ips = {
+        address
+        for address in peer.get("TailscaleIPs") or ()
+        if isinstance(address, str)
+    }
+    status = document.get("ExitNodeStatus")
+    if isinstance(status, dict):
+        if status.get("Online") is False:
+            return False
+        if expected_id is not None and status.get("ID") == expected_id:
+            return True
+        ips = status.get("TailscaleIPs")
+        if isinstance(ips, list) and expected_ips.intersection(
+            item for item in ips if isinstance(item, str)
+        ):
+            return True
+    node = document.get("Self")
+    if isinstance(node, dict):
+        exit_node = node.get("ExitNode")
+        if exit_node is True:
+            return True
+        if isinstance(exit_node, str) and (
+            exit_node == expected_id or exit_node in expected_ips
+        ):
+            return True
+    return False
+
+
+def set_client_exit_node(client: QGAClient, address: str) -> None:
+    try:
+        ipaddress.IPv4Address(address)
+    except ValueError as exc:
+        raise hostcheck.Refusal("the exit node address is not IPv4") from exc
+    command = (
+        f"{guest.CLIENT_TAILSCALE} set --exit-node={shlex.quote(address)} "
+        "--exit-node-allow-lan-access=false"
+    )
+    result = client.execute("/bin/sh", ["-c", command], timeout=60.0)
+    if result.exitcode != 0:
+        raise hostcheck.Refusal("cannot set the client exit node")
+
+
+def clear_client_exit_node(client: QGAClient) -> None:
+    result = client.execute(
+        "/bin/sh",
+        ["-c", f"{guest.CLIENT_TAILSCALE} set --exit-node="],
+        timeout=60.0,
+    )
+    if result.exitcode != 0:
+        raise hostcheck.Refusal("cannot clear the client exit node")
+
+
+def wait_client_exit_node(
+    client: QGAClient, peer: dict, *, timeout: float | None = None
+) -> dict:
+    if timeout is None:
+        timeout = CLIENT_READY_TIMEOUT
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        check_interrupt()
+        document = read_client_status(client)
+        if client_peer_is_active(document, peer):
+            return document
+        time.sleep(1.0)
+    raise hostcheck.Refusal("the client did not report the test exit node as active")
+
+
+def start_client_traffic(
+    client: QGAClient,
+    *,
+    marker: str,
+    https_ip: str,
+    http_ip: str,
+    runtime_sec: int,
+) -> None:
+    if not clientprobe.is_marker(marker):
+        raise hostcheck.Refusal("the client marker is not VPRCLIENTMARK1:<32 hex>")
+    for address in (https_ip, http_ip):
+        if not policy_mod.is_ipv4_literal(address):
+            raise hostcheck.Refusal("a client probe address is not IPv4")
+    if isinstance(runtime_sec, bool) or not isinstance(runtime_sec, int):
+        raise hostcheck.Refusal("the client traffic runtime is invalid")
+    if runtime_sec <= 0:
+        raise hostcheck.Refusal("the client traffic runtime must be positive")
+    command = (
+        f"systemctl reset-failed {guest.CLIENT_TRAFFIC_UNIT} 2>/dev/null || true; "
+        f"systemd-run --unit={guest.CLIENT_TRAFFIC_UNIT} "
+        f"-p RuntimeMaxSec={runtime_sec} "
+        f"{guest.CLIENT_TRAFFIC_SCRIPT} {shlex.quote(marker)} "
+        f"{shlex.quote(https_ip)} {shlex.quote(http_ip)}"
+    )
+    result = client.execute("/bin/sh", ["-c", command], timeout=60.0)
+    if result.exitcode != 0:
+        raise hostcheck.Refusal("cannot start the client traffic unit")
+
+
+def stop_client_traffic(client: QGAClient) -> None:
+    command = (
+        f"systemctl stop {guest.CLIENT_TRAFFIC_UNIT}.service 2>/dev/null || true; "
+        f"systemctl reset-failed {guest.CLIENT_TRAFFIC_UNIT}.service 2>/dev/null || true; "
+        "true"
+    )
+    client.execute("/bin/sh", ["-c", command], timeout=60.0)
+
+
+def read_client_probe_log(client: QGAClient) -> tuple[bytes | None, str | None]:
+    """Read the bounded probe log; return ``(data, problem)``."""
+    stat = client.execute(
+        "/bin/sh",
+        ["-c", f"stat -c %s {guest.CLIENT_PROBE_LOG} 2>/dev/null || true"],
+        timeout=15.0,
+    )
+    size_text = stat.stdout.decode("ascii", "replace").strip()
+    if not size_text.isdigit():
+        return None, "probe_log_missing"
+    size = int(size_text)
+    if size > CLIENT_PROBE_READ_LIMIT:
+        return None, "probe_log_oversized"
+    result = client.execute(
+        "/bin/sh", ["-c", f"cat {guest.CLIENT_PROBE_LOG}"], timeout=30.0
+    )
+    if result.exitcode != 0 or len(result.stdout) > CLIENT_PROBE_READ_LIMIT:
+        return None, "probe_log_unreadable"
+    return result.stdout, None
+
+
+def resolve_probe_ips(resolver=None) -> dict[str, str]:
+    """Resolve the two probe names on the host once per phase.
+
+    Client probes use ``curl --resolve`` with these addresses, so the client
+    needs no DNS.  Both must be public IPv4 addresses.
+    """
+    if resolver is None:
+        import socket
+
+        resolver = socket.getaddrinfo
+    else:
+        import socket
+    result: dict[str, str] = {}
+    for key, hostname in (("https", "am.i.mullvad.net"), ("http", "example.com")):
+        try:
+            records = resolver(hostname, 443 if key == "https" else 80, 0, socket.SOCK_STREAM)
+        except OSError as exc:
+            raise hostcheck.Refusal(f"cannot resolve {hostname}") from exc
+        address = None
+        for record in records:
+            candidate = record[4][0] if len(record) >= 5 else None
+            try:
+                parsed = ipaddress.IPv4Address(candidate)
+            except (ValueError, TypeError):
+                continue
+            if parsed.is_global:
+                address = str(parsed)
+                break
+        if address is None:
+            raise hostcheck.Refusal(f"{hostname} has no public IPv4 address")
+        result[key] = address
+    return result
+
+
+def client_runtime_seconds(duration: float) -> int:
+    value = int(duration) + CLIENT_TRAFFIC_RUNTIME_MARGIN
+    if value > int(MAX_PHASE_DURATION) + CLIENT_TRAFFIC_RUNTIME_MARGIN:
+        raise hostcheck.Refusal("client traffic runtime is out of range")
+    return value
+
+
+def client_traffic_unit_active(client: QGAClient) -> bool:
+    result = client.execute(
+        "/bin/sh",
+        ["-c", f"systemctl is-active --quiet {guest.CLIENT_TRAFFIC_UNIT}.service"],
+        timeout=15.0,
+    )
+    return result.exitcode == 0
+
+
+def wait_client_first_mullvad(
+    client: QGAClient, *, timeout: float = CLIENT_ROUTED_TIMEOUT
+) -> bool:
+    """Wait for a successful exit probe with ``mullvad_exit_ip: true``."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        check_interrupt()
+        data, problem = read_client_probe_log(client)
+        if data is not None and problem is None:
+            try:
+                entries = clientprobe.parse_probe_log(data)
+            except clientprobe.ProbeError:
+                entries = []
+            for entry in entries:
+                if (
+                    entry.get("k") == "exit"
+                    and entry.get("ok") is True
+                    and entry.get("m") is True
+                ):
+                    return True
+        time.sleep(1.0)
+    return False
+
+
+def cleanup_client_units(client: QGAClient) -> None:
+    """Stop the traffic unit and clear the exit node from the client."""
+    stop_client_traffic(client)
+    result = client.execute(
+        "/bin/sh",
+        ["-c", f"{guest.CLIENT_TAILSCALE} set --exit-node= 2>/dev/null || true"],
+        timeout=30.0,
+    )
+    if result.exitcode != 0:
+        raise hostcheck.Refusal("cannot stop the client traffic unit")
+
+
+def scan_client_evidence(
+    evidence: EvidenceDirectory,
+    *,
+    before: str,
+    after: str,
+    marker: str,
+    interface: str,
+    scanner_path: pathlib.Path,
+) -> ScanOutcome:
+    """Run clientscan.py over both captures through the retained directory fd."""
+    problems: list[str] = []
+    hashes: dict[str, str] = {}
+    client_scanner = pathlib.Path(scanner_path).with_name("clientscan.py")
+    try:
+        if evidence.size(guest.CLIENT_CAPTURE_FILE) <= 0:
+            return ScanOutcome(
+                present=False,
+                exitcode=2,
+                verdict=None,
+                stderr="",
+                argv=[],
+                hashes={},
+                problems=["client_capture_missing"],
+                report=None,
+            )
+        hashes = {
+            "client_pcap_sha256": evidence.hash(guest.CLIENT_CAPTURE_FILE),
+            "router_pcap_sha256": evidence.hash(guest.CAPTURE_FILE),
+            "client_stats_sha256": evidence.hash(
+                guest.CLIENT_CAPTURE_STATS_FILE
+            ),
+            "client_capture_argv_sha256": evidence.hash(
+                guest.CLIENT_CAPTURE_ARGV_FILE
+            ),
+        }
+    except (rootfs.PathError, OSError):
+        return ScanOutcome(
+            present=False,
+            exitcode=2,
+            verdict=None,
+            stderr="",
+            argv=[],
+            hashes={},
+            problems=["client_capture_missing"],
+            report=None,
+        )
+    if not client_scanner.is_file():
+        return ScanOutcome(
+            present=True,
+            exitcode=2,
+            verdict=None,
+            stderr="",
+            argv=[],
+            hashes=hashes,
+            problems=["client_scanner_missing"],
+            report=None,
+        )
+    scan_argv = [
+        sys.executable,
+        "-B",
+        str(client_scanner),
+        "--client-pcap",
+        evidence.proc_path(guest.CLIENT_CAPTURE_FILE),
+        "--router-pcap",
+        evidence.proc_path(guest.CAPTURE_FILE),
+        "--client-tcpdump-stats",
+        evidence.proc_path(guest.CLIENT_CAPTURE_STATS_FILE),
+        "--client-capture-argv-file",
+        evidence.proc_path(guest.CLIENT_CAPTURE_ARGV_FILE),
+        "--interface",
+        interface,
+        "--marker",
+        marker,
+        "--client-control-before",
+        before,
+        "--client-control-after",
+        after,
+    ]
+    scan_exit = 2
+    scan_stderr = ""
+    try:
+        completed = subprocess.run(
+            scanner_launch_argv(scan_argv),
+            check=False,
+            capture_output=True,
+            timeout=SCAN_TIMEOUT,
+            pass_fds=(evidence.fd,),
+        )
+        scan_exit = completed.returncode
+        evidence.open_new(guest.CLIENT_SCAN_REPORT_FILE, completed.stdout, mode=0o600)
+        scan_stderr = completed.stderr[:4096].decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError) as exc:
+        scan_exit = 2
+        scan_stderr = f"clientscan failed: {exc.__class__.__name__}"
+    try:
+        report = json.loads(evidence.read_bytes(guest.CLIENT_SCAN_REPORT_FILE))
+    except (rootfs.PathError, OSError, json.JSONDecodeError):
+        report = None
+        problems.append("client_scan_report_invalid")
+    scan_verdict: str | None = None
+    if isinstance(report, dict):
+        raw = report.get("verdict")
+        scan_verdict = raw if isinstance(raw, str) else None
+        expected_exit = {"PASS": 0, "LEAK": 1, "INVALID": 2}.get(scan_verdict or "")
+        if expected_exit is None or expected_exit != scan_exit:
+            problems.append("client_scan_report_mismatch")
+        meta = report.get("capture_meta")
+        if isinstance(meta, dict):
+            for field, key in (
+                ("source_sha256", "client_pcap_sha256"),
+                ("router_source_sha256", "router_pcap_sha256"),
+                ("stats_sha256", "client_stats_sha256"),
+                ("capture_argv_sha256", "client_capture_argv_sha256"),
+            ):
+                if meta.get(field) != hashes[key]:
+                    problems.append("client_scan_report_mismatch")
+            if meta.get("controls", {}).get("before", {}).get("nonce") != before:
+                problems.append("client_scan_report_mismatch")
+            if meta.get("controls", {}).get("after", {}).get("nonce") != after:
+                problems.append("client_scan_report_mismatch")
+        else:
+            problems.append("client_scan_report_mismatch")
+    else:
+        problems.append("client_scan_report_invalid")
+    try:
+        hashes["client_scan_sha256"] = evidence.hash(
+            guest.CLIENT_SCAN_REPORT_FILE
+        )
+        post = {
+            "client_pcap_sha256": evidence.hash(guest.CLIENT_CAPTURE_FILE),
+            "router_pcap_sha256": evidence.hash(guest.CAPTURE_FILE),
+            "client_stats_sha256": evidence.hash(
+                guest.CLIENT_CAPTURE_STATS_FILE
+            ),
+            "client_capture_argv_sha256": evidence.hash(
+                guest.CLIENT_CAPTURE_ARGV_FILE
+            ),
+        }
+        if post != {
+            key: hashes[key]
+            for key in (
+                "client_pcap_sha256",
+                "router_pcap_sha256",
+                "client_stats_sha256",
+                "client_capture_argv_sha256",
+            )
+        }:
+            problems.append("client_scan_report_mismatch")
+    except (rootfs.PathError, OSError):
+        problems.append("client_scan_report_invalid")
+    return ScanOutcome(
+        present=True,
+        exitcode=scan_exit,
+        verdict=scan_verdict,
+        stderr=scan_stderr,
+        argv=scan_argv,
+        hashes=hashes,
+        problems=list(dict.fromkeys(problems)),
+        report=report if isinstance(report, dict) else None,
+    )
+
+
+def combine_verdicts(
+    router_verdict: str | None,
+    client_scan_verdict: str | None,
+    probe_verdict: str | None,
+    *,
+    errors: list[str] | tuple[str, ...] = (),
+) -> str:
+    """Return the worst of the router, client-scan and probe verdicts."""
+    values = [
+        verdict
+        for verdict in (router_verdict, client_scan_verdict, probe_verdict)
+        if verdict is not None
+    ]
+    if "LEAK" in values:
+        return "LEAK"
+    if errors or any(value != "PASS" for value in values) or not values:
+        return "INVALID"
+    return "PASS"
+
+
+def _run_client_phase_locked(
+    arguments: argparse.Namespace, *, lifecycle: LifecycleState
+) -> int:
+    """Run one M3 phase with a real client VM (router VM also runs)."""
+    client_index = guest.validate_client_index(arguments.client)
+    client_name = guest.client_name(client_index)
+    if not tsnames.is_client_node(client_name):
+        raise hostcheck.Refusal("the client name is not a client test label")
     if arguments.phase not in PHASES:
         raise hostcheck.Refusal(f"unknown phase {arguments.phase}")
+    if arguments.phase == "login":
+        raise hostcheck.Refusal("login does not take --client; use client-login")
+    login_only = arguments.phase == "client-login"
     name = guest.validate_name(arguments.name)
-    if not tsnames.is_test_node(name):
+    if not login_only and not tsnames.is_test_node(name):
         raise hostcheck.Refusal(
             "name must be a throw-away zz-vprtest-NN-do-not-use label"
         )
@@ -2718,9 +3345,985 @@ def run_phase(arguments: argparse.Namespace) -> int:
         )
     if arguments.capture_size_cap <= 0:
         raise hostcheck.Refusal("capture size cap must be positive")
+    if arguments.tap != guest.TAP or arguments.bridge != guest.BRIDGE:
+        raise hostcheck.Refusal(
+            f"the leak lab uses the fixed tap {guest.TAP} and bridge {guest.BRIDGE}"
+        )
     if arguments.profile_fd is not None and arguments.profile_file is not None:
         raise hostcheck.Refusal("use exactly one of --profile-fd and --profile-file")
-    if arguments.profile_fd is None and arguments.profile_file is None:
+    if not login_only and arguments.profile_fd is None and arguments.profile_file is None:
+        raise hostcheck.Refusal("a WireGuard profile is required")
+    if login_only and (
+        arguments.profile_fd is not None or arguments.profile_file is not None
+    ):
+        arguments.profile_fd = None
+        arguments.profile_file = None
+
+    hostcheck.refuse_if_qemu_running(self_pid=os.getpid())
+    try:
+        uid, gid = guest.resolve_unprivileged_user(arguments.qemu_user)
+    except guest.GeneratorError as exc:
+        raise hostcheck.Refusal(str(exc)) from exc
+    base = pathlib.Path(arguments.base_image)
+    if os.geteuid() == 0:
+        try:
+            rootfs.validate_ancestry(base.parent, expected_uid=0)
+        except rootfs.PathError as exc:
+            raise hostcheck.Refusal(
+                f"base image ancestry is not root-trusted: {exc}"
+            ) from exc
+    base_digest = guest.verify_base_image(
+        base, pathlib.Path(arguments.checksum_manifest)
+    )
+    router_state = guest.state_path(
+        arguments.index, pathlib.Path(arguments.state_root)
+    )
+    client_state = guest.client_state_path(
+        client_index, pathlib.Path(arguments.state_root)
+    )
+    check_admission(
+        pathlib.Path(arguments.evidence_root),
+        int(arguments.capture_size_cap),
+        state_root=router_state.parent,
+        client_memory_mib=CLIENT_MEMORY_MIB,
+    )
+    if not login_only:
+        verify_state(router_state, qemu_uid=uid, qemu_gid=gid, base=base)
+    verify_state(
+        client_state,
+        qemu_uid=uid,
+        qemu_gid=gid,
+        base=base,
+        max_virtual_size=guest.CLIENT_OVERLAY_VIRTUAL_SIZE,
+    )
+    verify_host_lab(
+        tap=arguments.tap,
+        bridge=arguments.bridge,
+        owner_file=arguments.owner_file,
+        qemu_user=arguments.qemu_user,
+        client_index=client_index,
+    )
+
+    profile: SecretMaterial | None = None
+    lab_policy: policy_mod.Policy | None = None
+    endpoint: tuple[str, int] | None = None
+    if not login_only:
+        if arguments.profile_fd is not None:
+            profile = read_profile_fd(arguments.profile_fd)
+        else:
+            profile = read_profile_path(
+                pathlib.Path(arguments.profile_file),
+                owner_uid=0 if os.geteuid() == 0 else os.geteuid(),
+            )
+        endpoint = profile_endpoint(profile)
+        lab_policy = build_lab_policy(endpoint)
+
+    used_path = pathlib.Path(arguments.used_nonces)
+    if os.geteuid() == 0:
+        try:
+            rootfs.validate_ancestry(used_path.parent, expected_uid=0)
+        except rootfs.PathError as exc:
+            raise hostcheck.Refusal(
+                f"used-nonces ancestry is not root-trusted: {exc}"
+            ) from exc
+    used = load_used_nonces(used_path)
+    router_pair = fresh_pair(used)
+    used.update(router_pair.values())
+    client_pair = fresh_pair(used)
+    used.update(client_pair.values())
+    marker_hex = control_mod.generate_nonce(used)
+    used.add(marker_hex)
+    marker = clientprobe.MARKER_PREFIX + marker_hex
+    append_used_nonces(used_path, router_pair)
+    append_used_nonces(used_path, client_pair, extra=(marker_hex,))
+
+    tcpdump = shutil.which(arguments.tcpdump)
+    if tcpdump is None:
+        raise hostcheck.Refusal("tcpdump is not installed")
+    scanner_path = resolve_pcapscan(
+        _LEAK_LAB_DIR / "pcapscan.py",
+        installed_root=pathlib.Path(arguments.scanner_root),
+        allow_repo=bool(arguments.allow_repo_scanner),
+    )
+
+    evidence_root = pathlib.Path(arguments.evidence_root)
+    try:
+        state_real = client_state.resolve()
+        evidence_real = evidence_root.resolve()
+    except OSError as exc:
+        raise hostcheck.Refusal("cannot resolve the evidence path") from exc
+    if evidence_real == state_real or state_real in evidence_real.parents:
+        raise hostcheck.Refusal(
+            "evidence must live outside the QEMU-owned client state directory"
+        )
+    record_name = client_name if login_only else name
+    evidence = _evidence_run_dir(evidence_root, arguments.phase, record_name)
+    evidence_dir = evidence.path
+    pcap = evidence_dir / guest.CAPTURE_FILE
+    stats = evidence_dir / guest.CAPTURE_STATS_FILE
+    client_pcap = evidence_dir / guest.CLIENT_CAPTURE_FILE
+    client_stats = evidence_dir / guest.CLIENT_CAPTURE_STATS_FILE
+    qemu_log = evidence_dir / guest.QEMU_LOG_FILE
+    client_log = evidence_dir / "client-qemu.log"
+    client_tap = guest.client_tap(client_index)
+    if lab_policy is not None:
+        evidence.write_json("policy.json", lab_policy.to_dict())
+
+    record = base_phase_record(
+        phase=arguments.phase,
+        name=record_name,
+        state=client_state if login_only else router_state,
+        evidence_dir=evidence_dir,
+        image_id=image_id,
+    )
+    record["mode"] = "test"
+    record["certifies"] = (
+        "client_traffic_through_test_exit_node"
+        if not login_only
+        else "client_login"
+    )
+    scanner_root = pathlib.Path(arguments.scanner_root)
+    installed = str(scanner_path).startswith(str(scanner_root) + os.sep)
+    record["scanner"] = {
+        "path": str(scanner_path),
+        "source": "installed" if installed else "repo_override",
+        "certifiable": bool(installed),
+    }
+    if installed:
+        try:
+            record["scanner"]["manifest_sha256"] = sha256_file(
+                scanner_root / "SHA256SUMS"
+            )
+        except OSError:
+            record["scanner"]["manifest_sha256"] = None
+    record["nonces"] = {
+        "before": router_pair["before"],
+        "after": router_pair["after"],
+        "used_nonces_file": str(used_path),
+        "reserved": True,
+        "client_before": client_pair["before"],
+        "client_after": client_pair["after"],
+        "client_marker": marker,
+    }
+    if lab_policy is not None:
+        record["policy"] = {
+            "path": str(evidence_dir / "policy.json"),
+            "sha256": evidence.hash("policy.json"),
+            "allowed": [flow.to_dict() for flow in lab_policy.allowed],
+            "positive_control": lab_policy.positive_control.to_dict(),
+            "allow_arp": lab_policy.allow_arp,
+            "gateway_mac": lab_policy.gateway_mac,
+        }
+    record["base_image"] = str(base)
+    record["base_image_sha512"] = base_digest
+    record["qemu_log"] = str(qemu_log)
+    record["capture_size_cap"] = int(arguments.capture_size_cap)
+    record["client"] = {
+        "index": client_index,
+        "name": client_name,
+        "memory_mib": CLIENT_MEMORY_MIB,
+        "tap": client_tap,
+        "bridge": guest.CLIENT_BRIDGE,
+        "ipv4": guest.client_ipv4(client_index),
+        "mac": guest.client_mac(client_index),
+        "nonces": {
+            "before": client_pair["before"],
+            "after": client_pair["after"],
+            "marker": marker,
+        },
+        "probe_ips": {},
+        "exit_node": {
+            "router_name": name if not login_only else None,
+            "active": False,
+        },
+        "scan": {
+            "verdict": None,
+            "path": str(evidence_dir / guest.CLIENT_SCAN_REPORT_FILE),
+        },
+        "probe": None,
+        "combined": None,
+    }
+
+    router_capture: Capture | None = None
+    client_capture: Capture | None = None
+    router_guard: CaptureGuard | None = None
+    client_guard: CaptureGuard | None = None
+    router_process: subprocess.Popen | None = None
+    client_process: subprocess.Popen | None = None
+    router_client: QGAClient | None = None
+    client_client: QGAClient | None = None
+    errors: list[str] = []
+    after_client_sent = False
+    after_router_sent = False
+    traffic_started = False
+    started = time.monotonic()
+    record["timestamps"]["started_at"] = utc_now()
+    record["mem_available"] = read_mem_available()
+
+    def note(reason: str) -> None:
+        if reason not in errors:
+            errors.append(reason)
+
+    def guard_check() -> None:
+        for guard in (router_guard, client_guard):
+            if guard is not None:
+                guard.raise_if_exceeded()
+
+    try:
+        if not login_only:
+            router_guard = CaptureGuard(
+                evidence.fd, pcap.name, int(arguments.capture_size_cap)
+            )
+            client_guard = CaptureGuard(
+                evidence.fd,
+                client_pcap.name,
+                int(arguments.capture_size_cap),
+                tap=client_tap,
+            )
+            router_guard.start()
+            client_guard.start()
+            router_capture = start_capture(
+                arguments.tap,
+                pcap,
+                stats,
+                tcpdump=tcpdump,
+                evidence_fd=evidence.fd,
+                file_size_limit=int(arguments.capture_size_cap)
+                + CAPTURE_FSIZE_MARGIN,
+            )
+            record["tcpdump_argv"] = router_capture.argv
+            record["tcpdump_argv_display"] = display_argv(
+                router_capture.argv, evidence
+            )
+            evidence.write_json(guest.CAPTURE_ARGV_FILE, router_capture.argv)
+            client_capture = start_capture(
+                client_tap,
+                client_pcap,
+                client_stats,
+                tcpdump=tcpdump,
+                evidence_fd=evidence.fd,
+                file_size_limit=int(arguments.capture_size_cap)
+                + CAPTURE_FSIZE_MARGIN,
+            )
+            record["client"]["tcpdump_argv"] = client_capture.argv
+            record["client"]["tcpdump_argv_display"] = display_argv(
+                client_capture.argv, evidence
+            )
+            evidence.write_json(
+                guest.CLIENT_CAPTURE_ARGV_FILE, client_capture.argv
+            )
+            record["timestamps"]["capture_started"] = utc_now()
+            guard_check()
+
+        client_log_fd = evidence.open_append("client-qemu.log")
+        try:
+            client_process, client_qemu_argv, client_launch_argv = start_vm(
+                client_state,
+                name=client_name,
+                tap=client_tap,
+                qemu_user=arguments.qemu_user,
+                uid=uid,
+                gid=gid,
+                log_fd=client_log_fd,
+                memory_mib=CLIENT_MEMORY_MIB,
+                mac=guest.client_mac(client_index),
+            )
+        finally:
+            os.close(client_log_fd)
+        for guard in (router_guard, client_guard):
+            if guard is not None:
+                guard.attach_qemu(client_process)
+        record["client"]["qemu_argv"] = client_qemu_argv
+        record["client"]["launch_argv"] = client_launch_argv
+        record["timestamps"]["client_qemu_started"] = utc_now()
+        time.sleep(0.5)
+        if client_process.poll() is not None:
+            raise hostcheck.Refusal("client QEMU exited immediately")
+        client_client = wait_for_qga_or_exit(
+            client_state / guest.QGA_SOCKET, client_process
+        )
+        record["timestamps"]["client_qga_ready"] = utc_now()
+        guard_check()
+        # A crashed earlier phase may have left the transient traffic unit
+        # running.  Stop it before the silence check or the login bootstrap.
+        try:
+            stop_client_traffic(client_client)
+        except (QGAError, OSError):
+            note("cleanup_failed")
+        guard_check()
+        if not login_only:
+            client_silence = client_client.execute(
+                "/bin/sh",
+                [
+                    "-c",
+                    guest.client_silence_check_script(client_index),
+                ],
+                timeout=SILENCE_TIMEOUT,
+            )
+            if (
+                client_silence.exitcode != 0
+                or b"SILENCE-OK" not in client_silence.stdout
+            ):
+                raise hostcheck.Refusal("client silence check failed")
+            record["client"]["silence"] = "ok"
+            record["client"]["wan_device"] = resolve_wan_device(
+                client_client, guest.client_mac(client_index)
+            )
+        if login_only:
+            record["client"]["login_started"] = utc_now()
+            up = client_client.execute(
+                "/bin/sh",
+                [
+                    "-c",
+                    f"{guest.CLIENT_TAILSCALE} up --reset "
+                    f"--hostname={shlex.quote(client_name)} --shields-up "
+                    "--accept-routes=false",
+                ],
+                timeout=120.0,
+            )
+            if up.exitcode != 0:
+                note("client_login_failed")
+            login_phase_wait(
+                client_client,
+                name=client_name,
+                duration=arguments.duration,
+                evidence=evidence,
+                record=record,
+                guard=None,
+                note=note,
+                client_login=True,
+            )
+            document = read_client_status(client_client)
+            record["client"]["running"] = (
+                isinstance(document, dict)
+                and document.get("BackendState") == "Running"
+            )
+            if not record["client"]["running"]:
+                note("login_not_running")
+            record["client"]["combined"] = (
+                "PASS" if not errors else "INVALID"
+            )
+            record["result"] = record["client"]["combined"]
+            record["result_reason"] = "; ".join(errors) if errors else None
+            record["errors"] = list(errors)
+            record["durations"]["phase_seconds"] = round(
+                time.monotonic() - started, 3
+            )
+            record["timestamps"]["finished_at"] = utc_now()
+            try:
+                cleanup_client_units(client_client)
+                record["client"]["cleanup"] = "ok"
+            except BaseException as exc:  # noqa: BLE001
+                record["client"]["cleanup"] = exc.__class__.__name__
+                note("cleanup_failed")
+                record["result"] = "INVALID"
+                record["result_reason"] = "; ".join(errors)
+            try:
+                status, forced, survived = poweroff_vm(
+                    client_client, client_process, tap=client_tap
+                )
+            except BaseException as exc:  # noqa: BLE001
+                record["client_poweroff_error"] = exc.__class__.__name__
+                status, forced, survived = None, True, False
+            client_client = None
+            client_process = None
+            record["client"]["qemu_exit_status"] = status
+            if forced:
+                note("forced_poweroff")
+            if survived:
+                note("qemu_still_running")
+                lifecycle.qemu_alive = True
+            if errors:
+                record["result"] = "INVALID"
+                record["result_reason"] = "; ".join(errors)
+            record["client"]["combined"] = record["result"]
+            try:
+                evidence.write_json(guest.PHASE_RECORD_FILE, record)
+            finally:
+                evidence.close()
+            print(
+                json.dumps(
+                    {
+                        "phase": arguments.phase,
+                        "result": record["result"],
+                        "verdict": record["result"],
+                        "exit": 0 if record["result"] == "PASS" else 2,
+                        "evidence": str(evidence_dir),
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0 if record["result"] == "PASS" else 2
+
+        clear_client_exit_node(client_client)
+        document = wait_client_running(client_client, client_name)
+        record["client"]["running"] = True
+        record["client"]["advertises_exit_node"] = False
+        record["timestamps"]["client_ready"] = utc_now()
+        guard_check()
+        # Client before-control is sent before the router exists.
+        client_wan = record["client"]["wan_device"]
+        client_control_exitcode = emit_client_control(
+            client_client,
+            client_pair["before"],
+            client_index,
+            client_wan,
+        )
+        record["client"]["nonces"]["before_exitcode"] = client_control_exitcode
+        record["timestamps"]["client_before_control"] = utc_now()
+
+        # Router boot and setup.  For client phases the router is always made
+        # ready before the fault, so a pre-fault client success is possible for
+        # every accepted phase (including start-router, whose action is then
+        # idempotent).
+        router_log_fd = evidence.open_append(guest.QEMU_LOG_FILE)
+        try:
+            router_process, router_qemu_argv, router_launch_argv = start_vm(
+                router_state,
+                name=name,
+                tap=arguments.tap,
+                qemu_user=arguments.qemu_user,
+                uid=uid,
+                gid=gid,
+                log_fd=router_log_fd,
+            )
+        finally:
+            os.close(router_log_fd)
+        for guard in (router_guard, client_guard):
+            if guard is not None:
+                guard.attach_qemu(router_process)
+        record["qemu_argv"] = router_qemu_argv
+        record["launch_argv"] = router_launch_argv
+        record["timestamps"]["qemu_started"] = utc_now()
+        time.sleep(0.5)
+        if router_process.poll() is not None:
+            raise hostcheck.Refusal(
+                f"QEMU exited immediately with status {router_process.returncode}"
+            )
+        router_client = wait_for_qga_or_exit(
+            router_state / guest.QGA_SOCKET, router_process
+        )
+        record["timestamps"]["qga_ready"] = utc_now()
+        guard_check()
+        try:
+            cleanup_guest_units(router_client, name)
+        except hostcheck.Refusal:
+            note("cleanup_failed")
+            raise
+        initial_silence = run_silence_check(
+            router_client, name=name, image_id=image_id, expect_router_disabled=True
+        )
+        record["silence"].append(
+            {"when": "initial", "exitcode": initial_silence.exitcode, "ok": True}
+        )
+        verify_guest_image(router_client, image_id)
+        router_wan = resolve_wan_device(router_client)
+        secrets_paths = prepare_vm_secrets(
+            router_client, name, profile, image_id
+        )
+        record["guest"].update(secrets_paths)
+        guard_check()
+
+        reboot_phase = arguments.phase == "reboot-with-router-enabled"
+        if not reboot_phase:
+            record["controls"]["before_exitcode"] = emit_control(
+                router_client, router_pair["before"], lab_policy, router_wan
+            )
+            record["controls"]["before_transport"] = "qga"
+            record["timestamps"]["before_control"] = utc_now()
+        setup_command = f"systemctl start vprouter@{name}.service"
+        record["setup"]["command"] = setup_command
+        setup = router_client.execute(
+            "/bin/sh", ["-c", setup_command], timeout=ACTION_TIMEOUT
+        )
+        record["setup"]["exitcode"] = setup.exitcode
+        if setup.exitcode != 0:
+            record["setup"]["active"] = False
+            note("setup_failed")
+            raise hostcheck.Refusal("router setup failed")
+        wait_router_ready(router_client, name, require_tailscale=True)
+        record["setup"]["active"] = True
+        record_tailscale_state(record, router_client, name)
+        record["timestamps"]["router_active"] = utc_now()
+        guard_check()
+
+        # Exit node: find the router peer in the client's status and use it.
+        peer = client_find_router_peer(
+            read_client_status(client_client), name
+        )
+        if peer is None:
+            note("client_exit_peer_missing")
+            raise hostcheck.Refusal("the client cannot see the test exit node")
+        set_client_exit_node(client_client, client_peer_ipv4(peer))
+        wait_client_exit_node(client_client, peer)
+        record["client"]["exit_node"]["active"] = True
+        record["timestamps"]["exit_node_active"] = utc_now()
+        guard_check()
+
+        probe_ips = resolve_probe_ips()
+        record["client"]["probe_ips"] = dict(probe_ips)
+        start_client_traffic(
+            client_client,
+            marker=marker,
+            https_ip=probe_ips["https"],
+            http_ip=probe_ips["http"],
+            runtime_sec=client_runtime_seconds(arguments.duration),
+        )
+        traffic_started = True
+        record["timestamps"]["traffic_started"] = utc_now()
+        if not wait_client_first_mullvad(client_client):
+            note("client_not_routed")
+            raise hostcheck.Refusal("no pre-fault Mullvad client success")
+        record["client"]["pre_fault_mullvad"] = True
+        record["timestamps"]["pre_fault_control"] = utc_now()
+
+        record["client"]["fault_epoch"] = read_guest_clock(client_client)
+        record["timestamps"]["fault_started"] = utc_now()
+        action_ok = True
+        if reboot_phase:
+            enabled = router_client.execute(
+                "/bin/sh",
+                ["-c", f"systemctl enable vprouter@{name}.service"],
+                timeout=30.0,
+            )
+            if enabled.exitcode != 0:
+                note("setup_failed")
+                action_ok = False
+            boot_token = secrets.token_hex(16)
+            record["boot"]["boot_control"] = stage_boot_control(
+                router_client, router_pair["before"], lab_policy,
+                boot_token=boot_token,
+            )
+            record["controls"]["before_transport"] = "boot-control-unit"
+            record["boot"]["rebooted"] = True
+            previous_boot_id = read_boot_id(router_client)
+            record["boot"]["previous_boot_id"] = previous_boot_id
+            router_client.shutdown("reboot", timeout=5.0)
+            router_client.close()
+            router_client = wait_for_reboot(
+                router_state / guest.QGA_SOCKET, previous_boot_id
+            )
+            record["boot"]["new_boot_id"] = read_boot_id(router_client)
+            record["boot"]["boot_id_changed"] = (
+                record["boot"]["new_boot_id"] != previous_boot_id
+            )
+            wait_boot_control_sent(router_client, boot_token)
+            record["timestamps"]["before_control"] = utc_now()
+            record["controls"]["before_exitcode"] = 0
+            run_silence_check(
+                router_client,
+                name=name,
+                image_id=image_id,
+                expect_router_disabled=False,
+            )
+            wait_router_ready(router_client, name, require_tailscale=True)
+            if not record["boot"]["boot_id_changed"]:
+                note("postcondition_failed")
+                action_ok = False
+        else:
+            action_ok = run_router_fault(
+                router_client, arguments.phase, name, record, note
+            )
+        if not action_ok:
+            note("action_failed")
+        guard_check()
+        if arguments.phase == "login":
+            pass
+        hold_deadline = time.monotonic() + arguments.duration
+        while True:
+            check_interrupt()
+            guard_check()
+            remaining = hold_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.25, remaining))
+        if arguments.phase == "kill-wireguard" and router_client is not None:
+            record["recovery"] = read_wg0_state(router_client, name)
+
+        stop_client_traffic(client_client)
+        traffic_started = False
+        probe_data, probe_problem = read_client_probe_log(client_client)
+        if probe_problem is not None:
+            note(probe_problem)
+            probe_data = b""
+        evidence.open_new(guest.CLIENT_PROBE_FILE, probe_data, mode=0o600)
+        record["client"]["probe_log_sha256"] = evidence.hash(
+            guest.CLIENT_PROBE_FILE
+        )
+        record["hashes"]["client_probe_sha256"] = record["client"][
+            "probe_log_sha256"
+        ]
+        clear_client_exit_node(client_client)
+        record["client"]["exit_node"]["active"] = False
+        record["client"]["nonces"]["after_exitcode"] = emit_client_control(
+            client_client,
+            client_pair["after"],
+            client_index,
+            record["client"]["wan_device"],
+        )
+        record["timestamps"]["client_after_control"] = utc_now()
+        after_client_sent = True
+        record["controls"]["after_exitcode"] = emit_control(
+            router_client, router_pair["after"], lab_policy, router_wan
+        )
+        record["controls"]["after_transport"] = "qga"
+        record["timestamps"]["after_control"] = utc_now()
+        after_router_sent = True
+    except CaptureCapExceeded as exc:
+        note(str(exc) or "capture_size_cap")
+    except BaseException as exc:  # noqa: BLE001
+        record["error_class"] = exc.__class__.__name__
+        note(f"phase_exception:{exc.__class__.__name__}")
+    finally:
+        record["timestamps"]["finally_entered"] = utc_now()
+        for guard in (router_guard, client_guard):
+            if guard is not None:
+                reason = guard.check()
+                if reason is not None:
+                    note(reason)
+                if guard.isolation_error is not None:
+                    record["tap_isolation_error"] = guard.isolation_error
+                    note("tap_isolation_failed")
+                if guard.kill_error is not None:
+                    record["capture_guard_kill_error"] = guard.kill_error
+                    note("capture_guard_kill_failed")
+                if guard.capture_ended_early_at is not None:
+                    record["capture_ended_early_at"] = (
+                        guard.capture_ended_early_at
+                    )
+        if router_client is not None:
+            try:
+                cleanup_guest_units(router_client, name)
+                record["cleanup"]["services"] = "ok"
+            except BaseException as exc:  # noqa: BLE001
+                record["cleanup"]["services"] = exc.__class__.__name__
+                note("cleanup_failed")
+        if client_client is not None:
+            try:
+                cleanup_client_units(client_client)
+                record["client"]["cleanup"] = "ok"
+            except BaseException as exc:  # noqa: BLE001
+                record["client"]["cleanup"] = exc.__class__.__name__
+                note("cleanup_failed")
+        record["timestamps"]["vm_poweroff_started"] = utc_now()
+        statuses: list[int | None] = []
+        for process, qga, label, tap in (
+            (client_process, client_client, "client", client_tap),
+            (router_process, router_client, "router", arguments.tap),
+        ):
+            if process is None:
+                statuses.append(
+                    record["client"].get("qemu_exit_status")
+                    if label == "client"
+                    else record.get("qemu_exit_status")
+                )
+                continue
+            try:
+                status, forced, survived = poweroff_vm(
+                    qga, process, tap=tap
+                )
+            except BaseException as exc:  # noqa: BLE001
+                record[f"{label}_poweroff_error"] = exc.__class__.__name__
+                status, forced, survived = None, True, False
+            statuses.append(status)
+            if forced:
+                note("forced_poweroff")
+            elif status not in (0, None):
+                note("qemu_exit_status")
+            if survived:
+                note("qemu_still_running")
+                record["qemu_survived"] = True
+                lifecycle.qemu_alive = True
+        client_client = None
+        router_client = None
+        record["qemu_exit_status"] = statuses[1] if len(statuses) > 1 else None
+        record["client"]["qemu_exit_status"] = statuses[0] if statuses else None
+        record["timestamps"]["vm_finished_at"] = utc_now()
+
+        for capture, label, sent, pair in (
+            (client_capture, "client", after_client_sent, client_pair),
+            (router_capture, "router", after_router_sent, router_pair),
+        ):
+            if capture is None or not sent:
+                continue
+            try:
+                arrived = wait_for_control_in_pcap(
+                    capture.pcap,
+                    pair["after"],
+                    evidence_fd=evidence.fd,
+                    name=capture.pcap.name,
+                )
+            except BaseException:  # noqa: BLE001
+                arrived = False
+            record[f"{label}_after_in_pcap"] = arrived
+            if label == "router":
+                record["controls"]["after_in_pcap"] = arrived
+            if not arrived:
+                note("after_control_not_captured")
+        try:
+            time.sleep(QUIET_SECONDS)
+        except BaseException:  # noqa: BLE001
+            pass
+        for capture, guard, label in (
+            (client_capture, client_guard, "client"),
+            (router_capture, router_guard, "router"),
+        ):
+            if capture is None:
+                continue
+            try:
+                alive = capture.process.poll() is None
+            except BaseException:  # noqa: BLE001
+                alive = False
+            record[f"{label}_capture_alive_before_stop"] = alive
+            if not alive:
+                record["capture_ended_early"] = True
+                note("capture_ended_early")
+            if guard is not None:
+                guard.mark_capture_stopping()
+            try:
+                status = stop_capture(capture, evidence_fd=evidence.fd)
+                if label == "router":
+                    record["tcpdump_exit_status"] = status
+                else:
+                    record["client"]["tcpdump_exit_status"] = status
+            except BaseException as exc:  # noqa: BLE001
+                record[f"{label}_capture_stop_error"] = exc.__class__.__name__
+                note("capture_stop_failed")
+        for guard in (router_guard, client_guard):
+            if guard is not None:
+                try:
+                    guard.stop()
+                except BaseException as exc:  # noqa: BLE001
+                    record["capture_guard_error"] = exc.__class__.__name__
+                    note("capture_guard_failed")
+        record["errors"] = list(errors)
+
+    # Verdicts: router scan unchanged, client scan, then the probe log.
+    router_outcome: ScanOutcome | None = None
+    if not login_only:
+        router_outcome = scan_evidence(
+            evidence,
+            phase=arguments.phase,
+            before=router_pair["before"],
+            after=router_pair["after"],
+            scanner_path=scanner_path,
+        )
+        if router_outcome.present:
+            record["pcapscan_argv"] = router_outcome.argv
+            record["pcapscan_argv_display"] = display_argv(
+                router_outcome.argv, evidence
+            )
+            record["scan"]["exitcode"] = router_outcome.exitcode
+            record["scan"]["stderr"] = router_outcome.stderr
+            record["scan"]["verdict"] = router_outcome.verdict
+            record["hashes"].update(router_outcome.hashes)
+        for problem in router_outcome.problems:
+            note(problem)
+        client_outcome = scan_client_evidence(
+            evidence,
+            before=client_pair["before"],
+            after=client_pair["after"],
+            marker=marker,
+            interface=client_tap,
+            scanner_path=scanner_path,
+        )
+        if client_outcome.present:
+            record["client"]["scan_argv"] = client_outcome.argv
+            record["client"]["scan_argv_display"] = display_argv(
+                client_outcome.argv, evidence
+            )
+            record["client"]["scan"]["exitcode"] = client_outcome.exitcode
+            record["client"]["scan"]["stderr"] = client_outcome.stderr
+            record["client"]["scan"]["verdict"] = client_outcome.verdict
+            record["hashes"].update(client_outcome.hashes)
+        for problem in client_outcome.problems:
+            note(problem)
+    else:
+        client_outcome = None
+
+    probe_report: dict[str, Any] | None = None
+    if not login_only:
+        try:
+            probe_bytes = evidence.read_bytes(guest.CLIENT_PROBE_FILE)
+        except (rootfs.PathError, OSError):
+            probe_bytes = b""
+        probe_report = clientprobe.evaluate_probe_log(
+            probe_bytes,
+            fault_epoch=record["client"].get("fault_epoch"),
+        )
+        record["client"]["probe"] = probe_report
+        if probe_report["verdict"] != "PASS":
+            note(probe_report.get("reason") or "client_probe_invalid")
+
+    if lab_policy is not None:
+        record["hashes"]["policy_sha256"] = record["policy"]["sha256"]
+    record["durations"]["phase_seconds"] = round(
+        time.monotonic() - started, 3
+    )
+    record["timestamps"]["scan_finished"] = utc_now()
+
+    if login_only:
+        final_result = "PASS" if not errors else "INVALID"
+    else:
+        final_result = combine_verdicts(
+            router_outcome.verdict if router_outcome else None,
+            client_outcome.verdict if client_outcome else None,
+            probe_report["verdict"] if probe_report else None,
+            errors=errors,
+        )
+    final_exit = {"PASS": 0, "LEAK": 1, "INVALID": 2}[final_result]
+    record["client"]["combined"] = final_result
+    record["result"] = final_result
+    record["result_reason"] = "; ".join(errors) if errors else None
+    record["errors"] = list(errors)
+    try:
+        evidence.write_json(guest.PHASE_RECORD_FILE, record)
+    finally:
+        evidence.close()
+    if record["error_class"] is not None:
+        print(
+            f"run_phase: phase error {record['error_class']}",
+            file=sys.stderr,
+        )
+    print(
+        json.dumps(
+            {
+                "phase": arguments.phase,
+                "result": final_result,
+                "verdict": final_result,
+                "scan_verdict": router_outcome.verdict
+                if router_outcome is not None
+                else None,
+                "client_scan_verdict": client_outcome.verdict
+                if client_outcome is not None
+                else None,
+                "client_verdict": probe_report["verdict"]
+                if probe_report is not None
+                else None,
+                "exit": final_exit,
+                "expect_tunnel": PHASE_EXPECTATIONS[arguments.phase],
+                "evidence": str(evidence_dir),
+            },
+            sort_keys=True,
+        )
+    )
+    return final_exit
+
+
+
+def run_router_fault(
+    client: QGAClient,
+    phase: str,
+    name: str,
+    record: dict,
+    note,
+) -> bool:
+    """Apply one client-phase router fault and prove its effect."""
+    if phase in {"idle", "login"}:
+        record["action"]["command"] = "true"
+        record["action"]["exitcode"] = 0
+        return True
+    command = action_command(phase, name)
+    record["action"]["command"] = command
+    docker_pid_before = None
+    wg0_before = None
+    if phase == "restart-docker":
+        try:
+            docker_pid_before = read_docker_pid(client)
+        except hostcheck.Refusal:
+            note("postcondition_failed")
+            return False
+    if phase == "kill-wireguard":
+        before = read_wg0_state(client, name)
+        if before["status"] == "present" and before["ifindex"] is not None:
+            wg0_before = before["ifindex"]
+            record["preconditions"] = {
+                "wg0_ifindex": wg0_before,
+                "container_running": True,
+            }
+        else:
+            note("postcondition_failed")
+            return False
+    record["timestamps"]["action_started"] = utc_now()
+    action = client.execute("/bin/sh", ["-c", command], timeout=ACTION_TIMEOUT)
+    record["action"]["exitcode"] = action.exitcode
+    record["timestamps"]["action_finished"] = utc_now()
+    if action.exitcode != 0:
+        return False
+    if phase == "start-router":
+        try:
+            wait_router_ready(client, name, require_tailscale=False)
+        except hostcheck.Refusal:
+            note("router_not_ready")
+            return False
+        record["setup"]["active"] = True
+        record_tailscale_state(record, client, name)
+    elif phase == "restart-docker":
+        try:
+            new_pid = wait_docker_restarted(client, docker_pid_before)
+            record["postcondition"] = {
+                "command": "docker daemon restart",
+                "exitcode": 0,
+                "docker_pid_before": docker_pid_before,
+                "docker_pid_after": new_pid,
+            }
+            wait_router_ready(client, name, require_tailscale=True)
+        except hostcheck.Refusal:
+            note("postcondition_failed")
+            return False
+    elif phase == "kill-wireguard" and wg0_before is not None:
+        proof = check_kill_wireguard(client, name, before_ifindex=wg0_before)
+        record["postcondition"] = {
+            "command": wg0_state_command(name),
+            "exitcode": 0 if proof["ok"] else 1,
+            **proof,
+        }
+        if not proof["ok"]:
+            note("postcondition_failed")
+            return False
+    elif phase in FAULT_PHASES:
+        command = postcondition_command(phase, name)
+        record["postcondition"]["command"] = command
+        check = client.execute("/bin/sh", ["-c", command], timeout=ACTION_TIMEOUT)
+        record["postcondition"]["exitcode"] = check.exitcode
+        if check.exitcode != 0:
+            note("postcondition_failed")
+            return False
+    return True
+
+
+def run_phase(arguments: argparse.Namespace) -> int:
+    require_root()
+    install_signal_handlers()
+    if arguments.phase not in PHASES:
+        raise hostcheck.Refusal(f"unknown phase {arguments.phase}")
+    name = guest.validate_name(arguments.name)
+    client_number = getattr(arguments, "client", None)
+    if client_number is not None:
+        guest.validate_client_index(client_number)
+        if arguments.phase == "login":
+            raise hostcheck.Refusal("login does not take --client; use client-login")
+    else:
+        if arguments.phase == "client-login":
+            raise hostcheck.Refusal("client-login requires --client N")
+        if not tsnames.is_test_node(name):
+            raise hostcheck.Refusal(
+                "name must be a throw-away zz-vprtest-NN-do-not-use label"
+            )
+    image_id = guest.validate_image_id(arguments.image_id)
+    if arguments.duration < 0 or arguments.duration > MAX_PHASE_DURATION:
+        raise hostcheck.Refusal(
+            f"duration must be in 0..{int(MAX_PHASE_DURATION)} seconds"
+        )
+    if arguments.capture_size_cap <= 0:
+        raise hostcheck.Refusal("capture size cap must be positive")
+    if arguments.profile_fd is not None and arguments.profile_file is not None:
+        raise hostcheck.Refusal("use exactly one of --profile-fd and --profile-file")
+    if (
+        arguments.phase != "client-login"
+        and arguments.profile_fd is None
+        and arguments.profile_file is None
+    ):
         raise hostcheck.Refusal("a WireGuard profile is required")
     if arguments.tap != guest.TAP or arguments.bridge != guest.BRIDGE:
         # pcapscan's argv and stats banner are bound to the fixed lab tap.
@@ -2739,6 +4342,8 @@ def run_phase(arguments: argparse.Namespace) -> int:
 
     lock_fd = runlock.acquire(arguments.run_lock)
     try:
+        if client_number is not None:
+            return _run_client_phase_locked(arguments, lifecycle=lifecycle)
         return _run_phase_locked(
             arguments,
             name=name,
@@ -3405,6 +5010,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--used-nonces", required=True)
     parser.add_argument("--name", default=guest.DEFAULT_NAME)
     parser.add_argument("--index", type=int, default=guest.DEFAULT_INDEX)
+    parser.add_argument(
+        "--client",
+        type=int,
+        metavar="N",
+        help="run the M3 client VM N (1..9) alongside the router",
+    )
     parser.add_argument("--state")
     parser.add_argument("--state-root", default=str(guest.STATE_ROOT))
     parser.add_argument("--image-id", default=guest.DEPLOYED_IMAGE_ID)

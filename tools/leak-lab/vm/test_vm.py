@@ -5108,3 +5108,16 @@ class LiveBootOrderTests(unittest.TestCase):
                 self.assertNotIn(
                     "file=/var/lib/vprlab/vm-001/guest.qcow2,if=virtio,format=qcow2", argv
                 )
+
+
+class LivePackageTests(unittest.TestCase):
+    def test_docker_cli_is_installed_explicitly(self) -> None:
+        # Live 2026-11-09: on Debian 13 the docker CLI is a separate package
+        # that --no-install-recommends skips; `docker info` then never works.
+        script = guest.provision_script(
+            name=guest.DEFAULT_NAME, image_id=guest.DEPLOYED_IMAGE_ID
+        )
+        install = next(
+            line for line in script.splitlines() if "docker.io" in line and "docker-compose" in line
+        )
+        self.assertIn("docker-cli", install.split())

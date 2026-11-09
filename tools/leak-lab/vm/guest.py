@@ -828,7 +828,7 @@ printf '%s\n' \
     > /etc/apt/apt.conf.d/99-vprlab-norecommends
 DEBIAN_FRONTEND=noninteractive apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    docker.io docker-compose qemu-guest-agent nftables python3 \
+    docker.io docker-cli docker-compose qemu-guest-agent nftables python3 \
     iproute2 wireguard-tools util-linux ca-certificates
 
 log "loading tun and wireguard"
@@ -887,7 +887,15 @@ systemctl restart docker.service
 n=0
 while ! docker info >/dev/null 2>&1; do
     n=$((n + 1))
-    [ "$n" -lt 120 ] || fail "Docker daemon did not start"
+    if [ "$n" -ge 120 ]; then
+        # Diagnostics for the operator (Docker's own logs hold no secrets:
+        # the WireGuard profile is only written at test time).
+        if [ -w /dev/ttyS0 ]; then
+            journalctl -u docker.service -u containerd.service -n 40 --no-pager \
+                > /dev/ttyS0 2>&1 || true
+        fi
+        fail "Docker daemon did not start"
+    fi
     sleep 1
 done
 

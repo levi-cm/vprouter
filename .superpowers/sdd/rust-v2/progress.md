@@ -1360,3 +1360,14 @@ prefix-read primitive (stat N, guest sha256 of head -c N, bytes; trusted only if
 host-monotonic sampling every <= 15 s with per-window exit progress and exit-node re-check,
 S_end at the deadline before status calls, proven stop = inactive/failed + MainPID 0 + quiescent
 size, traffic marked started before launch, pre-fault flags only from trusted reads.
+2026-11-09 M3 round-4 reviews of 06baf40 (Claude-heavy per user: Opus A fixes, Opus B live
+readiness, GPT narrow): all round-3 reproducers fixed. GPT R4-I1 (deadline sample may credit
+post-deadline lines), Opus A I-1 (host coverage starts after the fault action, so faults that
+recover inside the action are covered only by the guest clock) + M-1..M-4, Opus B READY WITH
+FIXES: host-side sequence safe (stub-replayed teardown of the M2 setup and setup with --client 1),
+but Blocker B-1 (ExitNodeStatus.TailscaleIPs are /32 prefixes, so the exit node never matches)
+and Likely L-1 (MagicDNS rewrites the client's resolv.conf without --accept-dns=false) would make
+every client phase INVALID live. Fix round 4 (Claude Opus): pre-action sample and client
+sampling thread during the action, deadline sample must finish before the deadline, stop proof
+with no remaining process and 12 s quiescence, /32 parsing, accept-dns=false + CorpDNS check,
+peer-lookup retry, OOMScoreAdjust, probe cadence curl -m 4 + sleep 3, /var/tmp extraction, docs.

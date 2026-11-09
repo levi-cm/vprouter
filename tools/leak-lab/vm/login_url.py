@@ -27,15 +27,18 @@ import guest
 import runlock
 from qga import QGAError, wait_for_qga
 
-#: The only login URL shape the runner records.  The Tailscale auth path is
-#: 8..16 lowercase hex characters; anything longer or with other characters
-#: could carry a guest-selected encoding of profile/state bytes into the host
-#: evidence file and stderr.
-LOGIN_URL_RE = re.compile(r"https://login\.tailscale\.com/a/[0-9a-f]{8,16}")
+#: The only login URL shape the runner records.  The Tailscale auth path is a
+#: short lowercase alphanumeric token: older releases issue 8..16 lowercase hex
+#: characters, Tailscale 1.104.5 (the M3 client) issues 17 lowercase letters
+#: and digits (measured live 2026-11-09 without printing the URL).  Anything
+#: longer, with other characters or with more path could carry a
+#: guest-selected encoding of profile/state bytes into the host evidence file
+#: and stderr, so the alphabet and the length stay bounded.
+LOGIN_URL_RE = re.compile(r"https://login\.tailscale\.com/a/[0-9a-z]{8,24}")
 #: A candidate prefix used only to notice (and refuse) an unrecognized value.
 LOGIN_CANDIDATE_RE = re.compile(r"https://login\.tailscale\.com/[^\s\"']+")
 
-TAILSCALE_LOGIN_URL_LENGTHS = range(8, 17)
+TAILSCALE_LOGIN_URL_LENGTHS = range(8, 25)
 
 
 def _extract(text: str) -> str | None:
@@ -104,7 +107,9 @@ def find_client_login_url_result(client) -> tuple[str | None, bool]:
         "/bin/sh",
         [
             "-c",
-            "journalctl -u tailscaled.service --no-pager -n 400 2>&1 || true",
+            # Current boot only: the client journal is persistent, so older
+            # boots still hold dead AuthURLs (live 2026-11-09 diagnostics).
+            "journalctl -b -u tailscaled.service --no-pager -n 400 2>&1 || true",
         ],
         timeout=30.0,
     )

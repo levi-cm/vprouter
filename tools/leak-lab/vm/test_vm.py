@@ -4704,7 +4704,7 @@ class LoginUrlShapeTests(unittest.TestCase):
         self.assertFalse(unrecognized)
 
     def test_only_the_fixed_login_path_shape_is_accepted(self) -> None:
-        for length in range(8, 17):
+        for length in range(8, 25):
             with self.subTest(length=length):
                 url = "https://login.tailscale.com/a/" + "a" * length
                 found, unrecognized = login_url.find_login_url_result(
@@ -4712,10 +4712,19 @@ class LoginUrlShapeTests(unittest.TestCase):
                 )
                 self.assertEqual(found, url)
                 self.assertFalse(unrecognized)
+        # Tailscale 1.104.5 shape (live 2026-11-09): 17 lowercase letters/digits.
+        modern = "https://login.tailscale.com/a/" + "k3x9q7m2v8b4n6t1z"
+        found, unrecognized = login_url.find_login_url_result(
+            self.Client(auth_url=modern), guest.DEFAULT_NAME
+        )
+        self.assertEqual(found, modern)
+        self.assertFalse(unrecognized)
         for bad in (
             "https://login.tailscale.com/a/" + "a" * 7,
-            "https://login.tailscale.com/a/" + "a" * 17,
+            "https://login.tailscale.com/a/" + "a" * 25,
             "https://login.tailscale.com/a/" + "A" * 16,
+            "https://login.tailscale.com/a/" + "a" * 8 + "-x",
+            "https://login.tailscale.com/a/" + "a" * 8 + "_",
             "https://login.tailscale.com/a/" + "a" * 8 + "/extra",
             "https://login.tailscale.com/a/" + "a" * 8 + "%00",
             "https://login.tailscale.com/other/" + "a" * 16,
@@ -4727,8 +4736,28 @@ class LoginUrlShapeTests(unittest.TestCase):
                 self.assertIsNone(found)
                 self.assertTrue(unrecognized)
 
+    def test_client_login_url_reads_only_the_current_boot_journal(self) -> None:
+        # Live 2026-11-09: the client journal is persistent and held dead
+        # AuthURLs from earlier boots; status AuthURL is read first.
+        commands = []
+
+        class Client:
+            def execute(self, program, args=(), **kwargs):
+                commands.append(args[-1])
+                if "status --json" in args[-1]:
+                    return run_phase.ExecResult(0, b"{}", b"")
+                return run_phase.ExecResult(
+                    0, b"control: AuthURL is https://login.tailscale.com/a/k3x9q7m2v8b4n6t1z\n", b"")
+
+        found, unrecognized = login_url.find_client_login_url_result(Client())
+        self.assertEqual(found, "https://login.tailscale.com/a/k3x9q7m2v8b4n6t1z")
+        self.assertFalse(unrecognized)
+        journal = [c for c in commands if "journalctl" in c]
+        self.assertEqual(len(journal), 1)
+        self.assertIn("journalctl -b ", journal[0])
+
     def test_invalid_login_url_is_not_written_and_is_an_error(self) -> None:
-        invalid = "https://login.tailscale.com/a/" + "a" * 24
+        invalid = "https://login.tailscale.com/a/" + "a" * 25
         case = RunPhaseTests("test_login_phase_writes_only_the_url_to_a_root_only_file")
         case.setUp()
         try:

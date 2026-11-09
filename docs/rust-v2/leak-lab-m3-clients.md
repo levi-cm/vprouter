@@ -121,7 +121,11 @@ The client VM must not share a bridge with the router VM. Any client frame on
 ## Client VM
 
 - Base: the same pinned Debian 13 genericcloud base image as the router, with
-  a qcow2 overlay of 2 GiB or less. State lives in `/var/lib/vprlab/client-NNN`,
+  a qcow2 overlay of exactly 3 GiB, the base image's own virtual size: a
+  smaller overlay cuts the root partition off the disk (live 2026-11-09, the
+  first client provisioning dropped to the initramfs shell with a missing
+  PARTUUID), and the overlay check now refuses any overlay smaller than its
+  base. State lives in `/var/lib/vprlab/client-NNN`,
   owned by the QEMU user as for `vm-NNN`.
 - QEMU uses the same hardening as the router: the `vprlab-qemu` user, sandbox,
   `-nic none` plus the explicit tap, `-serial none` in test boots, QGA over
@@ -447,9 +451,9 @@ pre-existing documented risk is retained rather than changing the shared login
 behaviour. The URL remains root-only in `login-url.txt`.
 
 Admission reserves both capture caps on the evidence filesystem and both
-overlays (router 4 GiB + client 2 GiB) plus headroom on the state filesystem
+overlays (router 4 GiB + client 3 GiB) plus headroom on the state filesystem
 for a traffic phase. `client-login` reserves no capture and no router overlay:
-only the client 2 GiB overlay and the shared headroom.
+only the client 3 GiB overlay and the shared headroom.
 
 ## Tests (offline, required)
 
@@ -462,7 +466,7 @@ only the client 2 GiB overlay and the shared headroom.
   under Network (it is **not** byte-identical to the M2 plan); the client
   neighbour check matches both `dst` and `dev`.
 - Provision: refuses a tarball with the wrong sha256; the client name and
-  address are validated; the overlay is at most 2 GiB.
+  address are validated; the overlay is exactly 3 GiB and never smaller than its base.
 - Client scan: a pcap with the marker in clear is LEAK (inside the window,
   before the controls, after them, and split across two frames is out of
   scope); missing, duplicated or out-of-order controls are INVALID; forged

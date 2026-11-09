@@ -1735,10 +1735,20 @@ class OverlayTests(unittest.TestCase):
                 "filename": str(overlay),
                 "format": "qcow2",
                 "full-backing-filename": str(base),
+                "virtual-size": 4 * 1024**3,
             },
-            {"filename": str(base), "format": "qcow2"},
+            {"filename": str(base), "format": "qcow2", "virtual-size": 3 * 1024**3},
         ]
         guest.verify_overlay_chain(document, overlay, base)
+        # live 2026-11-09: a 2 GiB overlay of the 3 GiB base cut off the root
+        # partition; equal size is the smallest that boots.
+        equal = [dict(document[0], **{"virtual-size": 3 * 1024**3}), document[1]]
+        guest.verify_overlay_chain(equal, overlay, base)
+        for top_size in (2 * 1024**3, None, True, 0):
+            with self.subTest(top_size=top_size):
+                small = [dict(document[0], **{"virtual-size": top_size}), document[1]]
+                with self.assertRaises(guest.IntegrityError):
+                    guest.verify_overlay_chain(small, overlay, base)
         bad = [document[0], dict(document[1], **{"backing-filename": "/other"})]
         with self.assertRaises(guest.IntegrityError):
             guest.verify_overlay_chain(bad, overlay, base)
@@ -3177,8 +3187,9 @@ class StateVerificationTests(unittest.TestCase):
                     "filename": str(overlay),
                     "format": "qcow2",
                     "full-backing-filename": str(base),
+                    "virtual-size": 4 * 1024**3,
                 },
-                {"filename": str(base), "format": "qcow2"},
+                {"filename": str(base), "format": "qcow2", "virtual-size": 3 * 1024**3},
             ]
             captured = {}
 
@@ -5452,7 +5463,7 @@ class ClientGuestTests(unittest.TestCase):
         for index in (0, 10, True, "1"):
             with self.subTest(index=index), self.assertRaises(guest.GeneratorError):
                 guest.validate_client_index(index)
-        self.assertEqual(guest.CLIENT_OVERLAY_SIZE, "2G")
+        self.assertEqual(guest.CLIENT_OVERLAY_SIZE, "3G")
         self.assertEqual(guest.TAILSCALE_TARBALL_SHA256[:8], "720cbbcc")
 
     def test_client_qemu_boot_is_256_mib_with_its_own_mac(self) -> None:
@@ -5572,14 +5583,14 @@ class ClientGuestTests(unittest.TestCase):
         self.assertIn("52:54:00:76:71:02", script)
         self.assertNotIn("vprouter@", script)
 
-    def test_client_overlay_is_two_gibibytes(self) -> None:
+    def test_client_overlay_is_three_gibibytes(self) -> None:
         argv = guest.build_qemu_img_create_argv(
             pathlib.Path("/base.qcow2"),
             pathlib.Path("/client.qcow2"),
             size=guest.CLIENT_OVERLAY_SIZE,
         )
-        self.assertEqual(argv[-1], "2G")
-        self.assertEqual(guest.CLIENT_OVERLAY_VIRTUAL_SIZE, 2 * 1024 ** 3)
+        self.assertEqual(argv[-1], "3G")
+        self.assertEqual(guest.CLIENT_OVERLAY_VIRTUAL_SIZE, 3 * 1024 ** 3)
 
 
 class ProvisionClientTests(unittest.TestCase):
@@ -5629,7 +5640,7 @@ class ProvisionClientTests(unittest.TestCase):
             ):
                 provision.provision(arguments)
 
-    def test_client_provision_uses_a_two_gibibyte_overlay(self) -> None:
+    def test_client_provision_uses_a_three_gibibyte_overlay(self) -> None:
         calls = []
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -5647,7 +5658,7 @@ class ProvisionClientTests(unittest.TestCase):
                     what="qemu-img create",
                     timeout=1,
                 )
-        self.assertEqual(calls[0][-1], "2G")
+        self.assertEqual(calls[0][-1], "3G")
 
     def test_staged_tailscale_copy_is_rehashed_after_copy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -5667,7 +5678,7 @@ class ProvisionClientTests(unittest.TestCase):
             with self.assertRaises(hostcheck.Refusal):
                 provision._stage_client_payload(other, tarball, "0" * 64)
 
-    def test_client_provision_pipeline_is_384_mib_and_two_gibibytes(self) -> None:
+    def test_client_provision_pipeline_is_384_mib_and_three_gibibytes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             state_root = root / "state-root"
@@ -5744,7 +5755,7 @@ class ProvisionClientTests(unittest.TestCase):
             self.assertEqual(record["role"], "client")
             self.assertEqual(record["memory_mib"], 384)
             self.assertEqual(record["test_memory_mib"], 256)
-            self.assertEqual(record["overlay_size"], "2G")
+            self.assertEqual(record["overlay_size"], "3G")
             self.assertEqual(record["test_status"], "PROVISIONED_OFFLINE_READY")
             qemu_argv = record["qemu_argv"]
             self.assertEqual(qemu_argv[qemu_argv.index("-m") + 1], "384")

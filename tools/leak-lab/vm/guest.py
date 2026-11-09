@@ -75,8 +75,11 @@ CLIENT_SUBNET = ipaddress.IPv4Network("10.251.0.0/24")
 CLIENT_GATEWAY_IPV4 = "10.251.0.1"
 CLIENT_MEMORY_MIB = 256
 CLIENT_PROVISION_MEMORY_MIB = 384
-CLIENT_OVERLAY_SIZE = "2G"
-CLIENT_OVERLAY_VIRTUAL_SIZE = 2 * 1024 * 1024 * 1024
+CLIENT_OVERLAY_SIZE = "3G"
+# The overlay may not be smaller than the 3 GiB base image: a smaller
+# virtual disk cuts the root partition off its end (live 2026-11-09: the
+# client initramfs dropped to a shell, "PARTUUID ... does not exist").
+CLIENT_OVERLAY_VIRTUAL_SIZE = 3 * 1024 * 1024 * 1024
 MAX_CLIENT_INDEX = 9
 DEFAULT_CLIENT_INDEX = 1
 CLIENT_DEFAULT_NAME = "zz-vprclient-01-do-not-use"
@@ -632,6 +635,14 @@ def verify_overlay_chain(
         raise IntegrityError("backing chain parent is not the verified base image")
     if parent.get("backing-filename"):
         raise IntegrityError("the verified base image must not have its own backing file")
+    top_size, base_size = top.get("virtual-size"), parent.get("virtual-size")
+    for size in (top_size, base_size):
+        if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+            raise IntegrityError("qemu-img did not report a virtual size")
+    if top_size < base_size:
+        raise IntegrityError(
+            "the overlay is smaller than its base image and would cut off the root partition"
+        )
 
 
 # ---------------------------------------------------------------------------

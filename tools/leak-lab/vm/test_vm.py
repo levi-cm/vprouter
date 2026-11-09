@@ -5204,3 +5204,32 @@ class ImageTarChainTests(unittest.TestCase):
             path, index, config = self._tar(pathlib.Path(temporary), tamper=True)
             with self.assertRaises(hostcheck.Refusal):
                 provision.verify_image_tar_chain(path, index, config)
+
+
+class ReadinessDiagnosticsTests(unittest.TestCase):
+    def test_safe_text_keeps_release_reasons_and_drops_key_shapes(self) -> None:
+        self.assertEqual(run_phase._safe_text("Tailscale is not ready"), "Tailscale is not ready")
+        self.assertEqual(run_phase._safe_text("waiting for WireGuard"), "waiting for WireGuard")
+        key = "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk="
+        for leaky in (key, "reason " + key.rstrip("="), "x" * 25, "a/b", "a\nb"):
+            with self.subTest(value=leaky[:12]):
+                self.assertEqual(run_phase._safe_text(leaky), "unrecognized")
+        self.assertIsNone(run_phase._safe_text(None))
+
+    def test_refusal_records_gate_and_release_health(self) -> None:
+        class Client:
+            def execute(self, program, args=(), **kwargs):
+                command = args[-1]
+                if "vprouter-health.json" in command:
+                    body = json.dumps({"state": "BLOCKED", "reason": "Tailscale is not ready"})
+                    return run_phase.ExecResult(exitcode=0, stdout=body.encode(), stderr=b"")
+                return run_phase.ExecResult(exitcode=1, stdout=b"", stderr=b"")
+
+        record = {"tailscale": {}}
+        run_phase.record_readiness_refusal(
+            record, Client(), guest.DEFAULT_NAME,
+            hostcheck.Refusal("the release did not report READY (status exit 1)"),
+        )
+        self.assertEqual(record["readiness"]["release_health_state"], "BLOCKED")
+        self.assertEqual(record["readiness"]["release_health_reason"], "Tailscale is not ready")
+        self.assertIn("did not report READY", record["readiness"]["refusal"])

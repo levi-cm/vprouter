@@ -1499,6 +1499,50 @@ def release_status_command(name: str) -> str:
     )
 
 
+_SAFE_TEXT = re.compile(r"[A-Za-z0-9 .,:;()_-]{0,160}")
+#: A WireGuard key or any other long token: never recorded.
+_LONG_TOKEN = re.compile(r"[A-Za-z0-9]{20,}")
+
+
+def _safe_text(value: object) -> str | None:
+    """Return release-authored text only if it is plain and short, else None."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not _SAFE_TEXT.fullmatch(value) or _LONG_TOKEN.search(value):
+        return "unrecognized"
+    return value
+
+
+def record_readiness_refusal(
+    record: dict, client: QGAClient, name: str, exc: BaseException
+) -> None:
+    """Record which readiness gate refused and the release's own health.
+
+    The refusal text is authored by this runner.  The health file is written
+    by the deployed release (state + reason); both fields pass a strict
+    plain-text filter so a guest cannot smuggle arbitrary bytes through.
+    """
+    readiness = record.setdefault("readiness", {})
+    readiness["refusal"] = _safe_text(str(exc))
+    try:
+        result = client.execute(
+            "/bin/sh",
+            ["-c", f"docker exec {shlex.quote(name)} cat /run/vprouter-health.json"],
+            timeout=15.0,
+        )
+        document = json.loads(result.stdout.decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001 - diagnostics only
+        document = None
+    if isinstance(document, dict):
+        state = document.get("state")
+        readiness["release_health_state"] = (
+            state if state in {"STARTING", "BLOCKED", "RECOVERING", "READY"} else "unrecognized"
+        )
+        readiness["release_health_reason"] = _safe_text(document.get("reason"))
+    record_tailscale_state(record, client, name)
+
+
 def wait_release_ready(
     client: QGAClient, name: str, *, timeout: float | None = None
 ) -> dict:
@@ -2893,8 +2937,9 @@ def _run_phase_locked(
             try:
                 wait_router_ready(client, name, require_tailscale=True)
                 record["setup"]["active"] = True
-            except hostcheck.Refusal:
+            except hostcheck.Refusal as exc:
                 record["setup"]["active"] = False
+                record_readiness_refusal(record, client, name, exc)
                 note("router_not_ready")
                 boot_setup_ok = False
             if record["postcondition"]["exitcode"] != 0:
@@ -2933,8 +2978,9 @@ def _run_phase_locked(
                         require_tailscale=arguments.phase != "login",
                     )
                     record["setup"]["active"] = True
-                except hostcheck.Refusal:
+                except hostcheck.Refusal as exc:
                     record["setup"]["active"] = False
+                    record_readiness_refusal(record, client, name, exc)
                     note("router_not_ready")
                     setup_ok = False
                 else:

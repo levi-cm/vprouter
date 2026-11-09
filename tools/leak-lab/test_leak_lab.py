@@ -4447,13 +4447,29 @@ class WireGuardShapeTests(unittest.TestCase):
                 self.assertEqual(report["verdict"], "PASS", reasons(report))
                 self.assertEqual(directions(report, "mullvad-wg"), (1, 1))
 
+    def test_mtu_clamped_full_size_data_packets_pass(self):
+        # Opus/Pi r4 A-0: the kernel pads to 16 but clamps at the tunnel MTU,
+        # so full-size data at MTU 1420 (1452 B) and 1500 (1532 B) is valid.
+        for inner_mtu in (1420, 1500, 1380):
+            payload = b"\x04\x00\x00\x00" + b"\x00" * 12 + b"\x00" * (inner_mtu + 16)
+            with self.subTest(mtu=inner_mtu, length=len(payload)):
+                out = ipv4_frame(udp_segment(40000, WG_PORT, payload))
+                inbound = ipv4_frame(
+                    udp_segment(WG_PORT, 40000, payload),
+                    src_ip=WG_IP,
+                    dst_ip=VM_IP,
+                    src_mac=GW_MAC,
+                    dst_mac=VM_MAC,
+                )
+                report = scan_middle([out, inbound], expect_tunnel="up")
+                self.assertEqual(report["verdict"], "PASS", reasons(report))
+
     def test_wrong_wireguard_shapes_are_leaks(self):
         cases = {
             "type 0": b"\x00\x00\x00\x00" + b"\x00" * 28,
             "type 5": b"\x05\x00\x00\x00" + b"\x00" * 28,
             "nonzero reserved": b"\x04\x01\x00\x00" + b"\x00" * 28,
             "short data": b"\x04\x00\x00\x00" + b"\x00" * 12 + b"\x00" * 15,
-            "data not 16n": b"\x04\x00\x00\x00" + b"\x00" * 12 + b"\x00" * 17,
             "initiation 147": b"\x01\x00\x00\x00" + b"\x00" * 143,
             "response 91": b"\x02\x00\x00\x00" + b"\x00" * 87,
             "cookie 65": b"\x03\x00\x00\x00" + b"\x00" * 61,

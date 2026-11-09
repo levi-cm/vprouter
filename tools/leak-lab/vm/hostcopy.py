@@ -633,8 +633,14 @@ def verify_tree(
     links_manifest: str | os.PathLike[str],
     *,
     algorithm: str = "sha256",
+    exclude: tuple[str, ...] = (),
 ) -> list[str]:
-    """Return every file-hash or link-target problem in a copied tree."""
+    """Return every file-hash or link-target problem in a copied tree.
+
+    ``exclude`` names top-level entries (e.g. the separately verified
+    ``leaklab`` subtree) skipped by the extra-entry check; ``__pycache__``
+    directories are always skipped.
+    """
     directory = os.fspath(directory)
     problems: list[str] = []
     if algorithm not in {"sha256", "sha512"}:
@@ -701,6 +707,10 @@ def verify_tree(
         for index in range(1, len(parts)):
             known_directories.add("/".join(parts[:index]))
     for current, directories, entries in os.walk(directory, followlinks=False):
+        if current == directory:
+            directories[:] = [d for d in directories if d not in exclude]
+            entries = [e for e in entries if e not in exclude]
+        directories[:] = [d for d in directories if d != "__pycache__"]
         symlinked_directories = [
             name for name in directories if os.path.islink(os.path.join(current, name))
         ]
@@ -771,15 +781,23 @@ def main(argv: list[str] | None = None) -> int:
                 only=arguments[5:],
             )
         elif verb == "verify":
-            if len(arguments) not in (4, 5):
+            if len(arguments) < 4:
                 return _usage()
             algorithm = "sha256"
-            if len(arguments) == 5:
-                if not arguments[4].startswith("--algorithm="):
+            exclude: list[str] = []
+            for option in arguments[4:]:
+                if option.startswith("--algorithm="):
+                    algorithm = option.split("=", 1)[1]
+                elif option.startswith("--exclude="):
+                    name = option.split("=", 1)[1]
+                    if not name or "/" in name or name in (".", ".."):
+                        return _usage()
+                    exclude.append(name)
+                else:
                     return _usage()
-                algorithm = arguments[4].split("=", 1)[1]
             problems = verify_tree(
-                arguments[1], arguments[2], arguments[3], algorithm=algorithm
+                arguments[1], arguments[2], arguments[3], algorithm=algorithm,
+                exclude=tuple(exclude),
             )
             for problem in problems:
                 sys.stderr.write(f"vprlab: {problem}\n")

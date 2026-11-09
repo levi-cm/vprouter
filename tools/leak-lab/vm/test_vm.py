@@ -27,6 +27,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -1484,7 +1485,9 @@ class ProvisionPipelineTests(unittest.TestCase):
                     def fake_wait(process, serial, timeout):
                         del process, serial, timeout
                         os.kill(os.getpid(), signum)
-                        raise AssertionError("signal handler did not raise")
+                        # The real wait loop reaches its checkpoint next.
+                        provision.check_interrupt()
+                        raise AssertionError("deferred signal was not raised")
 
                     patches = self._pipeline_patches(
                         arguments, fake_run, FakeQemu
@@ -2012,7 +2015,7 @@ class RunPhaseTests(unittest.TestCase):
         client_kwargs = dict(client_kwargs or {})
         self.events.clear()
 
-        def start_capture(interface, pcap, stats, *, tcpdump, evidence_fd=None, popen=None, timeout=15.0):
+        def start_capture(interface, pcap, stats, *, tcpdump, evidence_fd=None, popen=None, timeout=15.0, file_size_limit=None):
             del tcpdump, popen, timeout, evidence_fd
             self.events.append(("capture_start",))
             self.pcap = pathlib.Path(pcap)
@@ -2101,7 +2104,7 @@ class RunPhaseTests(unittest.TestCase):
 
         original_capture_factory = start_capture
 
-        def capturing(interface, pcap, stats, *, tcpdump, evidence_fd=None, popen=None, timeout=15.0):
+        def capturing(interface, pcap, stats, *, tcpdump, evidence_fd=None, popen=None, timeout=15.0, file_size_limit=None):
             capture = original_capture_factory(
                 interface,
                 pcap,
@@ -3178,13 +3181,18 @@ class MainExitTests(unittest.TestCase):
     def test_provision_signal_handler_ignores_a_second_signal(self) -> None:
         provision.install_signal_handlers()
         try:
-            provision._signal_seen = False
             handler = signal.getsignal(signal.SIGTERM)
-            with self.assertRaises(provision.ProvisionInterrupted):
-                handler(signal.SIGTERM, None)
+            # Deferred model: the handler never raises (it could otherwise
+            # interrupt Popen before the QEMU handle exists).
             handler(signal.SIGTERM, None)
+            handler(signal.SIGHUP, None)
+            self.assertEqual(provision._signal_number, signal.SIGTERM)
+            with self.assertRaises(provision.ProvisionInterrupted):
+                provision.check_interrupt()
+            # The first checkpoint owns the raise; cleanup checkpoints do not.
+            provision.check_interrupt()
         finally:
-            provision._signal_seen = False
+            provision.install_signal_handlers()
             for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
                 signal.signal(signum, signal.SIG_DFL)
 
@@ -4980,3 +4988,95 @@ class CaptureWatchIntervalTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ControllerR4Tests(unittest.TestCase):
+    """Controller fixes after the round-4 SAFETY gate."""
+
+    def test_kill_qemu_signals_through_a_pidfd(self) -> None:
+        child = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        try:
+            sent = []
+            real = signal.pidfd_send_signal
+
+            def spy(fd, sig, *rest):
+                sent.append(sig)
+                return real(fd, sig, *rest)
+
+            with mock.patch.object(run_phase, "qemu_process_is_ours", return_value=True), \
+                    mock.patch.object(run_phase.signal, "pidfd_send_signal", side_effect=spy):
+                self.assertTrue(run_phase.kill_qemu(child))
+            self.assertEqual(sent, [signal.SIGKILL])
+            self.assertEqual(child.returncode, -signal.SIGKILL)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+
+    def test_kill_qemu_never_signals_an_unverified_process(self) -> None:
+        child = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        try:
+            with mock.patch.object(run_phase, "qemu_process_is_ours", return_value=False):
+                self.assertFalse(run_phase.kill_qemu(child))
+            self.assertIsNone(child.poll())
+        finally:
+            child.kill()
+            child.wait()
+
+    def test_stop_capture_waits_the_full_timeout_before_sigkill(self) -> None:
+        # A child that needs ~0.8 s to exit on SIGINT must not be SIGKILLed.
+        script = (
+            "import signal,time,sys\n"
+            "signal.signal(signal.SIGINT, lambda *a: (time.sleep(0.8), sys.exit(0)))\n"
+            "time.sleep(30)\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            process = subprocess.Popen(
+                [sys.executable, "-I", "-c", script], start_new_session=True
+            )
+            time.sleep(0.3)
+            capture = types.SimpleNamespace(
+                process=process,
+                pcap=root / "c.pcap",
+                stats=root / "c.pcap.stderr",
+                forced_stop=False,
+            )
+            status = run_phase.stop_capture(capture, timeout=5.0)
+            self.assertEqual(status, 0)
+            self.assertFalse(capture.forced_stop)
+
+    def test_verify_tree_excludes_nested_leaklab_and_pycache(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            source = root / "src"
+            (source / "bin").mkdir(parents=True)
+            (source / "bin" / "tool").write_bytes(b"x")
+            destination = root / "dst"
+            manifest = root / "SHA256SUMS"
+            links = root / "SYMLINKS.json"
+            hostcopy.copy_tree(source, destination, manifest, links)
+            (destination / "leaklab").mkdir()
+            (destination / "leaklab" / "pcapscan.py").write_bytes(b"y")
+            (destination / "bin" / "__pycache__").mkdir()
+            (destination / "bin" / "__pycache__" / "t.pyc").write_bytes(b"z")
+            self.assertEqual(
+                hostcopy.verify_tree(destination, manifest, links, exclude=("leaklab",)),
+                [],
+            )
+            problems = hostcopy.verify_tree(destination, manifest, links)
+            self.assertTrue(any("leaklab" in p for p in problems), problems)
+
+    def test_capture_rlimit_fsize_is_cap_plus_margin(self) -> None:
+        self.assertEqual(run_phase.CAPTURE_FSIZE_MARGIN, 256 * 1024 * 1024)
+        child = subprocess.Popen(["sleep", "30"])
+        try:
+            run_phase.apply_child_limits(
+                child.pid, file_size=run_phase.DEFAULT_CAPTURE_SIZE_CAP + run_phase.CAPTURE_FSIZE_MARGIN
+            )
+            limits = pathlib.Path(f"/proc/{child.pid}/limits").read_text()
+            line = next(l for l in limits.splitlines() if l.startswith("Max file size"))
+            self.assertIn(str(run_phase.DEFAULT_CAPTURE_SIZE_CAP + run_phase.CAPTURE_FSIZE_MARGIN), line)
+        finally:
+            child.kill()
+            child.wait()

@@ -796,6 +796,26 @@ name.
 - The guest clock has no NTP. It starts from the host RTC; verify it is sane
   before relying on TLS and WireGuard timestamps.
 
+### Accepted risks (controller decision, 2026-11-09)
+
+- **Login URL side channel.** The `login` phase accepts only
+  `https://login.tailscale.com/a/<8-16 hex>`, so one URL carries at most 64
+  bits. A compromised guest could still leak the lab WireGuard key in pieces
+  over several `login` phases. The key is one the host itself injected, and the
+  URL lands only in root-only evidence and on the operator's terminal, so no
+  trust boundary is crossed. This risk is accepted, not fixed (GPT r4 S2).
+- **Provisioning disk use.** Provisioning is a one-time, supervised step from
+  pinned inputs. It is bounded by a 64 MiB serial cap, RLIMIT_FSIZE 8 GiB and an
+  8 GiB free-space admission check. An aggregate quota across the staged
+  payload, seed ISOs and overlay is not enforced; the operator watches it
+  (GPT r4 S3).
+- **Guard SIGKILL.** QEMU is signalled through a pidfd opened from our own
+  child handle and re-verified (`/proc/<pid>/exe` is the staged QEMU), so a
+  reused pid can never receive the SIGKILL (GPT r4 new finding).
+- **tcpdump rlimit.** tcpdump runs with RLIMIT_FSIZE = capture cap + 256 MiB,
+  so the capture file stays bounded even if the runner is SIGKILLed and its
+  guard thread dies.
+
 ## Commands
 
 ```sh

@@ -802,7 +802,13 @@ What a compromised router VM can and cannot do:
   Every non-control UDP datagram on an allowed tuple must start with message
   type 1, 2, 3 or 4, have three zero reserved bytes, and have a plausible
   length: type 1 exactly 148 bytes, type 2 exactly 92, type 3 exactly 64, and
-  type 4 at least 32 bytes with `(length - 16) % 16 == 0`. A reassembled
+  type 4 at least 32 bytes (16-byte header plus the Poly1305 tag). There is
+  no 16-byte alignment rule for type 4: WireGuard pads plaintext to a
+  multiple of 16 but clamps the padding at the tunnel MTU, so full-size data
+  packets at MTU 1420 (1452 bytes) or 1500 (1532 bytes) are not aligned
+  (controller fix after the round-4 gate). A plaintext payload shaped like a
+  type-4 message still passes; that is an inherent limit of a shape check.
+  A reassembled
   fragmented datagram is checked with the same length rule; a first fragment
   that does not expose the four-byte header is refused. Anything else is the
   LEAK finding `allowed_tuple_not_wireguard`. This stops a plaintext payload

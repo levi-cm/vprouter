@@ -584,7 +584,7 @@ done
 copy_tree "$TOOLS_SOURCE" "$TOOLS_ROOT" "$TOOLS_ROOT/SHA256SUMS" \\
   "$TOOLS_ROOT/SYMLINKS.json"
 verify_manifest "$TOOLS_ROOT" "$TOOLS_ROOT/SHA256SUMS" \\
-  "$TOOLS_ROOT/SYMLINKS.json"
+  "$TOOLS_ROOT/SYMLINKS.json" --exclude=leaklab
 check_elf_deps "$TOOLS_ROOT"
 chown -R root:root "$TOOLS_ROOT"
 find "$TOOLS_ROOT" -type d -exec chmod 0755 {{}} +

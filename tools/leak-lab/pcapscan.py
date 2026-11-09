@@ -197,9 +197,11 @@ def wireguard_length_problem(kind: int, length: int) -> str | None:
     if kind in WIREGUARD_MESSAGE_TYPE_LENGTHS:
         return None if length == WIREGUARD_MESSAGE_TYPE_LENGTHS[kind] else "length"
     if kind == 4:
+        # WireGuard pads plaintext to a multiple of 16 but clamps the padding
+        # at the tunnel MTU (kernel: padded = min(ALIGN(len, 16), mtu)), so a
+        # full-size packet at MTU 1420/1500 is not 16-aligned. Only the
+        # minimum (header + Poly1305 tag) is a structural requirement.
         if length < WIREGUARD_DATA_MIN:
-            return "length"
-        if (length - WIREGUARD_DATA_HEADER) % 16 != 0:
             return "length"
         return None
     return "type"

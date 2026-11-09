@@ -135,6 +135,10 @@ OVERLAY_VIRTUAL_SIZE = 4 * 1024 * 1024 * 1024
 #: RLIMIT_FSIZE as a seat-belt for the overlay and qemu.log.
 TEST_QEMU_FSIZE_LIMIT = 6 * 1024 * 1024 * 1024
 SCAN_TIMEOUT = 300.0
+#: tcpdump's own RLIMIT_FSIZE is the capture cap plus this margin, so the
+#: guard (not the rlimit) normally decides; the rlimit only matters if the
+#: runner itself dies.  A truncated capture is then structurally INVALID.
+CAPTURE_FSIZE_MARGIN = 256 * 1024 * 1024
 INSTALLED_LEAKLAB = pathlib.Path("/opt/vprlab-tools/leaklab")
 TAILSCALE_BACKEND_STATES = frozenset(
     {"NoState", "NeedsLogin", "NeedsMachineAuth", "Stopped", "Starting", "Running"}
@@ -706,6 +710,7 @@ def start_capture(
     evidence_fd: int | None = None,
     popen=subprocess.Popen,
     timeout: float = 15.0,
+    file_size_limit: int | None = None,
 ) -> Capture:
     if evidence_fd is None:
         argv = guest.tcpdump_argv(interface, pcap)
@@ -738,8 +743,12 @@ def start_capture(
             )
             # The Popen handle exists before any deferred signal is examined.
             if isinstance(process, _REAL_POPEN):
+                # RLIMIT_FSIZE bounds the capture file even if this runner is
+                # SIGKILLed and the CaptureGuard thread dies with it.
                 apply_child_limits(
-                    process.pid, address_space=resource.RLIM_INFINITY
+                    process.pid,
+                    address_space=resource.RLIM_INFINITY,
+                    file_size=file_size_limit,
                 )
     except BaseException:
         reap_after_setup_failure(process)
@@ -792,7 +801,10 @@ def stop_capture(
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise subprocess.TimeoutExpired(process.args if hasattr(process, "args") else "tcpdump", timeout)
-            status = process.wait(timeout=min(0.5, remaining))
+            try:
+                status = process.wait(timeout=min(0.5, remaining))
+            except subprocess.TimeoutExpired:
+                continue
             break
     except subprocess.TimeoutExpired:
         capture.forced_stop = True
@@ -2210,13 +2222,25 @@ def kill_qemu(process: subprocess.Popen, state: pathlib.Path | None = None) -> b
     if not qemu_process_is_ours(process):
         # Pid reuse, or the staged binary was replaced: never signal it.
         return False
+    # A pidfd refers to exactly this process even if the pid is later reused,
+    # so a concurrent reap can never redirect the SIGKILL to another process.
     try:
-        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        pidfd = os.pidfd_open(process.pid)
     except OSError:
+        return process.poll() is not None
+    try:
+        if process.poll() is not None:
+            return True
+        if not qemu_process_is_ours(process):
+            return False
         try:
-            process.kill()
+            signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+        except ProcessLookupError:
+            return True
         except OSError:
             return False
+    finally:
+        os.close(pidfd)
     try:
         process.wait(timeout=10)
     except (subprocess.TimeoutExpired, OSError):
@@ -2757,7 +2781,8 @@ def _run_phase_locked(
         )
         capture_guard.start()
         capture = start_capture(
-            arguments.tap, pcap, stats, tcpdump=tcpdump, evidence_fd=evidence.fd
+            arguments.tap, pcap, stats, tcpdump=tcpdump, evidence_fd=evidence.fd,
+            file_size_limit=int(arguments.capture_size_cap) + CAPTURE_FSIZE_MARGIN,
         )
         capture_guard.attach_capture(capture.process)
         record["tcpdump_argv"] = capture.argv

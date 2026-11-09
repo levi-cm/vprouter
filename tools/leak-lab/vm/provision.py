@@ -50,19 +50,32 @@ class ProvisionInterrupted(RuntimeError):
 
 
 _signal_seen = False
+_signal_number: int | None = None
+_signal_raised = False
+
+
+def check_interrupt() -> None:
+    """Raise ProvisionInterrupted once if a termination signal arrived."""
+    global _signal_raised
+    if _signal_seen and not _signal_raised:
+        _signal_raised = True
+        raise ProvisionInterrupted(f"received signal {_signal_number}")
 
 
 def install_signal_handlers() -> None:
-    global _signal_seen
+    global _signal_seen, _signal_number, _signal_raised
     _signal_seen = False
+    _signal_number = None
+    _signal_raised = False
 
     def handle(signum, _frame):
-        global _signal_seen
-        if _signal_seen:
-            # A second signal during the reaper must not escape its finally.
-            return
-        _signal_seen = True
-        raise ProvisionInterrupted(f"received signal {signum}")
+        # Deferred: only record the signal.  Raising from the handler could
+        # interrupt subprocess.Popen() before the child handle exists and
+        # orphan QEMU; every wait loop calls check_interrupt() instead.
+        global _signal_seen, _signal_number
+        if not _signal_seen:
+            _signal_seen = True
+            _signal_number = signum
 
     for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
         signal.signal(signum, handle)
@@ -296,6 +309,7 @@ def _wait_for_marker(process: subprocess.Popen, serial: pathlib.Path, timeout: f
     marker = b"VPRLAB-PROVISION-OK "
     collected = b""
     while time.monotonic() < deadline:
+        check_interrupt()
         if serial.is_file():
             try:
                 flags = os.O_RDONLY
@@ -514,6 +528,7 @@ def _provision_locked(arguments: argparse.Namespace, state: pathlib.Path) -> int
                 restore_signals=True,
             )
             _apply_qemu_limits(process)
+        check_interrupt()
         record["qemu_pid"] = process.pid
         record["qemu_started_at"] = _utc_now()
         _write_json_fd(record_fd, record)
@@ -521,12 +536,17 @@ def _provision_locked(arguments: argparse.Namespace, state: pathlib.Path) -> int
         marker = _wait_for_marker(
             process, state / guest.SERIAL_FILE, PROVISION_TIMEOUT
         )
-        try:
-            status = process.wait(timeout=POWEROFF_TIMEOUT)
-        except subprocess.TimeoutExpired as exc:
-            raise hostcheck.Refusal(
-                "guest printed the completion marker but did not power off"
-            ) from exc
+        poweroff_deadline = time.monotonic() + POWEROFF_TIMEOUT
+        while True:
+            check_interrupt()
+            try:
+                status = process.wait(timeout=0.5)
+                break
+            except subprocess.TimeoutExpired:
+                if time.monotonic() >= poweroff_deadline:
+                    raise hostcheck.Refusal(
+                        "guest printed the completion marker but did not power off"
+                    ) from None
         if status != 0:
             raise hostcheck.Refusal(f"QEMU exited with status {status} after provisioning")
         if image_id not in marker:

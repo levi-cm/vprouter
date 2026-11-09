@@ -1350,3 +1350,13 @@ client-login `tailscale up`, policy-accept base chains, teardown edge). Fix roun
 proven traffic stop, sequence-number post-fault coverage with a 30 s minimum client hold and
 15 s gap, latched LEAK, end-of-hold exit-node re-check, non-blocking client-login, explicit
 forward drops for vprlab0/vprlab1, neighbour helpers verified against real `ip -j neigh` output.
+2026-11-09 M3 round-3 reviews of 37bafc2: Opus PASS (Minors R3-1..R3-4), GPT FAIL (R3-C1 partial
+boundary read understates S_fault; R3-C2 aggregate count does not prove traffic over the whole
+hold), Pi FAIL (R3-I1 = R3-C1; R3-M1 `is-active unknown` accepted as a stop). No reviewer
+reproduced an unflagged real-IP leak; these are coverage false PASSes. User asked for "more
+claude and less opencode": fix round 3 goes to Claude Opus 5.5 (fastMode false; a first launch
+inherited fastMode true and was cancelled before it changed anything). Decisions: one exact
+prefix-read primitive (stat N, guest sha256 of head -c N, bytes; trusted only if all agree),
+host-monotonic sampling every <= 15 s with per-window exit progress and exit-node re-check,
+S_end at the deadline before status calls, proven stop = inactive/failed + MainPID 0 + quiescent
+size, traffic marked started before launch, pre-fault flags only from trusted reads.

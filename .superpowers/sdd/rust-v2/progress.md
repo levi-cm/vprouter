@@ -1283,3 +1283,10 @@ other ICMP stays a LEAK). Re-scan of that real capture: PASS, 0 findings, 1 quot
 INVALID router_not_ready. New diagnostics show why: Tailscale Running and Online, but
 Self.ExitNodeOption=false (exit node not approved in the admin console), so the release stays
 RECOVERING "starting Tailscale" and correctly never reports READY. Waiting on user approval.
+2026-11-09 user approved zz-vprtest-01-do-not-use as an exit node. Idle phase (120 s hold): PASS,
+readiness passed with Tailscale required (release READY), 1,525 frames, 1,525/1,525/0 stats,
+782 out + 741 in WireGuard to the single endpoint, 0 findings, 0 ICMP quotes, both nonce controls
+seen. Certifies server-side only, no client traffic. tcpdump now runs with -B 8192 (3460c27,
+8 MiB kernel ring after the 58-minute phase lost 3 frames to kernel drops); root-owned install
+refreshed and verified. Fault phases (stop-router, kill-wireguard, kill-container,
+restart-docker, reboot-with-router-enabled) started.

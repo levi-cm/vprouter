@@ -548,8 +548,9 @@ set -eu
 #    "clients":[<created client indexes>]}
 # Every object created by the run carries the exact string
 #   @@OWNER_PREFIX@@<token>
-# in the vprlab0/vprlab-tap0 ifalias, the inet vprlab table comment and both
-# DOCKER-USER rule comments. Teardown reads that token and verifies every
+# in the ifalias of every lab link (vprlab0, vprlab-tap0 and, with --client,
+# vprlab1 and each vprlab-ctapN), the inet vprlab table comment and every
+# DOCKER-USER rule comment (two per bridge). Teardown reads that token and verifies every
 # existing object before any mutation; any mismatch aborts with no changes.
 # It also removes every client object the owner record names, even when this
 # plan was rendered without --client.
@@ -1713,7 +1714,10 @@ def main(argv: list[str] | None = None) -> int:
             for collision in collisions:
                 print(f"COLLISION: {collision}")
             return 1
-        print(f"OK: no vprlab collisions and no overlap with {LAB_SUBNET_TEXT}")
+        print(
+            "OK: no vprlab collisions and no overlap with "
+            f"{LAB_SUBNET_TEXT} or {CLIENT_SUBNET_TEXT}"
+        )
         return 0
 
     if args.wan_interface is None:

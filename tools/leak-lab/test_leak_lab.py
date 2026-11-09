@@ -5620,17 +5620,23 @@ class ClientScanTests(unittest.TestCase):
         self.assertIn("router_zero_packets", report["capture_meta"]["invalid_reasons"])
 
 
-def client_hold_samples(data, sequences, times, *, run_id=CLIENT_MARKER.split(":", 1)[1]):
-    """Build trusted hold samples that are exact prefixes of ``data``.
+def client_hold_samples(data, sequences, times, *, run_id=CLIENT_MARKER.split(":", 1)[1],
+                        pre=(0, (-13.0, -13.0)), actions=()):
+    """Build trusted coverage samples that are exact prefixes of ``data``.
 
-    ``sequences`` are the last complete sequence of each sample and ``times``
-    the host ``(stat_start, stat_end)`` pairs, relative to the S_fault sample.
+    ``sequences`` are the last complete sequence of S_fault, the hold samples
+    and S_end, and ``times`` their host ``(stat_start, stat_end)`` pairs,
+    relative to the S_fault sample.  Fix round 4 adds the S_pre sample
+    (``pre`` = ``(sequence, times)``, by default the empty prefix 13 s before
+    S_fault) and optional ``actions`` samples between S_pre and S_fault.  All
+    times are shifted so that S_pre's size read starts at 0, as the runner
+    records them; every sample carries its ``kind`` and ``exit_node_ok``.
     """
     import hashlib
 
     lines = data.splitlines(keepends=True)
-    samples = []
-    for sequence, (start, end) in zip(sequences, times):
+
+    def build(kind, sequence, start, end):
         size = 0
         for line in lines:
             try:
@@ -5642,17 +5648,28 @@ def client_hold_samples(data, sequences, times, *, run_id=CLIENT_MARKER.split(":
             size += len(line)
         prefix = data[:size]
         observation = clientprobe.prefix_observation(prefix, run_id=run_id)
-        samples.append(
-            {
-                "sequence": observation["sequence"],
-                "exit_sequence": observation["exit_sequence"],
-                "size": size,
-                "sha256": hashlib.sha256(prefix).hexdigest(),
-                "stat_start": float(start),
-                "stat_end": float(end),
-            }
-        )
-    return samples
+        return {
+            "kind": kind,
+            "sequence": observation["sequence"],
+            "exit_sequence": observation["exit_sequence"],
+            "size": size,
+            "sha256": hashlib.sha256(prefix).hexdigest(),
+            "stat_start": float(start),
+            "stat_end": float(end),
+            "exit_node_ok": True,
+        }
+
+    entries = [("pre", pre[0], pre[1])]
+    entries += [("action", sequence, window) for sequence, window in actions]
+    count = len(sequences)
+    for index, (sequence, window) in enumerate(zip(sequences, times)):
+        kind = "fault" if index == 0 else ("end" if index == count - 1 else "hold")
+        entries.append((kind, sequence, window))
+    shift = -float(pre[1][0])
+    return [
+        build(kind, sequence, start + shift, end + shift)
+        for kind, sequence, (start, end) in entries
+    ]
 
 
 class ClientProbeTests(unittest.TestCase):
@@ -5909,7 +5926,7 @@ class ClientProbeTests(unittest.TestCase):
     def test_one_new_exit_per_host_window_passes(self) -> None:
         data = self.frozen_log(3, step=10)
         samples = client_hold_samples(
-            data, [2, 4, 6, 8], [(0, 0), (10, 10.2), (20, 20.1), (30, 30.3)]
+            data, [2, 4, 6, 8], [(0, 0), (10, 10.2), (20, 20.1), (27, 27.3)]
         )
         report = clientprobe.evaluate_probe_log(
             data,
@@ -5918,6 +5935,7 @@ class ClientProbeTests(unittest.TestCase):
         )
         self.assertEqual(report["verdict"], "PASS", report["invalid_reasons"])
         self.assertEqual(report["hold_windows"], 3)
+        self.assertEqual(report["coverage_windows"], 4)
 
     def test_a_marker_alone_does_not_cover_a_window(self) -> None:
         data = self.frozen_log(2)
@@ -5955,20 +5973,142 @@ class ClientProbeTests(unittest.TestCase):
             data, hold_samples=short, **self.frozen_values()
         )
         self.assertIn("probe_hold_short", report["invalid_reasons"])
-        late = client_hold_samples(
-            data, [2, 4, 6], [(0, 0), (12, 12), (26, 32.5)]
+        # Fix round 4 (GPT R4-I1): the deadline sample starts at most
+        # HOLD_END_MARGIN (3 s) before the deadline ...
+        early = client_hold_samples(
+            data, [2, 4, 6], [(0, 0), (12, 12), (26.9, 27.0)]
         )
         report = clientprobe.evaluate_probe_log(
-            data, hold_samples=late, **self.frozen_values()
+            data, hold_samples=early, **self.frozen_values()
         )
         self.assertIn("probe_hold_short", report["invalid_reasons"])
-        late = client_hold_samples(
-            data, [2, 4, 6], [(0, 0), (16, 16), (31, 32.5)]
+        # ... and must finish its size read at or before the deadline.  The
+        # old 2 s grace accepted both of these.
+        for end in ((29.0, 30.5), (30.0, 31.0), (30.0, 32.0)):
+            with self.subTest(end=end):
+                late = client_hold_samples(
+                    data, [2, 4, 6], [(0, 0), (16, 16), end]
+                )
+                report = clientprobe.evaluate_probe_log(
+                    data, hold_samples=late, **self.frozen_values()
+                )
+                self.assertEqual(report["verdict"], "INVALID")
+                self.assertIn("probe_hold_deadline_late", report["invalid_reasons"])
+        for end in ((27.0, 27.2), (29.5, 30.0)):
+            with self.subTest(end=end):
+                ok = client_hold_samples(
+                    data, [2, 4, 6], [(0, 0), (14, 14.2), end]
+                )
+                report = clientprobe.evaluate_probe_log(
+                    data, hold_samples=ok, **self.frozen_values()
+                )
+                self.assertNotIn("probe_hold_deadline_late", report["invalid_reasons"])
+                self.assertNotIn("probe_hold_short", report["invalid_reasons"])
+
+    def test_coverage_spans_the_fault_action_from_s_pre(self) -> None:
+        # Opus R4 I-1 at the evaluator: the action took 60 s (S_pre at -73,
+        # S_fault at 0).  Without action samples the S_pre -> S_fault window
+        # is far longer than 15 s; with samples during a silent action every
+        # action window is empty.  Healthy action samples PASS.
+        data = (
+            client_probe_line(1, 100, mullvad=True)
+            + client_probe_line(2, 100, kind="marker")
+        )
+        stamp = 100
+        for index in range(9):
+            stamp += 10
+            data += client_probe_line(3 + 2 * index, stamp, ok=False, mullvad=None)
+            data += client_probe_line(4 + 2 * index, stamp, kind="marker", ok=False)
+        values = self.frozen_values(
+            fault_epoch=100, post_fault_epoch=170, clock_stop=200,
+            fault_sequence=14, end_sequence=20, hold_seconds=30,
+        )
+        hold = ([14, 16, 20], [(0, 0.1), (13.5, 13.6), (27, 27.1)])
+        no_action = client_hold_samples(
+            data, *hold, pre=(2, (-73.0, -72.9))
+        )
+        report = clientprobe.evaluate_probe_log(data, hold_samples=no_action, **values)
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("probe_hold_window_late", report["invalid_reasons"])
+        silent = client_hold_samples(
+            data, *hold, pre=(2, (-73.0, -72.9)),
+            actions=[(2, (-60.0 + 13 * i, -59.9 + 13 * i)) for i in range(5)],
+        )
+        report = clientprobe.evaluate_probe_log(data, hold_samples=silent, **values)
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("probe_hold_window_empty", report["invalid_reasons"])
+        healthy = client_hold_samples(
+            data, *hold, pre=(2, (-73.0, -72.9)),
+            actions=[(4 + 2 * i, (-60.0 + 13 * i, -59.9 + 13 * i)) for i in range(5)],
+        )
+        report = clientprobe.evaluate_probe_log(data, hold_samples=healthy, **values)
+        self.assertEqual(report["verdict"], "PASS", report["invalid_reasons"])
+        self.assertEqual(report["hold_windows"], 2)
+        self.assertEqual(report["coverage_windows"], 8)
+
+    def test_sample_kinds_must_be_pre_action_fault_hold_end(self) -> None:
+        data = self.frozen_log(3, step=10)
+        good = client_hold_samples(
+            data, [2, 4, 6, 8], [(0, 0), (10, 10.2), (20, 20.1), (27, 27.3)]
         )
         report = clientprobe.evaluate_probe_log(
-            data, hold_samples=late, **self.frozen_values()
+            data, hold_samples=good, **self.frozen_values(end_sequence=8)
         )
-        self.assertIn("probe_hold_deadline_late", report["invalid_reasons"])
+        self.assertEqual(report["verdict"], "PASS", report["invalid_reasons"])
+        for label, kinds in (
+            ("no-pre", ["fault", "hold", "hold", "hold", "end"]),
+            ("two-faults", ["pre", "fault", "fault", "hold", "end"]),
+            ("action-after-fault", ["pre", "fault", "action", "hold", "end"]),
+            ("no-end", ["pre", "fault", "hold", "hold", "hold"]),
+            ("unknown", ["pre", "fault", "bogus", "hold", "end"]),
+            ("missing", ["pre", "fault", None, "hold", "end"]),
+        ):
+            with self.subTest(case=label):
+                samples = [dict(sample) for sample in good]
+                for sample, kind in zip(samples, kinds):
+                    if kind is None:
+                        sample.pop("kind")
+                    else:
+                        sample["kind"] = kind
+                report = clientprobe.evaluate_probe_log(
+                    data, hold_samples=samples, **self.frozen_values(end_sequence=8)
+                )
+                self.assertEqual(report["verdict"], "INVALID")
+                self.assertIn("probe_hold_samples_invalid", report["invalid_reasons"])
+
+    def test_every_sample_must_keep_the_exit_node_selected(self) -> None:
+        # Opus R4 M-2: the standalone evaluator (and its CLI) requires
+        # exit_node_ok on every sample; 06baf40 ignored it and said PASS.
+        data = self.frozen_log(3, step=10)
+        samples = client_hold_samples(
+            data, [2, 4, 6, 8], [(0, 0), (10, 10.2), (20, 20.1), (27, 27.3)]
+        )
+        for index in range(len(samples)):
+            for value in (False, None, "true"):
+                with self.subTest(index=index, value=value):
+                    changed = [dict(sample) for sample in samples]
+                    changed[index]["exit_node_ok"] = value
+                    report = clientprobe.evaluate_probe_log(
+                        data, hold_samples=changed, **self.frozen_values(end_sequence=8)
+                    )
+                    self.assertEqual(report["verdict"], "INVALID")
+                    self.assertIn("client_exit_node_lost", report["invalid_reasons"])
+        samples[2]["exit_node_ok"] = False
+        with tempfile.TemporaryDirectory() as directory:
+            log = pathlib.Path(directory) / "probe.jsonl"
+            log.write_bytes(data)
+            held = pathlib.Path(directory) / "samples.json"
+            held.write_text(json.dumps(samples), encoding="utf-8")
+            with redirect_stdout(StringIO()) as out:
+                code = clientprobe.main([
+                    "--probe-log", str(log), "--fault-epoch", "100",
+                    "--post-fault-epoch", "100", "--fault-sequence", "2",
+                    "--end-sequence", "8", "--hold-seconds", "30",
+                    "--clock-start", "99", "--clock-stop", "130",
+                    "--run-id", self.RUN_ID, "--hold-samples", str(held),
+                ])
+        self.assertEqual(code, 2)
+        self.assertIn("client_exit_node_lost", json.loads(out.getvalue())["invalid_reasons"])
 
     def test_samples_must_be_prefixes_of_the_evidence(self) -> None:
         data = self.frozen_log(2)

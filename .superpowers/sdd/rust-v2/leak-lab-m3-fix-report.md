@@ -473,3 +473,170 @@ python3 -B tools/leak-lab/clientprobe.py --probe-log <file> \
 ```
 
 `run_phase.py` and `netplan.py` invocations are unchanged.
+
+# Fix round 4
+
+Milestone: M3 — fix round for the three round-4 reports on `06baf40`
+(`leak-lab-m3-rereview4-gpt.md` FAIL R4-I1, `-rereview4-opusA.md` FAIL I-1 +
+M-1..M-4, `-live-readiness-opusB.md` READY WITH FIXES B-1, L-1, P-1..P-4,
+H-1/H-2, D-1..D-4).  Repository `/DATA/AppData/vprouter-rust-v2`, branch
+`rust/v2`, HEAD `06baf40`.  Date: 2026-11-09.  Last offline round before the
+first live client run.
+
+All work is in the working tree; nothing was staged, committed or pushed.  No
+privileged command (sudo, QEMU, tcpdump, `ip`, `nft`, `iptables`, docker,
+useradd, `systemctl` or network execution) was run.  Generated shell was only
+parsed with `sh -n`; the new `/proc` process-scan snippet was additionally run
+unprivileged on the host (it only reads `/proc/*/cmdline`) to prove that it
+counts a process whose argv names the script and never counts itself.
+Scratch `/var/tmp/leaklab-m3-fix4`, including the extracted
+`git archive 06baf40` tree, was deleted at the end.
+
+## Design (controller decisions 1-8)
+
+- **Coverage through the fault (decision 1, Opus I-1).**  A trusted sample
+  `S_pre` is taken immediately before the fault action.  A helper thread
+  (`ClientActionSampler`) then samples the client log every 13 s of host
+  monotonic time (start to start) while the router action and its
+  postcondition run, including the reboot path; every sample re-checks the
+  exit-node selection with `require_online=False`.  The thread only calls
+  `take_client_coverage_sample`, which talks to the client QGA socket; the
+  main thread talks only to the router QGA socket until the thread is halted
+  and joined in a `finally`.  The two `QGAClient`s are distinct objects on
+  distinct sockets (refused if identical).  A thread that cannot be joined
+  within 180 s still owns the client socket: `client_sampler_stuck`, INVALID,
+  and the runner never touches that socket again (no collection, no client
+  cleanup, QEMU killed).  Thread results are applied by the main thread after
+  the join; the thread never touches the record.  `S_fault` is taken at the
+  next point of the same 13 s cadence after the join (so its window always
+  holds a complete probe loop), and post-fault exit/marker attempts are still
+  required.  All sample offsets are relative to `S_pre`; every sample records
+  its `kind` (`pre`, `action`, `fault`, `hold`, `end`).
+- **Deadline (decision 2, GPT R4-I1).**  `S_end` is started 3 s before the
+  hold deadline (`HOLD_END_MARGIN`) and must finish its size read at or
+  before the deadline; otherwise `probe_hold_deadline_late` (runner and
+  evaluator).  The hold windows are equal splits of
+  `[h0, deadline - 3 s]` of 12-14 s.  Windows were not shortened (decision
+  4/M-4); to keep every window above the worst-case probe loop, a requested
+  hold that has no such split is extended (never shortened) to the next whole
+  second that has one (30 → 30, 33 → 39, 60 → 63, 90 → 90, 120 → 120);
+  `hold_seconds` records the hold used and `hold_requested_seconds` the
+  request.  Lines first written after the deadline never count; they are
+  still parsed for LEAK.
+- **Proven stop (decision 3, Opus M-1).**  Besides `inactive`/`failed` and
+  `MainPID` 0, a `/proc` scan (no procps needed) must find no process whose
+  command line names `/usr/local/sbin/vprlab-client-traffic`, and the two
+  quiescence size reads are now 12 s apart.
+- **Evaluator (decision 4).**  `exit_node_ok is True` is required on every
+  sample (`client_exit_node_lost`, so the CLI carries the binding), the sample
+  kinds must run `pre`, `action`*, `fault`, `hold`*, `end`, every window from
+  `S_pre` to `S_end` must be <= 15 s and contain a new exit attempt, and the
+  report gains `coverage_windows`.  The 2-window spacing bound is documented.
+
+## Finding-to-fix map
+
+Line numbers are from the fixed working tree.
+
+| ID | Fix |
+|---|---|
+| GPT R4-I1 — deadline stat may finish up to 2 s after the deadline | `S_end` due at deadline − 3 s, runner refuses `stat_end > deadline` (`vm/run_phase.py:4932-4943`); evaluator `probe_hold_short`/`probe_hold_deadline_late` against the S_fault base (`clientprobe.py:398-409`, `HOLD_END_MARGIN` `:86`); schedule `client_hold_schedule` (`vm/run_phase.py:3722`).  Tests `vm/test_vm.py:7861` (1 s and 2 s late read, late-only pair), `:7885` (controls), `test_leak_lab.py:5969`. |
+| Opus A I-1 — fault action covered only by the guest clock | `S_pre` (`vm/run_phase.py:4808`), `ClientActionSampler` (`:3679`) started around the action (`:4834`) and joined in `finally` (`:4884`), `S_fault` on the same cadence (`:4913`), outer `finally` backstop + `client_qga_unsafe` (`:5043`); evaluator coverage over all samples (`clientprobe.py:312`, `:327`).  Tests `vm/test_vm.py:7947` (60 s silent action, frozen clock: restart-docker, kill-wireguard, kill-container), `:7965` (healthy 60 s action sampled by the thread, router calls only on the main thread), `:8011` (action raises, thread joined), `:8031` (stuck sampler: no client command after the action), `test_leak_lab.py:6008`, `:6049`. |
+| Opus A M-1 — 2 s quiescence shorter than the writer gap | `/proc` scan `client_traffic_process_scan_script`/`_count` (`vm/run_phase.py:3359`, `:3383`) required by `stop_client_traffic` (`:3429`); `CLIENT_STOP_QUIESCENCE_SECONDS = 12.0` (`:167`).  Tests `vm/test_vm.py:8078` (writer every 5 s, first 3 s after a clean-looking stop, visible → INVALID `client_traffic_stop_failed`, hidden from the scan → LEAK `client_writer_not_quiescent`), stop-proof matrix in `ClientProbeReadTests`. |
+| Opus A M-2 — standalone evaluator ignores `exit_node_ok` | `clientprobe.py:354-356`.  Test `test_leak_lab.py:6079` (every index, `False`/`None`/`"true"`, and the CLI exits 2). |
+| Opus A M-3 — PASS record lacks `traffic_stop_proven: true` | `vm/run_phase.py:4994`.  Asserted in `vm/test_vm.py` `test_healthy_hold_is_sampled_every_window_and_passes`. |
+| Opus A M-4 — what the window rule bounds | Documented (clientprobe docstring, design step 8, `leak-lab-vm.md`); windows not shortened. |
+| Opus B B-1 — `ExitNodeStatus.TailscaleIPs` are prefixes | `_exit_status_has_address` (`vm/run_phase.py:3148`): `ip_interface`, IPv4 `/32` equal to the address, bare address accepted, wider prefix refused.  Every `ExitNodeStatus` fake now uses `"/32"` (+ `/128`), peers keep bare addresses.  Tests `vm/test_vm.py:5867` (real-shaped JSON), `test_exit_node_status_must_name_the_exact_peer_and_address`, `:8106` (phase). |
+| Opus B L-1 — MagicDNS rewrites resolv.conf | `--accept-dns=false` on client-login (`vm/run_phase.py:4517`); prefs require `CorpDNS` false (`:2984-2987`, `client_accepts_dns`; missing → `client_prefs_incomplete`).  Test `vm/test_vm.py:8115` (phase refuses before traffic; login command; login with `CorpDNS` true is INVALID). |
+| Opus B P-1 — single router-peer read | `wait_client_router_peer` (`vm/run_phase.py:3179`, 60 s, 1 s polls), used at `:4719`.  Test `vm/test_vm.py:8142`. |
+| Opus B P-2 — OOM kill of tailscaled | `OOMScoreAdjust=-900` (`vm/guest.py:1100`); guest `MemAvailable` at boot and at the end of every client phase incl. client-login (`read_guest_mem_available` `vm/run_phase.py:3747`, `:4467`, `:4549`, `:5100`; `client.guest_mem_available`). |
+| Opus B P-3 — probe cadence | `curl -m 4`, 4.5 s backstop, 3 s sleep (`vm/guest.py:918-920`); worst-case exit spacing ≈ 11 s (12 s with the backstop) < `CLIENT_HOLD_SAMPLE_MIN` 12 s ≤ windows ≤ 14 s (+ latency ≤ 15 s); test asserts the relation. |
+| Opus B P-4 — tarball extracted under `/tmp` | `/var/tmp/vprlab-ts` (`vm/guest.py:1077-1086`). |
+| Opus B D-1 — `leak-lab.md` "unchanged M2 router steps" | Rewritten: the no-client plan is not M2 byte for byte (scoped accepts + drops, decision 6). |
+| Opus B D-2 — drop order sentence | Rewritten to the real order (disjoint interface pairs; order immaterial), checked against `netplan.py:1144-1158`. |
+| Opus B D-3 — plan header / collision OK line | Header lists every lab link alias and every DOCKER-USER comment; OK line names both subnets (`netplan.py:551-553`, `:1716`).  Comment/print text only. |
+| Opus B D-4 — "contains the address" | Design step 6 and `leak-lab-vm.md` now say the IPv4 `/32` prefix. |
+| Operator step | `leak-lab-vm.md` and design: delete any older `zz-vprclient-NN-*` node in the admin console before client-login; a client logged in before this round re-runs client-login; an already provisioned client keeps the old unit/script until re-provisioned. |
+| Opus B H-1, H-2 | Skipped (controller decision 8): documented Minors, no code change. |
+| Opus B P-5 | Skipped: verify on the first live boot as the report suggests. |
+
+## Regression check against `06baf40`
+
+An extracted `git archive 06baf40` tree received the new `test_leak_lab.py`
+and `vm/test_vm.py`.  Because the harness fake now answers with the real
+`/32` `ExitNodeStatus` shape, which 06baf40 can never select, a second copy
+of the new `test_vm.py` with only that fake reverted to a bare address was
+used for every non-B-1 reproducer, so each fails on 06baf40 for its own
+reason.  The control `test_client_idle_passes_with_both_captures_and_the_probe_log`
+passes on 06baf40 with that copy.
+
+| Reproducer (new test) | `06baf40` | Fixed |
+|---|---|---|
+| GPT R4-I1 deadline read ends 1 s after the hold, late-only pair | **PASS** (`'PASS' == 'PASS'`) | exit 2 INVALID `probe_hold_deadline_late` |
+| GPT R4-I1 same, 2 s | **PASS** | exit 2 INVALID `probe_hold_deadline_late` |
+| Control: same slow read, no late pair | INVALID `probe_hold_window_empty` | INVALID `probe_hold_deadline_late` |
+| Control: 1 s slow read ending inside the hold / healthy | — | exit 0 PASS |
+| Opus I-1 60 s silent action, frozen clock: restart-docker | **PASS** | exit 2 INVALID (empty or late window) |
+| … kill-wireguard | **PASS** | exit 2 INVALID |
+| … kill-container | **PASS** | exit 2 INVALID |
+| Opus M-1 writer every 5 s after a clean-looking stop, visible | **PASS** | exit 2 INVALID `client_traffic_stop_failed` |
+| … hidden from the `/proc` scan | **PASS** | exit 1 LEAK `client_writer_not_quiescent` |
+| Opus B B-1 real `/32` shape, idle phase (real-shape copy) | exit 2 INVALID `phase_exception:Refusal` (exit node never selected) | exit 0 PASS |
+| Opus B B-1 unit, real-shaped JSON | `client_peer_is_active` False | True |
+| Opus B L-1 prefs `CorpDNS: true` | exit 0 PASS | exit 2 INVALID `client_accepts_dns`, no traffic started |
+| Opus B P-1 peer online only on the third read | refused after 1 read | exit 0 PASS |
+
+All nine round-4 phase/unit reproducers above fail by assertion on 06baf40
+and pass on the fixed tree.  The new evaluator-level tests
+(`test_every_sample_must_keep_the_exit_node_selected`,
+`test_deadline_sample_must_reach_and_not_overrun_the_deadline`) also fail on
+06baf40, but partly because the new sample schema (S_pre first) is foreign to
+the old evaluator, so the phase reproducers are the meaningful old-commit
+evidence; Opus A's CLI reproducer is the 06baf40 evidence for M-2.
+
+## Tests run (all pass)
+
+From `tools/leak-lab`:
+
+- `python3 -B -W error -m unittest test_leak_lab` — **344 tests, OK** (was 341)
+- `python3 -B -W error -m unittest vm.test_vm` — **302 tests, OK** (was 291);
+  run seven times across the round, stable (the action-sampler tests use a real thread over the
+  fake clock)
+- `py_compile` of `clientprobe.py`, `clientscan.py`, `netplan.py`,
+  `vm/guest.py`, `vm/provision.py`, `vm/run_phase.py`, `vm/test_vm.py`,
+  `test_leak_lab.py` — OK
+- `sh -n` on the rendered no-client, `--client 1` and `--client 1 --client 2`
+  plans, the client provisioning script and the process-scan snippet — OK
+- `git diff --check` — OK
+
+Router-only verification: an AST comparison with `06baf40` shows
+`_run_phase_locked`, `run_phase`, `main`, `run_router_fault`,
+`wait_router_ready`, `wait_for_reboot`, `run_silence_check`, `scan_evidence`,
+`start_capture`, `stop_capture`, `emit_control`, `cleanup_guest_units`,
+`poweroff_vm`, `check_admission`, `login_phase_wait`, `combine_verdicts`,
+`read_wg0_state`, `check_kill_wireguard`, `wait_docker_restarted`,
+`action_command` and `postcondition_command` unchanged.  The rendered
+no-client plan differs from `06baf40` only in the header comment (D-3).
+
+## Live notes
+
+- Re-provision the client (or at least reinstall the unit and script) to get
+  `OOMScoreAdjust`, the new cadence and the `/var/tmp` extraction; the new
+  runner also works with the old 1 s script (its exit spacing is shorter).
+- Delete older `zz-vprclient-NN-*` nodes in the admin console, then run
+  client-login (with `--accept-dns=false`, which it now passes) before the
+  first client phase.
+- Every client phase now takes about 13 s longer (S_fault waits for the next
+  point of the 13 s cadence) plus the 12 s quiescence; some requested holds
+  are extended by up to about 12 s (`hold_requested_seconds` vs
+  `hold_seconds`).
+- Still to verify live (not a false PASS): whether tailscaled keeps
+  `ExitNodeStatus` (same ID and `/32`) while the router is offline during
+  stop-router/kill-container/kill-wireguard; if it drops it, those phases are
+  INVALID `client_exit_node_lost`.
+
+## Updated operator commands
+
+Unchanged.  The `--hold-samples` file for `clientprobe.py` is the
+`client.hold_samples` list of `phase.json`, which now starts with the `pre`
+sample and includes the `action` samples; pass `client.hold_seconds` (the
+hold used) as `--hold-seconds`.

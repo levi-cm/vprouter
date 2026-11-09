@@ -30,15 +30,25 @@ Verdict rules:
   non-decreasing timestamp inside the observed launch/stop window; probes must
   keep trying (no guest-clock gap above 15 s).  At least one exit and one
   marker attempt must have ``s > S_fault``;
-* hold coverage is host-observed, never guest-clock based: the runner takes a
-  trusted prefix sample of the log (exact size + SHA-256) at the fault
-  boundary (``S_fault``), at least every 15 s of host monotonic time during
-  the hold, and at the hold deadline (``S_end``).  Every window between
-  consecutive samples must be at most 15 s long and must contain a new exit
-  attempt (an exit line with ``s`` above the previous sample's last ``s``).
-  The evaluator recomputes every sample from the evidence bytes it is given:
-  each sample's prefix hash must match, so a sample can never claim a line
-  the evidence does not contain;
+* coverage is host-observed, never guest-clock based (fix round 4): the
+  runner takes a trusted prefix sample of the log (exact size + SHA-256)
+  immediately before the fault action (``S_pre``), at least every 15 s of
+  host monotonic time while the action and its postcondition run, after the
+  action (``S_fault``), during the hold, and finally at most
+  :data:`HOLD_END_MARGIN` seconds before the hold deadline (``S_end``).  Every
+  window between consecutive samples must be at most 15 s long and must
+  contain a new exit attempt (an exit line with ``s`` above the previous
+  sample's last ``s``).  The deadline sample must finish its size read at or
+  before the deadline, so a line first written after the hold never counts
+  as coverage (it is still parsed for a LEAK).  Every sample must also report
+  that the client still had exactly the router exit node selected
+  (``exit_node_ok``).  The evaluator recomputes every sample from the
+  evidence bytes it is given: each sample's prefix hash must match, so a
+  sample can never claim a line the evidence does not contain.  Windows of at
+  most 15 s bound the spacing of individual exit attempts only to about two
+  windows in the worst case (an attempt just after one sample and the next
+  just before the sample after next); the 15 s guest-clock gap rule bounds
+  the spacing of the rows themselves;
 * the guest clocks must be ordered ``clock_start <= fault_epoch <=
   post_fault_epoch <= clock_stop`` and must advance across the hold
   (``clock_stop - post_fault_epoch >= hold - 2``).  These are extra INVALID
@@ -69,10 +79,14 @@ MAX_PROBE_GAP_SECONDS = 15
 # may be longer than this, measured from the start of the earlier sample's
 # size read to the end of the later sample's size read.
 MAX_HOLD_SAMPLE_WINDOW = 15.0
-# The deadline sample (S_end) must finish its size read within this many
-# seconds after the hold deadline; a later sample could credit lines first
-# written after the hold.
-HOLD_DEADLINE_SLACK = 2.0
+# The deadline sample (S_end) starts its size read at most this many seconds
+# before the hold deadline and must finish it at or before the deadline: a
+# size read that ends after the deadline could credit lines first written
+# after the hold (GPT R4-I1).
+HOLD_END_MARGIN = 3.0
+# Recorded host offsets are rounded to milliseconds.
+_OFFSET_ROUNDING = 0.001
+SAMPLE_KINDS = ("pre", "action", "fault", "hold", "end")
 # The guest clock must advance across the hold, within this tolerance.
 CLOCK_STALL_TOLERANCE = 2
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -276,6 +290,8 @@ def _is_offset(value: object) -> bool:
 def _valid_sample(sample: object) -> bool:
     if not isinstance(sample, dict):
         return False
+    if sample.get("kind") not in SAMPLE_KINDS:
+        return False
     if not _is_count(sample.get("sequence")) or not _is_count(sample.get("size")):
         return False
     exit_sequence = sample.get("exit_sequence")
@@ -293,6 +309,21 @@ def _valid_sample(sample: object) -> bool:
     return float(end) >= float(start)
 
 
+def _fault_index(samples: list[dict[str, Any]]) -> int | None:
+    """Return the S_fault index when the kinds are pre, action*, fault, hold*, end."""
+    kinds = [sample["kind"] for sample in samples]
+    if len(kinds) < 3 or kinds[0] != "pre" or kinds[-1] != "end":
+        return None
+    if kinds.count("fault") != 1:
+        return None
+    fault = kinds.index("fault")
+    if any(kind != "action" for kind in kinds[1:fault]):
+        return None
+    if any(kind != "hold" for kind in kinds[fault + 1 : -1]):
+        return None
+    return fault
+
+
 def _check_hold_samples(
     raw: bytes,
     samples: object,
@@ -303,18 +334,30 @@ def _check_hold_samples(
     hold_seconds: int | None,
     max_window: float,
     reasons: list[str],
-) -> None:
-    """Verify host-observed hold coverage against the evidence bytes."""
-    if not isinstance(samples, list) or len(samples) < 2:
+) -> int | None:
+    """Verify host-observed coverage from S_pre to S_end against the evidence.
+
+    Returns the index of the S_fault sample, or None when the samples cannot
+    be used at all.
+    """
+    if not isinstance(samples, list) or len(samples) < 3:
         _add_reason(reasons, "probe_hold_samples_missing")
-        return
+        return None
     if not all(_valid_sample(sample) for sample in samples):
         _add_reason(reasons, "probe_hold_samples_invalid")
-        return
+        return None
+    fault = _fault_index(samples)
+    if fault is None:
+        _add_reason(reasons, "probe_hold_samples_invalid")
+        return None
+    # Opus R4 M-2: the exit-node binding is part of the evidence; every
+    # sample must say the client still had exactly the router selected.
+    if any(sample.get("exit_node_ok") is not True for sample in samples):
+        _add_reason(reasons, "client_exit_node_lost")
     if (
         fault_sequence is None
         or end_sequence is None
-        or samples[0]["sequence"] != fault_sequence
+        or samples[fault]["sequence"] != fault_sequence
         or samples[-1]["sequence"] != end_sequence
     ):
         _add_reason(reasons, "probe_hold_samples_invalid")
@@ -326,7 +369,7 @@ def _check_hold_samples(
             # The sample is not a prefix of this evidence: nothing it claims
             # can be checked, so it covers nothing.
             _add_reason(reasons, "probe_hold_prefix_mismatch")
-            return
+            return fault
         observation = prefix_observation(prefix, run_id=run_id)
         if (
             observation["sequence"] != sample["sequence"]
@@ -341,6 +384,8 @@ def _check_hold_samples(
             or float(later["stat_start"]) < float(earlier["stat_start"])
         ):
             _add_reason(reasons, "probe_hold_samples_invalid")
+    # Every window from S_pre to S_end, through the fault action, its
+    # postcondition and the hold, needs a new exit attempt.
     for index in range(1, len(samples)):
         window = float(samples[index]["stat_end"]) - float(
             samples[index - 1]["stat_start"]
@@ -351,11 +396,18 @@ def _check_hold_samples(
         if newest_exit is None or newest_exit <= observed[index - 1]["sequence"]:
             _add_reason(reasons, "probe_hold_window_empty")
     if hold_seconds is not None:
-        base = float(samples[0]["stat_start"])
-        if float(samples[-1]["stat_start"]) - base < float(hold_seconds) - 0.001:
+        base = float(samples[fault]["stat_start"])
+        deadline = base + float(hold_seconds)
+        end_start = float(samples[-1]["stat_start"])
+        end_stop = float(samples[-1]["stat_end"])
+        if end_start < deadline - HOLD_END_MARGIN - _OFFSET_ROUNDING:
             _add_reason(reasons, "probe_hold_short")
-        if float(samples[-1]["stat_end"]) - base > float(hold_seconds) + HOLD_DEADLINE_SLACK:
+        if end_stop > deadline + _OFFSET_ROUNDING:
+            # GPT R4-I1: the size read may observe the log anywhere inside
+            # [stat_start, stat_end]; one that ends after the deadline could
+            # credit a line first written after the hold.
             _add_reason(reasons, "probe_hold_deadline_late")
+    return fault
 
 
 def _empty_counts() -> dict[str, dict[str, dict[str, int]]]:
@@ -406,13 +458,17 @@ def evaluate_probe_log(
     QGA after the fault action and its postcondition finished.  A post-fault
     attempt must have a strictly greater ``s``; ``end_sequence`` is the last
     complete sequence number of the deadline sample.  ``hold_samples`` are the
-    runner's trusted prefix samples (first = S_fault, last = S_end), each with
-    ``sequence``, ``exit_sequence``, ``size``, ``sha256`` and the host
+    runner's trusted prefix samples in order: ``pre`` (immediately before the
+    fault action), any ``action`` samples taken while the action and its
+    postcondition ran, exactly one ``fault`` (S_fault), any ``hold`` samples
+    and the ``end`` sample (S_end).  Each carries ``kind``, ``sequence``,
+    ``exit_sequence``, ``size``, ``sha256``, ``exit_node_ok`` and the host
     monotonic ``stat_start``/``stat_end`` of its size read (seconds relative
-    to the first sample).  Coverage is decided only from those samples,
+    to the S_pre sample).  The hold deadline is the S_fault size read's start
+    plus ``hold_seconds``.  Coverage is decided only from those samples,
     re-derived from ``data``: a same-second or frozen guest clock, a burst
-    followed by silence, or lines first written after the deadline can never
-    certify the hold.
+    followed by silence, a silent fault action, or lines first written after
+    the deadline can never certify the phase.
     """
     if not isinstance(run_id, str) or RUN_ID_RE.fullmatch(run_id) is None:
         raise ProbeError("invalid_run_id")
@@ -554,7 +610,7 @@ def evaluate_probe_log(
         if post_fault_marker_attempts == 0:
             _add_reason(invalid_reasons, "probe_post_fault_marker_missing")
     raw = bytes(data[:MAX_PROBE_LOG_BYTES])
-    _check_hold_samples(
+    fault_index = _check_hold_samples(
         raw,
         hold_samples,
         run_id=run_id,
@@ -585,9 +641,12 @@ def evaluate_probe_log(
         "fault_sequence": fault_sequence,
         "end_sequence": end_sequence,
         "hold_seconds": hold_seconds,
-        "hold_windows": max(0, len(hold_samples) - 1)
-        if isinstance(hold_samples, list)
-        else 0,
+        "hold_windows": (
+            len(hold_samples) - 1 - fault_index if fault_index is not None else 0
+        ),
+        "coverage_windows": (
+            len(hold_samples) - 1 if fault_index is not None else 0
+        ),
         "clock_start": clock_start,
         "clock_stop": clock_stop,
         "run_id": run_id,

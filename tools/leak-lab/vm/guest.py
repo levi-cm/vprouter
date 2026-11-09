@@ -899,6 +899,12 @@ _CLIENT_TRAFFIC_SCRIPT = r'''#!/usr/bin/env python3
 Every loop appends at most two JSON lines to the probe log.  Every line carries
 the phase marker id (``r``) and a gap-free sequence number (``s``).  It never
 records the reported IP or location: only the Mullvad boolean is kept.
+
+Cadence: each probe is ``curl -m 4`` (4.5 s subprocess backstop) and the loop
+sleeps 3 s, so consecutive exit attempts are at most about 11 s apart (12 s
+with the backstop).  The runner's host-sampled coverage windows (12-15 s) are
+longer than that, so every window holds a completed exit attempt even while
+the exit node is down.
 """
 import json
 import os
@@ -909,6 +915,9 @@ import time
 
 LOG = "@@PROBE_LOG@@"
 MAX_LOG = 1024 * 1024
+CURL_MAX_TIME = "4"
+PROBE_BACKSTOP = 4.5
+LOOP_SLEEP = 3.0
 MARKER_RE = re.compile(r"^VPRCLIENTMARK1:([0-9a-f]{32})$")
 
 
@@ -941,12 +950,12 @@ def emit(state, document, stamp):
 
 def exit_probe(ip):
     command = [
-        "curl", "-sS", "-m", "3", "--resolve",
+        "curl", "-sS", "-m", CURL_MAX_TIME, "--resolve",
         "am.i.mullvad.net:443:" + ip, "https://am.i.mullvad.net/json",
     ]
     try:
         result = subprocess.run(
-            command, capture_output=True, timeout=4, check=False
+            command, capture_output=True, timeout=PROBE_BACKSTOP, check=False
         )
     except (OSError, subprocess.SubprocessError):
         return {"ok": False, "m": None}
@@ -966,13 +975,13 @@ def exit_probe(ip):
 
 def marker_probe(marker, ip):
     command = [
-        "curl", "-sS", "-m", "3", "--resolve", "example.com:80:" + ip,
+        "curl", "-sS", "-m", CURL_MAX_TIME, "--resolve", "example.com:80:" + ip,
         "-H", "X-Vprlab-Marker: " + marker,
         "http://example.com/?vprlab=" + marker,
     ]
     try:
         result = subprocess.run(
-            command, capture_output=True, timeout=4, check=False
+            command, capture_output=True, timeout=PROBE_BACKSTOP, check=False
         )
     except (OSError, subprocess.SubprocessError):
         return {"ok": False}
@@ -998,7 +1007,7 @@ def main():
         stamp = int(time.time())
         emit(state, {"k": "exit", **exit_probe(https_ip)}, stamp)
         emit(state, {"k": "marker", **marker_probe(marker, http_ip)}, stamp)
-        time.sleep(1.0)
+        time.sleep(LOOP_SLEEP)
 
 
 if __name__ == "__main__":
@@ -1064,15 +1073,17 @@ printf '%s  %s\n' "$EXPECTED_TAILSCALE_SHA256" "$tarball" | sha256sum -c - \
     || fail "tailscale tarball sha256 mismatch"
 
 log "installing the pinned tailscale binaries"
-install -d -m 0700 -o root -g root /tmp/vprlab-ts
-tar -xzf "$tarball" -C /tmp/vprlab-ts
-tailscaled=$(find /tmp/vprlab-ts -type f -name tailscaled | head -n 1)
-tailscale=$(find /tmp/vprlab-ts -type f -name tailscale | head -n 1)
+# /var/tmp is on disk; /tmp is a tmpfs in RAM on Debian 13 (Opus B P-4).
+rm -rf /var/tmp/vprlab-ts
+install -d -m 0700 -o root -g root /var/tmp/vprlab-ts
+tar -xzf "$tarball" -C /var/tmp/vprlab-ts
+tailscaled=$(find /var/tmp/vprlab-ts -type f -name tailscaled | head -n 1)
+tailscale=$(find /var/tmp/vprlab-ts -type f -name tailscale | head -n 1)
 [ -n "$tailscaled" ] || fail "tailscaled missing from the tarball"
 [ -n "$tailscale" ] || fail "tailscale missing from the tarball"
 install -m 0755 "$tailscaled" @@CLIENT_TAILSCALED@@
 install -m 0755 "$tailscale" @@CLIENT_TAILSCALE@@
-rm -rf /tmp/vprlab-ts
+rm -rf /var/tmp/vprlab-ts
 install -d -m 0700 -o root -g root /var/lib/tailscale
 cat > /etc/systemd/system/tailscaled.service <<'UNIT'
 [Unit]
@@ -1084,6 +1095,9 @@ Wants=network-pre.target
 Type=simple
 ExecStart=@@CLIENT_TAILSCALED@@ --state=@@CLIENT_TAILSCALE_STATE@@ --port=41641
 Restart=on-failure
+# At 256 MiB an OOM kill of tailscaled would drop tailscale0 and send client
+# probes out in clear (Opus B P-2); the traffic script or curl dies first.
+OOMScoreAdjust=-900
 RuntimeDirectory=tailscale
 RuntimeDirectoryMode=0755
 

@@ -5506,8 +5506,21 @@ class ClientGuestTests(unittest.TestCase):
         self.assertNotIn("hashlib", script)
         self.assertIn('"k": "exit"', script)
         self.assertIn('"k": "marker"', script)
-        self.assertIn('"-m", "3"', script)
-        self.assertIn("timeout=4", script)
+        # Fix round 4 (P-3): curl -m 4 per probe, 4.5 s backstop, 3 s sleep;
+        # worst-case loop about 11 s, below every 12-15 s coverage window.
+        self.assertIn('"-m", CURL_MAX_TIME', script)
+        self.assertIn('CURL_MAX_TIME = "4"', script)
+        self.assertIn("timeout=PROBE_BACKSTOP", script)
+        self.assertIn("PROBE_BACKSTOP = 4.5", script)
+        self.assertIn("LOOP_SLEEP = 3.0", script)
+        self.assertIn("time.sleep(LOOP_SLEEP)", script)
+        self.assertNotIn("time.sleep(1.0)", script)
+        worst_loop = 4.5 + 3.0 + 4.5
+        self.assertLess(worst_loop, run_phase.CLIENT_HOLD_SAMPLE_MIN + 0.5)
+        self.assertLessEqual(
+            run_phase.CLIENT_HOLD_SAMPLE_TARGET + 1.0,
+            clientprobe.MAX_HOLD_SAMPLE_WINDOW,
+        )
         self.assertNotIn("@ip", script)  # parses only the boolean/json, not a raw IP field
 
     def test_client_traffic_script_compiles(self) -> None:
@@ -5520,6 +5533,11 @@ class ClientGuestTests(unittest.TestCase):
 
     def test_client_provision_script_installs_pinned_tailscale_and_silences(self) -> None:
         text = guest.client_provision_script(1)
+        # Opus B P-2 / P-4: tailscaled is protected from the OOM killer and
+        # the tarball is extracted on disk, not in the /tmp tmpfs.
+        self.assertIn("OOMScoreAdjust=-900", text)
+        self.assertIn("/var/tmp/vprlab-ts", text)
+        self.assertNotIn("/tmp/vprlab-ts", text.replace("/var/tmp/vprlab-ts", ""))
         self.assertIn(guest.TAILSCALE_TARBALL_NAME, text)
         self.assertIn(guest.TAILSCALE_TARBALL_SHA256, text)
         self.assertIn("sha256sum -c -", text)
@@ -5827,40 +5845,106 @@ class ClientExitBindingTests(unittest.TestCase):
             )
         )
 
-    def test_exit_node_status_must_name_the_exact_peer_and_address(self) -> None:
-        active = {
-            "ExitNodeStatus": {
-                "ID": "router-node",
-                "Online": True,
-                "TailscaleIPs": ["100.64.0.9"],
-            }
-        }
-        self.assertTrue(
-            run_phase.client_peer_is_active(active, "router-node", "100.64.0.9")
+    # Real `tailscale status --json` shape (Opus B B-1): PeerStatus
+    # TailscaleIPs are bare netip.Addr values, ExitNodeStatus.TailscaleIPs
+    # are netip.Prefix values.
+    REAL_STATUS_JSON = """{
+      "Version": "1.104.5-t0123456789-g0123456789",
+      "BackendState": "Running",
+      "TailscaleIPs": ["100.64.0.20", "fd7a:115c:a1e0::14"],
+      "Self": {"ID": "nClient", "HostName": "zz-vprclient-01-do-not-use",
+               "DNSName": "zz-vprclient-01-do-not-use.tail0000.ts.net.",
+               "TailscaleIPs": ["100.64.0.20", "fd7a:115c:a1e0::14"],
+               "Online": true, "ExitNode": false, "ExitNodeOption": false},
+      "Peer": {"nodekey:00": {"ID": "router-node",
+               "HostName": "zz-vprtest-01-do-not-use",
+               "TailscaleIPs": ["100.64.0.9", "fd7a:115c:a1e0::9"],
+               "Online": true, "ExitNode": true, "ExitNodeOption": true}},
+      "ExitNodeStatus": {"ID": "router-node", "Online": true,
+                         "TailscaleIPs": ["100.64.0.9/32", "fd7a:115c:a1e0::9/128"]}
+    }"""
+
+    def test_opus_b_b1_real_shaped_exit_node_status_is_accepted(self) -> None:
+        document = json.loads(self.REAL_STATUS_JSON)
+        peer = run_phase.client_find_router_peer(
+            document, guest.DEFAULT_NAME, "router-node", ["100.64.0.9"]
         )
-        for status in (
-            {"ExitNodeStatus": {"ID": "wrong", "Online": True, "TailscaleIPs": ["100.64.0.9"]}},
-            {"ExitNodeStatus": {"ID": "router-node", "Online": False, "TailscaleIPs": ["100.64.0.9"]}},
-            {"ExitNodeStatus": {"ID": "router-node", "Online": True, "TailscaleIPs": ["100.64.0.10"]}},
+        self.assertIsNotNone(peer)
+        self.assertEqual(run_phase.client_peer_ipv4(peer, ["100.64.0.9"]), "100.64.0.9")
+        self.assertTrue(
+            run_phase.client_peer_is_active(document, "router-node", "100.64.0.9")
+        )
+        self.assertTrue(
+            run_phase.client_peer_is_active(
+                document, "router-node", "100.64.0.9", require_online=False
+            )
+        )
+        offline = json.loads(self.REAL_STATUS_JSON)
+        offline["ExitNodeStatus"]["Online"] = False
+        self.assertFalse(
+            run_phase.client_peer_is_active(offline, "router-node", "100.64.0.9")
+        )
+        self.assertTrue(
+            run_phase.client_peer_is_active(
+                offline, "router-node", "100.64.0.9", require_online=False
+            )
+        )
+
+    def test_exit_node_status_must_name_the_exact_peer_and_address(self) -> None:
+        def status(node_id="router-node", online=True, addresses=("100.64.0.9/32",)):
+            return {"ExitNodeStatus": {"ID": node_id, "Online": online,
+                                       "TailscaleIPs": list(addresses)}}
+
+        for addresses in (
+            ("100.64.0.9/32",),
+            ("100.64.0.9/32", "fd7a:115c:a1e0::9/128"),
+            ("fd7a:115c:a1e0::9/128", "100.64.0.9/32"),
+            # A bare address is accepted as the same /32.
+            ("100.64.0.9",),
+        ):
+            with self.subTest(addresses=addresses):
+                self.assertTrue(
+                    run_phase.client_peer_is_active(
+                        status(addresses=addresses), "router-node", "100.64.0.9"
+                    )
+                )
+        for document in (
+            status(node_id="wrong"),
+            status(online=False),
+            status(addresses=("100.64.0.10/32",)),
+            # A wider prefix that contains the address is not the address.
+            status(addresses=("100.64.0.0/10",)),
+            status(addresses=("100.64.0.9/31",)),
+            status(addresses=("fd7a:115c:a1e0::9/128",)),
+            status(addresses=("::ffff:100.64.0.9/128",)),
+            status(addresses=("100.64.0.9/32x", "garbage", 7, None)),
+            status(addresses=()),
+            {"ExitNodeStatus": {"ID": "router-node", "Online": True,
+                                "TailscaleIPs": "100.64.0.9/32"}},
+            {"ExitNodeStatus": {"ID": "router-node", "Online": True}},
             {"ExitNodeStatus": None},
             {"Self": {"ExitNode": True}},
         ):
-            self.assertFalse(
-                run_phase.client_peer_is_active(status, "router-node", "100.64.0.9")
-            )
+            with self.subTest(document=document):
+                self.assertFalse(
+                    run_phase.client_peer_is_active(document, "router-node", "100.64.0.9")
+                )
+        self.assertFalse(
+            run_phase.client_peer_is_active(status(), "router-node", "not-an-ip")
+        )
 
     def test_hold_samples_accept_an_offline_router_but_never_another_peer(self) -> None:
         # During stop-router/kill-container/kill-wireguard the router's
         # Tailscale is legitimately offline; the sample proves the selection.
         offline = {"ExitNodeStatus": {"ID": "router-node", "Online": False,
-                                      "TailscaleIPs": ["100.64.0.9"]}}
+                                      "TailscaleIPs": ["100.64.0.9/32"]}}
         self.assertTrue(run_phase.client_peer_is_active(
             offline, "router-node", "100.64.0.9", require_online=False))
         self.assertFalse(run_phase.client_peer_is_active(
             offline, "router-node", "100.64.0.9"))
         for status in (
-            {"ExitNodeStatus": {"ID": "wrong", "Online": False, "TailscaleIPs": ["100.64.0.9"]}},
-            {"ExitNodeStatus": {"ID": "router-node", "Online": False, "TailscaleIPs": ["100.64.0.10"]}},
+            {"ExitNodeStatus": {"ID": "wrong", "Online": False, "TailscaleIPs": ["100.64.0.9/32"]}},
+            {"ExitNodeStatus": {"ID": "router-node", "Online": False, "TailscaleIPs": ["100.64.0.10/32"]}},
             {"ExitNodeStatus": None},
             {"Self": {"ExitNode": True}},
         ):
@@ -6300,7 +6384,7 @@ class ClientRunPhaseTests(unittest.TestCase):
                 if client.traffic_active and not client.silent_hold:
                     client.maybe_probe(fake_clock[0])
                 if client.ghost_writing:
-                    client.ghost_probe()
+                    client.ghost_tick(fake_clock[0])
 
         def fake_monotonic():
             return fake_clock[0]
@@ -6314,7 +6398,8 @@ class ClientRunPhaseTests(unittest.TestCase):
                          login_blocks_until_authenticated=False,
                          frozen_clock=False, digest_fail=False,
                          prefs=None, is_active_after_stop=None,
-                         ghost_writer_after_stop=None):
+                         ghost_writer_after_stop=None, ghost_period=1.0,
+                         ghost_first=0.0, ghost_hidden=False):
                 self.exit_node_active = False
                 self.log = b""
                 self.commands = []
@@ -6350,6 +6435,14 @@ class ClientRunPhaseTests(unittest.TestCase):
                 # writer keeps appending one current-run leak line per second.
                 self.ghost_writer_after_stop = ghost_writer_after_stop
                 self.ghost_writing = False
+                # Round 4 knobs (Opus R4 M-1): the surviving writer appends
+                # every `ghost_period` fake seconds, first `ghost_first`
+                # seconds after the stop; `ghost_hidden` hides it from the
+                # /proc scan (an escaped process with another command line).
+                self.ghost_period = float(ghost_period)
+                self.ghost_first = float(ghost_first)
+                self.ghost_hidden = ghost_hidden
+                self.ghost_next = None
                 # truncate_next_read=(lines, exitcode): the next content read
                 # (`cat` or `head -c N`) returns only the first `lines` lines.
                 self.truncate_next_read = None
@@ -6379,6 +6472,13 @@ class ClientRunPhaseTests(unittest.TestCase):
                 """A writer that outlived a stop which claimed success."""
                 self.append_probe("exit", ok=True, m=False)
 
+            def ghost_tick(self, now):
+                if self.ghost_next is None:
+                    self.ghost_next = now + self.ghost_first
+                while now >= self.ghost_next:
+                    self.ghost_next += self.ghost_period
+                    self.ghost_probe()
+
             def append_probe(self, kind, **fields):
                 self.sequence += 1
                 document = {
@@ -6402,12 +6502,15 @@ class ClientRunPhaseTests(unittest.TestCase):
                 self.append_probe("marker", ok=not self.marker_fail)
 
             def status(self):
+                # Real shapes (Opus B B-1): PeerStatus.TailscaleIPs are bare
+                # netip.Addr values, ExitNodeStatus.TailscaleIPs are
+                # netip.Prefix values.
                 peer = {
                     "ID": "peer-router",
                     "HostName": guest.DEFAULT_NAME,
                     "ExitNodeOption": True,
                     "Online": True,
-                    "TailscaleIPs": ["100.64.0.9"],
+                    "TailscaleIPs": ["100.64.0.9", "fd7a:115c:a1e0::9"],
                 }
                 document = {
                     "BackendState": (
@@ -6428,7 +6531,10 @@ class ClientRunPhaseTests(unittest.TestCase):
                     document["ExitNodeStatus"] = {
                         "ID": "peer-router",
                         "Online": True,
-                        "TailscaleIPs": ["100.64.0.9"],
+                        "TailscaleIPs": [
+                            "100.64.0.9/32",
+                            "fd7a:115c:a1e0::9/128",
+                        ],
                     }
                 return document
 
@@ -6476,6 +6582,15 @@ class ClientRunPhaseTests(unittest.TestCase):
                 if "systemctl show -p MainPID --value" in command:
                     pid = b"4242\n" if self.traffic_active else b"0\n"
                     return ExecResult(0, pid, b"")
+                if "TRAFFIC-PROCS" in command:
+                    live = self.traffic_active or (
+                        self.ghost_writing and not self.ghost_hidden
+                    )
+                    return ExecResult(
+                        0, b"TRAFFIC-PROCS:%d\n" % (1 if live else 0), b""
+                    )
+                if "/proc/meminfo" in command:
+                    return ExecResult(0, b"MemAvailable:     123456 kB\n", b"")
                 if "systemctl is-active" in command:
                     state = "active" if self.traffic_active else "inactive"
                     if (
@@ -6509,6 +6624,7 @@ class ClientRunPhaseTests(unittest.TestCase):
                         and self.traffic_active
                     ):
                         self.ghost_writing = True
+                        self.ghost_next = fake_clock[0] + self.ghost_first
                     self.traffic_active = False
                     if self.truncate_final_cat and self.stop_count >= 2:
                         self.truncate_cat = True
@@ -6565,6 +6681,7 @@ class ClientRunPhaseTests(unittest.TestCase):
                         "AdvertiseRoutes": self.advertise_routes or None,
                         "RouteAll": False,
                         "ShieldsUp": True,
+                        "CorpDNS": False,
                     }
                     if self.prefs is not None:
                         document = self.prefs
@@ -7034,7 +7151,7 @@ class ClientRunPhaseTests(unittest.TestCase):
                 document["ExitNodeStatus"] = {
                     "ID": "some-other-exit",
                     "Online": True,
-                    "TailscaleIPs": ["100.64.0.99"],
+                    "TailscaleIPs": ["100.64.0.99/32"],
                 }
             return document
 
@@ -7139,7 +7256,7 @@ class ClientRunPhaseTests(unittest.TestCase):
             document["ExitNodeStatus"] = {
                 "ID": "wrong-peer",
                 "Online": True,
-                "TailscaleIPs": ["100.64.0.99"],
+                "TailscaleIPs": ["100.64.0.99/32"],
             }
             document["Self"]["ExitNode"] = True
             return document
@@ -7404,8 +7521,13 @@ class ClientRunPhaseTests(unittest.TestCase):
         self.assertEqual(record["result"], "INVALID")
         reasons = record["client"]["probe"]["invalid_reasons"]
         self.assertIn("probe_hold_window_empty", reasons)
-        self.assertEqual(record["client"]["hold_windows"], 3)
-        self.assertEqual(len(record["client"]["hold_samples"]), 4)
+        # Fix round 4: a 30 s hold is two 13.5 s windows after S_fault; the
+        # samples are S_pre, S_fault, one hold sample and S_end.
+        self.assertEqual(record["client"]["hold_windows"], 2)
+        self.assertEqual(
+            [sample["kind"] for sample in record["client"]["hold_samples"]],
+            ["pre", "fault", "hold", "end"],
+        )
 
     def test_gpt_r3_c2_probes_only_during_the_end_status_call(self) -> None:
         # GPT R3-C2 reproducer 2: silent for the whole host hold; the stalled
@@ -7460,26 +7582,53 @@ class ClientRunPhaseTests(unittest.TestCase):
         self.assertGreater(record["client"]["probe"]["post_fault_exit_attempts"], 4)
 
     def test_healthy_hold_is_sampled_every_window_and_passes(self) -> None:
-        for phase, duration, windows in (("stop-router", 30.0, 3), ("idle", 61.0, 5)):
+        for phase, duration, hold, windows in (
+            ("stop-router", 30.0, 30, 2),
+            ("idle", 61.0, 63, 5),
+            ("restart-docker", 120.0, 120, 9),
+        ):
             with self.subTest(phase=phase):
                 self._fresh_evidence(phase)
                 code, record, *_ = self._run(phase, duration)
                 self.assertEqual(code, 0, record["result_reason"])
                 samples = record["client"]["hold_samples"]
+                kinds = [sample["kind"] for sample in samples]
+                self.assertEqual(kinds[0], "pre")
+                self.assertEqual(kinds.count("fault"), 1)
+                self.assertEqual(kinds[-1], "end")
+                fault = kinds.index("fault")
                 self.assertEqual(record["client"]["hold_windows"], windows)
-                self.assertEqual(len(samples), windows + 1)
+                self.assertEqual(record["client"]["hold_seconds"], hold)
+                self.assertEqual(len(samples) - 1 - fault, windows)
                 self.assertEqual(samples[0]["stat_start"], 0.0)
-                self.assertGreaterEqual(samples[-1]["stat_start"], duration)
+                base = samples[fault]["stat_start"]
+                # The deadline sample starts at most 3 s before the deadline
+                # and finishes its size read by the deadline.
+                self.assertGreaterEqual(
+                    samples[-1]["stat_start"],
+                    base + hold - clientprobe.HOLD_END_MARGIN - 0.001,
+                )
+                self.assertLessEqual(samples[-1]["stat_end"], base + hold)
                 for earlier, later in zip(samples, samples[1:]):
                     self.assertLessEqual(
                         later["stat_end"] - earlier["stat_start"],
                         clientprobe.MAX_HOLD_SAMPLE_WINDOW,
                     )
+                    self.assertGreaterEqual(
+                        later["stat_start"] - earlier["stat_start"],
+                        run_phase.CLIENT_HOLD_SAMPLE_MIN - 0.001,
+                    )
                     self.assertGreater(later["exit_sequence"], earlier["sequence"])
                 self.assertTrue(all(sample["exit_node_ok"] for sample in samples))
-                self.assertEqual(record["client"]["fault_sequence"], samples[0]["sequence"])
+                self.assertEqual(record["client"]["fault_sequence"], samples[fault]["sequence"])
                 self.assertEqual(record["client"]["hold_sequence_end"], samples[-1]["sequence"])
                 self.assertTrue(record["client"]["exit_node"]["reverified"])
+                # Opus R4 M-3 and P-2.
+                self.assertIs(record["client"]["traffic_stop_proven"], True)
+                self.assertEqual(
+                    record["client"]["guest_mem_available"],
+                    {"boot": 123456 * 1024, "end": 123456 * 1024},
+                )
 
     def test_router_offline_during_the_hold_keeps_the_selection_valid(self) -> None:
         # stop-router takes the router's Tailscale offline for the whole hold;
@@ -7514,7 +7663,7 @@ class ClientRunPhaseTests(unittest.TestCase):
                 document["ExitNodeStatus"] = {
                     "ID": "some-other-exit",
                     "Online": True,
-                    "TailscaleIPs": ["100.64.0.99"],
+                    "TailscaleIPs": ["100.64.0.99/32"],
                 }
                 return document
             return None
@@ -7547,8 +7696,11 @@ class ClientRunPhaseTests(unittest.TestCase):
         # Decision 3: the stop reports inactive and MainPID 0, but the log
         # keeps growing.  Quiescence fails, the snapshot is untrusted and the
         # leak the surviving writer appended is latched.  37bafc2 PASSed.
+        # The writer is hidden from the /proc scan (an escaped process under
+        # another command line), so only the quiescence proof can see it.
         code, record, *_ = self._run(
-            "idle", client_kwargs={"ghost_writer_after_stop": 2}
+            "idle",
+            client_kwargs={"ghost_writer_after_stop": 2, "ghost_hidden": True},
         )
         self.assertEqual(code, 1, record["result_reason"])
         self.assertEqual(record["result"], "LEAK")
@@ -7606,7 +7758,8 @@ class ClientRunPhaseTests(unittest.TestCase):
         self.assertNotIn("pre_fault_mullvad", record["client"])
 
     def test_client_prefs_must_keep_the_client_role(self) -> None:
-        good = {"AdvertiseRoutes": None, "RouteAll": False, "ShieldsUp": True}
+        good = {"AdvertiseRoutes": None, "RouteAll": False, "ShieldsUp": True,
+                "CorpDNS": False}
         for label, prefs, reason in (
             ("missing-routes", {"RouteAll": False, "ShieldsUp": True}, "client_prefs_incomplete"),
             ("accept-routes", dict(good, RouteAll=True), "client_accepts_routes"),
@@ -7627,6 +7780,396 @@ class ClientRunPhaseTests(unittest.TestCase):
                 code, record, *_ = self._run("idle", client_kwargs={"prefs": prefs})
                 self.assertEqual(code, 0, record["result_reason"])
 
+    # ------------------------------------------------------------------
+    # Fix round 4 regressions.  Like round 3, the hooks patch only functions
+    # that exist on 06baf40 as well (start_client_traffic, run_router_fault,
+    # read_client_status, read_client_prefs) or wrap the fake QGA itself, so
+    # each reproducer runs unchanged against the old runner.
+
+    def _deadline_hooks(self, stack, *, delay_until, late_pair, silence_after=20.0):
+        """GPT R4-I1: a stalled tail and a slow deadline size read.
+
+        The guest clock follows the fake host clock (no frozen clock).  The
+        hold base h0 is the first size read after the fault action returned.
+        The loop writes only for hold offsets <= ``silence_after``.  The first
+        size read at hold offset >= 26.9 s (06baf40: the deadline read at
+        30 s; now: S_end at deadline - 3 s) is held until hold offset
+        ``delay_until``; with ``late_pair`` one probe pair is written just
+        before that read executes, i.e. after the 30 s hold deadline.
+        """
+        holder = {"fault_done": False, "h0": None, "delayed": False}
+        original_start = run_phase.start_client_traffic
+        original_fault = run_phase.run_router_fault
+
+        def start(client, **kwargs):
+            result = original_start(client, **kwargs)
+            holder["client"] = client
+            holder["t0"] = run_phase.time.monotonic()
+            holder["g0"] = client.clock
+            execute = client.execute
+            pair = client.probe_pair
+
+            def guest_now():
+                return holder["g0"] + int(run_phase.time.monotonic() - holder["t0"])
+
+            def probe_pair():
+                client.clock = guest_now()
+                pair()
+
+            def wrapped(program, args=(), timeout=60.0, **extra):
+                command = args[-1] if args else ""
+                if command.startswith("stat -c %s") and holder["fault_done"]:
+                    now = run_phase.time.monotonic()
+                    if holder["h0"] is None:
+                        holder["h0"] = now
+                        client.hold_started_at = now
+                        client.hold_plan = lambda offset: offset <= silence_after
+                    offset = now - holder["h0"]
+                    if (
+                        offset >= 26.9
+                        and client.traffic_active
+                        and not holder["delayed"]
+                    ):
+                        holder["delayed"] = True
+                        wait = holder["h0"] + delay_until - now
+                        if wait > 0:
+                            run_phase.time.sleep(wait)
+                        if late_pair:
+                            probe_pair()
+                if command.strip() == "date +%s":
+                    client.clock = guest_now()
+                    return ExecResult(0, f"{client.clock}\n".encode(), b"")
+                return execute(program, args, timeout=timeout, **extra)
+
+            client.probe_pair = probe_pair
+            client.execute = wrapped
+            return result
+
+        def fault(*args, **kwargs):
+            result = original_fault(*args, **kwargs)
+            holder["fault_done"] = True
+            return result
+
+        stack.enter_context(
+            mock.patch.object(run_phase, "start_client_traffic", side_effect=start)
+        )
+        stack.enter_context(
+            mock.patch.object(run_phase, "run_router_fault", side_effect=fault)
+        )
+        return holder
+
+    def test_gpt_r4_i1_late_deadline_read_never_credits_post_hold_lines(self) -> None:
+        # GPT R4-I1: the deadline size read finishes 1 s / 2 s after the
+        # 30 s hold, and the only exit attempt after hold offset 20 is a pair
+        # first written after the deadline.  06baf40 credited it (2 s grace)
+        # and PASSed.
+        for label, until in (("1s", 31.0), ("2s", 32.0)):
+            with self.subTest(delay=label):
+                self._fresh_evidence("r4i1-" + label)
+                with contextlib.ExitStack() as stack:
+                    holder = self._deadline_hooks(
+                        stack, delay_until=until, late_pair=True
+                    )
+                    code, record, client, *_ = self._run("stop-router")
+                self.assertTrue(holder["delayed"])
+                self.assertNotEqual(record["result"], "PASS")
+                self.assertEqual(code, 2)
+                self.assertIn("probe_hold_deadline_late", record["errors"])
+                end = record["client"]["hold_samples"][-1]
+                fault = next(
+                    sample for sample in record["client"]["hold_samples"]
+                    if sample.get("kind") == "fault"
+                )
+                self.assertGreater(end["stat_end"] - fault["stat_start"], 30.0)
+
+    def test_gpt_r4_i1_controls(self) -> None:
+        # Same slow deadline read without the late pair: INVALID as well.
+        self._fresh_evidence("r4i1-nolate")
+        with contextlib.ExitStack() as stack:
+            self._deadline_hooks(stack, delay_until=31.0, late_pair=False)
+            code, record, *_ = self._run("stop-router")
+        self.assertEqual(code, 2)
+        self.assertIn("probe_hold_deadline_late", record["errors"])
+        # A 1 s slow read that still ends before the deadline is fine: the
+        # end sample starts 3 s early, and the pair it sees was written
+        # inside the hold.  (Its window, 13.5 s + 1 s, stays <= 15 s; a
+        # longer read is INVALID by the window rule, never a PASS.)
+        self._fresh_evidence("r4i1-margin")
+        with contextlib.ExitStack() as stack:
+            self._deadline_hooks(stack, delay_until=28.0, late_pair=True)
+            code, record, *_ = self._run("stop-router")
+        self.assertEqual(code, 0, record["errors"])
+        end = record["client"]["hold_samples"][-1]
+        self.assertEqual(end["kind"], "end")
+        self._fresh_evidence("r4i1-slow")
+        with contextlib.ExitStack() as stack:
+            self._deadline_hooks(stack, delay_until=29.5, late_pair=True)
+            code, record, *_ = self._run("stop-router")
+        self.assertEqual(code, 2)
+        self.assertIn("probe_hold_window_late", record["client"]["probe"]["invalid_reasons"])
+        # Healthy, no delay, silence only after hold offset 20: every window
+        # of the 13.5 s split still has an exit attempt.
+        self._fresh_evidence("r4i1-healthy")
+        with contextlib.ExitStack() as stack:
+            self._deadline_hooks(stack, delay_until=0.0, late_pair=False)
+            code, record, *_ = self._run("stop-router")
+        self.assertEqual(code, 0, record["errors"])
+
+    def _silent_action(self, stack, seconds=60.0):
+        """Opus R4 I-1: the fault action takes ``seconds`` of host time while
+        the client loop writes nothing and its clock does not advance (a
+        paused client VM); the 1 Hz loop resumes for the whole hold."""
+        original_start = run_phase.start_client_traffic
+        original_fault = run_phase.run_router_fault
+        holder = {}
+
+        def start(client, **kwargs):
+            holder["client"] = client
+            return original_start(client, **kwargs)
+
+        def fault(*args, **kwargs):
+            client = holder["client"]
+            client.silent_hold = True
+            client.frozen_clock = True
+            run_phase.time.sleep(seconds)
+            client.silent_hold = False
+            client.frozen_clock = False
+            client.next_probe_at = None
+            return original_fault(*args, **kwargs)
+
+        stack.enter_context(
+            mock.patch.object(run_phase, "start_client_traffic", side_effect=start)
+        )
+        stack.enter_context(
+            mock.patch.object(run_phase, "run_router_fault", side_effect=fault)
+        )
+
+    def test_opus_r4_i1_silent_fault_action_is_never_covered(self) -> None:
+        # 06baf40 started host coverage only after the action, so a 60 s
+        # action with zero client probes PASSed on the guest clock's word.
+        for phase in ("restart-docker", "kill-wireguard", "kill-container"):
+            with self.subTest(phase=phase):
+                self._fresh_evidence("r4i1a-" + phase)
+                with contextlib.ExitStack() as stack:
+                    self._silent_action(stack)
+                    code, record, *_ = self._run(phase)
+                self.assertNotEqual(record["result"], "PASS")
+                self.assertEqual(code, 2)
+                reasons = set(record["client"]["probe"]["invalid_reasons"])
+                self.assertTrue(
+                    {"probe_hold_window_empty", "probe_hold_window_late"} & reasons,
+                    reasons,
+                )
+                self.assertEqual(record["client"]["hold_samples"][0]["kind"], "pre")
+
+    def test_long_healthy_fault_action_is_sampled_by_the_helper_thread(self) -> None:
+        # Positive control for decision 1: a 60 s action with live client
+        # traffic is sampled from the helper thread (client QGA only) every
+        # 13 s and PASSes; the action windows are part of the evidence.
+        instances = []
+
+        class Recording(run_phase.ClientActionSampler):
+            poll_interval = 0.001
+
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                instances.append(self)
+
+        original_fault = run_phase.run_router_fault
+        router_threads = set()
+
+        def fault(router, *args, **kwargs):
+            router_threads.add(threading.get_ident())
+            sampler = instances[-1]
+            for _ in range(60):
+                run_phase.time.sleep(1.0)
+                give_up = time.perf_counter() + 5.0
+                while (
+                    sampler.is_alive()
+                    and sampler.next_due <= run_phase.time.monotonic()
+                    and time.perf_counter() < give_up
+                ):
+                    threading.Event().wait(0.0005)
+            return original_fault(router, *args, **kwargs)
+
+        with mock.patch.object(run_phase, "ClientActionSampler", Recording), \
+                mock.patch.object(run_phase, "run_router_fault", side_effect=fault):
+            code, record, *_ = self._run("restart-docker")
+        self.assertEqual(code, 0, record["errors"])
+        kinds = [sample["kind"] for sample in record["client"]["hold_samples"]]
+        self.assertEqual(kinds[:6], ["pre", "action", "action", "action", "action", "fault"])
+        self.assertEqual(record["client"]["action_samples"], 4)
+        self.assertEqual(router_threads, {threading.get_ident()})
+        self.assertFalse(instances[-1].is_alive())
+        samples = record["client"]["hold_samples"]
+        for earlier, later in zip(samples, samples[1:]):
+            self.assertLessEqual(
+                later["stat_end"] - earlier["stat_start"],
+                clientprobe.MAX_HOLD_SAMPLE_WINDOW,
+            )
+
+    def test_action_sampler_is_joined_when_the_action_raises(self) -> None:
+        instances = []
+
+        class Recording(run_phase.ClientActionSampler):
+            poll_interval = 0.001
+
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                instances.append(self)
+
+        with mock.patch.object(run_phase, "ClientActionSampler", Recording), \
+                mock.patch.object(
+                    run_phase, "run_router_fault", side_effect=RuntimeError("boom")
+                ):
+            code, record, *_ = self._run("kill-container")
+        self.assertEqual(code, 2)
+        self.assertTrue(instances)
+        self.assertFalse(instances[-1].is_alive())
+        self.assertTrue(record["client"]["probe_collected"])
+
+    def test_stuck_action_sampler_never_shares_the_client_socket(self) -> None:
+        # A sampler that cannot be joined still owns the client QGA socket:
+        # the runner refuses and never uses that socket again (no probe
+        # collection, no client cleanup; QEMU is killed instead).
+        entered = threading.Event()
+        release = threading.Event()
+        original_take = run_phase.take_client_coverage_sample
+        original_fault = run_phase.run_router_fault
+
+        seen = {}
+
+        def take(client, run_id, *, kind, **kwargs):
+            if kind == "action":
+                seen["client"] = client
+                entered.set()
+                release.wait(10.0)
+                raise QGAError("released")
+            return original_take(client, run_id, kind=kind, **kwargs)
+
+        def fault(*args, **kwargs):
+            entered.wait(5.0)
+            result = original_fault(*args, **kwargs)
+            # The sampler is blocked inside its sample; from here on every
+            # client command would come from the main thread.
+            seen["commands"] = len(seen["client"].commands)
+            return result
+
+        class Fast(run_phase.ClientActionSampler):
+            poll_interval = 0.001
+
+        try:
+            with mock.patch.object(run_phase, "take_client_coverage_sample", side_effect=take), \
+                    mock.patch.object(run_phase, "run_router_fault", side_effect=fault), \
+                    mock.patch.object(run_phase, "ClientActionSampler", Fast), \
+                    mock.patch.object(run_phase, "CLIENT_ACTION_SAMPLE_INTERVAL", 0.0), \
+                    mock.patch.object(run_phase, "CLIENT_SAMPLER_JOIN_TIMEOUT", 0.05):
+                code, record, client, *_ = self._run("kill-container")
+                commands_after = list(client.commands[seen["commands"]:])
+        finally:
+            release.set()
+        self.assertTrue(entered.is_set())
+        self.assertEqual(code, 2)
+        self.assertIn("client_sampler_stuck", record["errors"])
+        self.assertNotIn("cleanup", record["client"])
+        self.assertIsNot(record["client"].get("probe_collected"), True)
+        self.assertEqual(commands_after, [])
+
+    def test_opus_r4_m1_slow_writer_after_a_clean_looking_stop(self) -> None:
+        # Opus R4 M-1: `is-active` says inactive and MainPID is 0, but a
+        # writer appends a current-run leak every 5 s, first 3 s after the
+        # stop.  06baf40's 2 s quiescence missed it and PASSed.  Now the
+        # /proc scan sees it, and a writer hidden from the scan is caught by
+        # the 12 s quiescence (its leak is latched).
+        for label, hidden in (("visible", False), ("hidden", True)):
+            with self.subTest(writer=label):
+                self._fresh_evidence("m1-" + label)
+                code, record, client, *_ = self._run(
+                    "idle",
+                    client_kwargs={
+                        "ghost_writer_after_stop": 2,
+                        "ghost_period": 5.0,
+                        "ghost_first": 3.0,
+                        "ghost_hidden": hidden,
+                    },
+                )
+                self.assertNotEqual(record["result"], "PASS")
+                self.assertFalse(record["client"]["traffic_stop_proven"])
+                self.assertFalse(record["client"]["probe_snapshot_trusted"])
+                if hidden:
+                    self.assertEqual(code, 1, record["errors"])
+                    self.assertIn("client_writer_not_quiescent", record["errors"])
+                else:
+                    self.assertEqual(code, 2, record["errors"])
+                    self.assertIn("client_traffic_stop_failed", record["errors"])
+
+    def test_opus_b_b1_real_prefix_shaped_exit_node_status_is_selected(self) -> None:
+        # Opus B B-1: ExitNodeStatus.TailscaleIPs are netip.Prefix values
+        # ("100.64.0.9/32"); 06baf40 compared bare addresses and could never
+        # select the exit node with real tailscaled output.
+        code, record, *_ = self._run("idle")
+        self.assertEqual(code, 0, record["errors"])
+        self.assertTrue(record["client"]["exit_node"]["router_peer_bound"])
+        self.assertTrue(record["client"]["exit_node"]["reverified"])
+
+    def test_opus_b_l1_client_must_not_accept_tailnet_dns(self) -> None:
+        # Opus B L-1: client-login runs `tailscale up --accept-dns=false`,
+        # and a phase refuses a client whose prefs accept DNS.
+        code, record, client, events, *_ = self._run(
+            "idle",
+            client_kwargs={"prefs": {"AdvertiseRoutes": None, "RouteAll": False,
+                                     "ShieldsUp": True, "CorpDNS": True}},
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("client_accepts_dns", record["errors"])
+        self.assertFalse(any(entry[0] == "traffic_start" for entry in events))
+        self._fresh_evidence("l1-login")
+        code, record, client, *_ = self._run("client-login", 30.0)
+        login = [command for command in client.commands
+                 if "systemd-run" in command and "tailscale up" in command]
+        self.assertEqual(len(login), 1)
+        self.assertIn("--accept-dns=false", login[0])
+        self.assertEqual(code, 0, record["errors"])
+        self._fresh_evidence("l1-login-dns")
+        code, record, *_ = self._run(
+            "client-login", 30.0,
+            client_kwargs={"prefs": {"AdvertiseRoutes": None, "RouteAll": False,
+                                     "ShieldsUp": True, "CorpDNS": True}},
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("client_accepts_dns", record["errors"])
+
+    def test_opus_b_p1_router_peer_lookup_is_retried(self) -> None:
+        # The client's netmap shows the freshly started router online only
+        # on the third read after the router became ready; 06baf40 refused
+        # after a single read.
+        state = {"router_ready": False, "offline_reads": 0}
+        original_status = run_phase.read_client_status
+        original_ready = run_phase.wait_router_ready
+
+        def ready(*args, **kwargs):
+            result = original_ready(*args, **kwargs)
+            state["router_ready"] = True
+            return result
+
+        def status(client):
+            document = original_status(client)
+            if (
+                state["router_ready"]
+                and not client.exit_node_active
+                and state["offline_reads"] < 2
+                and isinstance(document, dict)
+            ):
+                state["offline_reads"] += 1
+                for peer in document.get("Peer", {}).values():
+                    peer["Online"] = False
+            return document
+
+        with mock.patch.object(run_phase, "wait_router_ready", side_effect=ready), \
+                mock.patch.object(run_phase, "read_client_status", side_effect=status):
+            code, record, *_ = self._run("idle")
+        self.assertEqual(state["offline_reads"], 2)
+        self.assertEqual(code, 0, record["errors"])
 
 class ClientProbeReadTests(unittest.TestCase):
     """Fix round 3: the exact prefix-read primitive and the stop proof."""
@@ -7635,7 +8178,8 @@ class ClientProbeReadTests(unittest.TestCase):
 
     class Guest:
         def __init__(self, log=b"", *, stat_exit=0, digest_exit=0, data_exit=0,
-                     deliver=None, digest_of=None, states=("inactive",), main_pid="0"):
+                     deliver=None, digest_of=None, states=("inactive",), main_pid="0",
+                     procs="TRAFFIC-PROCS:0"):
             self.log = log
             self.stat_exit = stat_exit
             self.digest_exit = digest_exit
@@ -7644,6 +8188,7 @@ class ClientProbeReadTests(unittest.TestCase):
             self.digest_of = digest_of
             self.states = list(states)
             self.main_pid = main_pid
+            self.procs = procs
             self.commands = []
 
         def execute(self, program, args=(), timeout=60.0):
@@ -7672,6 +8217,8 @@ class ClientProbeReadTests(unittest.TestCase):
                 return ExecResult(0 if state == "active" else 3, state.encode() + b"\n", b"")
             if "systemctl show -p MainPID --value" in command:
                 return ExecResult(0, self.main_pid.encode() + b"\n", b"")
+            if "TRAFFIC-PROCS" in command:
+                return ExecResult(0, self.procs.encode() + b"\n", b"")
             return ExecResult(0, b"", b"")
 
     RUN_ID = "a" * 32
@@ -7758,8 +8305,20 @@ class ClientProbeReadTests(unittest.TestCase):
                     ),
                     expected,
                 )
+        # Opus R4 M-1: no traffic-script process may remain anywhere.
+        for procs, expected in (
+            ("TRAFFIC-PROCS:0", True),
+            ("TRAFFIC-PROCS:1", False),
+            ("TRAFFIC-PROCS:", False),
+            ("", False),
+            ("TRAFFIC-PROCS:0 extra", False),
+        ):
+            with self.subTest(procs=procs):
+                self.assertIs(
+                    run_phase.stop_client_traffic(self.Guest(procs=procs)), expected
+                )
 
-    def test_quiescence_needs_two_equal_size_reads_two_seconds_apart(self) -> None:
+    def test_quiescence_needs_two_equal_size_reads_twelve_seconds_apart(self) -> None:
         clock = [100.0]
         guest_vm = self.Guest(self.line(1))
 
@@ -7783,6 +8342,8 @@ class ClientProbeReadTests(unittest.TestCase):
             self.assertGreaterEqual(
                 clock[0] - start[0], run_phase.CLIENT_STOP_QUIESCENCE_SECONDS
             )
+        # Longer than one worst-case probe loop (Opus R4 M-1).
+        self.assertGreaterEqual(run_phase.CLIENT_STOP_QUIESCENCE_SECONDS, 12.0)
         self.assertFalse(
             run_phase.client_probe_writer_quiescent(self.Guest(self.line(1), stat_exit=1))
         )
@@ -7815,7 +8376,8 @@ class ClientProbeReadTests(unittest.TestCase):
             self.assertTrue(flags["mullvad"] and flags["marker"])
 
     def test_prefs_require_present_empty_routes_and_the_client_flags(self) -> None:
-        good = {"AdvertiseRoutes": None, "RouteAll": False, "ShieldsUp": True}
+        good = {"AdvertiseRoutes": None, "RouteAll": False, "ShieldsUp": True,
+                "CorpDNS": False}
         check = run_phase.client_route_advertisement_problem
         self.assertIsNone(check(good))
         self.assertIsNone(check(dict(good, AdvertiseRoutes=[])))
@@ -7827,6 +8389,12 @@ class ClientProbeReadTests(unittest.TestCase):
         self.assertEqual(check(dict(good, ShieldsUp=False)), "client_shields_down")
         self.assertEqual(check({"AdvertiseRoutes": []}), "client_prefs_incomplete")
         self.assertEqual(check(None), "client_prefs_unreadable")
+        # Opus B L-1: MagicDNS must be off (`--accept-dns=false`).
+        self.assertEqual(check(dict(good, CorpDNS=True)), "client_accepts_dns")
+        self.assertEqual(check(dict(good, CorpDNS=None)), "client_accepts_dns")
+        missing = dict(good)
+        del missing["CorpDNS"]
+        self.assertEqual(check(missing), "client_prefs_incomplete")
 
 
 class TestFileLayoutTests(unittest.TestCase):

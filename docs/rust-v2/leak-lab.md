@@ -699,8 +699,10 @@ same reviewed script:
   and `DOCKER-USER` accepts as `vprlab0`, in the same `inet vprlab` table; the
   forward accepts are scoped by `ip saddr`/`ip daddr` to `10.251.0.0/24`;
 - an explicit `forward` drop between `vprlab0` and `vprlab1` in **both**
-  directions before the bridge-to-WAN accepts, so neither guest can reach the
-  other over the lab L2 path.
+  directions, so neither guest can reach the other over the lab L2 path.  In
+  the generated chain these drops come after the `vprlab0` rules and before
+  the `vprlab1`-to-WAN accepts; the rules match disjoint interface pairs, so
+  the order does not change any decision.
 
 ```sh
 python3 -B tools/leak-lab/netplan.py \
@@ -715,9 +717,15 @@ table membership.  Setup records the client indexes it created in
 neighbour before any mutation, isolates each client tap before removing
 protections, and deletes every recorded client object with the router objects
 even when the plan was rendered without `--client`.  With no `--client` option
-the routine still creates no client object and the setup/capture steps are the
-unchanged M2 router steps; the only extra text is the dynamic teardown of any
-client objects recorded by an earlier client setup.  The collision preflight
+the routine still creates no client object, but it is **not** the M2 plan
+byte for byte: since M3 decision 6 the `vprlab0` forward rules are scoped
+(`iifname vprlab0 oifname <wan> ip saddr 10.250.0.0/24 accept` and a
+`ct state established,related` return accept for `ip daddr
+10.250.0.0/24`), followed by explicit drops for every other packet between
+`vprlab0` and the WAN, because the `inet vprlab` base chains have
+`policy accept`.  The router VM's own traffic matches the scoped accepts
+unchanged.  The plan also carries the dynamic teardown of any client objects
+recorded by an earlier client setup.  The collision preflight
 always inventories `vprlab1` and `vprlab-ctap1..9` and the `10.251.0.0/24`
 subnet, so residue is never invisible to a no-client plan.
 

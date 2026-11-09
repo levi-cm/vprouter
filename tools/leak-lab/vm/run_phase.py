@@ -137,15 +137,34 @@ CLIENT_READY_TIMEOUT = 180.0
 #: A client phase must hold long enough for the probe loop to be observed
 #: across more than one host-sampled window.
 MIN_CLIENT_HOLD_SECONDS = 30
-#: Host-observed hold coverage (controller decision 2): the hold is split into
-#: equal windows no longer than this target, so every window stays below
-#: clientprobe.MAX_HOLD_SAMPLE_WINDOW (15 s) including the size-read latency,
-#: and above the traffic loop's worst-case exit spacing (two `curl -m 3`
-#: probes plus a 1 s sleep) for every hold of at least 30 s (>= 10 s).
+#: Host-observed coverage (controller decisions 2 and fix-round-4 1/2).  The
+#: hold is split into equal windows no longer than this target, so every
+#: window stays below clientprobe.MAX_HOLD_SAMPLE_WINDOW (15 s) including the
+#: size-read latency ...
 CLIENT_HOLD_SAMPLE_TARGET = 14.0
-#: Writer quiescence after a proven stop (controller decision 3): two trusted
-#: size reads at least this far apart must agree.
-CLIENT_STOP_QUIESCENCE_SECONDS = 2.0
+#: ... and no shorter than this, so every window is longer than the traffic
+#: loop's worst-case exit spacing (`curl -m 4` marker probe + 3 s sleep +
+#: `curl -m 4` exit probe, about 11 s; at most 12 s with the 4.5 s subprocess
+#: backstop).  A requested hold for which no equal split fits both bounds is
+#: extended (never shortened) to the next whole second that does.
+CLIENT_HOLD_SAMPLE_MIN = 12.0
+#: The deadline sample (S_end) is started this long before the hold deadline
+#: and must finish its size read by the deadline (GPT R4-I1).
+CLIENT_HOLD_END_MARGIN = clientprobe.HOLD_END_MARGIN
+#: While the fault action and its postcondition run, a helper thread samples
+#: the client log this often (start to start), on the host monotonic clock.
+#: S_fault is taken at the next point of the same cadence after the action.
+CLIENT_ACTION_SAMPLE_INTERVAL = 13.0
+#: Bound on joining the action sampler: one sample is at most four QGA execs
+#: (15 + 30 + 30 + 20 s).  A sampler that is still alive after this owns the
+#: client QGA socket; the runner then never touches that socket again.
+CLIENT_SAMPLER_JOIN_TIMEOUT = 180.0
+#: The router peer is looked up in the client's netmap until it appears.
+CLIENT_PEER_TIMEOUT = 60.0
+#: Writer quiescence after a proven stop (controller decision 3, Opus R4
+#: M-1): two trusted size reads at least this far apart must agree.  Longer
+#: than one worst-case probe loop, so a surviving writer must append.
+CLIENT_STOP_QUIESCENCE_SECONDS = 12.0
 #: The traffic unit may outlive the hold by this margin; RuntimeMaxSec must
 #: cover the pre-fault wait, the fault action, a possible reboot, the hold and
 #: this margin.  The runner still stops the unit explicitly.
@@ -2944,7 +2963,10 @@ def client_route_advertisement_problem(document: object) -> str | None:
       which is how Go encodes an empty slice); a missing key is a refusal
       (Pi R3-M5), any route is ``client_advertises_routes``;
     * ``RouteAll`` must be exactly ``false`` (``--accept-routes=false``) and
-      ``ShieldsUp`` exactly ``true`` (``--shields-up``; Opus R3-4).
+      ``ShieldsUp`` exactly ``true`` (``--shields-up``; Opus R3-4);
+    * ``CorpDNS`` must be exactly ``false`` (``--accept-dns=false``; Opus B
+      L-1).  With MagicDNS accepted, tailscaled rewrites ``/etc/resolv.conf``
+      and the client silence check refuses every later boot.
     """
     if not isinstance(document, dict):
         return "client_prefs_unreadable"
@@ -2959,6 +2981,10 @@ def client_route_advertisement_problem(document: object) -> str | None:
         return "client_accepts_routes"
     if document.get("ShieldsUp") is not True:
         return "client_shields_down"
+    if "CorpDNS" not in document:
+        return "client_prefs_incomplete"
+    if document.get("CorpDNS") is not False:
+        return "client_accepts_dns"
     return None
 
 
@@ -3116,10 +3142,67 @@ def client_peer_is_active(
         return False
     if require_online and status.get("Online") is not True:
         return False
-    addresses = status.get("TailscaleIPs")
-    if not isinstance(addresses, list):
+    return _exit_status_has_address(status.get("TailscaleIPs"), address)
+
+
+def _exit_status_has_address(entries: object, address: str) -> bool:
+    """True when ``entries`` holds ``address`` as an IPv4 ``/32``.
+
+    ``ExitNodeStatus.TailscaleIPs`` is ``[]netip.Prefix`` in tailscaled, so the
+    JSON carries ``"100.x.y.z/32"`` (and an IPv6 ``/128``), unlike the bare
+    addresses of ``PeerStatus.TailscaleIPs`` (Opus B B-1).  A bare address is
+    accepted as the same ``/32``.  A wider prefix that merely contains the
+    address is not the router's address and is refused.
+    """
+    try:
+        wanted = ipaddress.IPv4Address(address)
+    except (ipaddress.AddressValueError, ValueError, TypeError):
         return False
-    return address in addresses
+    if not isinstance(entries, list):
+        return False
+    for entry in entries:
+        if not isinstance(entry, str):
+            continue
+        try:
+            interface = ipaddress.ip_interface(entry)
+        except ValueError:
+            continue
+        if (
+            interface.version == 4
+            and interface.network.prefixlen == 32
+            and interface.ip == wanted
+        ):
+            return True
+    return False
+
+
+def wait_client_router_peer(
+    client: QGAClient,
+    router_name: str,
+    router_id: str,
+    router_addresses: list[str],
+    *,
+    timeout: float | None = None,
+) -> dict:
+    """Poll the client's netmap until it shows exactly the router peer.
+
+    The router has only just become ready; control pushes its online state to
+    the client asynchronously, so a single read can lose that race (Opus B
+    P-1).  Every read applies the full :func:`client_find_router_peer` rule.
+    """
+    if timeout is None:
+        timeout = CLIENT_PEER_TIMEOUT
+    deadline = time.monotonic() + timeout
+    while True:
+        check_interrupt()
+        peer = client_find_router_peer(
+            read_client_status(client), router_name, router_id, router_addresses
+        )
+        if peer is not None:
+            return peer
+        if time.monotonic() >= deadline:
+            raise hostcheck.Refusal("the client cannot see the test exit node")
+        time.sleep(1.0)
 
 
 def set_client_exit_node(client: QGAClient, address: str) -> None:
@@ -3273,6 +3356,42 @@ def client_traffic_main_pid(client: QGAClient) -> int | None:
     return int(text)
 
 
+def client_traffic_process_scan_script() -> str:
+    """Count live processes whose command line names the traffic script.
+
+    A plain ``/proc`` walk, so it needs no procps in the client.  The pattern
+    ends in the bracket expression ``[c]``: the scanning shell's own command
+    line contains the text ``...traffi'[c]`` and therefore never matches
+    itself, while a running ``python3 /usr/local/sbin/vprlab-client-traffic``
+    does.  Unreadable entries (a process that just exited) are skipped.
+    """
+    path = guest.CLIENT_TRAFFIC_SCRIPT
+    head, last = path[:-1], path[-1]
+    if not re.fullmatch(r"/[A-Za-z0-9/._-]+", head) or not last.isalnum():
+        raise hostcheck.Refusal("the client traffic script path is unexpected")
+    return (
+        "count=0; "
+        "for entry in /proc/[0-9]*; do "
+        "[ -r \"$entry/cmdline\" ] || continue; "
+        "command=$(tr '\\000' ' ' < \"$entry/cmdline\" 2>/dev/null) || continue; "
+        f"case \"$command\" in *'{head}'[{last}]*) count=$((count + 1)) ;; esac; "
+        "done; "
+        "printf 'TRAFFIC-PROCS:%s\\n' \"$count\""
+    )
+
+
+def client_traffic_process_count(client: QGAClient) -> int | None:
+    """Return how many traffic-script processes run in the client, or None."""
+    result = client.execute(
+        "/bin/sh", ["-c", client_traffic_process_scan_script()], timeout=15.0
+    )
+    if result.exitcode != 0:
+        return None
+    text = result.stdout.decode("ascii", "replace").strip()
+    match = re.fullmatch(r"TRAFFIC-PROCS:([0-9]{1,6})", text)
+    return int(match.group(1)) if match else None
+
+
 def stop_client_traffic(client: QGAClient) -> bool:
     """Stop the unit and return True only when it is proven not running.
 
@@ -3281,9 +3400,11 @@ def stop_client_traffic(client: QGAClient) -> bool:
     (``inactive`` is also what it prints for a unit the manager no longer
     knows), and ``systemctl show -p MainPID --value`` must print ``0`` (also
     what it prints for an absent unit).  ``unknown``, ``deactivating``, an
-    empty answer or any other word is not proof (Pi R3-M1).  Writer
-    quiescence is proven separately by :func:`client_probe_writer_quiescent`
-    before any snapshot is trusted.
+    empty answer or any other word is not proof (Pi R3-M1).  Finally no
+    process of the traffic script may remain anywhere in the guest, inside or
+    outside the unit's cgroup (Opus R4 M-1).  Writer quiescence is proven
+    separately by :func:`client_probe_writer_quiescent` before any snapshot
+    is trusted.
     """
     # The stop exit status is deliberately not the proof: `systemctl stop`
     # can return non-zero for an already-gone unit.  The state reads below
@@ -3303,7 +3424,9 @@ def stop_client_traffic(client: QGAClient) -> bool:
     state = client_traffic_unit_state(client)
     if state not in ("inactive", "failed"):
         return False
-    return client_traffic_main_pid(client) == 0
+    if client_traffic_main_pid(client) != 0:
+        return False
+    return client_traffic_process_count(client) == 0
 
 
 def stop_client_login_unit(client: QGAClient) -> None:
@@ -3338,9 +3461,10 @@ def read_client_probe_size(client: QGAClient) -> int | None:
 def client_probe_writer_quiescent(client: QGAClient) -> bool:
     """Prove the probe log stopped growing after a proven unit stop.
 
-    Two trusted size reads at least :data:`CLIENT_STOP_QUIESCENCE_SECONDS` of
-    host monotonic time apart must be equal.  A writer that survived a stop
-    which claimed success makes the snapshot untrusted.
+    Two trusted size reads at least :data:`CLIENT_STOP_QUIESCENCE_SECONDS`
+    (12 s, longer than one worst-case probe loop) of host monotonic time apart
+    must be equal.  A writer that survived a stop which claimed success makes
+    the snapshot untrusted.
     """
     first = read_client_probe_size(client)
     if first is None:
@@ -3494,6 +3618,149 @@ def take_client_probe_sample(
         "stat_end": round(max(0.0, read.stat_end - origin), 3),
     }
     return sample, read
+
+
+@dataclasses.dataclass
+class ClientCoverageSample:
+    """One coverage sample: the trusted sample (or None) and what it found.
+
+    Built without touching the phase record, so the action sampler thread can
+    produce it; the main thread applies it with the same rules in order.
+    """
+
+    kind: str
+    sample: dict[str, Any] | None
+    read: ProbeLogRead
+    leak: bool
+    problems: list[str]
+
+
+def take_client_coverage_sample(
+    client: QGAClient,
+    run_id: str,
+    *,
+    kind: str,
+    base: float | None,
+    router_id: str,
+    exit_ipv4: str,
+) -> ClientCoverageSample:
+    """Take one trusted prefix sample and re-check the exit-node selection.
+
+    Controller decisions 1 and 2: only a trusted prefix read can establish a
+    sample; an untrusted one is a fixed problem and its bytes are still parsed
+    for a LEAK.  The prefix boundary is fixed by the size read, before the
+    status call, so nothing written during that call counts for this sample.
+    The selection check uses ``require_online=False``: during a fault the
+    router may legitimately be offline, but the client must still have
+    exactly that router selected.  Only the client's QGA socket is used.
+    """
+    if kind not in clientprobe.SAMPLE_KINDS:
+        raise ValueError("unknown coverage sample kind")
+    sample, read = take_client_probe_sample(client, run_id, base=base)
+    leak = bool(read.data) and clientprobe.probe_prefix_flags(
+        read.data, run_id=run_id
+    )["leak"]
+    problems: list[str] = []
+    if sample is None:
+        problems.append(f"probe_{kind}_sample_untrusted")
+        if read.problem is not None:
+            problems.append(read.problem)
+        return ClientCoverageSample(kind, None, read, leak, problems)
+    exit_ok = client_peer_is_active(
+        read_client_status(client), router_id, exit_ipv4, require_online=False
+    )
+    sample["kind"] = kind
+    sample["exit_node_ok"] = exit_ok
+    if not exit_ok:
+        problems.append("client_exit_node_lost")
+    return ClientCoverageSample(kind, sample, read, leak, problems)
+
+
+class ClientActionSampler(threading.Thread):
+    """Sample the client log while the router fault action runs (Opus R4 I-1).
+
+    The thread only calls ``take`` (which talks to the CLIENT's QGA socket);
+    the main thread talks only to the ROUTER's QGA socket until
+    :meth:`halt` has joined this thread.  Samples are taken on the host
+    monotonic clock, each ``interval`` seconds after the previous sample's
+    size read started.  Results are kept here and applied by the main thread
+    after the join; the thread never touches the phase record.
+    """
+
+    poll_interval = 0.25
+
+    def __init__(self, take, *, first_due: float, interval: float) -> None:
+        super().__init__(name="vprlab-client-action-sampler", daemon=True)
+        self._take = take
+        self._halt = threading.Event()
+        self.interval = float(interval)
+        self.next_due = float(first_due)
+        self.results: list[ClientCoverageSample] = []
+        self.failure: str | None = None
+
+    def run(self) -> None:
+        try:
+            while not self._halt.is_set():
+                remaining = self.next_due - time.monotonic()
+                if remaining > 0:
+                    self._halt.wait(min(self.poll_interval, remaining))
+                    continue
+                result = self._take()
+                self.results.append(result)
+                self.next_due = result.read.stat_start + self.interval
+        except BaseException as exc:  # noqa: BLE001 - reported by the main thread
+            self.failure = exc.__class__.__name__
+
+    def halt(self, timeout: float) -> bool:
+        """Stop sampling and join; True only when the thread has ended."""
+        self._halt.set()
+        if self.ident is not None:
+            self.join(timeout)
+        return not self.is_alive()
+
+
+def client_hold_schedule(duration: float) -> tuple[int, int, float]:
+    """Return ``(hold_seconds, windows, spacing)`` for a requested hold.
+
+    The deadline sample starts :data:`CLIENT_HOLD_END_MARGIN` before the
+    deadline, so ``windows`` equal windows of ``spacing`` seconds cover
+    ``hold_seconds - CLIENT_HOLD_END_MARGIN``.  The spacing stays within
+    [:data:`CLIENT_HOLD_SAMPLE_MIN`, :data:`CLIENT_HOLD_SAMPLE_TARGET`]; when
+    the requested hold has no such split it is extended to the next whole
+    second that has one (never shortened).
+    """
+    requested = int(math.ceil(float(duration)))
+    span = requested - CLIENT_HOLD_END_MARGIN
+    if span <= 0:
+        raise hostcheck.Refusal("the client hold is too short")
+    windows = max(1, math.ceil(span / CLIENT_HOLD_SAMPLE_TARGET))
+    spacing = span / windows
+    hold = requested
+    if spacing < CLIENT_HOLD_SAMPLE_MIN:
+        hold = int(
+            math.ceil(CLIENT_HOLD_END_MARGIN + windows * CLIENT_HOLD_SAMPLE_MIN)
+        )
+        spacing = (hold - CLIENT_HOLD_END_MARGIN) / windows
+    return hold, windows, spacing
+
+
+def read_guest_mem_available(client: QGAClient) -> int | None:
+    """Return the guest's ``MemAvailable`` in bytes, or None (Opus B P-2)."""
+    try:
+        result = client.execute(
+            "/bin/sh",
+            ["-c", "grep -m 1 '^MemAvailable:' /proc/meminfo"],
+            timeout=15.0,
+        )
+    except (QGAError, OSError):
+        return None
+    if result.exitcode != 0:
+        return None
+    match = re.fullmatch(
+        r"MemAvailable:\s+([0-9]{1,12}) kB",
+        result.stdout.decode("ascii", "replace").strip(),
+    )
+    return int(match.group(1)) * 1024 if match else None
 
 
 def collect_client_probe(
@@ -3872,6 +4139,9 @@ def _run_client_phase_locked(
         raise hostcheck.Refusal(
             f"a --client phase needs --duration >= {MIN_CLIENT_HOLD_SECONDS} seconds"
         )
+    hold_seconds, hold_windows, hold_spacing = client_hold_schedule(
+        arguments.duration
+    )
     if arguments.capture_size_cap <= 0:
         raise hostcheck.Refusal("capture size cap must be positive")
     if arguments.tap != guest.TAP or arguments.bridge != guest.BRIDGE:
@@ -4081,7 +4351,9 @@ def _run_client_phase_locked(
         "fault_sequence": None,
         "hold_sequence_end": None,
         "hold_samples": [],
-        "hold_seconds": int(arguments.duration),
+        "hold_seconds": hold_seconds,
+        "hold_requested_seconds": int(math.ceil(float(arguments.duration))),
+        "guest_mem_available": {"boot": None, "end": None},
         "combined": None,
     }
 
@@ -4097,6 +4369,10 @@ def _run_client_phase_locked(
     after_client_sent = False
     after_router_sent = False
     traffic_started = False
+    # The action sampler thread owns the client QGA socket while it runs.  If
+    # it cannot be joined, the socket is never used again from this thread.
+    action_sampler: ClientActionSampler | None = None
+    client_qga_unsafe = False
     started = time.monotonic()
     record["timestamps"]["started_at"] = utc_now()
     record["mem_available"] = read_mem_available()
@@ -4188,6 +4464,9 @@ def _run_client_phase_locked(
             client_state / guest.QGA_SOCKET, client_process
         )
         record["timestamps"]["client_qga_ready"] = utc_now()
+        record["client"]["guest_mem_available"]["boot"] = read_guest_mem_available(
+            client_client
+        )
         guard_check()
         # A crashed earlier phase may have left the transient traffic unit
         # running.  Stop it and prove it is gone before the silence check or
@@ -4235,7 +4514,7 @@ def _run_client_phase_locked(
                 f"--property=RuntimeMaxSec={login_runtime} "
                 f"{guest.CLIENT_TAILSCALE} up --reset "
                 f"--hostname={shlex.quote(client_name)} --shields-up "
-                "--accept-routes=false"
+                "--accept-routes=false --accept-dns=false"
             )
             up = client_client.execute(
                 "/bin/sh", ["-c", login_command], timeout=60.0
@@ -4267,6 +4546,9 @@ def _run_client_phase_locked(
             )
             if problem is not None:
                 note(problem)
+            record["client"]["guest_mem_available"]["end"] = (
+                read_guest_mem_available(client_client)
+            )
             record["client"]["combined"] = (
                 "PASS" if not errors else "INVALID"
             )
@@ -4433,15 +4715,13 @@ def _run_client_phase_locked(
         router_id, router_addresses = router_exit_identity(
             read_tailscale_status(router_client, name)
         )
-        peer = client_find_router_peer(
-            read_client_status(client_client),
-            name,
-            router_id,
-            router_addresses,
-        )
-        if peer is None:
+        try:
+            peer = wait_client_router_peer(
+                client_client, name, router_id, router_addresses
+            )
+        except hostcheck.Refusal:
             note("client_exit_peer_missing")
-            raise hostcheck.Refusal("the client cannot see the test exit node")
+            raise
         exit_ipv4 = client_peer_ipv4(peer, router_addresses)
         set_client_exit_node(client_client, exit_ipv4)
         wait_client_exit_node(client_client, router_id, exit_ipv4)
@@ -4463,7 +4743,7 @@ def _run_client_phase_locked(
             marker=marker,
             https_ip=probe_ips["https"],
             http_ip=probe_ips["http"],
-            runtime_sec=client_runtime_seconds(arguments.duration),
+            runtime_sec=client_runtime_seconds(hold_seconds),
         )
         record["timestamps"]["traffic_started"] = utc_now()
         probe_flags = wait_client_probe_control(
@@ -4485,141 +4765,194 @@ def _run_client_phase_locked(
         record["client"]["pre_fault_marker"] = True
         record["timestamps"]["pre_fault_control"] = utc_now()
 
-        record["client"]["fault_epoch"] = read_guest_clock(client_client)
-        record["timestamps"]["fault_started"] = utc_now()
-        action_ok = True
-        if reboot_phase:
-            enabled = router_client.execute(
-                "/bin/sh",
-                ["-c", f"systemctl enable vprouter@{name}.service"],
-                timeout=30.0,
-            )
-            if enabled.exitcode != 0:
-                note("setup_failed")
-                action_ok = False
-            boot_token = secrets.token_hex(16)
-            record["boot"]["boot_control"] = stage_boot_control(
-                router_client, router_pair["before"], lab_policy,
-                boot_token=boot_token,
-            )
-            record["controls"]["before_transport"] = "boot-control-unit"
-            record["boot"]["rebooted"] = True
-            previous_boot_id = read_boot_id(router_client)
-            record["boot"]["previous_boot_id"] = previous_boot_id
-            router_client.shutdown("reboot", timeout=5.0)
-            router_client.close()
-            router_client = wait_for_reboot(
-                router_state / guest.QGA_SOCKET, previous_boot_id
-            )
-            record["boot"]["new_boot_id"] = read_boot_id(router_client)
-            record["boot"]["boot_id_changed"] = (
-                record["boot"]["new_boot_id"] != previous_boot_id
-            )
-            wait_boot_control_sent(router_client, boot_token)
-            record["timestamps"]["before_control"] = utc_now()
-            record["controls"]["before_exitcode"] = 0
-            run_silence_check(
-                router_client,
-                name=name,
-                image_id=image_id,
-                expect_router_disabled=False,
-            )
-            wait_router_ready(router_client, name, require_tailscale=True)
-            if not record["boot"]["boot_id_changed"]:
-                note("postcondition_failed")
-                action_ok = False
-        else:
-            action_ok = run_router_fault(
-                router_client, arguments.phase, name, record, note
-            )
-        if not action_ok:
-            note("action_failed")
-        record["client"]["post_fault_epoch"] = read_guest_clock(client_client)
-        guard_check()
         fault_run_id = clientprobe.marker_run_id(marker)
         hold_samples: list[dict[str, Any]] = record["client"]["hold_samples"]
-        hold_base: float | None = None
+        coverage_count = {"action": 0}
 
-        def sample_hold(kind: str) -> tuple[dict[str, Any] | None, ProbeLogRead]:
-            """Take one trusted sample and re-check the exit-node binding.
-
-            Controller decisions 1 and 2: only a trusted prefix read can
-            establish S_fault, a hold sample or S_end; an untrusted one makes
-            the phase INVALID, and its bytes are still parsed for a LEAK.
-            The prefix boundary is fixed by the size read, before the status
-            call, so nothing the guest writes during that call can count for
-            this sample.
-            """
-            sample, read = take_client_probe_sample(
-                client_client, fault_run_id, base=hold_base
-            )
-            if read.data and clientprobe.probe_prefix_flags(
-                read.data, run_id=fault_run_id
-            )["leak"]:
+        def apply_sample(result: ClientCoverageSample) -> None:
+            """Apply one coverage sample to the record, in sample order."""
+            if result.leak:
                 record["client"]["probe_leak_observed"] = True
-            if sample is None:
-                note(f"probe_{kind}_sample_untrusted")
-                if read.problem is not None:
-                    note(read.problem)
-                return None, read
-            # Opus R3-4: every sample re-checks the exact router binding.
-            exit_ok = client_peer_is_active(
-                read_client_status(client_client),
-                router_id,
-                exit_ipv4,
-                require_online=False,
-            )
-            sample["exit_node_ok"] = exit_ok
-            if not exit_ok:
-                note("client_exit_node_lost")
-            hold_samples.append(sample)
-            return sample, read
+            for problem in result.problems:
+                note(problem)
+            if result.sample is not None:
+                hold_samples.append(result.sample)
 
-        # S_fault: a trusted prefix read after the action and its
-        # postcondition finished.  Its size read starts the host-observed hold.
-        # base=None makes the S_fault sample relative to its own size read, so
-        # its stat_start is 0.0 and every later sample is relative to it.
-        fault_sample, fault_read = sample_hold("fault")
-        hold_base = fault_read.stat_start
-        fault_sequence = fault_sample["sequence"] if fault_sample else None
+        def coverage_sample(kind: str, base: float | None) -> ClientCoverageSample:
+            result = take_client_coverage_sample(
+                client_client,
+                fault_run_id,
+                kind=kind,
+                base=base,
+                router_id=router_id,
+                exit_ipv4=exit_ipv4,
+            )
+            apply_sample(result)
+            return result
+
+        def wait_until(due: float) -> None:
+            while True:
+                check_interrupt()
+                guard_check()
+                remaining = due - time.monotonic()
+                if remaining <= 0:
+                    return
+                time.sleep(min(0.25, remaining))
+
+        record["client"]["fault_epoch"] = read_guest_clock(client_client)
+        # S_pre (fix round 4, decision 1): a trusted sample immediately before
+        # the fault action.  Host-observed coverage runs from here to S_end,
+        # through the action and its postcondition, so the fault itself is
+        # never covered only by the guest clock (Opus R4 I-1).  All sample
+        # offsets are relative to S_pre's size read.
+        pre_result = coverage_sample("pre", None)
+        sample_base = pre_result.read.stat_start
+        record["timestamps"]["pre_fault_sample"] = utc_now()
+        if client_client is router_client:
+            raise hostcheck.Refusal("the client and router QGA clients are shared")
+
+        def action_take() -> ClientCoverageSample:
+            # Runs in the sampler thread: only the client's QGA socket.
+            return take_client_coverage_sample(
+                client_client,
+                fault_run_id,
+                kind="action",
+                base=sample_base,
+                router_id=router_id,
+                exit_ipv4=exit_ipv4,
+            )
+
+        record["timestamps"]["fault_started"] = utc_now()
+        action_ok = True
+        sampler_alive = False
+        try:
+            action_sampler = ClientActionSampler(
+                action_take,
+                first_due=sample_base + CLIENT_ACTION_SAMPLE_INTERVAL,
+                interval=CLIENT_ACTION_SAMPLE_INTERVAL,
+            )
+            action_sampler.start()
+            # From here until the join below only the router QGA is used.
+            if reboot_phase:
+                enabled = router_client.execute(
+                    "/bin/sh",
+                    ["-c", f"systemctl enable vprouter@{name}.service"],
+                    timeout=30.0,
+                )
+                if enabled.exitcode != 0:
+                    note("setup_failed")
+                    action_ok = False
+                boot_token = secrets.token_hex(16)
+                record["boot"]["boot_control"] = stage_boot_control(
+                    router_client, router_pair["before"], lab_policy,
+                    boot_token=boot_token,
+                )
+                record["controls"]["before_transport"] = "boot-control-unit"
+                record["boot"]["rebooted"] = True
+                previous_boot_id = read_boot_id(router_client)
+                record["boot"]["previous_boot_id"] = previous_boot_id
+                router_client.shutdown("reboot", timeout=5.0)
+                router_client.close()
+                router_client = wait_for_reboot(
+                    router_state / guest.QGA_SOCKET, previous_boot_id
+                )
+                record["boot"]["new_boot_id"] = read_boot_id(router_client)
+                record["boot"]["boot_id_changed"] = (
+                    record["boot"]["new_boot_id"] != previous_boot_id
+                )
+                wait_boot_control_sent(router_client, boot_token)
+                record["timestamps"]["before_control"] = utc_now()
+                record["controls"]["before_exitcode"] = 0
+                run_silence_check(
+                    router_client,
+                    name=name,
+                    image_id=image_id,
+                    expect_router_disabled=False,
+                )
+                wait_router_ready(router_client, name, require_tailscale=True)
+                if not record["boot"]["boot_id_changed"]:
+                    note("postcondition_failed")
+                    action_ok = False
+            else:
+                action_ok = run_router_fault(
+                    router_client, arguments.phase, name, record, note
+                )
+        finally:
+            # Stopped and joined on every path before the client QGA socket
+            # is used again from this thread.
+            if action_sampler is not None:
+                sampler_alive = not action_sampler.halt(CLIENT_SAMPLER_JOIN_TIMEOUT)
+                if sampler_alive:
+                    client_qga_unsafe = True
+                    note("client_sampler_stuck")
+                else:
+                    for result in action_sampler.results:
+                        coverage_count["action"] += 1
+                        apply_sample(result)
+                    if action_sampler.failure is not None:
+                        note("client_sampler_failed")
+            record["timestamps"]["fault_finished"] = utc_now()
+        if sampler_alive:
+            raise hostcheck.Refusal("the client action sampler did not stop")
+        if not action_ok:
+            note("action_failed")
+        record["client"]["action_samples"] = coverage_count["action"]
+        record["client"]["post_fault_epoch"] = read_guest_clock(client_client)
+        guard_check()
+
+        # S_fault: the next point of the same <= 13 s cadence after the
+        # action and its postcondition finished, so its window still holds a
+        # complete probe loop.  Its size read starts the hold.
+        last_start = pre_result.read.stat_start
+        if action_sampler is not None and action_sampler.results:
+            last_start = max(
+                last_start,
+                max(result.read.stat_start for result in action_sampler.results),
+            )
+        wait_until(last_start + CLIENT_ACTION_SAMPLE_INTERVAL)
+        fault_result = coverage_sample("fault", sample_base)
+        hold_base = fault_result.read.stat_start
+        fault_sequence = (
+            fault_result.sample["sequence"] if fault_result.sample else None
+        )
         if fault_sequence is None:
             note("probe_fault_sequence_missing")
         record["client"]["fault_sequence"] = fault_sequence
         record["timestamps"]["fault_sequence_read"] = utc_now()
         guard_check()
 
-        # Controller decision 2: trusted samples at most ~14 s apart in host
-        # monotonic time, the last one exactly at the hold deadline.  The
-        # deadline sample is S_end and is taken before any end-of-hold status
-        # call; lines first seen after it never count as hold coverage.
-        hold_duration = float(arguments.duration)
-        windows = max(1, math.ceil(hold_duration / CLIENT_HOLD_SAMPLE_TARGET))
-        hold_deadline = hold_base + hold_duration
+        # The hold: equal windows of 12-14 s from S_fault; the deadline
+        # sample S_end starts CLIENT_HOLD_END_MARGIN before the deadline and
+        # must finish its size read by the deadline (GPT R4-I1).  Lines first
+        # written after the deadline never count as coverage.
+        hold_deadline = hold_base + float(hold_seconds)
         due_times = [
-            hold_base + hold_duration * index / windows
-            for index in range(1, windows)
-        ] + [hold_deadline]
-        record["client"]["hold_windows"] = windows
-        end_sample: dict[str, Any] | None = None
+            hold_base + hold_spacing * index
+            for index in range(1, hold_windows + 1)
+        ]
+        record["client"]["hold_windows"] = hold_windows
+        end_result: ClientCoverageSample | None = None
         for index, due in enumerate(due_times):
-            while True:
-                check_interrupt()
-                guard_check()
-                remaining = due - time.monotonic()
-                if remaining <= 0:
-                    break
-                time.sleep(min(0.25, remaining))
+            wait_until(due)
             last = index == len(due_times) - 1
-            taken, _read = sample_hold("end" if last else "hold")
+            result = coverage_sample("end" if last else "hold", sample_base)
             if last:
-                end_sample = taken
+                end_result = result
+        end_sample = end_result.sample if end_result is not None else None
+        if end_result is not None and end_result.read.stat_end > hold_deadline:
+            note("probe_hold_deadline_late")
         end_sequence = end_sample["sequence"] if end_sample else None
         if end_sequence is None:
             note("probe_end_sequence_missing")
         record["client"]["hold_sequence_end"] = end_sequence
+        kinds = [sample.get("kind") for sample in hold_samples]
         record["client"]["exit_node"]["reverified"] = bool(
-            len(hold_samples) == windows + 1
-            and all(sample.get("exit_node_ok") for sample in hold_samples)
+            kinds
+            and kinds[0] == "pre"
+            and kinds[-1] == "end"
+            and kinds.count("fault") == 1
+            and kinds.count("hold") == hold_windows - 1
+            and all(sample.get("exit_node_ok") is True for sample in hold_samples)
         )
         record["timestamps"]["exit_node_reverified"] = utc_now()
         if arguments.phase == "kill-wireguard" and router_client is not None:
@@ -4657,6 +4990,9 @@ def _run_client_phase_locked(
             raise hostcheck.Refusal(
                 "the client probe log kept growing after the traffic unit stopped"
             )
+        # Opus R4 M-3: a PASS record states the proven stop explicitly.
+        record["client"]["traffic_stop_proven"] = True
+        traffic_started = False
         collect_client_probe(
             client_client, evidence, record, note, run_id=fault_run_id
         )
@@ -4698,6 +5034,16 @@ def _run_client_phase_locked(
                     record["capture_ended_early_at"] = (
                         guard.capture_ended_early_at
                     )
+        if action_sampler is not None and action_sampler.is_alive():
+            # Normally joined right after the action; this is the backstop
+            # for any path that skipped it.
+            if not action_sampler.halt(CLIENT_SAMPLER_JOIN_TIMEOUT):
+                client_qga_unsafe = True
+                note("client_sampler_stuck")
+        if client_qga_unsafe:
+            # A live sampler may still be using the client QGA socket: never
+            # share it.  QEMU is killed without a guest powerdown request.
+            client_client = None
         if router_client is not None:
             try:
                 cleanup_guest_units(router_client, name)
@@ -4750,6 +5096,10 @@ def _run_client_phase_locked(
                     )
             except BaseException:  # noqa: BLE001
                 note("probe_collection_failed")
+            if not login_only:
+                record["client"]["guest_mem_available"]["end"] = (
+                    read_guest_mem_available(client_client)
+                )
             try:
                 cleanup_client_units(client_client)
                 record["client"]["cleanup"] = "ok"

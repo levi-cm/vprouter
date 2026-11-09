@@ -75,11 +75,18 @@ name is exactly `zz-vprclient-NN-do-not-use` (no suffix).
 ### Client provisioning and login
 
 Provisioning reuses the router's online cloud-init path but installs no Docker
-and no release.  It installs the pinned static tarball (sha256
-`720cbbcc...ad7bf7`) to `/usr/local/sbin`, enables a `tailscaled.service` with
-`--state=/var/lib/tailscale/tailscaled.state --port=41641`, writes the
-MAC-matched static networkd file, masks the router's silence list, and writes
-`/usr/local/sbin/vprlab-client-traffic`:
+and no release.  It extracts the pinned static tarball (sha256
+`720cbbcc...ad7bf7`) under `/var/tmp` (on disk; `/tmp` is a RAM tmpfs), installs
+it to `/usr/local/sbin`, enables a `tailscaled.service` with
+`--state=/var/lib/tailscale/tailscaled.state --port=41641` and
+`OOMScoreAdjust=-900` (at 256 MiB an OOM kill of tailscaled would remove
+`tailscale0` and send probes out in clear; the traffic script or curl is killed
+first instead), writes the MAC-matched static networkd file, masks the
+router's silence list, and writes `/usr/local/sbin/vprlab-client-traffic`
+(each probe `curl -m 4` with a 4.5 s backstop, then a 3 s sleep: consecutive
+exit attempts at most about 11 s apart, below every 12-15 s coverage window).
+An already provisioned client keeps its old unit and script until it is
+provisioned again:
 
 ```sh
 # once, online (root, debdev).  The tarball hash is verified on the host
@@ -90,8 +97,20 @@ python3 -B tools/leak-lab/vm/provision.py --client --index 1 \
 
 Interactive login boots only the client VM, runs
 `tailscale up --reset --hostname=zz-vprclient-01-do-not-use --shields-up
---accept-routes=false`, prints the fixed-shape login URL, and passes only when
-`BackendState == Running` at the end:
+--accept-routes=false --accept-dns=false`, prints the fixed-shape login URL,
+and passes only when `BackendState == Running` at the end and the client's
+`tailscale debug prefs` keep the client role (no advertised routes,
+`RouteAll` false, `ShieldsUp` true, `CorpDNS` false).  `--accept-dns=false`
+matters: with MagicDNS accepted, tailscaled rewrites the client's
+`/etc/resolv.conf`, and the client silence check then refuses every boot.
+
+**Before client-login**, delete any older `zz-vprclient-NN-*` node (for
+example `zz-vprclient-01-do-not-use` from an earlier provisioning) in the
+Tailscale admin console.  Otherwise the new node gets a `-1` DNS suffix, and
+every client phase refuses it because its DNS name disagrees with the
+expected label.  A client that logged in before fix round 4 (without
+`--accept-dns=false`) must run `client-login` again (`--reset` re-applies all
+flags) before its next phase.
 
 ```sh
 python3 -B tools/leak-lab/vm/run_phase.py \
@@ -126,20 +145,35 @@ to `10.251.0.1:39001`; require the client to be Running with its exact
 and make it READY; read the router's own `Self.ID`/`Self.TailscaleIPs` through
 QGA and select exactly that peer (HostName `zz-vprtest-01-do-not-use`,
 `ExitNodeOption: true`, online; a duplicate ID or HostName collision is
-refused); `tailscale set --exit-node=<peer IPv4>
+refused; the client's netmap is re-read every second for up to 60 s until the
+peer appears); `tailscale set --exit-node=<peer IPv4>
 --exit-node-allow-lan-access=false`; wait until `ExitNodeStatus` names that ID,
-contains the address and is online; delete any stale probe log, start the
+lists that IPv4 as a `/32` prefix (`ExitNodeStatus.TailscaleIPs` holds
+prefixes such as `100.x.y.z/32`, unlike the bare addresses of a peer's
+`TailscaleIPs`) and is online; delete any stale probe log, start the
 transient traffic unit and require a pre-fault Mullvad success **and** a
 successful marker probe within 90 s, both from trusted prefix reads
-(`client_not_routed` / `client_marker_not_sent` otherwise); apply the fault;
-take the trusted `S_fault` sample; hold for `--duration` while taking a
-trusted sample (plus an `ExitNodeStatus` re-check) at least every 15 s of host
-monotonic time and one at the deadline (`S_end`, before any status call);
-require the unit still active, stop it and prove the stop (`is-active`
-`inactive`/`failed`, `MainPID` 0, two equal log sizes 2 s apart), read the
-exact probe log; clear the exit node; send the client after-control; send the
-router after-control; shut both VMs down and stop both captures only after
-both QEMUs exited; then scan.
+(`client_not_routed` / `client_marker_not_sent` otherwise); take the trusted
+`S_pre` sample immediately before the fault; apply the fault while a helper
+thread keeps taking trusted samples of the client log every 13 s of host
+monotonic time (it uses only the client's QGA socket; the action uses only the
+router's), and join it; take the trusted `S_fault` sample at the next point of
+that cadence; hold while taking a trusted sample every 12-14 s, the last one
+(`S_end`) started 3 s before the hold deadline and required to finish its size
+read by the deadline; every sample re-checks `ExitNodeStatus` (same ID and
+`/32`, the router may be offline); require the unit still active, stop it and
+prove the stop (`is-active` `inactive`/`failed`, `MainPID` 0, no
+`vprlab-client-traffic` process left in `/proc`, two equal log sizes 12 s
+apart), read the exact probe log; clear the exit node; send the client
+after-control; send the router after-control; shut both VMs down and stop both
+captures only after both QEMUs exited; then scan.
+
+The hold is `--duration` rounded up to whole seconds, split into equal 12-14 s
+windows after `S_fault` plus the final 3 s margin.  When no such split exists
+(for example 33 s or 60 s), the hold is extended to the next whole second that
+has one (39 s and 63 s); `phase.json` records `hold_seconds` (used) and
+`hold_requested_seconds`.  The client records the guest `MemAvailable` at boot
+and at the end of every client phase (`client.guest_mem_available`).
 
 For every accepted phase the router is made READY before the fault, including
 `start-router` (whose action is then an idempotent `systemctl start`), because
@@ -196,12 +230,20 @@ latched across later read failures; no pre-fault Mullvad success is INVALID
 `client_marker_not_sent`; a foreign run id, sequence gap, timestamp
 regression/out-of-window value, guest-clock probe gap above 15 s, a guest
 clock that did not advance across the hold, missing post-fault exit/marker
-attempt (`s > S_fault`), missing or inconsistent hold samples, a host window
-between two samples longer than 15 s or without a new exit attempt, a
-deadline sample that is short or late, an unordered clock window, overflow
-line or read-quality problem is INVALID.  Hold coverage is decided only from
-the host-observed samples, re-derived from the evidence bytes through each
-sample's prefix SHA-256; it never depends on the guest clock.  Failures after the fault are expected and counted only.  The final
+attempt (`s > S_fault`), missing or inconsistent samples (they must run
+`pre`, `action`*, `fault`, `hold`*, `end`), a sample without
+`exit_node_ok: true`, a host window between two samples longer than 15 s or
+without a new exit attempt (from `S_pre` through the fault action to
+`S_end`), a deadline sample that starts more than 3 s before the deadline or
+finishes its size read after it, an unordered clock window, overflow line or
+read-quality problem is INVALID.  Coverage is decided only from the
+host-observed samples, re-derived from the evidence bytes through each
+sample's prefix SHA-256; it never depends on the guest clock.  Windows of at
+most 15 s bound the spacing of individual exit attempts only to about two
+windows in the worst case (an attempt just after one sample, the next just
+before the sample after next); the guest-clock 15 s row-gap rule is the
+tighter bound.  `ExitNodeStatus` is checked once per sample, so a switch away
+and back between two samples is not visible; nothing in the lab triggers one.  Failures after the fault are expected and counted only.  The final
 phase result is the worst of the router scan, the client scan, the probe
 verdict and runner errors: LEAK > INVALID > PASS; a missing verdict is INVALID.
 

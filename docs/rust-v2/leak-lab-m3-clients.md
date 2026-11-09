@@ -1,7 +1,9 @@
 # Leak lab M3: real client traffic through the test exit node
 
 Status: design, 2026-11-09 (fix round 3: exact prefix reads, host-observed
-hold coverage, proven writer stop). Applies to the legacy deployed release that the
+hold coverage, proven writer stop; fix round 4: coverage through the fault
+action, deadline sample inside the hold, process-scan stop proof, real
+`ExitNodeStatus` prefix shape, `--accept-dns=false`). Applies to the legacy deployed release that the
 lab already tests (`/opt/vprouter/current`). It is not rust/v2.
 
 ## Goal
@@ -23,9 +25,11 @@ exit node `zz-vprtest-01-do-not-use`. A phase PASSes only if all of these hold:
 4. **Positive controls.** Without these the phase is INVALID:
    - Before the fault, at least one client HTTPS probe succeeded with a
      Mullvad exit, which proves client traffic really crossed the router.
-   - Client traffic really flowed during the whole fault hold: the runner saw
-     a new exit attempt in every host-timed window of at most 15 s between
-     the fault boundary and the hold deadline (see "Hold coverage" below).
+   - Client traffic really flowed while the fault and its recovery happened
+     and during the whole hold: the runner saw a new exit attempt in every
+     host-timed window of at most 15 s from the sample taken immediately
+     before the fault action (`S_pre`), through the action and its
+     postcondition, to the deadline sample (see step 8 below).
    - The client capture saw a before-control and an after-control nonce frame
      from the client in cleartext.
    - Both captures have 0 drops and captured == received.
@@ -44,7 +48,13 @@ phase INVALID.
 - Test nodes carry special names so nobody selects them by accident.
   - Client nodes: `zz-vprclient-NN-do-not-use` (NN = 01..99).
   - They never advertise an exit node or routes.
-  - They run with `--shields-up` and `--accept-routes=false`.
+  - They run with `--shields-up`, `--accept-routes=false` and
+    `--accept-dns=false` (fix round 4, Opus B L-1: with MagicDNS accepted,
+    tailscaled rewrites `/etc/resolv.conf` and the client silence check
+    refuses the boot).
+  - Before `client-login`, the operator deletes any older
+    `zz-vprclient-NN-*` node in the Tailscale admin console; otherwise the new
+    node gets a `-1` DNS suffix and every client phase refuses its identity.
 - Tailscale logins use interactive login URLs, the same way as the router's
   login phase.
 
@@ -125,8 +135,12 @@ The client VM must not share a bridge with the router VM. Any client frame on
     operator stored it at `/root/vprlab/tailscale_1.104.5_amd64.tgz` (root-only).
     `provision.py` verifies the hash on the host before staging it on the
     payload ISO. The guest installs `tailscaled` and `tailscale` to
-    `/usr/local/sbin`, plus a systemd unit with `--state=/var/lib/tailscale/tailscaled.state`
-    and `--port=41641`. The unit is enabled.
+    `/usr/local/sbin` (extracted under `/var/tmp`, on disk, not the `/tmp`
+    tmpfs; Opus B P-4), plus a systemd unit with
+    `--state=/var/lib/tailscale/tailscaled.state`, `--port=41641` and
+    `OOMScoreAdjust=-900` (Opus B P-2: an OOM kill of tailscaled would remove
+    `tailscale0` and send probes out in clear; the traffic script or curl dies
+    first, which is a fail-safe INVALID). The unit is enabled.
   - Static networkd config for the client address and gateway 10.251.0.1, with
     IPv6 disabled the same way as the router.
   - No DNS dependency: probes use `curl --resolve` with IPs passed in by the
@@ -151,7 +165,12 @@ systemd-run --unit=vprlab-client-traffic -p RuntimeMaxSec=<remaining phase> \
 
 `RuntimeMaxSec` covers the pre-fault wait, the fault action (including a
 possible reboot), the hold and a 600 s margin; the runner still stops the unit
-explicitly after the hold.  The script loops once per second until stopped and
+explicitly after the hold.  The script loops until stopped: an exit probe, a
+marker probe, then a 3 s sleep.  Each probe is `curl -m 4` with a 4.5 s
+subprocess backstop, so consecutive exit attempts are at most about 11 s apart
+(12 s with the backstop) even while the exit node is down, which is shorter
+than every 12-15 s coverage window (fix round 4, Opus B P-3; it also keeps the
+am.i.mullvad.net rate near one request every 3.5 s while healthy).  It
 appends one JSON line per probe to `/var/lib/vprlab/client-probe.jsonl`.  It
 truncates the file at start and keeps it under 1 MiB; if a line would cross the
 cap it writes one final `{"k":"overflow",...}` line, which makes the phase
@@ -166,7 +185,7 @@ Every line carries:
 
 - **HTTPS exit probe:**
   ```
-  curl -sS -m 3 --resolve am.i.mullvad.net:443:<https-ip> https://am.i.mullvad.net/json
+  curl -sS -m 4 --resolve am.i.mullvad.net:443:<https-ip> https://am.i.mullvad.net/json
   ```
   The line is `{"t":<epoch>,"k":"exit","ok":true|false,"m":true|false|null,"r":<marker id>,"s":<n>}`,
   where `m` is `mullvad_exit_ip`.
@@ -176,7 +195,7 @@ Every line carries:
   - A response that does not parse is `"ok":false`.
 - **HTTP marker probe:**
   ```
-  curl -sS -m 3 --resolve example.com:80:<http-ip> -H "X-Vprlab-Marker: <marker>" \
+  curl -sS -m 4 --resolve example.com:80:<http-ip> -H "X-Vprlab-Marker: <marker>" \
     "http://example.com/?vprlab=<marker>"
   ```
   The line is `{"t":...,"k":"marker","ok":true|false,"r":<marker id>,"s":<n>}`.
@@ -218,8 +237,10 @@ A `--client` phase requires `--duration >= 30` seconds, including
      present and empty (`[]`, or JSON `null`, Go's empty slice; a missing key
      is `client_prefs_incomplete`, any route `client_advertises_routes`),
      `RouteAll` is exactly `false` (`client_accepts_routes`) and `ShieldsUp`
-     is exactly `true` (`client_shields_down`). The same check runs at the
-     end of `client-login`.
+     is exactly `true` (`client_shields_down`) and `CorpDNS` is exactly
+     `false` (`client_accepts_dns`; a missing key is
+     `client_prefs_incomplete`). The same check runs at the end of
+     `client-login`, whose `tailscale up` passes `--accept-dns=false`.
 5. **Router boot.** Boot the router and set it up to READY, unchanged.
 6. **Client exit node.**
    - Read the router's own `tailscale status --json` through the router QGA
@@ -227,9 +248,17 @@ A `--client` phase requires `--duration >= 30` seconds, including
    - Find exactly that peer in the client's status: exactly one peer with that
      ID, HostName `zz-vprtest-01-do-not-use`, `ExitNodeOption` true, online.
      A duplicate ID or a second peer with the same HostName is a refusal.
+     The router has only just become ready, and control pushes its online
+     state to the client asynchronously, so the client status is re-read
+     every second for up to 60 s until the peer appears (Opus B P-1).
    - Run `tailscale set --exit-node=<its Tailscale IPv4> --exit-node-allow-lan-access=false`.
    - Wait until the client reports `ExitNodeStatus` with that exact ID,
-     containing that address, `Online` true.
+     `Online` true, and listing that IPv4 as a `/32` prefix.
+     `ExitNodeStatus.TailscaleIPs` is `[]netip.Prefix` in tailscaled
+     (`"100.x.y.z/32"`, `"fd7a:.../128"`), unlike the bare addresses of
+     `PeerStatus.TailscaleIPs`; each entry is parsed as an interface, a bare
+     address counts as its `/32`, and a wider prefix that merely contains the
+     address is refused (Opus B B-1).
 7. **Pre-fault positive control.** The traffic unit is started here so the
    probe stream exists. The start counts as attempted before the start
    command runs, so a start that launched the unit and then raised is still
@@ -242,38 +271,65 @@ A `--client` phase requires `--duration >= 30` seconds, including
      `client_marker_not_sent`). A successful exit probe with `m` not `true`
      is latched as a LEAK and returned immediately; the final collection still
      runs.
-8. **Traffic and hold coverage.** Apply the fault and prove it took effect,
-   exactly as today. Then (controller decision 2):
-   - **S_fault.** After the action and its postcondition finish, take a
-     trusted prefix sample (below); its last complete sequence number is
-     `S_fault`, and the start of its size read is the hold base `h0` (host
-     monotonic time).
-   - **Hold samples.** The hold `[h0, h0 + duration]` is split into
-     `k = ceil(duration / 14)` equal windows (10-14 s for every hold of at
-     least 30 s). At each window boundary the runner takes a trusted sample;
-     the last one is taken at the deadline `h0 + duration` and is `S_end`.
-     Each sample's prefix boundary is its size read, which runs *before* the
-     sample's `ExitNodeStatus` call, so the deadline sample is taken before
-     any end-of-hold status call and lines first written after it never
-     count as hold coverage.
-   - **Exit node.** Every sample (including S_fault and S_end) re-reads
-     `ExitNodeStatus` and requires the router's own `Self.ID` and the
-     selected IP; otherwise INVALID (`client_exit_node_lost`). `Online` is
-     required only for the pre-fault selection: during stop-router,
-     kill-container and kill-wireguard the router's Tailscale is legitimately
-     offline, and a sample must prove that the client still has exactly this
-     router selected, not that the router is healthy (controller decision
-     after fix round 3).
-   - **Coverage rule.** Every window between consecutive samples must be at
-     most 15 s long, measured conservatively from the start of the earlier
-     sample's size read to the end of the later one's, and must contain at
-     least one new exit attempt: an exit line with `s` greater than the
-     previous sample's last `s`, seen in the later sample. A burst followed by
-     silence, a silent window in the middle, or probes written only during the
-     end status call all leave an empty window and are INVALID
-     (`probe_hold_window_empty`). The deadline sample must start its size read
-     at or after the deadline (`probe_hold_short`) and finish it within 2 s
-     (`probe_hold_deadline_late`).
+8. **Traffic and coverage through the fault (fix round 4).**
+   - **S_pre.** Immediately before the fault action, take a trusted prefix
+     sample (below).  Every sample offset in the record is relative to its
+     size read.
+   - **Action samples.** While the router action and its postcondition run
+     (including a reboot and the router-ready waits), a helper thread takes
+     a trusted sample of the client log every 13 s of host monotonic time
+     (start to start), with the same window rule and the same exit-node
+     re-check.  The thread uses only the client's QGA socket; the main thread
+     uses only the router's QGA socket until the thread is stopped and
+     joined, on every exit path.  A thread that cannot be joined still owns
+     the client socket: the phase is INVALID (`client_sampler_stuck`) and
+     the runner never uses that socket again (no collection, QEMU is killed).
+     This closes Opus R4 I-1: in restart-docker, kill-wireguard,
+     kill-container and reboot the leak-relevant transition happens inside
+     the action, and it is now host-observed, not covered only by the guest
+     clock.
+   - **S_fault.** After the action and its postcondition finished and the
+     thread was joined, take a trusted sample at the next point of the same
+     13 s cadence (so its window still holds a complete probe loop).  Its
+     last complete sequence number is `S_fault`, and the start of its size
+     read is the hold base `h0`.  Post-fault exit and marker attempts with
+     `s > S_fault` are still required.
+   - **Hold samples.** The hold `[h0, h0 + hold]` ends with a 3 s margin:
+     the deadline sample `S_end` starts its size read 3 s before the
+     deadline and must finish it at or before the deadline, otherwise the
+     phase is INVALID (`probe_hold_deadline_late`; GPT R4-I1: a size read
+     observes the log anywhere inside `[stat_start, stat_end]`, so one that
+     ends after the deadline could credit a line first written after the
+     hold).  `[h0, deadline - 3 s]` is split into equal windows of 12-14 s
+     (above the probe loop's worst-case exit spacing, below 15 s with the
+     read latency).  When the requested duration has no such split (for
+     example 33 s or 60 s) the hold is extended, never shortened, to the next
+     whole second that has one (39 s, 63 s); `hold_seconds` records the hold
+     used and `hold_requested_seconds` the request.  Lines first seen after
+     the deadline never count for coverage; they are still parsed for LEAK.
+   - **Exit node.** Every sample (S_pre, action samples, S_fault, hold
+     samples and S_end) re-reads `ExitNodeStatus` and requires the router's
+     own `Self.ID` and the selected `/32`; otherwise INVALID
+     (`client_exit_node_lost`).  `Online` is required only for the pre-fault
+     selection: during stop-router, kill-container and kill-wireguard the
+     router's Tailscale is legitimately offline, and a sample must prove that
+     the client still has exactly this router selected, not that the router
+     is healthy (controller decision after fix round 3).  The selection is
+     sampled, not continuous: a switch away and back between two samples is
+     not visible; nothing in the lab triggers one.
+   - **Coverage rule.** Every window between consecutive samples, from S_pre
+     to S_end, must be at most 15 s long, measured conservatively from the
+     start of the earlier sample's size read to the end of the later one's,
+     and must contain at least one new exit attempt: an exit line with `s`
+     greater than the previous sample's last `s`, seen in the later sample.
+     A silent fault action, a burst followed by silence, a silent window in
+     the middle, or probes written only during the end status call all leave
+     an empty window and are INVALID (`probe_hold_window_empty`).  Windows of
+     at most 15 s bound the spacing of individual exit attempts only to
+     about two windows in the worst case (an attempt just after one sample
+     and the next just before the sample after next, Opus R4 M-4); windows
+     are deliberately not shortened, and the guest-clock 15 s row-gap rule
+     is the tighter bound.
    - **Trusted prefix read (decision 1).** Every value the verdict trusts
      comes from one primitive: N = `stat -c %s` of the log, then the guest
      SHA-256 of `head -c N` and the bytes of `head -c N` (separate bounded QGA
@@ -281,23 +337,27 @@ A `--client` phase requires `--duration >= 30` seconds, including
      stable). The read is trusted only if every exec exited 0, exactly N bytes
      arrived and the host SHA-256 equals the guest's. Sequence numbers come
      only from complete newline-terminated lines of a trusted prefix. An
-     untrusted read never establishes `S_fault`, a sample or `S_end`; it makes
-     the phase INVALID (`probe_{fault,hold,end}_sample_untrusted` plus the
-     read problem) and its bytes are still parsed tolerantly to latch a LEAK.
+     untrusted read never establishes a sample; it makes the phase INVALID
+     (`probe_{pre,action,fault,hold,end}_sample_untrusted` plus the read
+     problem) and its bytes are still parsed tolerantly to latch a LEAK.
      There is no retry and no fallback to a partial read.
-   - At least one exit and one marker attempt with `s > S_fault` are still
-     required. The guest-clock checks remain as extra INVALID conditions
-     only; coverage never depends on the guest clock.
+   - The guest-clock checks remain as extra INVALID conditions only;
+     coverage never depends on the guest clock.
 9. **Collect.**
    - Require the traffic unit to be `systemctl is-active` at the end of the
      hold. Then `systemctl stop` it *without masking the result* and prove the
      stop (decision 3): `systemctl is-active` must print exactly `inactive` or
      `failed` (`unknown`, `deactivating`, empty or anything else is not
      proof), and `systemctl show -p MainPID --value` must print `0` (which is
-     also what an absent unit reports). The guest clock (`clock_stop`) is
-     read right after the proven stop. Then **writer quiescence**: two
-     trusted size reads at least 2 s of host time apart must be equal. Only
-     then is the final snapshot trusted. If any step fails, the phase is
+     also what an absent unit reports), and a `/proc` scan must find no
+     process whose command line names `/usr/local/sbin/vprlab-client-traffic`,
+     inside or outside the unit's cgroup (fix round 4, Opus R4 M-1; the scan
+     needs no procps and never matches itself). The guest clock
+     (`clock_stop`) is read right after the proven stop. Then **writer
+     quiescence**: two trusted size reads at least 12 s of host time apart
+     (longer than one worst-case probe loop) must be equal. Only then is the
+     final snapshot trusted, and the record says `traffic_stop_proven: true`
+     (Opus R4 M-3). If any step fails, the phase is
      INVALID (`client_traffic_stop_failed` / `client_writer_not_quiescent`),
      the snapshot is marked untrusted, and a later cleanup stop never
      validates it; the bytes are still kept for LEAK parsing.
@@ -331,8 +391,12 @@ A `--client` phase requires `--duration >= 30` seconds, including
         gap above 15 s, a guest clock that did not advance across the hold
         (`clock_stop - post_fault_epoch < hold - 2`, `probe_clock_stalled`),
         no post-fault exit/marker attempt with `s > S_fault`, missing or
-        inconsistent hold samples, a host window longer than 15 s or without
-        a new exit attempt, a short or late deadline sample, an unordered
+        inconsistent samples (kinds must run `pre`, `action`*, `fault`,
+        `hold`*, `end`), a sample without `exit_node_ok: true`
+        (`client_exit_node_lost`; Opus R4 M-2, so the standalone evaluator
+        and its CLI carry the binding too), a host window longer than 15 s
+        or without a new exit attempt, a deadline sample that starts more
+        than 3 s before the deadline or ends after it, an unordered
         clock window (`clock_start <= fault_epoch <= post_fault_epoch <=
         clock_stop`), an overflow line, or any read quality problem;
       - the evaluator re-derives every hold sample from the evidence bytes:
@@ -364,10 +428,13 @@ Each phase evidence directory gains:
 - the resolved probe IPs;
 - the counts and the client verdict;
 - the latched `probe_leak_observed` flag, `fault_sequence`,
-  `hold_sequence_end`, `hold_windows`, `hold_samples` (per sample: `sequence`,
-  `exit_sequence`, `size`, `sha256` of the prefix, host `stat_start`/`stat_end`
-  relative to the S_fault sample, `exit_node_ok`), `traffic_stop_proven` and
-  `probe_snapshot_trusted`;
+  `hold_sequence_end`, `hold_seconds`, `hold_requested_seconds`,
+  `hold_windows` (after S_fault), `action_samples`, `hold_samples` (every
+  coverage sample from S_pre to S_end; per sample: `kind`, `sequence`,
+  `exit_sequence`, `size`, `sha256` of the prefix, host
+  `stat_start`/`stat_end` relative to the S_pre sample, `exit_node_ok`),
+  `traffic_stop_proven`, `probe_snapshot_trusted` and
+  `guest_mem_available` (`boot` and `end`, bytes; Opus B P-2);
 - the combined result.
 
 The rules of the existing evidence directory apply to all of it: root-only,
@@ -442,7 +509,20 @@ only the client 2 GiB overlay and the shared headroom.
     keeps appending after a claimed stop, a start that raises after launching
     the unit, untrusted reads at the pre-fault gate (the fault never runs),
     and client prefs without `AdvertiseRoutes`, with `RouteAll` true or with
-    `ShieldsUp` false.
+    `ShieldsUp` false;
+  - fix round 4 reproducers (each fails on 06baf40): a deadline size read
+    that ends 1 s or 2 s after the hold while the only late exit attempt is
+    a pair first written after the deadline (plus controls: the same slow
+    read without the pair, a 1 s slow read that ends inside the hold, a
+    2.5 s one that breaks the window rule, and a healthy run); a 60 s fault
+    action with zero client probes and a frozen guest clock for
+    restart-docker, kill-wireguard and kill-container (plus a healthy 60 s
+    action that the helper thread samples, an action that raises, and a
+    sampler that cannot be joined); a writer that appends every 5 s, first
+    3 s after a clean-looking stop, both visible to and hidden from the
+    `/proc` scan; real-shaped `ExitNodeStatus` JSON with `/32` prefixes;
+    client prefs with `CorpDNS` true and the `--accept-dns=false` login; a
+    router peer that the client sees online only on the third read.
 
 ## Out of scope
 

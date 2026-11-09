@@ -1314,3 +1314,18 @@ adversarial cases incl. outside the control window. Root-owned scanner refreshed
 15 retained live captures (fd-anchored like the runner): 0 findings everywhere; the 5 fault
 phases re-scan PASS (4 real quotes all exact); captures taken before -B 8192 now read INVALID
 only for capture_argv_mismatch (contract change), with 0 findings, so nothing was hidden.
+2026-11-09 round-5 reviews complete (Opus FAIL 1 Important, GPT r5b FAIL 1 Important, Pi FAIL 1
+Critical = the same ICMP defect as GPT R5-C1; no reviewer reproduced a real-IP leak or a
+different-image deployment). Fixed (7e8d74f, 25921e7, e7ccc18): ICMP quotes must also match a
+datagram the tap saw arrive from the endpoint <= 2 s earlier (addresses, ports, IP ID, total
+length, first 520 WireGuard bytes; one quote per arrival; 4,096 remembered) and a whole quote
+> 548 bytes is a leak; all 6 real quotes match their arrivals and the 5 fault phases still
+re-scan PASS. Release health reason recorded only from the release's fixed vocabulary (else
+sha256[:12] + length); runner text rejects addresses, hostnames, tskey and digit tokens; health
+read capped at 4 KiB; non-string state handled. Image tar: no duplicate members, regular-file
+index.json, exactly one runnable linux/amd64 manifest, attestation only as unknown/unknown,
+every layer hash-verified (streamed); the real deployed image tar still verifies. Installed
+scanner tree refuses cached bytecode, setup deletes it, scan wrapper runs -B. Test classes after
+__main__ guards moved, with a layout test. -B 8192 measured: mmap ring 4 MiB -> 16 MiB (Pi's
+rmem_max claim does not apply). Not changed: tighter type-4 length (shape-only, no leak path),
+QEMU process-group kill (QEMU runs with spawn=deny). Suites: 273 + 212 OK.

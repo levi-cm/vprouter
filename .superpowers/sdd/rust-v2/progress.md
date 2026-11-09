@@ -1290,3 +1290,17 @@ seen. Certifies server-side only, no client traffic. tcpdump now runs with -B 81
 8 MiB kernel ring after the 58-minute phase lost 3 frames to kernel drops); root-owned install
 refreshed and verified. Fault phases (stop-router, kill-wireguard, kill-container,
 restart-docker, reboot-with-router-enabled) started.
+2026-11-09 fault phases (each: start router, wait for release READY with Tailscale Running and
+the exit node advertised, apply fault, prove it in-guest, hold 120 s, after-control; tcpdump
+-B 8192; every phase 0 kernel drops, captured == received, both controls seen, 0 findings,
+all traffic WireGuard to the single profile endpoint):
+  stop-router     PASS  508 frames; unit proven inactive; 1 allowed ICMP 3/3 quote
+  kill-wireguard  PASS  1,539 frames; wg0 ifindex 2 before, proven absent after, present again
+                        at the end (ifindex 2 again, so likely a fresh container netns)
+  kill-container  PASS  1,528 frames; container proven not running; 2 allowed ICMP quotes
+  restart-docker  PASS  2,595 frames; dockerd pid 650 -> 2636, release READY again
+  reboot-with-router-enabled PASS 2,078 frames; boot_id changed, release READY after boot
+The ICMP quotes are the VM kernel answering the server's WireGuard packets while no socket is
+bound (allowed by the user's narrow rule; same endpoint and public IP). max-vprouter healthy
+before, between and after. Certifies server-side, no client traffic, legacy release only.
+Next: client VMs (M3) so real client traffic crosses the router during each fault.

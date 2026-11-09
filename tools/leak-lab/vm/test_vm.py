@@ -5095,3 +5095,16 @@ class LiveBringUpTests(unittest.TestCase):
                     argv[argv.index("-bios") + 1],
                     str(guest.LAB_TOOLS / "usr/share/seabios/bios-256k.bin"),
                 )
+
+
+class LiveBootOrderTests(unittest.TestCase):
+    def test_root_disk_has_bootindex_zero_in_both_modes(self) -> None:
+        # Live 2026-11-09: with the payload ISO as a second virtio-blk disk,
+        # SeaBIOS booted the payload and the guest hung with no console output.
+        for mode in ("provision", "test"):
+            with self.subTest(mode=mode):
+                argv = guest.build_qemu_argv(mode, pathlib.Path("/var/lib/vprlab/vm-001"))
+                self.assertIn("virtio-blk-pci,drive=root,bootindex=0", argv)
+                self.assertNotIn(
+                    "file=/var/lib/vprlab/vm-001/guest.qcow2,if=virtio,format=qcow2", argv
+                )

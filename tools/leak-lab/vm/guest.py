@@ -297,7 +297,12 @@ def build_qemu_argv(
         "-name",
         f"vprlab-{name}",
         "-drive",
-        f"file={overlay},if=virtio,format=qcow2",
+        # bootindex=0: in provision mode the payload ISO is a second
+        # virtio-blk disk and SeaBIOS would otherwise try to boot it and
+        # hang silently (found live on 2026-11-09).
+        f"file={overlay},if=none,id=root,format=qcow2",
+        "-device",
+        "virtio-blk-pci,drive=root,bootindex=0",
         # Explicitly suppress QEMU's implicit default NIC, so the only NIC is
         # the one declared below.
         "-nic",

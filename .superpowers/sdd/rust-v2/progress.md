@@ -1378,3 +1378,10 @@ owner-tagged DOCKER-USER rules; max-vprouter healthy throughout). Router-only id
 rules: PASS, release READY, 2,020 frames, 2,020/2,020/0 stats, 1,092 out + 926 in WireGuard to
 the single endpoint, 0 findings, both controls. Client VM provisioning started (pinned Tailscale
 1.104.5 tarball). Round-5 offline review (Opus + GPT) of fix round 4 running in parallel.
+2026-11-09 M3 offline gate closed after round 5 (Opus PASS; GPT R5-I1 short-action coverage
+documented as an accepted resolution limit, R5-M1 rounding fixed; Opus m-1..m-3 fixed in
+1c621de). First live client provisioning FAILED: the design's "2 GiB or less" overlay was smaller
+than the 3 GiB genericcloud base, so the root partition was cut off and the initramfs dropped to
+a shell (PARTUUID missing); provisioning timed out after 30 min, no secrets involved. Fixed in
+1ef841d: client overlay = 3 GiB, verify_overlay_chain refuses an overlay smaller than its base or
+without a virtual size. Failed client state removed; re-provisioning boots past the root mount.

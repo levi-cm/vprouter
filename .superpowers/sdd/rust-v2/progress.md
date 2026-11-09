@@ -1254,3 +1254,17 @@ Pi DeepSeek. Monitor rounds 1-3 FAIL->fixed (2fc1779, b0c06f8, 8ccbcdc). Runner 
 review FAIL, 0 Critical / ~12 Important (host trust/ownership/lifecycle/resource bounds; the
 scanner fuzz found no leak-hiding PASS). A fix round moving the lab to root-owned paths with a
 dedicated vprlab-qemu user is in progress. No VM booted, no lab network created yet.
+
+2026-11-09 Leak lab LIVE bring-up on debdev. Round-4 SAFETY gate: Opus PASS, Pi PASS, GPT FAIL
+(login-URL side channel + provisioning disk accepted as documented risks; PID race fixed via
+pidfd; MTU-clamped WireGuard false-LEAK fixed) -> 1e213a1. Host setup ran (vprlab-qemu uid 999
+in kvm only; root-owned /opt/vprlab-tools, /var/lib/vprlab, /run/vprlab; all copies verified),
+lab network up (owner-token-tagged bridge/tap/inet vprlab/2 DOCKER-USER rules; prod guard table
+untouched; max-vprouter healthy throughout). Live-only bugs fixed with tests: explicit SeaBIOS
+(2b09352), root disk bootindex=0 (8b7f452), docker-cli package (beeddca), guest image ID =
+config digest bound to host containerd index digest by a hash-verified OCI chain (2c9bff6).
+Provisioned 512 MiB / 1 vCPU VM (PROVISIONED_OFFLINE_READY). FIRST REAL PHASE start-router with
+lab device Hot Dingo -> ch-zrh-wg-001 (live catalog, non-default relay): PASS, 968 frames,
+968/968/0 stats, 519 out + 447 in WireGuard to the single endpoint, 0 findings, before-control
+= frame 0 (silent boot), after-control = last frame (silent teardown), QEMU exit 0,
+Tailscale NeedsLogin. Certifies server-side only, no client traffic; legacy release, not rust/v2.

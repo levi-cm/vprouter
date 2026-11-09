@@ -1329,3 +1329,16 @@ scanner tree refuses cached bytecode, setup deletes it, scan wrapper runs -B. Te
 __main__ guards moved, with a layout test. -B 8192 measured: mmap ring 4 MiB -> 16 MiB (Pi's
 rmem_max claim does not apply). Not changed: tighter type-4 length (shape-only, no leak path),
 QEMU process-group kill (QEMU runs with spawn=deny). Suites: 273 + 212 OK.
+2026-11-09 M3 (client traffic) implemented by OpenCode DeepSeek (b849e3c, 301 + 227 tests). Three
+reviews FAIL: GPT 4 Critical + 5 Important (forged/reordered client controls; truncated probe-log
+read hides a leak; stale log / never-running traffic unit certifies PASS; Self.ExitNode boolean
+bypasses exit-peer identity; hostname fallback; LEAK masked by malformed lines or pre-fault
+refusal; guest bytes in diagnostics; login URL on stderr). Opus 2 Important (no traffic during the
+fault still PASSes; 48-bit IP hash reversible) + 9 Minor. Pi 1 Critical + 3 Important (same
+traffic-liveness hole; exit-node shortcut; no-client teardown leaves vprlab1 objects; admission
+counts one overlay/capture). Controller decisions: run-bound probe log (run id, sequence, guest
+clock bounds, liveness, gap <= 10 s, post-fault attempts, pre-fault marker success), exact
+size+sha256 final read, LEAK never masked, fixed-code diagnostics, exit peer bound to the router
+VM's own Self.ID/TailscaleIPs, strict client controls, owner-recorded client teardown, two-guest
+admission; drop the IP hash; login URL on stderr accepted (same as router). Fix round dispatched.
+Nothing M3 is live; no client VM provisioned yet.

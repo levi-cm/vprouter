@@ -7,8 +7,8 @@ polling, ``guest-file-open``/``guest-file-write``/``guest-file-close`` for
 root-only files, and ``guest-shutdown``.
 
 This module never logs, prints or returns the bytes it writes to the guest.
-Errors carry the method name and the agent's error class/description, never file
-contents.
+Errors carry the method name and, at most, a locally allowlisted guest error
+class; guest-provided descriptions are discarded unread.
 
 The wire protocol is the public QEMU guest-agent JSON protocol:
 
@@ -30,19 +30,33 @@ from dataclasses import dataclass
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_CONNECT_TIMEOUT = 120.0
 MAX_FILE_CHUNK = 65536
-#: Guest-provided error text is untrusted.  It is truncated and stripped of
-#: control characters before it can reach an exception or a log line.
-MAX_GUEST_ERROR_TEXT = 200
+#: Guest-provided error text is never rendered.  Only a known QGA error class
+#: may be named; everything else becomes a local ``guest_error``.  A 44-byte
+#: WireGuard key fits comfortably inside any truncation limit, so length
+#: bounding is not secrecy.
+QGA_ERROR_CLASSES = frozenset(
+    {
+        "GenericError",
+        "CommandNotFound",
+        "CommandDisabled",
+        "InvalidParameter",
+        "DeviceNotActive",
+        "DeviceNotFound",
+        "FileNotFound",
+        "FileExists",
+        "IoError",
+        "PermissionDenied",
+        "Unsupported",
+    }
+)
+UNKNOWN_GUEST_ERROR = "guest_error"
 
 
-def _bounded_guest_text(value: object, limit: int = MAX_GUEST_ERROR_TEXT) -> str:
-    """Return printable, length-bounded text from an untrusted frame field."""
-    if value is None:
-        return ""
-    if not isinstance(value, str):
-        value = str(value)
-    printable = "".join(ch for ch in value if ch.isprintable())
-    return printable[:limit]
+def _error_class_name(value: object) -> str:
+    """Map an untrusted guest error class to a local allowlisted name."""
+    if isinstance(value, str) and value in QGA_ERROR_CLASSES:
+        return value
+    return UNKNOWN_GUEST_ERROR
 
 
 class QGAError(RuntimeError):
@@ -202,11 +216,11 @@ class QGAClient:
                 if error is not None:
                     if not isinstance(error, dict):
                         raise QGAError("guest agent returned a malformed error")
-                    klass = _bounded_guest_text(error.get("class", "GenericError"), 64)
-                    description = _bounded_guest_text(error.get("desc", ""))
-                    message = f"guest agent error {klass or 'GenericError'}"
-                    if description:
-                        message = f"{message}: {description}"
+                    klass = _error_class_name(error.get("class"))
+                    # The guest-controlled ``desc`` is deliberately discarded:
+                    # it is untrusted and may contain profile or Tailscale
+                    # state bytes.
+                    message = f"guest agent error {klass}"
                     raise QGAError(message)
                 if "return" not in document:
                     raise QGAProtocolError("guest agent frame has no return value")

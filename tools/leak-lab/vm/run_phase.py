@@ -32,6 +32,7 @@ directory.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import datetime
 import hashlib
@@ -61,6 +62,7 @@ import tsnames  # noqa: E402
 import guest  # noqa: E402
 import hostcheck  # noqa: E402
 import login_url as login_url_mod  # noqa: E402
+import rootfs  # noqa: E402
 import runlock  # noqa: E402
 from qga import ExecResult, QGAClient, QGAError, wait_for_qga  # noqa: E402
 
@@ -110,7 +112,15 @@ AFTER_CAPTURE_TIMEOUT = 30.0
 QUIET_SECONDS = 2.0
 USED_NONCES_MODE = 0o600
 SINK_UDP_PORT = 39001
-EVIDENCE_ROOT = pathlib.Path("/DATA/vprouter-lab/leaklab/evidence")
+EVIDENCE_ROOT = guest.EVIDENCE_ROOT
+MAX_PHASE_DURATION = 3600.0
+HANDSHAKE_MAX_AGE_SECONDS = 180.0
+MIN_MEMORY_AVAILABLE = 1536 * 1024 * 1024
+DISK_HEADROOM = 1024 * 1024 * 1024
+DEFAULT_CAPTURE_SIZE_CAP = 2 * 1024 * 1024 * 1024
+SCAN_MEMORY_LIMIT = 1024 * 1024 * 1024
+SCAN_TIMEOUT = 300.0
+CERTIFICATION = "server_side_no_client_traffic"
 
 
 def utc_now() -> str:
@@ -206,9 +216,10 @@ def profile_endpoint(material: SecretMaterial) -> tuple[str, int]:
         if stripped.startswith(b"[") and stripped.endswith(b"]"):
             section = stripped[1:-1].strip().lower()
             continue
-        if section != b"peer" or b"=" not in stripped:
+        if section != b"peer" or (b"=" not in stripped and b":" not in stripped):
             continue
-        key, _, value = stripped.partition(b"=")
+        separator = b"=" if b"=" in stripped else b":"
+        key, _, value = stripped.partition(separator)
         if key.strip().lower() == b"endpoint":
             try:
                 endpoint = value.strip().decode("ascii")
@@ -467,6 +478,7 @@ class Capture:
     argv: list[str]
     pcap: pathlib.Path
     stats: pathlib.Path
+    forced_stop: bool = False
 
 
 def start_capture(
@@ -475,18 +487,35 @@ def start_capture(
     stats: pathlib.Path,
     *,
     tcpdump: str,
+    evidence_fd: int | None = None,
     popen=subprocess.Popen,
     timeout: float = 15.0,
 ) -> Capture:
-    argv = guest.tcpdump_argv(interface, pcap)
-    with stats.open("xb") as error_log:
+    if evidence_fd is None:
+        argv = guest.tcpdump_argv(interface, pcap)
+        error_log = stats.open("xb")
+        popen_kwargs: dict = {}
+    else:
+        # tcpdump must open the pcap through the retained directory fd, so a
+        # rename of the evidence path cannot redirect its output.
+        rootfs.write_bytes_at(evidence_fd, pcap.name, b"", mode=0o600)
+        argv = guest.tcpdump_argv(
+            interface, pathlib.Path(rootfs.proc_path(evidence_fd, pcap.name))
+        )
+        error_descriptor = rootfs.open_file_at(
+            evidence_fd, stats.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+        )
+        error_log = os.fdopen(error_descriptor, "wb")
+        popen_kwargs = {"pass_fds": (evidence_fd,)}
+    with error_log as error_stream:
         process = popen(
             argv,
             executable=tcpdump,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=error_log,
+            stderr=error_stream,
             start_new_session=True,
+            **popen_kwargs,
         )
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -494,15 +523,28 @@ def start_capture(
         if status is not None:
             raise hostcheck.Refusal(f"tcpdump exited before listening (status {status})")
         if pcap.is_file() and pcap.stat().st_size >= 24:
-            os.chmod(stats, 0o600)
-            os.chmod(pcap, 0o600)
+            if evidence_fd is not None:
+                for name in (pcap.name, stats.name):
+                    descriptor = rootfs.open_file_at(evidence_fd, name, os.O_RDONLY)
+                    try:
+                        os.fchmod(descriptor, 0o600)
+                    finally:
+                        os.close(descriptor)
+            else:
+                os.chmod(stats, 0o600)
+                os.chmod(pcap, 0o600)
             return Capture(process=process, argv=argv, pcap=pcap, stats=stats)
         time.sleep(0.05)
     stop_capture(Capture(process=process, argv=argv, pcap=pcap, stats=stats), timeout=5)
     raise hostcheck.Refusal("tcpdump did not start listening in time")
 
 
-def stop_capture(capture: Capture | None, *, timeout: float = 20.0) -> int | None:
+def stop_capture(
+    capture: Capture | None,
+    *,
+    timeout: float = 20.0,
+    evidence_fd: int | None = None,
+) -> int | None:
     if capture is None:
         return None
     process = capture.process
@@ -514,6 +556,7 @@ def stop_capture(capture: Capture | None, *, timeout: float = 20.0) -> int | Non
     try:
         status = process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
+        capture.forced_stop = True
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         except OSError:
@@ -521,7 +564,14 @@ def stop_capture(capture: Capture | None, *, timeout: float = 20.0) -> int | Non
         status = process.wait(timeout=10)
     for path in (capture.pcap, capture.stats):
         try:
-            os.chmod(path, 0o600)
+            if evidence_fd is not None:
+                descriptor = rootfs.open_file_at(evidence_fd, path.name, os.O_RDONLY)
+                try:
+                    os.fchmod(descriptor, 0o600)
+                finally:
+                    os.close(descriptor)
+            else:
+                os.chmod(path, 0o600)
         except OSError:
             pass
     return status
@@ -544,11 +594,35 @@ def file_contains_payload(path: pathlib.Path, needle: bytes) -> bool:
         return False
 
 
+def file_contains_payload_at(directory_fd: int, name: str, needle: bytes) -> bool:
+    """Descriptor-anchored variant of :func:`file_contains_payload`."""
+    carry = b""
+    try:
+        descriptor = rootfs.open_file_at(directory_fd, name, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                return False
+            window = carry + chunk
+            if needle in window:
+                return True
+            carry = window[-max(0, len(needle) - 1) :]
+    except OSError:
+        return False
+    finally:
+        os.close(descriptor)
+
+
 def wait_for_control_in_pcap(
-    path: pathlib.Path,
+    path: pathlib.Path | None,
     nonce: str,
     *,
     timeout: float | None = None,
+    evidence_fd: int | None = None,
+    name: str | None = None,
 ) -> bool:
     """Wait until tcpdump's ``-U --immediate-mode`` file contains the AFTER."""
     if timeout is None:
@@ -556,7 +630,13 @@ def wait_for_control_in_pcap(
     needle = policy_mod.CONTROL_PREFIX + nonce.encode("ascii")
     deadline = time.monotonic() + timeout
     while True:
-        if file_contains_payload(path, needle):
+        if evidence_fd is not None and name is not None:
+            found = file_contains_payload_at(evidence_fd, name, needle)
+        elif path is not None:
+            found = file_contains_payload(path, needle)
+        else:
+            found = False
+        if found:
             return True
         if time.monotonic() >= deadline:
             return False
@@ -584,6 +664,7 @@ def base_phase_record(
         "evidence_dir": str(evidence_dir),
         "image_ref": image_id,
         "expect_tunnel": PHASE_EXPECTATIONS[phase],
+        "certifies": CERTIFICATION,
         "qemu_argv": [],
         "launch_argv": [],
         "tcpdump_argv": [],
@@ -650,29 +731,55 @@ def write_private_text(path: pathlib.Path, text: str) -> None:
         stream.write(text)
 
 
-def ensure_root_directory(path: pathlib.Path) -> None:
+@dataclasses.dataclass
+class EvidenceDirectory:
+    """A retained root directory fd plus a display path for records."""
+
+    fd: int
+    path: pathlib.Path
+
+    def close(self) -> None:
+        if self.fd >= 0:
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+            self.fd = -1
+
+    def open_new(self, name: str, data: bytes, *, mode: int = 0o600) -> None:
+        rootfs.write_bytes_at(self.fd, name, data, mode=mode, exclusive=True)
+
+    def open_append(self, name: str, *, mode: int = 0o600) -> int:
+        return rootfs.open_file_at(
+            self.fd, name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode
+        )
+
+    def write_json(self, name: str, document: object, *, mode: int = 0o600) -> None:
+        rootfs.write_json_at(self.fd, name, document, mode=mode)
+
+    def write_text(self, name: str, text: str, *, mode: int = 0o600) -> None:
+        self.open_new(name, text.encode("utf-8"), mode=mode)
+
+    def read_bytes(self, name: str) -> bytes:
+        return rootfs.read_bytes_at(self.fd, name)
+
+    def hash(self, name: str, algorithm: str = "sha256") -> str:
+        return rootfs.hash_file_at(self.fd, name, algorithm)
+
+    def size(self, name: str) -> int:
+        return rootfs.file_size_at(self.fd, name)
+
+    def proc_path(self, name: str) -> str:
+        return rootfs.proc_path(self.fd, name)
+
+
+def ensure_root_directory(path: pathlib.Path, *, anchor: pathlib.Path | None = None) -> None:
     """Create/validate a root-only 0700 directory without following links."""
-    path = pathlib.Path(path)
-    try:
-        path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    except OSError as exc:
-        raise hostcheck.Refusal(
-            f"cannot create evidence directory: {exc.__class__.__name__}"
-        ) from exc
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        descriptor = os.open(path, flags)
-    except OSError as exc:
-        raise hostcheck.Refusal("evidence path must be a real directory") from exc
-    try:
-        info = os.fstat(descriptor)
-        if not stat.S_ISDIR(info.st_mode):
-            raise hostcheck.Refusal("evidence path must be a real directory")
-        if os.geteuid() == 0 and info.st_uid != 0:
-            raise hostcheck.Refusal("evidence directory must be owned by root")
-        os.fchmod(descriptor, 0o700)
-    finally:
-        os.close(descriptor)
+    expected_uid = 0 if os.geteuid() == 0 else os.geteuid()
+    descriptor = rootfs.open_directory(
+        path, create=True, mode=0o700, expected_uid=expected_uid, anchor=anchor
+    )
+    os.close(descriptor)
 
 
 # ---------------------------------------------------------------------------
@@ -709,17 +816,79 @@ def postcondition_command(phase: str, name: str) -> str | None:
             "&& exit 1; exit 0"
         )
     if phase == "kill-wireguard":
-        return (
-            f"pid=$(docker inspect --format '{{{{.State.Pid}}}}' {name}) || exit 1; "
-            '[ "$pid" -gt 1 ] || exit 1; '
-            'nsenter -t "$pid" -n sh -c \'! ip link show wg0 >/dev/null 2>&1\''
-        )
+        return f"ip -j link show wg0 inside the router netns ({name})"
     if phase == "kill-container":
         return (
             f"if docker inspect --format '{{{{.State.Running}}}}' {name} "
             "2>/dev/null | grep -qx true; then exit 1; fi; exit 0"
         )
     return None
+
+
+def wg0_state_command(name: str) -> str:
+    guest.validate_name(name)
+    return (
+        f"pid=$(docker inspect --format '{{{{.State.Pid}}}}' {name} 2>/dev/null) "
+        "|| { echo stopped; exit 0; }; "
+        '[ "$pid" -gt 1 ] || { echo stopped; exit 0; }; '
+        'if nsenter -t "$pid" -n ip -j link show wg0 2>/dev/null; then exit 0; '
+        'else echo absent; fi'
+    )
+
+
+def read_wg0_state(client: QGAClient, name: str) -> dict:
+    """Return container/wg0 state without assuming either still exists."""
+    result = client.execute("/bin/sh", ["-c", wg0_state_command(name)], timeout=15.0)
+    text = result.stdout.decode("utf-8", "replace").strip()
+    if result.exitcode != 0:
+        return {"status": "unknown", "container_running": None, "ifindex": None}
+    if text == "stopped":
+        return {"status": "container_stopped", "container_running": False, "ifindex": None}
+    if text == "absent" or not text:
+        return {"status": "absent", "container_running": True, "ifindex": None}
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError:
+        return {"status": "unknown", "container_running": None, "ifindex": None}
+    if isinstance(document, list):
+        for entry in document:
+            if isinstance(entry, dict) and entry.get("ifname") == "wg0":
+                index = entry.get("ifindex")
+                if isinstance(index, int) and not isinstance(index, bool):
+                    return {
+                        "status": "present",
+                        "container_running": True,
+                        "ifindex": index,
+                    }
+    return {"status": "absent", "container_running": True, "ifindex": None}
+
+
+def check_kill_wireguard(
+    client: QGAClient,
+    name: str,
+    *,
+    before_ifindex: int,
+    window: float = 1.0,
+) -> dict:
+    """Prove wg0 disappeared or was recreated within one second.
+
+    A stopped router container is also proof: the release's monitor may stop
+    it while the fault is being observed (review m-5).  Recovery is recorded
+    later, never required, so the check cannot flake.
+    """
+    deadline = time.monotonic() + window
+    state = read_wg0_state(client, name)
+    while True:
+        if state["status"] == "container_stopped":
+            return {"ok": True, "proof": "container_stopped", **state}
+        if state["status"] == "absent":
+            return {"ok": True, "proof": "wg0_absent", **state}
+        if state["status"] == "present" and state["ifindex"] != before_ifindex:
+            return {"ok": True, "proof": "ifindex_changed", **state}
+        if time.monotonic() >= deadline:
+            return {"ok": False, "proof": "wg0_unchanged", **state}
+        time.sleep(0.1)
+        state = read_wg0_state(client, name)
 
 
 def run_silence_check(
@@ -890,27 +1059,60 @@ def router_handshake_command(name: str) -> str:
 
 
 def wait_router_handshake(
-    client: QGAClient, name: str, *, timeout: float | None = None
-) -> None:
-    """Require a real WireGuard handshake inside the router netns."""
+    client: QGAClient,
+    name: str,
+    *,
+    timeout: float | None = None,
+    max_age: float = HANDSHAKE_MAX_AGE_SECONDS,
+) -> int:
+    """Require a real, fresh WireGuard handshake inside the router netns.
+
+    Freshness is measured with the guest's own clock: ``latest-handshakes``
+    reports the guest-kernel timestamp, and a static or days-old handshake is
+    not proof that the tunnel is currently up.
+    """
     if timeout is None:
         timeout = ROUTER_HANDSHAKE_TIMEOUT
     deadline = time.monotonic() + timeout
     command = router_handshake_command(name)
     while time.monotonic() < deadline:
+        now = read_guest_clock(client)
         result = client.execute("/bin/sh", ["-c", command], timeout=15.0)
         if result.exitcode == 0:
             for line in result.stdout.decode("utf-8", "replace").splitlines():
                 fields = line.split()
-                if len(fields) >= 2 and fields[1].isdigit() and int(fields[1]) > 0:
-                    return
+                if len(fields) < 2 or not fields[1].isdigit():
+                    continue
+                timestamp = int(fields[1])
+                age = now - timestamp
+                if -5 <= age < max_age:
+                    return timestamp
         time.sleep(1.0)
-    raise hostcheck.Refusal("no WireGuard handshake was observed in the router netns")
+    raise hostcheck.Refusal(
+        "no fresh WireGuard handshake (age < "
+        f"{int(max_age)} s) was observed in the router netns"
+    )
 
 
-def wait_router_ready(client: QGAClient, name: str) -> None:
+def wait_router_ready(
+    client: QGAClient,
+    name: str,
+    *,
+    require_tailscale: bool = False,
+) -> None:
+    """Require the phase's pre-window readiness.
+
+    ``start-router`` (and the login bootstrap) may run before an interactive
+    login, so they require only the active unit and a fresh handshake.  Every
+    phase that certifies idle/fault behaviour must additionally consume the
+    release's own READY status and a running node that advertises an exit
+    node.
+    """
     wait_router_active(client, name)
     wait_router_handshake(client, name)
+    if require_tailscale:
+        wait_release_ready(client, name)
+        wait_tailscale_ready(client, name)
 
 
 def read_boot_id(client: QGAClient) -> str:
@@ -956,7 +1158,16 @@ def wait_docker_restarted(
     raise hostcheck.Refusal("the Docker daemon did not restart with a new PID")
 
 
-def read_tailscale_backend_state(client: QGAClient, name: str) -> str | None:
+def read_guest_clock(client: QGAClient) -> int:
+    """Read the guest wall clock (QGA), used for handshake freshness."""
+    result = client.execute("/bin/sh", ["-c", "date +%s"], timeout=15.0)
+    value = result.stdout.decode("ascii", "replace").strip()
+    if result.exitcode != 0 or not value.isdigit():
+        raise hostcheck.Refusal("cannot read the guest clock")
+    return int(value)
+
+
+def read_tailscale_status(client: QGAClient, name: str) -> dict | None:
     result = client.execute(
         "/bin/sh",
         ["-c", f"docker exec {name} tailscale status --json 2>/dev/null || true"],
@@ -966,7 +1177,32 @@ def read_tailscale_backend_state(client: QGAClient, name: str) -> str | None:
         document = json.loads(result.stdout.decode("utf-8", "replace"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         return None
+    return document if isinstance(document, dict) else None
+
+
+def tailscale_readiness_problems(document: object) -> list[str]:
+    """Require a running Tailscale node that advertises an exit node."""
     if not isinstance(document, dict):
+        return ["tailscale status is unavailable"]
+    problems: list[str] = []
+    if document.get("BackendState") != "Running":
+        problems.append("Tailscale BackendState is not Running")
+    node = document.get("Self")
+    if not isinstance(node, dict):
+        problems.append("tailscale status has no Self node")
+        return problems
+    advertised = node.get("AdvertisedRoutes")
+    routes = advertised if isinstance(advertised, list) else []
+    exit_option = node.get("ExitNodeOption") is True
+    advertises_default = any(str(route) == "0.0.0.0/0" for route in routes)
+    if not (exit_option or advertises_default):
+        problems.append("the node does not advertise an exit node")
+    return problems
+
+
+def read_tailscale_backend_state(client: QGAClient, name: str) -> str | None:
+    document = read_tailscale_status(client, name)
+    if document is None:
         return None
     state = document.get("BackendState")
     if not isinstance(state, str):
@@ -981,6 +1217,58 @@ def record_tailscale_state(record: dict, client: QGAClient, name: str) -> None:
         record["tailscale"]["backend_state"] = None
 
 
+def release_status_command(name: str) -> str:
+    guest.validate_name(name)
+    return (
+        "exec python3 /opt/vprouter/current/host/orchestrate.py status "
+        f"--name {shlex.quote(name)}"
+    )
+
+
+def wait_release_ready(
+    client: QGAClient, name: str, *, timeout: float | None = None
+) -> dict:
+    """Require the deployed release's own READY health status."""
+    if timeout is None:
+        timeout = ROUTER_ACTIVE_TIMEOUT
+    deadline = time.monotonic() + timeout
+    command = release_status_command(name)
+    last_problem = "no status"
+    while time.monotonic() < deadline:
+        result = client.execute("/bin/sh", ["-c", command], timeout=30.0)
+        if result.exitcode == 0:
+            try:
+                document = json.loads(result.stdout.decode("utf-8", "replace"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                document = None
+            if (
+                isinstance(document, dict)
+                and document.get("state") == "READY"
+                and document.get("name") == name
+            ):
+                return document
+            last_problem = "status document is not READY"
+        else:
+            last_problem = f"status exit {result.exitcode}"
+        time.sleep(2.0)
+    raise hostcheck.Refusal(f"the release did not report READY ({last_problem})")
+
+
+def wait_tailscale_ready(
+    client: QGAClient, name: str, *, timeout: float | None = None
+) -> None:
+    if timeout is None:
+        timeout = ROUTER_HANDSHAKE_TIMEOUT
+    deadline = time.monotonic() + timeout
+    problems = ["tailscale status is unavailable"]
+    while time.monotonic() < deadline:
+        problems = tailscale_readiness_problems(read_tailscale_status(client, name))
+        if not problems:
+            return
+        time.sleep(2.0)
+    raise hostcheck.Refusal("Tailscale is not a running exit node: " + "; ".join(problems))
+
+
 def find_login_url(client: QGAClient, name: str) -> str | None:
     return login_url_mod.find_login_url(client, name)
 
@@ -990,21 +1278,29 @@ def login_phase_wait(
     *,
     name: str,
     duration: float,
-    evidence_dir: pathlib.Path,
+    evidence: EvidenceDirectory,
     record: dict,
+    pcap: pathlib.Path | None = None,
+    capture_size_cap: int | None = None,
 ) -> None:
     """Poll the login URL through the runner's own QGA connection."""
-    url_path = evidence_dir / "login-url.txt"
+    url_path = evidence.path / "login-url.txt"
     deadline = time.monotonic() + duration
     found: str | None = None
     while True:
+        if pcap is not None and capture_size_cap is not None:
+            try:
+                if pathlib.Path(pcap).stat().st_size > capture_size_cap:
+                    raise CaptureCapExceeded("capture_size_cap")
+            except OSError:
+                pass
         try:
             url = find_login_url(client, name)
         except (QGAError, OSError):
             url = None
         if url is not None and found is None:
             found = url
-            write_private_text(url_path, url + "\n")
+            evidence.write_text("login-url.txt", url + "\n")
             record["login_url"] = str(url_path)
             print(f"run_phase: login URL {url}", file=sys.stderr)
         remaining = deadline - time.monotonic()
@@ -1088,9 +1384,106 @@ def _run_json(argv: list[str], *, what: str) -> object:
         raise hostcheck.Refusal(f"{what} did not return JSON") from exc
 
 
-def verify_host_lab(
-    *, tap: str, bridge: str, owner_file: str | pathlib.Path = hostcheck.OWNER_FILE
+def read_mem_available() -> int:
+    try:
+        text = pathlib.Path("/proc/meminfo").read_text(encoding="ascii")
+    except OSError as exc:
+        raise hostcheck.Refusal("cannot read /proc/meminfo") from exc
+    for line in text.splitlines():
+        if line.startswith("MemAvailable:"):
+            fields = line.split()
+            if len(fields) >= 2 and fields[1].isdigit():
+                return int(fields[1]) * 1024
+    raise hostcheck.Refusal("/proc/meminfo has no MemAvailable")
+
+
+def _existing_ancestor(path: pathlib.Path) -> pathlib.Path:
+    candidate = pathlib.Path(path)
+    while not candidate.exists():
+        if candidate.parent == candidate:
+            break
+        candidate = candidate.parent
+    return candidate
+
+
+def check_admission(
+    evidence_root: pathlib.Path,
+    capture_size_cap: int,
+    *,
+    mem_available: int | None = None,
+    free_bytes: int | None = None,
 ) -> None:
+    """Refuse to boot a guest without host memory and disk headroom."""
+    available = read_mem_available() if mem_available is None else mem_available
+    if available < MIN_MEMORY_AVAILABLE:
+        raise hostcheck.Refusal(
+            "host MemAvailable is below "
+            f"{MIN_MEMORY_AVAILABLE // (1024 * 1024)} MiB; refusing to boot"
+        )
+    if free_bytes is None:
+        try:
+            stats = os.statvfs(_existing_ancestor(evidence_root))
+        except OSError as exc:
+            raise hostcheck.Refusal("cannot measure free disk space") from exc
+        free_bytes = stats.f_bavail * stats.f_frsize
+    required = int(capture_size_cap) + DISK_HEADROOM
+    if free_bytes < required:
+        raise hostcheck.Refusal(
+            f"free disk is below the capture cap plus {DISK_HEADROOM // (1024 * 1024)} MiB"
+        )
+
+
+class CaptureCapExceeded(RuntimeError):
+    """The guest wrote more capture bytes than the phase's private quota."""
+
+
+def wait_capture_room(
+    pcap: pathlib.Path,
+    seconds: float,
+    capture_size_cap: int,
+    *,
+    chunk: float = 0.25,
+) -> None:
+    """Sleep one phase window while enforcing the capture size cap."""
+    remaining = max(0.0, float(seconds))
+    while True:
+        try:
+            size = pathlib.Path(pcap).stat().st_size
+        except OSError:
+            size = 0
+        if size > capture_size_cap:
+            raise CaptureCapExceeded("capture_size_cap")
+        if remaining <= 0:
+            return
+        step = min(chunk, remaining)
+        time.sleep(step)
+        remaining -= step
+
+
+def set_scan_limits() -> None:
+    """Child pre-exec: cap the scanner's address space at 1 GiB."""
+    import resource
+
+    limit = SCAN_MEMORY_LIMIT
+    resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+
+def verify_host_lab(
+    *,
+    tap: str,
+    bridge: str,
+    owner_file: str | pathlib.Path = hostcheck.OWNER_FILE,
+    qemu_user: str | None = None,
+) -> None:
+    if os.geteuid() == 0:
+        try:
+            rootfs.validate_ancestry(
+                pathlib.Path(owner_file).parent, expected_uid=0
+            )
+        except rootfs.PathError as exc:
+            raise hostcheck.Refusal(
+                f"owner-document ancestry is not root-trusted: {exc}"
+            ) from exc
     token = hostcheck.load_owner_token(owner_file)
     try:
         forwarding = pathlib.Path("/proc/sys/net/ipv4/ip_forward").read_text(
@@ -1131,6 +1524,7 @@ def verify_host_lab(
         bridge=bridge,
         tap=tap,
         owner_token=token,
+        tap_user=qemu_user,
     )
     if problems:
         raise hostcheck.Refusal("; ".join(problems))
@@ -1139,6 +1533,11 @@ def verify_host_lab(
 def verify_state(
     state: pathlib.Path, *, qemu_uid: int, base: pathlib.Path, qemu_gid: int | None = None
 ) -> None:
+    if os.geteuid() == 0:
+        try:
+            rootfs.validate_ancestry(pathlib.Path(state).parent, expected_uid=0)
+        except rootfs.PathError as exc:
+            raise hostcheck.Refusal(f"state ancestry is not root-trusted: {exc}") from exc
     try:
         info = state.lstat()
     except OSError as exc:
@@ -1165,6 +1564,10 @@ def verify_state(
     # parser must run as that same user (never as root).
     if qemu_gid is None:
         qemu_gid = qemu_gid_for(qemu_uid)
+    try:
+        guest.verify_tool_ancestry()
+    except guest.GeneratorError as exc:
+        raise hostcheck.Refusal(str(exc)) from exc
     argv = guest.build_setpriv_argv(
         guest.build_qemu_img_info_argv(overlay), qemu_uid, qemu_gid
     )
@@ -1175,7 +1578,7 @@ def verify_state(
             capture_output=True,
             text=True,
             timeout=60,
-            env=guest.qemu_env({}),
+            env=guest.clean_environment(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise hostcheck.Refusal("qemu-img could not inspect the overlay") from exc
@@ -1209,8 +1612,11 @@ def start_vm(
     qemu_user: str,
     uid: int,
     gid: int,
-    log_path: pathlib.Path,
+    log_path: pathlib.Path | None = None,
+    log_fd: int | None = None,
 ) -> tuple[subprocess.Popen, list[str], list[str]]:
+    if (log_path is None) == (log_fd is None):
+        raise hostcheck.Refusal("exactly one of log_path and log_fd is required")
     for stale in (guest.PID_FILE, guest.QGA_SOCKET):
         try:
             (state / stale).unlink()
@@ -1218,14 +1624,17 @@ def start_vm(
             pass
     qemu_argv = guest.build_qemu_argv("test", state, name=name, tap=tap)
     launch_argv = guest.build_launch_argv(qemu_argv, qemu_user, uid=uid, gid=gid)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    descriptor = os.open(log_path, flags, 0o600)
+    if log_fd is None:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(log_path, flags, 0o600)
+    else:
+        descriptor = os.dup(log_fd)
     with os.fdopen(descriptor, "ab") as log:
         process = subprocess.Popen(
             launch_argv,
-            env=guest.qemu_env({}),
+            env=guest.clean_environment(),
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -1257,30 +1666,110 @@ def wait_for_qga_or_exit(
             time.sleep(0.25)
 
 
+def qemu_pid_is_ours(process: subprocess.Popen, state: pathlib.Path | None) -> bool:
+    """Prove the live pid is our QEMU via its pidfile and /proc cmdline."""
+    if state is None:
+        return False
+    pid_path = pathlib.Path(state) / guest.PID_FILE
+    try:
+        info = pid_path.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            return False
+        if info.st_uid == 0 and os.geteuid() != 0:
+            return False
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(pid_path, flags)
+        try:
+            raw = os.read(descriptor, 64)
+        finally:
+            os.close(descriptor)
+        pidfile = int(raw.decode("ascii", "replace").strip())
+    except (OSError, ValueError):
+        return False
+    if pidfile != process.pid:
+        return False
+    try:
+        cmdline = pathlib.Path(f"/proc/{process.pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+    if b"qemu-system" not in cmdline:
+        return False
+    return str(state).encode() in cmdline
+
+
+def kill_qemu(process: subprocess.Popen, state: pathlib.Path | None) -> bool:
+    """SIGKILL our verified QEMU and reap it; return whether it is gone."""
+    if process.poll() is not None:
+        return True
+    if not qemu_pid_is_ours(process, state):
+        # Pid reuse: never signal a process we cannot prove is ours.
+        return False
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except OSError:
+        try:
+            process.kill()
+        except OSError:
+            return False
+    try:
+        process.wait(timeout=10)
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return True
+
+
+def isolate_tap(tap: str = guest.TAP) -> None:
+    """Bring the lab tap down so a surviving guest cannot reach the host."""
+    completed = subprocess.run(
+        ["ip", "link", "set", "dev", tap, "down"],
+        check=False,
+        capture_output=True,
+        timeout=15,
+    )
+    if completed.returncode != 0:
+        raise hostcheck.Refusal("cannot isolate the laboratory tap")
+
+
 def poweroff_vm(
-    client: QGAClient | None, process: subprocess.Popen | None
-) -> tuple[int | None, bool]:
-    """Power the guest off and wait for QEMU; return ``(status, forced)``."""
+    client: QGAClient | None,
+    process: subprocess.Popen | None,
+    *,
+    state: pathlib.Path | None = None,
+    tap: str = guest.TAP,
+) -> tuple[int | None, bool, bool]:
+    """Power the guest off; return ``(status, forced, survived)``.
+
+    A timeout, an exception, or a termination signal during the wait falls back
+    to a verified SIGKILL of our QEMU.  If the process survives even that, the
+    tap is brought down before the caller stops observing it.
+    """
+    forced = False
     if client is not None:
         try:
             client.shutdown("powerdown", timeout=5.0)
-        except (QGAError, OSError):
-            pass
+        except BaseException:  # noqa: BLE001 - a failed request still means kill
+            forced = True
         finally:
             try:
                 client.close()
             except OSError:
                 pass
     if process is None:
-        return None, False
+        return None, forced, False
     try:
-        return process.wait(timeout=POWEROFF_TIMEOUT), False
-    except subprocess.TimeoutExpired:
+        return process.wait(timeout=POWEROFF_TIMEOUT), forced, False
+    except BaseException:  # timeout or a termination signal during the wait
+        forced = True
+    if kill_qemu(process, state):
+        status = process.poll()
+        return status, forced, False
+    survived = process.poll() is None
+    if survived:
         try:
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        except OSError:
-            process.kill()
-        return process.wait(timeout=10), True
+            isolate_tap(tap)
+        except (hostcheck.Refusal, OSError, subprocess.SubprocessError):
+            pass
+    return (process.poll() if not survived else None), forced, survived
 
 
 # ---------------------------------------------------------------------------
@@ -1309,16 +1798,45 @@ def install_signal_handlers() -> None:
         signal.signal(signum, _handle_signal)
 
 
+@contextlib.contextmanager
+def block_termination_signals():
+    """Keep a process handle from being orphaned between fork and assignment."""
+    if not hasattr(signal, "pthread_sigmask"):
+        yield
+        return
+    blocked = {signal.SIGTERM, signal.SIGHUP, signal.SIGINT}
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, blocked)
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+
+
 # ---------------------------------------------------------------------------
 # Main phase
 
 
-def _evidence_run_dir(root: pathlib.Path, phase: str, name: str) -> pathlib.Path:
+def _evidence_run_dir(
+    root: pathlib.Path, phase: str, name: str
+) -> EvidenceDirectory:
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    ensure_root_directory(root)
-    run_dir = pathlib.Path(root) / f"{phase}-{stamp}-{name}"
-    ensure_root_directory(run_dir)
-    return run_dir
+    expected_uid = 0 if os.geteuid() == 0 else os.geteuid()
+    root_fd = rootfs.open_directory(
+        root, create=True, mode=0o700, expected_uid=expected_uid
+    )
+    try:
+        run_name = f"{phase}-{stamp}-{name}"
+        run_fd = rootfs.make_run_directory(
+            root_fd, run_name, expected_uid=expected_uid
+        )
+    finally:
+        os.close(root_fd)
+    return EvidenceDirectory(fd=run_fd, path=pathlib.Path(root) / run_name)
+
+
+@dataclasses.dataclass
+class LifecycleState:
+    qemu_alive: bool = False
 
 
 def run_phase(arguments: argparse.Namespace) -> int:
@@ -1331,8 +1849,12 @@ def run_phase(arguments: argparse.Namespace) -> int:
             "name must be a throw-away zz-vprtest-NN-do-not-use label"
         )
     image_id = guest.validate_image_id(arguments.image_id)
-    if arguments.duration < 0 or arguments.duration > 86400:
-        raise hostcheck.Refusal("duration must be in 0..86400 seconds")
+    if arguments.duration < 0 or arguments.duration > MAX_PHASE_DURATION:
+        raise hostcheck.Refusal(
+            f"duration must be in 0..{int(MAX_PHASE_DURATION)} seconds"
+        )
+    if arguments.capture_size_cap <= 0:
+        raise hostcheck.Refusal("capture size cap must be positive")
     if arguments.profile_fd is not None and arguments.profile_file is not None:
         raise hostcheck.Refusal("use exactly one of --profile-fd and --profile-file")
     if arguments.profile_fd is None and arguments.profile_file is None:
@@ -1350,6 +1872,7 @@ def run_phase(arguments: argparse.Namespace) -> int:
     )
     base = pathlib.Path(arguments.base_image)
     used_path = pathlib.Path(arguments.used_nonces)
+    lifecycle = LifecycleState()
 
     lock_fd = runlock.acquire(arguments.run_lock)
     try:
@@ -1360,9 +1883,19 @@ def run_phase(arguments: argparse.Namespace) -> int:
             state=state,
             base=base,
             used_path=used_path,
+            lifecycle=lifecycle,
         )
     finally:
-        runlock.release(lock_fd)
+        if lifecycle.qemu_alive:
+            # Never release admission while a guest that we could not kill and
+            # isolate may still be running.  The descriptor stays open; the
+            # kernel releases it only when this process exits.
+            print(
+                "run_phase: QEMU survived shutdown; keeping the run lock held",
+                file=sys.stderr,
+            )
+        else:
+            runlock.release(lock_fd)
 
 
 def _run_phase_locked(
@@ -1373,6 +1906,7 @@ def _run_phase_locked(
     state: pathlib.Path,
     base: pathlib.Path,
     used_path: pathlib.Path,
+    lifecycle: LifecycleState,
 ) -> int:
     # The single-guest check happens while the global lock is held.
     hostcheck.refuse_if_qemu_running(self_pid=os.getpid())
@@ -1380,7 +1914,15 @@ def _run_phase_locked(
         uid, gid = guest.resolve_unprivileged_user(arguments.qemu_user)
     except guest.GeneratorError as exc:
         raise hostcheck.Refusal(str(exc)) from exc
+    if os.geteuid() == 0:
+        try:
+            rootfs.validate_ancestry(base.parent, expected_uid=0)
+        except rootfs.PathError as exc:
+            raise hostcheck.Refusal(f"base image ancestry is not root-trusted: {exc}") from exc
     base_digest = guest.verify_base_image(base, pathlib.Path(arguments.checksum_manifest))
+    check_admission(
+        pathlib.Path(arguments.evidence_root), int(arguments.capture_size_cap)
+    )
 
     if arguments.profile_fd is not None:
         profile = read_profile_fd(arguments.profile_fd)
@@ -1394,9 +1936,19 @@ def _run_phase_locked(
 
     verify_state(state, qemu_uid=uid, qemu_gid=gid, base=base)
     verify_host_lab(
-        tap=arguments.tap, bridge=arguments.bridge, owner_file=arguments.owner_file
+        tap=arguments.tap,
+        bridge=arguments.bridge,
+        owner_file=arguments.owner_file,
+        qemu_user=arguments.qemu_user,
     )
 
+    if os.geteuid() == 0:
+        try:
+            rootfs.validate_ancestry(used_path.parent, expected_uid=0)
+        except rootfs.PathError as exc:
+            raise hostcheck.Refusal(
+                f"used-nonces ancestry is not root-trusted: {exc}"
+            ) from exc
     used = load_used_nonces(used_path)
     pair = fresh_pair(used)
     append_used_nonces(used_path, pair)
@@ -1413,15 +1965,16 @@ def _run_phase_locked(
         raise hostcheck.Refusal("cannot resolve the evidence path") from exc
     if evidence_real == state_real or state_real in evidence_real.parents:
         raise hostcheck.Refusal(
-            "evidence must live outside the opsec-owned VM state directory"
+            "evidence must live outside the QEMU-owned VM state directory"
         )
-    evidence_dir = _evidence_run_dir(evidence_root, arguments.phase, name)
+    evidence = _evidence_run_dir(evidence_root, arguments.phase, name)
+    evidence_dir = evidence.path
     pcap = evidence_dir / guest.CAPTURE_FILE
     stats = evidence_dir / guest.CAPTURE_STATS_FILE
     scan_path = evidence_dir / guest.SCAN_REPORT_FILE
     qemu_log = evidence_dir / guest.QEMU_LOG_FILE
+    evidence.write_json("policy.json", lab_policy.to_dict())
     policy_path = evidence_dir / "policy.json"
-    write_private_json(policy_path, lab_policy.to_dict())
 
     record = base_phase_record(
         phase=arguments.phase,
@@ -1430,13 +1983,14 @@ def _run_phase_locked(
         evidence_dir=evidence_dir,
         image_id=image_id,
     )
+    record["certifies"] = CERTIFICATION
     record["nonces"]["before"] = pair["before"]
     record["nonces"]["after"] = pair["after"]
     record["nonces"]["used_nonces_file"] = str(used_path)
     record["nonces"]["reserved"] = True
     record["policy"] = {
         "path": str(policy_path),
-        "sha256": sha256_file(policy_path),
+        "sha256": evidence.hash("policy.json"),
         "allowed": [flow.to_dict() for flow in lab_policy.allowed],
         "positive_control": lab_policy.positive_control.to_dict(),
         "allow_arp": lab_policy.allow_arp,
@@ -1445,6 +1999,7 @@ def _run_phase_locked(
     record["base_image"] = str(base)
     record["base_image_sha512"] = base_digest
     record["qemu_log"] = str(qemu_log)
+    record["capture_size_cap"] = int(arguments.capture_size_cap)
     boot_control_phase = arguments.phase == "reboot-with-router-enabled"
 
     capture: Capture | None = None
@@ -1460,20 +2015,28 @@ def _run_phase_locked(
             errors.append(reason)
 
     try:
-        capture = start_capture(arguments.tap, pcap, stats, tcpdump=tcpdump)
+        with block_termination_signals():
+            capture = start_capture(
+                arguments.tap, pcap, stats, tcpdump=tcpdump, evidence_fd=evidence.fd
+            )
         record["tcpdump_argv"] = capture.argv
         record["timestamps"]["capture_started"] = utc_now()
-        write_private_json(evidence_dir / guest.CAPTURE_ARGV_FILE, capture.argv)
+        evidence.write_json(guest.CAPTURE_ARGV_FILE, capture.argv)
 
-        qemu_process, qemu_argv, launch_argv = start_vm(
-            state,
-            name=name,
-            tap=arguments.tap,
-            qemu_user=arguments.qemu_user,
-            uid=uid,
-            gid=gid,
-            log_path=qemu_log,
-        )
+        qemu_log_fd = evidence.open_append(guest.QEMU_LOG_FILE)
+        try:
+            with block_termination_signals():
+                qemu_process, qemu_argv, launch_argv = start_vm(
+                    state,
+                    name=name,
+                    tap=arguments.tap,
+                    qemu_user=arguments.qemu_user,
+                    uid=uid,
+                    gid=gid,
+                    log_fd=qemu_log_fd,
+                )
+        finally:
+            os.close(qemu_log_fd)
         record["qemu_argv"] = qemu_argv
         record["launch_argv"] = launch_argv
         record["timestamps"]["qemu_started"] = utc_now()
@@ -1553,11 +2116,14 @@ def _run_phase_locked(
             )
             boot_setup_ok = True
             try:
-                wait_router_ready(client, name)
+                wait_router_ready(client, name, require_tailscale=True)
                 record["setup"]["active"] = True
             except hostcheck.Refusal:
                 record["setup"]["active"] = False
                 note("router_not_ready")
+                boot_setup_ok = False
+            if record["postcondition"]["exitcode"] != 0:
+                note("postcondition_failed")
                 boot_setup_ok = False
             record["timestamps"]["router_active"] = utc_now()
             record_tailscale_state(record, client, name)
@@ -1585,7 +2151,11 @@ def _run_phase_locked(
                 setup_ok = False
             else:
                 try:
-                    wait_router_ready(client, name)
+                    wait_router_ready(
+                        client,
+                        name,
+                        require_tailscale=arguments.phase != "login",
+                    )
                     record["setup"]["active"] = True
                 except hostcheck.Refusal:
                     record["setup"]["active"] = False
@@ -1607,10 +2177,22 @@ def _run_phase_locked(
                 command = action_command(arguments.phase, name)
                 record["action"]["command"] = command
                 docker_pid_before = None
+                wg0_before = None
                 if arguments.phase == "restart-docker":
                     try:
                         docker_pid_before = read_docker_pid(client)
                     except hostcheck.Refusal:
+                        note("postcondition_failed")
+                        action_ok = False
+                if arguments.phase == "kill-wireguard" and action_ok:
+                    before = read_wg0_state(client, name)
+                    if before["status"] == "present" and before["ifindex"] is not None:
+                        wg0_before = before["ifindex"]
+                        record["preconditions"] = {
+                            "wg0_ifindex": wg0_before,
+                            "container_running": True,
+                        }
+                    else:
                         note("postcondition_failed")
                         action_ok = False
                 if action_ok:
@@ -1626,11 +2208,12 @@ def _run_phase_locked(
                 if action_ok:
                     if arguments.phase == "start-router":
                         try:
-                            wait_router_ready(client, name)
+                            wait_router_ready(client, name, require_tailscale=False)
                         except hostcheck.Refusal:
                             note("router_not_ready")
                             action_ok = False
                         else:
+                            record["setup"]["active"] = True
                             record_tailscale_state(record, client, name)
                     elif arguments.phase == "restart-docker":
                         try:
@@ -1643,7 +2226,20 @@ def _run_phase_locked(
                                 "docker_pid_before": docker_pid_before,
                                 "docker_pid_after": new_pid,
                             }
+                            wait_router_ready(client, name, require_tailscale=True)
                         except hostcheck.Refusal:
+                            note("postcondition_failed")
+                            action_ok = False
+                    elif arguments.phase == "kill-wireguard" and wg0_before is not None:
+                        proof = check_kill_wireguard(
+                            client, name, before_ifindex=wg0_before
+                        )
+                        record["postcondition"] = {
+                            "command": wg0_state_command(name),
+                            "exitcode": 0 if proof["ok"] else 1,
+                            **proof,
+                        }
+                        if not proof["ok"]:
                             note("postcondition_failed")
                             action_ok = False
                     elif arguments.phase in FAULT_PHASES:
@@ -1663,12 +2259,20 @@ def _run_phase_locked(
                     client,
                     name=name,
                     duration=arguments.duration,
-                    evidence_dir=evidence_dir,
+                    evidence=evidence,
                     record=record,
+                    pcap=pcap,
+                    capture_size_cap=int(arguments.capture_size_cap),
                 )
                 record_tailscale_state(record, client, name)
+                if record["tailscale"]["backend_state"] != "Running":
+                    note("login_not_running")
             else:
-                time.sleep(arguments.duration)
+                wait_capture_room(
+                    pcap, arguments.duration, int(arguments.capture_size_cap)
+                )
+            if arguments.phase == "kill-wireguard":
+                record["recovery"] = read_wg0_state(client, name)
 
         record["controls"]["after_exitcode"] = emit_control(
             client, pair["after"], lab_policy, wan_device
@@ -1676,7 +2280,9 @@ def _run_phase_locked(
         record["controls"]["after_transport"] = "qga"
         record["timestamps"]["after_control"] = utc_now()
         after_control_sent = True
-    except BaseException as exc:  # noqa: BLE001 - recorded and re-raised below
+    except CaptureCapExceeded:
+        note("capture_size_cap")
+    except BaseException as exc:  # noqa: BLE001 - every failure is recorded as INVALID
         record["error_class"] = exc.__class__.__name__
         note(f"phase_exception:{exc.__class__.__name__}")
     finally:
@@ -1690,13 +2296,27 @@ def _run_phase_locked(
             except BaseException as exc:  # noqa: BLE001 - one step must not skip the rest
                 record["cleanup"]["services"] = exc.__class__.__name__
                 note("cleanup_failed")
-        # 2. Guest poweroff.
+        # 2. Guest poweroff.  A timeout, an exception or a termination signal
+        #    falls back to a verified SIGKILL, then tap isolation; the run lock
+        #    is retained if QEMU survives both.
         record["timestamps"]["vm_poweroff_started"] = utc_now()
         try:
-            status, forced = poweroff_vm(client, qemu_process)
+            status, forced, survived = poweroff_vm(
+                client, qemu_process, state=state, tap=arguments.tap
+            )
         except BaseException as exc:  # noqa: BLE001
-            status, forced = None, True
             record["poweroff_error"] = exc.__class__.__name__
+            status, forced = None, True
+            survived = qemu_process is not None and qemu_process.poll() is None
+            if survived and qemu_process is not None:
+                if kill_qemu(qemu_process, state):
+                    survived = False
+                    status = qemu_process.poll()
+                else:
+                    try:
+                        isolate_tap(arguments.tap)
+                    except BaseException:  # noqa: BLE001
+                        pass
         client = None
         record["qemu_exit_status"] = status
         record["timestamps"]["vm_finished_at"] = utc_now()
@@ -1704,10 +2324,25 @@ def _run_phase_locked(
             note("forced_poweroff")
         elif status not in (0, None):
             note("qemu_exit_status")
+        if survived:
+            note("qemu_still_running")
+            record["qemu_survived"] = True
+            lifecycle.qemu_alive = True
+            try:
+                isolate_tap(arguments.tap)
+                record["tap_isolated"] = True
+            except BaseException as exc:  # noqa: BLE001
+                record["tap_isolation_error"] = exc.__class__.__name__
+                note("tap_isolation_failed")
         # 3. Verify the AFTER marker reached the pcap before stopping tcpdump.
         if after_control_sent and capture is not None:
             try:
-                arrived = wait_for_control_in_pcap(capture.pcap, pair["after"])
+                arrived = wait_for_control_in_pcap(
+                    capture.pcap,
+                    pair["after"],
+                    evidence_fd=evidence.fd,
+                    name=capture.pcap.name,
+                )
             except BaseException:  # noqa: BLE001
                 arrived = False
             record["controls"]["after_in_pcap"] = arrived
@@ -1721,32 +2356,49 @@ def _run_phase_locked(
             pass
         if capture is not None:
             try:
-                record["tcpdump_exit_status"] = stop_capture(capture)
+                record["tcpdump_exit_status"] = stop_capture(
+                    capture, evidence_fd=evidence.fd
+                )
+                record["tcpdump_forced_stop"] = bool(
+                    getattr(capture, "forced_stop", False)
+                )
                 record["timestamps"]["capture_stopped"] = utc_now()
             except BaseException as exc:  # noqa: BLE001
                 record["tcpdump_exit_status"] = None
                 record["capture_stop_error"] = exc.__class__.__name__
                 note("capture_stop_failed")
             capture = None
+        if record.get("tcpdump_exit_status") not in (0, None):
+            note("tcpdump_exit_status")
         record["errors"] = list(errors)
 
     # Scan even after a failed phase: missing controls and truncated windows
     # are pcapscan's INVALID, not a reason to suppress the capture.
     scan_exit = 2
     scan_verdict: str | None = None
-    if pcap.is_file():
+    try:
+        capture_present = evidence.size(guest.CAPTURE_FILE) > 0
+    except (rootfs.PathError, OSError):
+        capture_present = False
+    if capture_present:
+        pre_hashes = {
+            "pcap_sha256": evidence.hash(guest.CAPTURE_FILE),
+            "stats_sha256": evidence.hash(guest.CAPTURE_STATS_FILE),
+            "capture_argv_sha256": evidence.hash(guest.CAPTURE_ARGV_FILE),
+            "policy_sha256": evidence.hash("policy.json"),
+        }
         scan_argv = [
             sys.executable,
             "-B",
             str(_LEAK_LAB_DIR / "pcapscan.py"),
             "--policy",
-            str(policy_path),
+            evidence.proc_path("policy.json"),
             "--pcap",
-            str(pcap),
+            evidence.proc_path(guest.CAPTURE_FILE),
             "--tcpdump-stats",
-            str(stats),
+            evidence.proc_path(guest.CAPTURE_STATS_FILE),
             "--capture-argv-file",
-            str(evidence_dir / guest.CAPTURE_ARGV_FILE),
+            evidence.proc_path(guest.CAPTURE_ARGV_FILE),
             "--expect-tunnel",
             PHASE_EXPECTATIONS[arguments.phase],
             "--control-before",
@@ -1756,15 +2408,15 @@ def _run_phase_locked(
         ]
         try:
             completed = subprocess.run(
-                scan_argv, check=False, capture_output=True, timeout=300
+                scan_argv,
+                check=False,
+                capture_output=True,
+                timeout=SCAN_TIMEOUT,
+                pass_fds=(evidence.fd,),
+                preexec_fn=set_scan_limits,
             )
             scan_exit = completed.returncode
-            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-            if hasattr(os, "O_NOFOLLOW"):
-                flags |= os.O_NOFOLLOW
-            descriptor = os.open(scan_path, flags, 0o600)
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(completed.stdout)
+            evidence.open_new(guest.SCAN_REPORT_FILE, completed.stdout, mode=0o600)
             scan_stderr = completed.stderr[:4096]
         except (OSError, subprocess.SubprocessError) as exc:
             scan_exit = 2
@@ -1772,40 +2424,56 @@ def _run_phase_locked(
         record["pcapscan_argv"] = scan_argv
         record["scan"]["exitcode"] = scan_exit
         record["scan"]["stderr"] = scan_stderr.decode("utf-8", "replace")
-        if scan_path.is_file():
-            try:
-                report = json.loads(scan_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                report = None
-            if isinstance(report, dict):
-                raw = report.get("verdict")
-                scan_verdict = raw if isinstance(raw, str) else None
-                expected_exit = {"PASS": 0, "LEAK": 1, "INVALID": 2}.get(
-                    scan_verdict or ""
-                )
-                if expected_exit is None or expected_exit != scan_exit:
-                    note("scan_report_mismatch")
-                if report.get("control_before") not in (None, pair["before"]):
-                    note("scan_report_mismatch")
-                if report.get("control_after") not in (None, pair["after"]):
-                    note("scan_report_mismatch")
-            record["scan"]["verdict"] = scan_verdict
-            record["hashes"]["scan_sha256"] = sha256_file(scan_path)
+        try:
+            report = json.loads(evidence.read_bytes(guest.SCAN_REPORT_FILE))
+        except (rootfs.PathError, OSError, json.JSONDecodeError):
+            report = None
+            note("scan_report_invalid")
+        if isinstance(report, dict):
+            raw = report.get("verdict")
+            scan_verdict = raw if isinstance(raw, str) else None
+            expected_exit = {"PASS": 0, "LEAK": 1, "INVALID": 2}.get(
+                scan_verdict or ""
+            )
+            if expected_exit is None or expected_exit != scan_exit:
+                note("scan_report_mismatch")
+            if report.get("control_before") not in (None, pair["before"]):
+                note("scan_report_mismatch")
+            if report.get("control_after") not in (None, pair["after"]):
+                note("scan_report_mismatch")
+            capture_meta = report.get("capture_meta")
+            if isinstance(capture_meta, dict):
+                for field in (
+                    "source_sha256",
+                    "stats_sha256",
+                    "capture_argv_sha256",
+                    "policy_sha256",
+                ):
+                    declared = capture_meta.get(field)
+                    expected = pre_hashes[
+                        "pcap_sha256" if field == "source_sha256" else field
+                    ]
+                    if declared != expected:
+                        note("scan_report_mismatch")
+            else:
+                note("scan_report_mismatch")
         else:
-            note("scan_report_missing")
+            note("scan_report_invalid")
+        record["scan"]["verdict"] = scan_verdict
+        record["hashes"]["scan_sha256"] = evidence.hash(guest.SCAN_REPORT_FILE)
+        post_hashes = {
+            "pcap_sha256": evidence.hash(guest.CAPTURE_FILE),
+            "stats_sha256": evidence.hash(guest.CAPTURE_STATS_FILE),
+            "capture_argv_sha256": evidence.hash(guest.CAPTURE_ARGV_FILE),
+            "policy_sha256": evidence.hash("policy.json"),
+        }
+        if post_hashes != pre_hashes:
+            note("scan_report_mismatch")
+        record["hashes"].update(pre_hashes)
     else:
         note("capture_missing")
 
     record["hashes"]["policy_sha256"] = record["policy"]["sha256"]
-    record["hashes"]["stats_sha256"] = (
-        sha256_file(stats) if stats.is_file() else None
-    )
-    record["hashes"]["pcap_sha256"] = sha256_file(pcap) if pcap.is_file() else None
-    record["hashes"]["capture_argv_sha256"] = (
-        sha256_file(evidence_dir / guest.CAPTURE_ARGV_FILE)
-        if (evidence_dir / guest.CAPTURE_ARGV_FILE).is_file()
-        else None
-    )
     record["durations"]["phase_seconds"] = round(time.monotonic() - started, 3)
     record["timestamps"]["scan_finished"] = utc_now()
 
@@ -1823,7 +2491,10 @@ def _run_phase_locked(
     record["result"] = final_result
     record["result_reason"] = "; ".join(errors) if errors else None
     record["errors"] = list(errors)
-    write_private_json(evidence_dir / guest.PHASE_RECORD_FILE, record)
+    try:
+        evidence.write_json(guest.PHASE_RECORD_FILE, record)
+    finally:
+        evidence.close()
 
     if record["error_class"] is not None:
         print(
@@ -1866,6 +2537,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bridge", default=guest.BRIDGE)
     parser.add_argument("--tcpdump", default="tcpdump")
     parser.add_argument("--evidence-root", default=str(EVIDENCE_ROOT))
+    parser.add_argument(
+        "--capture-size-cap",
+        type=int,
+        default=DEFAULT_CAPTURE_SIZE_CAP,
+        help="stop the phase and mark it INVALID above this many pcap bytes",
+    )
     parser.add_argument("--run-lock", default=str(runlock.RUN_LOCK))
     parser.add_argument("--owner-file", default=str(hostcheck.OWNER_FILE))
     arguments = parser.parse_args(argv)

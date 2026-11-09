@@ -77,50 +77,55 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-lock", default=str(runlock.RUN_LOCK))
     arguments = parser.parse_args(argv)
     # A runner holds one QGA connection for the whole phase; a second client
-    # cannot complete the handshake.  Refuse loudly instead of timing out.
+    # cannot complete the handshake.  Hold the same global lock across the
+    # connection (not just a check-then-release probe) so a phase cannot take
+    # it between the check and the connect.
     try:
-        runlock.ensure_unlocked(arguments.run_lock)
+        lock_fd = runlock.acquire(arguments.run_lock)
     except runlock.LockError as exc:
         print(f"login_url: {exc}", file=sys.stderr)
         return 2
     try:
-        guest.validate_name(arguments.name)
-    except guest.GeneratorError as exc:
-        print(f"login_url: {exc}", file=sys.stderr)
-        return 2
-    state = (
-        pathlib.Path(arguments.state)
-        if arguments.state is not None
-        else guest.state_path(arguments.index, pathlib.Path(arguments.state_root))
-    )
-    deadline = time.monotonic() + max(0.0, arguments.wait)
-    try:
-        client = wait_for_qga(
-            state / guest.QGA_SOCKET, timeout=arguments.connect_timeout
+        try:
+            guest.validate_name(arguments.name)
+        except guest.GeneratorError as exc:
+            print(f"login_url: {exc}", file=sys.stderr)
+            return 2
+        state = (
+            pathlib.Path(arguments.state)
+            if arguments.state is not None
+            else guest.state_path(arguments.index, pathlib.Path(arguments.state_root))
         )
-    except QGAError as exc:
-        print(f"login_url: {exc}", file=sys.stderr)
-        return 2
-    try:
-        while True:
-            try:
-                url = find_login_url(client, arguments.name)
-            except QGAError as exc:
-                print(f"login_url: {exc}", file=sys.stderr)
-                return 2
-            if url is not None:
-                print(url)
-                return 0
-            if time.monotonic() >= deadline:
-                print(
-                    "login_url: no login URL yet; the router may be starting or "
-                    "already authenticated",
-                    file=sys.stderr,
-                )
-                return 1
-            time.sleep(2.0)
+        deadline = time.monotonic() + max(0.0, arguments.wait)
+        try:
+            client = wait_for_qga(
+                state / guest.QGA_SOCKET, timeout=arguments.connect_timeout
+            )
+        except QGAError as exc:
+            print(f"login_url: {exc}", file=sys.stderr)
+            return 2
+        try:
+            while True:
+                try:
+                    url = find_login_url(client, arguments.name)
+                except QGAError as exc:
+                    print(f"login_url: {exc}", file=sys.stderr)
+                    return 2
+                if url is not None:
+                    print(url)
+                    return 0
+                if time.monotonic() >= deadline:
+                    print(
+                        "login_url: no login URL yet; the router may be starting or "
+                        "already authenticated",
+                        file=sys.stderr,
+                    )
+                    return 1
+                time.sleep(2.0)
+        finally:
+            client.close()
     finally:
-        client.close()
+        runlock.release(lock_fd)
 
 
 if __name__ == "__main__":

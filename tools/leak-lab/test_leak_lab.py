@@ -31,8 +31,12 @@ from io import StringIO
 HERE = pathlib.Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
+VM_TOOLS = HERE / "vm"
+if str(VM_TOOLS) not in sys.path:
+    sys.path.insert(0, str(VM_TOOLS))
 
 import control  # noqa: E402
+import hostcheck  # noqa: E402
 import netplan  # noqa: E402
 import pcapscan  # noqa: E402
 import policy  # noqa: E402
@@ -2399,36 +2403,59 @@ if NAME == "ip":
             save(state)
             sys.exit(0)
         if action == "show":
-            name = after(rest, "dev")
-            entry = state["links"].get(name)
-            if entry is None:
-                sys.exit(1)
-            if "-j" not in options:
-                sys.stdout.write(name + "\\n")
+            def document_for(name, entry):
+                document = {
+                    "ifindex": 9 if name == "vprlab-tap0" else 8,
+                    "ifname": name,
+                    "flags": ["BROADCAST", "MULTICAST"],
+                    "mtu": 1500,
+                    "operstate": entry.get("operstate", "DOWN"),
+                    "linkmode": "DEFAULT",
+                    "group": "default",
+                    "txqlen": 1000,
+                    "link_type": "ether",
+                    "address": entry.get("address", "52:54:00:76:70:02"),
+                    "broadcast": "ff:ff:ff:ff:ff:ff",
+                }
+                if entry.get("ifalias") is not None:
+                    document["ifalias"] = entry["ifalias"]
+                if entry.get("master"):
+                    document["master"] = entry["master"]
+                if "-d" in options:
+                    info = {"info_kind": entry.get("kind", "tun"), "info_data": {}}
+                    if entry.get("kind") == "tun":
+                        info["info_data"] = {
+                            "type": entry.get("tap_type", "tap"),
+                            "user": "vprlab-qemu",
+                        }
+                    document["linkinfo"] = info
+                return document
+            if "dev" in rest:
+                name = after(rest, "dev")
+                entry = state["links"].get(name)
+                if entry is None:
+                    sys.exit(1)
+                if "-j" not in options:
+                    sys.stdout.write(name + "\\n")
+                    sys.exit(0)
+                sys.stdout.write(json.dumps([document_for(name, entry)]) + "\\n")
                 sys.exit(0)
-            document = {
-                "ifindex": 9,
-                "ifname": name,
-                "flags": ["BROADCAST", "MULTICAST"],
-                "mtu": 1500,
-                "operstate": entry.get("operstate", "DOWN"),
-                "linkmode": "DEFAULT",
-                "group": "default",
-                "txqlen": 1000,
-                "link_type": "ether",
-                "address": entry.get("address", "52:54:00:76:70:02"),
-                "broadcast": "ff:ff:ff:ff:ff:ff",
-            }
-            if entry.get("ifalias") is not None:
-                document["ifalias"] = entry["ifalias"]
-            if entry.get("master"):
-                document["master"] = entry["master"]
-            if "-d" in options:
-                info = {"info_kind": entry.get("kind", "tun"), "info_data": {}}
-                if entry.get("kind") == "tun":
-                    info["info_data"] = {"type": entry.get("tap_type", "tap")}
-                document["linkinfo"] = info
-            sys.stdout.write(json.dumps([document]) + "\\n")
+            if fail("link_inventory"):
+                sys.stderr.write("RTNETLINK answers: No buffer space available\\n")
+                sys.exit(2)
+            if fail("link_inventory_json"):
+                sys.stdout.write("not json\\n")
+                sys.exit(0)
+            if "-j" not in options:
+                for name in state["links"]:
+                    sys.stdout.write(name + "\\n")
+                sys.exit(0)
+            sys.stdout.write(
+                json.dumps(
+                    [document_for(name, entry) for name, entry in state["links"].items()]
+                )
+                + "\\n"
+            )
             sys.exit(0)
         if action == "set":
             if "dev" in rest:
@@ -2474,14 +2501,17 @@ if NAME == "ip":
             save(state)
             sys.exit(0)
         if action == "show":
-            ip = rest[2]
             entries = []
-            if ip in state["neigh"]:
-                entry = state["neigh"][ip]
+            selected = None
+            if len(rest) > 2:
+                selected = rest[2]
+            for ip, entry in state["neigh"].items():
+                if selected is not None and ip != selected:
+                    continue
                 entries.append(
                     {
                         "dst": ip,
-                        "dev": after(rest, "dev"),
+                        "dev": after(rest, "dev") if "dev" in rest else "vprlab0",
                         "lladdr": entry["lladdr"],
                         "nud_state": "permanent",
                         "state": ["PERMANENT"],
@@ -2551,6 +2581,8 @@ if NAME == "iptables":
         save(state)
         sys.exit(0)
     if action == "-C":
+        if fail("iptables_check"):
+            sys.exit(2)
         sys.exit(0 if spec in state["rules"] else 1)
     if action == "-D":
         if fail("iptables_delete"):
@@ -2706,14 +2738,14 @@ class NetplanTests(unittest.TestCase):
             "ip link add vprlab0 type bridge",
             "ip link set vprlab0 address 52:54:00:76:70:01",
             "ip addr add 10.250.0.1/24 dev vprlab0",
-            "ip tuntap add dev vprlab-tap0 mode tap user opsec",
+            "ip tuntap add dev vprlab-tap0 mode tap user vprlab-qemu",
             "ip link set dev vprlab-tap0 master vprlab0",
             "sysctl -w net.ipv6.conf.vprlab0.disable_ipv6=1",
             'nft create table inet vprlab',
             'nft add rule inet vprlab postrouting ip saddr 10.250.0.0/24 iifname "vprlab0" oifname "eth0" masquerade',
             'nft add rule inet vprlab forward iifname "vprlab0" oifname "eth0" accept',
             'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab0" accept',
-            "tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w vprlab-capture.pcap",
+            'tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w "$RUN_DIR/manual-capture.pcap"',
         ):
             self.assertIn(expected, plan)
         self.assertNotIn("flush ruleset", plan)
@@ -3015,8 +3047,9 @@ class NetplanTests(unittest.TestCase):
         self.assertNotIn("iptables -D", verify_block)
         self.assertIn("without changes", verify_block)
         # Duplicate owned DOCKER-USER rules are removed until none remain.
-        self.assertIn("while iptables -C DOCKER-USER", plan)
+        self.assertIn("if iptables -C DOCKER-USER", plan)
         self.assertIn("iptables -D DOCKER-USER", plan)
+        self.assertIn('echo "netplan: cannot inspect the outbound DOCKER-USER rule', plan)
         # The owner record is removed only after every step succeeded.
         self.assertIn("teardown incomplete; $OWNER_FILE retained for retry", teardown)
         # The script traps signals and runs teardown of what this run created.
@@ -3246,7 +3279,7 @@ class NetplanTests(unittest.TestCase):
             "-i vprlab0 -o eno1 -s 10.250.0.0/24",
             "-i eno1 -o vprlab0 -d 10.250.0.0/24 -m conntrack --ctstate ESTABLISHED,RELATED",
         ):
-            self.assertIn(f"while iptables -C DOCKER-USER {expected}", plan)
+            self.assertIn(f"iptables -C DOCKER-USER {expected}", plan)
             self.assertIn(f"iptables -D DOCKER-USER {expected}", plan)
         self.assertNotIn("--comment vprlab-owned", plan)
         self.assertIn('-m comment --comment "$OWNER"', plan)
@@ -3288,7 +3321,7 @@ class NetplanTests(unittest.TestCase):
         plan = netplan.render_plan("eth0", tap_user="vprouterlab")
         self.assertIn("ip tuntap add dev vprlab-tap0 mode tap user vprouterlab", plan)
         default = netplan.render_plan("eth0")
-        self.assertIn("ip tuntap add dev vprlab-tap0 mode tap user opsec", default)
+        self.assertIn("ip tuntap add dev vprlab-tap0 mode tap user vprlab-qemu", default)
         for user in ("root", "0", "00", "-root", "root\n"):
             with self.subTest(user=user):
                 with self.assertRaises(netplan.NetplanError):
@@ -3763,6 +3796,79 @@ class NetplanTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("--iptables-save", errors.getvalue())
 
+    def test_gpt_i8_failed_link_inventory_is_never_absence(self):
+        for failure in ("link_inventory", "link_inventory_json"):
+            with self.subTest(failure=failure):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = pathlib.Path(directory)
+                    owner = _valid_owner(root)
+                    state = _owned_state(owner)
+                    result, log, state_after, owner_path = self._run_lab(
+                        root,
+                        netplan.render_plan("eth0"),
+                        state,
+                        args=("teardown",),
+                        fails=failure,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("cannot inventory", result.stderr)
+                    for line in log.splitlines():
+                        self.assertNotIn("neigh del", line)
+                        self.assertNotIn("nft delete", line)
+                        self.assertNotIn("iptables -D", line)
+                        self.assertNotIn("link del", line)
+                    self.assertTrue(owner_path.exists())
+                    self.assertIsNotNone(state_after["table"])
+                    self.assertEqual(len(state_after["rules"]), 2)
+                    self.assertEqual(len(state_after["links"]), 2)
+
+    def test_iptables_check_error_is_not_rule_absence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            owner = _valid_owner(root)
+            state = _owned_state(owner)
+            result, log, state_after, owner_path = self._run_lab(
+                root,
+                netplan.render_plan("eth0"),
+                state,
+                args=("teardown",),
+                fails="iptables_check",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("cannot inspect", result.stderr)
+            self.assertTrue(owner_path.exists())
+            self.assertEqual(len(state_after["rules"]), 2)
+            self.assertIsNotNone(state_after["table"])
+            self.assertIn("iptables -C", log)
+            self.assertNotIn("iptables -D", log)
+
+    def test_teardown_refuses_while_a_phase_holds_the_run_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            owner = _valid_owner(root)
+            state = _owned_state(owner)
+            import fcntl
+
+            lock_path = root / "run" / "run.lock"
+            descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                result, log, state_after, owner_path = self._run_lab(
+                    root,
+                    netplan.render_plan("eth0"),
+                    state,
+                    args=("teardown",),
+                )
+            finally:
+                os.close(descriptor)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("holds", result.stderr)
+            self.assertIn("refusing teardown", result.stderr)
+            self.assertTrue(owner_path.exists())
+            self.assertIsNotNone(state_after["table"])
+            self.assertEqual(state_after, state)
+            self.assertNotIn("link del", log)
+
     def test_check_mode_reports_docker_forward_policy(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -3786,6 +3892,210 @@ class NetplanTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("FORWARD policy DROP", output.getvalue())
             self.assertIn("DOCKER-USER present", output.getvalue())
+
+
+# --------------------------------------------------------------------------
+# Resource bounds (gpt I9)
+# --------------------------------------------------------------------------
+class ResourceBoundTests(unittest.TestCase):
+    def test_50k_record_stream_scan_is_memory_bounded(self):
+        import tracemalloc
+
+        frames = [control_frame(NONCE_A)]
+        frames += [wg_outbound() for _ in range(50_000)]
+        frames.append(control_frame(NONCE_B))
+        data = pcap(frames)
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "large.pcap"
+            path.write_bytes(data)
+            tracemalloc.start()
+            baseline = tracemalloc.get_traced_memory()[0]
+            with path.open("rb") as stream:
+                report = pcapscan.scan_capture_stream(
+                    stream,
+                    make_policy(),
+                    NONCE_A,
+                    NONCE_B,
+                    tcpdump_stats_text=zero_stats(len(frames)),
+                    capture_argv=CAPTURE_ARGV,
+                    expect_tunnel="any",
+                )
+            _current, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+        self.assertEqual(report["packets"], 50_002)
+        self.assertEqual(report["verdict"], "PASS")
+        # Per-packet tuples and the whole file are no longer retained.
+        self.assertLess(peak - baseline, 8 * 1024 * 1024)
+
+    def test_fragment_table_overflow_is_a_finding_and_invalid(self):
+        frames = [control_frame(NONCE_A)]
+        for ident in range(4097):
+            frames.append(
+                ipv4_frame(
+                    udp_segment(40000, WG_PORT, b"wireguard", length=64),
+                    ident=ident,
+                    more_fragments=True,
+                )
+            )
+        frames.append(control_frame(NONCE_B))
+        report = scan(frames)
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("fragment_table_overflow", invalid_reasons(report))
+        self.assertIn("fragment_table_overflow", reasons(report))
+        self.assertTrue(
+            any(
+                finding.get("limit") == pcapscan.MAX_FRAGMENT_ASSOCIATIONS
+                for finding in report["findings"]
+            )
+        )
+
+    def test_outside_window_indexes_are_capped_with_a_total(self):
+        frames = [control_frame(NONCE_A), control_frame(NONCE_B)]
+        frames += [wg_outbound() for _ in range(pcapscan.MAX_OUTSIDE_WINDOW_INDEXES + 500)]
+        report = scan(frames)
+        meta = report["capture_meta"]
+        self.assertEqual(meta["outside_window_allowed"], 1500)
+        self.assertEqual(
+            len(meta["outside_window_allowed_packets"]),
+            pcapscan.MAX_OUTSIDE_WINDOW_INDEXES,
+        )
+        self.assertTrue(meta["outside_window_allowed_truncated"])
+
+
+# --------------------------------------------------------------------------
+# M1 -> M2 ownership integration
+# --------------------------------------------------------------------------
+class OwnershipIntegrationTests(unittest.TestCase):
+    def _documents(self, state, token, *, tap_user="vprlab-qemu"):
+        owner = netplan.OWNER_PREFIX + token
+        links = []
+        order = [netplan.BRIDGE, netplan.TAP]
+        for name in order:
+            entry = state["links"][name]
+            document = {
+                "ifname": name,
+                "address": entry.get("address", ""),
+                "flags": ["UP"] if entry.get("operstate") == "UP" else [],
+                "ifalias": entry.get("ifalias"),
+            }
+            if entry.get("master"):
+                document["master"] = entry["master"]
+            if name == netplan.BRIDGE:
+                document["linkinfo"] = {"info_kind": "bridge"}
+                document["addr_info"] = [
+                    {"family": "inet", "local": netplan.BRIDGE_ADDRESS.split("/")[0],
+                     "prefixlen": 24}
+                ]
+            else:
+                document["linkinfo"] = {
+                    "info_kind": "tun",
+                    "info_data": {
+                        "type": entry.get("tap_type", "tap"),
+                        "user": tap_user,
+                    },
+                }
+            links.append(document)
+        table = {
+            "nftables": [
+                {
+                    "table": {
+                        "family": "inet",
+                        "name": "vprlab",
+                        "comment": state["table"]["comment"],
+                    }
+                }
+            ]
+            + [
+                {"chain": {"family": "inet", "name": name, "table": "vprlab"}}
+                for name in hostcheck.REQUIRED_CHAINS
+            ]
+        }
+        neighbours = [
+            {
+                "dst": ip,
+                "dev": netplan.BRIDGE,
+                "lladdr": entry["lladdr"],
+                "state": ["PERMANENT"] if entry.get("permanent") else ["STALE"],
+            }
+            for ip, entry in state["neigh"].items()
+        ]
+        return links, table, neighbours
+
+    def _verify(self, documents, token="e" * 32):
+        return hostcheck.verify_host_network(
+            documents[0], documents[1], documents[2], owner_token=token
+        )
+
+    def test_generated_m1_setup_is_accepted_by_m2_and_every_mutation_is_refused(self):
+        import copy
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            result, _log, state, owner_path = NetplanTests()._run_lab(
+                root,
+                netplan.render_plan("eth0"),
+                {},
+                args=("setup",),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(owner_path.exists())
+            token = json.loads(owner_path.read_text())["token"]
+            self.assertRegex(token, r"^[0-9a-f]{32}$")
+            self.assertIn(netplan.OWNER_PREFIX + token, state["table"]["comment"])
+            documents = self._documents(state, token)
+            self.assertEqual(self._verify(documents, token), [])
+
+            def mutate(change):
+                cloned = copy.deepcopy(documents)
+                change(cloned[0], cloned[1], cloned[2])
+                return cloned
+
+            mutations = {
+                "old fixed table tag": lambda links, table, neigh: table["nftables"][0][
+                    "table"
+                ].__setitem__("comment", "vprlab-leak-lab-m1"),
+                "missing table comment": lambda links, table, neigh: table[
+                    "nftables"
+                ][0]["table"].pop("comment"),
+                "missing table": lambda links, table, neigh: table.__setitem__(
+                    "nftables", [entry for entry in table["nftables"] if "table" not in entry]
+                ),
+                "missing chain": lambda links, table, neigh: table["nftables"].pop(),
+                "bridge ifalias": lambda links, table, neigh: links[0].__setitem__(
+                    "ifalias", "vprlab-owned:" + "f" * 32
+                ),
+                "tap ifalias": lambda links, table, neigh: links[1].__setitem__(
+                    "ifalias", None
+                ),
+                "bridge MAC": lambda links, table, neigh: links[0].__setitem__(
+                    "address", "52:54:00:76:70:09"
+                ),
+                "bridge down": lambda links, table, neigh: links[0].__setitem__(
+                    "flags", []
+                ),
+                "bridge address": lambda links, table, neigh: links[0][
+                    "addr_info"
+                ][0].__setitem__("local", "10.250.0.9"),
+                "tap master": lambda links, table, neigh: links[1].pop("master"),
+                "plain tun": lambda links, table, neigh: links[1]["linkinfo"][
+                    "info_data"
+                ].__setitem__("type", "tun"),
+                "tap owner": lambda links, table, neigh: links[1]["linkinfo"][
+                    "info_data"
+                ].__setitem__("user", "opsec"),
+                "neighbour MAC": lambda links, table, neigh: neigh[0].__setitem__(
+                    "lladdr", "52:54:00:76:70:09"
+                ),
+                "neighbour state": lambda links, table, neigh: neigh[0].__setitem__(
+                    "state", ["STALE"]
+                ),
+                "neighbour absent": lambda links, table, neigh: neigh.clear(),
+            }
+            for label, change in mutations.items():
+                with self.subTest(label=label):
+                    self.assertNotEqual(self._verify(mutate(change), token), [])
+            with self.subTest(label="wrong run token"):
+                self.assertNotEqual(self._verify(documents, "f" * 32), [])
 
 
 # --------------------------------------------------------------------------

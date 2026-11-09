@@ -51,8 +51,11 @@ LAB_SUBNET_TEXT = "10.250.0.0/24"
 LAB_SUBNET = ipaddress.IPv4Network(LAB_SUBNET_TEXT)
 OWNER_PREFIX = "vprlab-owned:"
 DEFAULT_RUN_DIR = "/run/vprlab"
-DEFAULT_TAP_USER = "opsec"
-DEFAULT_CAPTURE = "vprlab-capture.pcap"
+DEFAULT_TAP_USER = "vprlab-qemu"
+#: The M1 plan's own foreground capture lives in the root-owned run directory
+#: (created before the capture starts), never in the operator's working
+#: directory.  ``$RUN_DIR`` is expanded by the generated shell script.
+DEFAULT_CAPTURE = "$RUN_DIR/manual-capture.pcap"
 VM_WAN_IPV4 = "10.250.0.2"
 
 _IFACE_RE = re.compile(r"^[A-Za-z0-9_.:@-]{1,15}$")
@@ -281,6 +284,47 @@ if len(entries) != 1:
 sys.exit(0 if entries[0].get("master") else 1)
 """
 
+#: Full-inventory lookups.  Exit 0 means present, 1 means proved absent from a
+#: complete successful inventory, and 2 means the inventory itself failed.
+#: Only 1 may be read as "the object is gone"; a failed inventory retains
+#: protection.
+_INVENTORY_LINK_CODE = """\
+import json, sys
+name = sys.argv[1]
+try:
+    document = json.load(sys.stdin)
+except Exception:
+    sys.exit(2)
+if not isinstance(document, list):
+    sys.exit(2)
+present = False
+for entry in document:
+    if not isinstance(entry, dict) or not isinstance(entry.get("ifname"), str):
+        sys.exit(2)
+    if entry["ifname"] == name:
+        present = True
+sys.exit(0 if present else 1)
+"""
+
+_INVENTORY_NEIGH_CODE = """\
+import json, sys
+ip = sys.argv[1]
+dev = sys.argv[2]
+try:
+    document = json.load(sys.stdin)
+except Exception:
+    sys.exit(2)
+if not isinstance(document, list):
+    sys.exit(2)
+present = False
+for entry in document:
+    if not isinstance(entry, dict):
+        sys.exit(2)
+    if entry.get("dst") == ip and entry.get("dev") == dev:
+        present = True
+sys.exit(0 if present else 1)
+"""
+
 _ISOLATED_CHECK_CODE = """\
 import json, sys
 name = sys.argv[1]
@@ -350,9 +394,34 @@ set -eu
 
 RUN_DIR="${VPRLAB_RUN_DIR:-@@RUN_DIR@@}"
 OWNER_FILE="$RUN_DIR/owner.json"
+RUN_LOCK="$RUN_DIR/run.lock"
 OWNER=""
 RUN_STARTED=0
 TEARDOWN_DONE=0
+
+# Exit 0: present.  Exit 1: a complete successful inventory proves absence.
+# Exit 2: inventory failed or was malformed; absence is NOT proved.
+link_state() {
+  ip -j link show 2>/dev/null | python3 -c '@@INVENTORY_LINK@@' "$1"
+}
+
+neigh_state() {
+  ip -j neigh show 2>/dev/null | python3 -c '@@INVENTORY_NEIGH@@' "@@VM_IP@@" "@@BRIDGE@@"
+}
+
+teardown_locked() {
+  if [ -e "$RUN_LOCK" ]; then
+    if ! command -v flock >/dev/null 2>&1; then
+      echo "netplan: cannot verify $RUN_LOCK without flock; refusing teardown" >&2
+      return 1
+    fi
+    if ! flock -n "$RUN_LOCK" true 2>/dev/null; then
+      echo "netplan: a leak-lab phase holds $RUN_LOCK; refusing teardown" >&2
+      return 1
+    fi
+  fi
+  return 0
+}
 
 read_owner() {
   if ! OWNER=$(python3 -c '@@READ_OWNER@@' "$OWNER_FILE" 2>/dev/null); then
@@ -402,37 +471,54 @@ tap_mastered() {
 
 verify_ownership() {
   failed=0
-  if ip link show dev @@TAP@@ >/dev/null 2>&1; then
-    if ! link_owned "@@TAP@@" tun; then
-      echo "netplan: refusing teardown: @@TAP@@ exists but is not owned by this run (ifalias or link kind mismatch)" >&2
-      failed=1
-    fi
-  fi
-  if ip link show dev @@BRIDGE@@ >/dev/null 2>&1; then
-    if ! link_owned "@@BRIDGE@@" bridge; then
-      echo "netplan: refusing teardown: @@BRIDGE@@ exists but is not owned by this run (ifalias or link kind mismatch)" >&2
-      failed=1
-    fi
-  fi
+  rc=0; link_state "@@TAP@@" || rc=$?
+  case "$rc" in
+    0) if ! link_owned "@@TAP@@" tun; then
+         echo "netplan: refusing teardown: @@TAP@@ exists but is not owned by this run (ifalias or link kind mismatch)" >&2
+         failed=1
+       fi ;;
+    1) : ;;
+    *) echo "netplan: cannot inventory links; retaining protection and refusing teardown" >&2
+       failed=1 ;;
+  esac
+  rc=0; link_state "@@BRIDGE@@" || rc=$?
+  case "$rc" in
+    0) if ! link_owned "@@BRIDGE@@" bridge; then
+         echo "netplan: refusing teardown: @@BRIDGE@@ exists but is not owned by this run (ifalias or link kind mismatch)" >&2
+         failed=1
+       fi ;;
+    1) : ;;
+    *) echo "netplan: cannot inventory links; retaining protection and refusing teardown" >&2
+       failed=1 ;;
+  esac
   if nft list table @@TABLE_FAMILY@@ @@TABLE_NAME@@ >/dev/null 2>&1; then
     if ! table_owned; then
       echo "netplan: refusing teardown: @@TABLE_FAMILY@@ @@TABLE_NAME@@ exists without this run's exact comment" >&2
       failed=1
     fi
   fi
-  if ip link show dev @@BRIDGE@@ >/dev/null 2>&1; then
-    if ! neigh_ok; then
-      echo "netplan: refusing teardown: @@VM_IP@@ neighbour on @@BRIDGE@@ is not this run's fixed permanent entry" >&2
-      failed=1
-    fi
-  fi
+  rc=0; link_state "@@BRIDGE@@" || rc=$?
+  case "$rc" in
+    0) if ! neigh_ok; then
+         echo "netplan: refusing teardown: @@VM_IP@@ neighbour on @@BRIDGE@@ is not this run's fixed permanent entry" >&2
+         failed=1
+       fi ;;
+    1) : ;;
+    *) echo "netplan: cannot inventory links; retaining protection and refusing teardown" >&2
+       failed=1 ;;
+  esac
   return "$failed"
 }
 
 isolate_tap() {
-  if ! ip link show dev @@TAP@@ >/dev/null 2>&1; then
+  rc=0; link_state "@@TAP@@" || rc=$?
+  if [ "$rc" -eq 1 ]; then
     echo "netplan: @@TAP@@ absent; guest already isolated"
     return 0
+  fi
+  if [ "$rc" -ne 0 ]; then
+    echo "netplan: cannot inventory links; @@TAP@@ isolation is unproven; stopping with protections in place" >&2
+    return 1
   fi
   if ! ip link set dev @@TAP@@ down; then
     echo "netplan: failed to set @@TAP@@ down; stopping with protections in place" >&2
@@ -451,30 +537,49 @@ isolate_tap() {
   return 0
 }
 
+# iptables -C exits 1 for "no such rule" and any other status for a real
+# inspection failure.  Only status 1 may end the removal loop.
 remove_docker_out() {
-  while iptables -C DOCKER-USER @@DOCKER_SPEC_OUT@@ 2>/dev/null; do
-    if ! iptables -D DOCKER-USER @@DOCKER_SPEC_OUT@@; then
-      echo "netplan: failed to remove outbound DOCKER-USER accept" >&2
+  while :; do
+    if iptables -C DOCKER-USER @@DOCKER_SPEC_OUT@@ 2>/dev/null; then
+      if ! iptables -D DOCKER-USER @@DOCKER_SPEC_OUT@@; then
+        echo "netplan: failed to remove outbound DOCKER-USER accept" >&2
+        return 1
+      fi
+    else
+      rc=$?
+      [ "$rc" -eq 1 ] && return 0
+      echo "netplan: cannot inspect the outbound DOCKER-USER rule (status $rc)" >&2
       return 1
     fi
   done
-  return 0
 }
 
 remove_docker_in() {
-  while iptables -C DOCKER-USER @@DOCKER_SPEC_IN@@ 2>/dev/null; do
-    if ! iptables -D DOCKER-USER @@DOCKER_SPEC_IN@@; then
-      echo "netplan: failed to remove inbound DOCKER-USER accept" >&2
+  while :; do
+    if iptables -C DOCKER-USER @@DOCKER_SPEC_IN@@ 2>/dev/null; then
+      if ! iptables -D DOCKER-USER @@DOCKER_SPEC_IN@@; then
+        echo "netplan: failed to remove inbound DOCKER-USER accept" >&2
+        return 1
+      fi
+    else
+      rc=$?
+      [ "$rc" -eq 1 ] && return 0
+      echo "netplan: cannot inspect the inbound DOCKER-USER rule (status $rc)" >&2
       return 1
     fi
   done
-  return 0
 }
 
 delete_link() {
-  if ! ip link show dev "$1" >/dev/null 2>&1; then
+  rc=0; link_state "$1" || rc=$?
+  if [ "$rc" -eq 1 ]; then
     echo "netplan: $1 absent"
     return 0
+  fi
+  if [ "$rc" -ne 0 ]; then
+    echo "netplan: cannot inventory links; refusing to delete $1 (absence unproven)" >&2
+    return 1
   fi
   if ! link_owned "$1" "$2"; then
     echo "netplan: refusing to delete $1 (ownership changed)" >&2
@@ -497,6 +602,9 @@ delete_link() {
 # teardown stops with all protections still installed.  The owner record is
 # removed last and only after every step succeeded.
 do_teardown() {
+  if ! teardown_locked; then
+    return 1
+  fi
   if ! read_owner; then
     return 1
   fi
@@ -509,16 +617,22 @@ do_teardown() {
     return 1
   fi
   failed=0
-  if ip link show dev @@BRIDGE@@ >/dev/null 2>&1 && neigh_present; then
-    if ! ip neigh del @@VM_IP@@ dev @@BRIDGE@@; then
-      echo "netplan: failed to remove the static neighbour @@VM_IP@@ on @@BRIDGE@@" >&2
-      failed=1
-    fi
-  else
-    echo "netplan: no static neighbour for @@VM_IP@@ on @@BRIDGE@@"
-  fi
+  rc=0; neigh_state || rc=$?
+  case "$rc" in
+    0) if ! ip neigh del @@VM_IP@@ dev @@BRIDGE@@; then
+         echo "netplan: failed to remove the static neighbour @@VM_IP@@ on @@BRIDGE@@" >&2
+         failed=1
+       fi ;;
+    1) echo "netplan: no static neighbour for @@VM_IP@@ on @@BRIDGE@@" ;;
+    *) echo "netplan: cannot inventory neighbours; retaining protection" >&2
+      return 1 ;;
+  esac
   remove_docker_out || failed=1
   remove_docker_in || failed=1
+  if [ "$failed" -ne 0 ]; then
+    echo "netplan: teardown incomplete; DOCKER-USER rules could not be proved removed; $OWNER_FILE retained for retry" >&2
+    return 1
+  fi
   if nft list table @@TABLE_FAMILY@@ @@TABLE_NAME@@ >/dev/null 2>&1; then
     if table_owned; then
       if ! nft delete table @@TABLE_FAMILY@@ @@TABLE_NAME@@; then
@@ -623,6 +737,16 @@ ip neigh replace @@VM_IP@@ lladdr @@VM_MAC@@ dev @@BRIDGE@@ nud permanent
 ip link set @@TAP@@ up
 ip link set @@BRIDGE@@ up
 
+# Setup-only mode leaves the reviewed lab network running for the M2 phase
+# runner.  The runner owns the capture, so no second (unbounded) tcpdump is
+# started here.  Teardown remains a separate explicit subcommand and refuses
+# while /run/vprlab/run.lock is held by a phase.
+if [ "${1:-}" = "setup" ]; then
+  TEARDOWN_DONE=1
+  echo "netplan: setup complete; capture not started"
+  exit 0
+fi
+
 # --- 5. capture outside the VM ---
 # The exact argv below must be supplied to pcapscan.py as --capture-argv-file
 # (a JSON list, without the shell redirection). Stop the capture only after the
@@ -672,6 +796,12 @@ def render_plan(
 
     capture_line = " ".join(shlex.quote(part) for part in argv)
     stats_q = shlex.quote(stats_file)
+    if capture_file.startswith("$RUN_DIR/"):
+        capture_line = capture_line.replace(
+            shlex.quote(capture_file), '"' + capture_file + '"'
+        )
+    if stats_file.startswith("$RUN_DIR/"):
+        stats_q = '"' + stats_file + '"'
 
     docker_spec_out = (
         f"-i {BRIDGE} -o {wan} -s {LAB_SUBNET_TEXT} "
@@ -710,6 +840,8 @@ def render_plan(
         NFT_CHECK=_NFT_CHECK_CODE,
         NEIGH_CHECK=_NEIGH_CHECK_CODE,
         NEIGH_PRESENT=_NEIGH_PRESENT_CODE,
+        INVENTORY_LINK=_INVENTORY_LINK_CODE,
+        INVENTORY_NEIGH=_INVENTORY_NEIGH_CODE,
         ISOLATED_CHECK=_ISOLATED_CHECK_CODE,
         TAP_MASTERED=_TAP_MASTERED_CODE,
     )

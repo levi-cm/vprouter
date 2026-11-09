@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import os
 import pathlib
 import re
 import shlex
@@ -19,17 +20,18 @@ import shlex
 # ---------------------------------------------------------------------------
 # Fixed lab facts
 
+#: Root-owned layout (controller decision A).  Nothing under
+#: ``/DATA/vprouter-lab`` is used at runtime: that tree is owned by the
+#: interactive operator and can be renamed at any time.
 BASE_IMAGE = pathlib.Path(
-    "/DATA/vprouter-lab/lab-images/debian-13-genericcloud-amd64-20261021-2638.qcow2"
+    "/var/lib/vprlab/images/debian-13-genericcloud-amd64-20261021-2638.qcow2"
 )
 BASE_IMAGE_SHA512 = (
     "16e0965312c56feb331049d45d2b1b5778f3f942a33d4300eedbb97527707f2bea"
     "87c0006f3e4cc7a25fadbff739c4e235a51fb9bcd1b66fd554f7f8e80ba45c"
 )
-CHECKSUM_MANIFEST = pathlib.Path(
-    "/DATA/vprouter-lab/lab-images/SHA512SUMS-20261021-2638"
-)
-LAB_TOOLS = pathlib.Path("/DATA/vprouter-lab/lab-tools/root")
+CHECKSUM_MANIFEST = pathlib.Path("/var/lib/vprlab/images/SHA512SUMS")
+LAB_TOOLS = pathlib.Path("/opt/vprlab-tools")
 QEMU = LAB_TOOLS / "usr/bin/qemu-system-x86_64"
 QEMU_IMG = LAB_TOOLS / "usr/bin/qemu-img"
 GENISOIMAGE = LAB_TOOLS / "usr/bin/genisoimage"
@@ -37,9 +39,17 @@ LAB_LIBRARY_DIR = LAB_TOOLS / "usr/lib/x86_64-linux-gnu"
 QEMU_MODULE_DIR = LAB_LIBRARY_DIR / "qemu"
 QEMU_SHARE_DIR = LAB_TOOLS / "usr/share/qemu"
 
-STATE_ROOT = pathlib.Path("/DATA/vprouter-lab/leaklab")
+STATE_ROOT = pathlib.Path("/var/lib/vprlab")
+EVIDENCE_ROOT = STATE_ROOT / "evidence"
 RELEASE_DIR = pathlib.Path("/opt/vprouter/current")
-QEMU_USER = "opsec"
+#: Dedicated system account, member of ``kvm`` only.  Created by hostsetup.py.
+QEMU_USER = "vprlab-qemu"
+#: Groups that must never contain the QEMU account.  Membership in any group
+#: other than its own primary group and ``kvm`` is refused.
+QEMU_FORBIDDEN_GROUPS = frozenset(
+    {"sudo", "wheel", "adm", "docker", "lxd", "libvirt", "disk"}
+)
+QEMU_ALLOWED_EXTRA_GROUPS = frozenset({"kvm"})
 
 BRIDGE = "vprlab0"
 TAP = "vprlab-tap0"
@@ -223,10 +233,36 @@ def state_path(index: int = DEFAULT_INDEX, root: pathlib.Path = STATE_ROOT) -> p
 
 
 def qemu_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Return the staged-tool environment (used **after** the privilege drop)."""
     environment = dict(base if base is not None else {})
     environment["LD_LIBRARY_PATH"] = str(LAB_LIBRARY_DIR)
     environment["QEMU_MODULE_DIR"] = str(QEMU_MODULE_DIR)
     return environment
+
+
+def clean_environment() -> dict[str, str]:
+    """Return a loader-clean environment for the trusted ``setpriv`` binary.
+
+    ``setpriv`` resolves its own shared libraries before it can drop
+    privileges, so it must never see ``LD_LIBRARY_PATH`` pointing at an
+    operator-owned directory.  The staged QEMU library/module variables are
+    applied by ``/usr/bin/env -i`` only after ``setpriv --``.
+    """
+    return {
+        "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+    }
+
+
+def staged_env_argv() -> list[str]:
+    """Return the post-drop ``env -i`` prefix for the staged tool tree."""
+    return [
+        "/usr/bin/env",
+        "-i",
+        "LD_LIBRARY_PATH=" + str(LAB_LIBRARY_DIR),
+        "QEMU_MODULE_DIR=" + str(QEMU_MODULE_DIR),
+    ]
 
 
 def build_qemu_argv(
@@ -318,17 +354,71 @@ def build_qemu_argv(
     return argv
 
 
-def resolve_unprivileged_user(user: str = QEMU_USER) -> tuple[int, int]:
-    """Return ``(uid, gid)`` for a non-root account; refuse uid 0."""
+def verify_qemu_account(
+    user: str = QEMU_USER,
+    *,
+    pwd_record: object | None = None,
+    group_records: list[object] | None = None,
+) -> tuple[int, int, str]:
+    """Refuse QEMU accounts with root or privileged-group access.
+
+    ``pwd_record`` needs ``pw_uid``/``pw_gid``/``pw_name``; group records need
+    ``gr_name``, ``gr_gid`` and ``gr_mem``.  The defaults are read from the
+    live host.  Membership is refused for uid 0, any explicitly forbidden
+    group, and every supplementary group except ``kvm``.
+    """
+    import grp
     import pwd
 
-    try:
-        record = pwd.getpwnam(user)
-    except KeyError as exc:
-        raise GeneratorError(f"unknown unprivileged user {user!r}") from exc
-    if record.pw_uid == 0:
+    if pwd_record is None:
+        try:
+            pwd_record = pwd.getpwnam(user)
+        except KeyError as exc:
+            raise GeneratorError(f"unknown unprivileged user {user!r}") from exc
+    uid = int(getattr(pwd_record, "pw_uid"))
+    gid = int(getattr(pwd_record, "pw_gid"))
+    if uid == 0:
         raise GeneratorError("QEMU must never run as uid 0")
-    return record.pw_uid, record.pw_gid
+    records = group_records if group_records is not None else list(grp.getgrall())
+    primary = getattr(pwd_record, "pw_name", user)
+    for record in records:
+        name = str(getattr(record, "gr_name", ""))
+        members = getattr(record, "gr_mem", [])
+        if not isinstance(members, (list, tuple)):
+            continue
+        if user not in members and not (name == primary and int(getattr(record, "gr_gid", -1)) == gid):
+            continue
+        if name in QEMU_FORBIDDEN_GROUPS:
+            raise GeneratorError(
+                f"QEMU user {user!r} must not be a member of {name!r}"
+            )
+        if name == primary:
+            continue
+        if name not in QEMU_ALLOWED_EXTRA_GROUPS:
+            raise GeneratorError(
+                f"QEMU user {user!r} has an unexpected supplementary group {name!r}"
+            )
+    return uid, gid, primary
+
+
+def resolve_unprivileged_user(user: str = QEMU_USER) -> tuple[int, int]:
+    """Return ``(uid, gid)`` for a validated non-root, kvm-only account."""
+    uid, gid, _primary = verify_qemu_account(user)
+    return uid, gid
+
+
+def verify_tool_ancestry(tools: pathlib.Path = LAB_TOOLS) -> None:
+    """Refuse a staged tool tree below an operator-writable directory."""
+    import rootfs
+
+    if os.geteuid() != 0:
+        # Offline tests run as the operator; the production caller is root and
+        # must validate every ancestor.
+        return
+    try:
+        rootfs.validate_ancestry(tools, expected_uid=0)
+    except rootfs.PathError as exc:
+        raise GeneratorError(f"staged tool tree is not root-trusted: {exc}") from exc
 
 
 def build_setpriv_argv(
@@ -338,7 +428,13 @@ def build_setpriv_argv(
     *,
     setpriv: str = "/usr/bin/setpriv",
 ) -> list[str]:
-    """Wrap ``argv`` in setpriv with every extra privilege removed."""
+    """Wrap ``argv`` in setpriv with every extra privilege removed.
+
+    The trusted setpriv itself runs with the caller's clean environment.  The
+    staged QEMU library/module variables are only set by ``env -i`` after the
+    privilege drop, so the dynamic loader can never resolve setpriv's own
+    dependencies from an operator-owned directory.
+    """
     if isinstance(uid, bool) or isinstance(gid, bool):
         raise GeneratorError("uid and gid must be integers")
     if not isinstance(uid, int) or not isinstance(gid, int):
@@ -349,12 +445,15 @@ def build_setpriv_argv(
         setpriv,
         f"--reuid={uid}",
         f"--regid={gid}",
-        "--clear-groups",
+        # Keep exactly the validated account's supplementary groups (``kvm``)
+        # so the dedicated QEMU user can open /dev/kvm; never inherit the
+        # caller's groups.
+        "--init-groups",
         "--no-new-privs",
         "--inh-caps=-all",
         "--bounding-set=-all",
         "--",
-    ] + list(argv)
+    ] + staged_env_argv() + list(argv)
 
 
 def build_private_tool_argv(

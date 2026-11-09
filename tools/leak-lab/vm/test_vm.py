@@ -31,6 +31,7 @@ from unittest import mock
 
 import guest
 import hostcheck
+import hostsetup
 import login_url
 import provision
 import runlock
@@ -286,6 +287,59 @@ class QGATestCase(unittest.TestCase):
         self.assertLessEqual(len(message), 200 + len("guest agent error GenericError: guest-ping: "))
         self.assertIn("guest-ping", message)
 
+    def test_guest_error_class_and_description_are_never_rendered(self) -> None:
+        key = "A" * 43 + "="
+        for error_class in ("GenericError", "PRIVATEKEY" + "A" * 32, key):
+            with self.subTest(error_class=error_class[:16]):
+                client = QGAClient("/not-connected")
+                client._buffer = (
+                    json.dumps(
+                        {
+                            "error": {
+                                "class": error_class,
+                                "desc": "PrivateKey = " + key,
+                            }
+                        }
+                    ).encode("ascii")
+                    + b"\n"
+                )
+                with self.assertRaises(QGAError) as raised:
+                    client._read_response(0)
+                message = str(raised.exception)
+                self.assertNotIn(key, message)
+                self.assertNotIn("PrivateKey", message)
+                self.assertNotIn("desc", message)
+                if error_class == "GenericError":
+                    self.assertIn("GenericError", message)
+                else:
+                    self.assertIn("guest_error", message)
+
+    def test_guest_error_through_command_is_mapped_only_to_a_class(self) -> None:
+        key = "B" * 43 + "="
+        client = QGAClient("/not-connected")
+
+        class Socket:
+            def sendall(self, _payload):
+                return None
+
+        client._socket = Socket()
+        client._buffer = (
+            json.dumps(
+                {
+                    "id": None,
+                    "error": {"class": key, "desc": "PrivateKey = " + key},
+                }
+            ).encode("ascii")
+            + b"\n"
+        )
+        with self.assertRaises(QGAError) as raised:
+            client.command("guest-ping")
+        message = str(raised.exception)
+        self.assertIn("guest-ping", message)
+        self.assertIn("guest_error", message)
+        self.assertNotIn(key, message)
+        self.assertNotIn("PrivateKey", message)
+
 
 class QemuArgvTests(unittest.TestCase):
     def test_test_mode_is_tap_only_and_has_no_qmp(self) -> None:
@@ -334,24 +388,29 @@ class QemuArgvTests(unittest.TestCase):
 
     def test_unprivileged_launch_drops_every_privilege(self) -> None:
         argv = guest.build_qemu_argv("test", pathlib.Path("/state"))
-        launched = guest.build_launch_argv(argv, "opsec", uid=1000, gid=1000)
+        launched = guest.build_launch_argv(argv, "vprlab-qemu", uid=1000, gid=1000)
         self.assertEqual(
-            launched[:8],
+            launched[:9],
             [
                 "/usr/bin/setpriv",
                 "--reuid=1000",
                 "--regid=1000",
-                "--clear-groups",
+                "--init-groups",
                 "--no-new-privs",
                 "--inh-caps=-all",
                 "--bounding-set=-all",
                 "--",
+                "/usr/bin/env",
             ],
         )
         self.assertIn("--no-new-privs", launched)
         self.assertIn("--inh-caps=-all", launched)
         self.assertIn("--bounding-set=-all", launched)
-        self.assertEqual(launched[launched.index("--") + 1 :], argv)
+        # The staged-loader variables are applied only after the drop.
+        self.assertEqual(launched[9], "-i")
+        self.assertEqual(launched[10], "LD_LIBRARY_PATH=" + str(guest.LAB_LIBRARY_DIR))
+        self.assertEqual(launched[11], "QEMU_MODULE_DIR=" + str(guest.QEMU_MODULE_DIR))
+        self.assertEqual(launched[12:], argv)
 
     def test_uid_zero_is_refused(self) -> None:
         with self.assertRaises(guest.GeneratorError):
@@ -360,6 +419,48 @@ class QemuArgvTests(unittest.TestCase):
             guest.build_setpriv_argv(["tool"], 0, 0)
         with self.assertRaises(guest.GeneratorError):
             guest.resolve_unprivileged_user("root")
+
+    def test_qemu_account_must_be_nonroot_and_kvm_only(self) -> None:
+        import types
+
+        def user(uid=123, gid=100):
+            return types.SimpleNamespace(
+                pw_uid=uid,
+                pw_gid=gid,
+                pw_name="vprlab-qemu",
+                pw_shell="/usr/sbin/nologin",
+            )
+
+        def group(name, gid, members):
+            return types.SimpleNamespace(gr_name=name, gr_gid=gid, gr_mem=list(members))
+
+        valid_groups = [
+            group("vprlab-qemu", 100, []),
+            group("kvm", 108, ["vprlab-qemu"]),
+        ]
+        self.assertEqual(
+            guest.verify_qemu_account(
+                "vprlab-qemu", pwd_record=user(), group_records=valid_groups
+            ),
+            (123, 100, "vprlab-qemu"),
+        )
+        with self.assertRaises(guest.GeneratorError):
+            guest.verify_qemu_account(
+                "vprlab-qemu", pwd_record=user(uid=0), group_records=valid_groups
+            )
+        for forbidden in ("sudo", "wheel", "adm", "docker", "lxd", "libvirt", "disk"):
+            with self.subTest(group=forbidden):
+                groups = valid_groups + [group(forbidden, 50, ["vprlab-qemu"])]
+                with self.assertRaises(guest.GeneratorError):
+                    guest.verify_qemu_account(
+                        "vprlab-qemu", pwd_record=user(), group_records=groups
+                    )
+        with self.assertRaises(guest.GeneratorError):
+            guest.verify_qemu_account(
+                "vprlab-qemu",
+                pwd_record=user(),
+                group_records=valid_groups + [group("backup", 34, ["vprlab-qemu"])],
+            )
 
     def test_generator_tools_run_as_qemu_with_private_umask(self) -> None:
         wrapper = guest.build_private_tool_argv(
@@ -445,7 +546,7 @@ class ActionCommandTests(unittest.TestCase):
         stop = run_phase.postcondition_command("stop-router", name)
         self.assertIn("is-active", stop)
         wireguard = run_phase.postcondition_command("kill-wireguard", name)
-        self.assertIn("ip link show wg0", wireguard)
+        self.assertIn("ip -j link show wg0", wireguard)
         container = run_phase.postcondition_command("kill-container", name)
         self.assertIn("State.Running", container)
         self.assertIsNone(run_phase.postcondition_command("start-router", name))
@@ -799,7 +900,7 @@ class HostcheckTests(unittest.TestCase):
                     "table": {
                         "family": "inet",
                         "name": "vprlab",
-                        "comment": hostcheck.OWNER_TAG,
+                        "comment": "vprlab-owned:" + "e" * 32,
                     }
                 }
             ]
@@ -1058,7 +1159,12 @@ class RefusalTests(unittest.TestCase):
         self.assertIn("--regid=456", argv)
         self.assertIn("umask 077; exec \"$@\"", argv)
         self.assertEqual(argv[-3:], ["/lab/qemu-img", "create", "out"])
-        self.assertEqual(captured["env"]["LD_LIBRARY_PATH"], str(guest.LAB_LIBRARY_DIR))
+        self.assertEqual(captured["env"], guest.clean_environment())
+        self.assertNotIn("LD_LIBRARY_PATH", captured["env"])
+        self.assertIn(
+            "LD_LIBRARY_PATH=" + str(guest.LAB_LIBRARY_DIR),
+            argv,
+        )
 
 
 class ProvisionPipelineTests(unittest.TestCase):
@@ -1160,6 +1266,148 @@ class ProvisionPipelineTests(unittest.TestCase):
             self.assertEqual(record["test_status"], "PROVISIONED_OFFLINE_READY")
             self.assertEqual(record["qemu_exit_status"], 0)
             self.assertEqual(record["qemu_user"], guest.QEMU_USER)
+
+    def _pipeline_arguments(self, root: pathlib.Path):
+        state_root = root / "state-root"
+        release = root / "release"
+        release.mkdir(exist_ok=True)
+        for relative in guest.TRUSTED_RELEASE_FILES:
+            path = release / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# release\n", encoding="utf-8")
+        unit = release / guest.UNIT_SOURCE
+        unit.parent.mkdir(parents=True, exist_ok=True)
+        unit.write_text("[Unit]\n", encoding="utf-8")
+        image_tar = root / "image.tar"
+        image_tar.write_bytes(b"image-tar")
+        base = root / "base.qcow2"
+        base.write_bytes(b"base")
+        manifest = root / "manifest"
+        manifest.write_text("", encoding="utf-8")
+        return argparse.Namespace(
+            index=1,
+            state_root=str(state_root),
+            name=guest.DEFAULT_NAME,
+            image_id=guest.DEPLOYED_IMAGE_ID,
+            image_tar=str(image_tar),
+            release_dir=str(release),
+            base_image=str(base),
+            checksum_manifest=str(manifest),
+            qemu_user=guest.QEMU_USER,
+            ipv6_mode="netns-safe",
+            run_lock=str(root / "run.lock"),
+        )
+
+    def _pipeline_patches(self, arguments, fake_run, fake_qemu):
+        uid = os.geteuid()
+        gid = os.getegid()
+        return [
+            mock.patch.object(provision, "require_root"),
+            mock.patch.object(
+                provision.guest, "verify_base_image", return_value="0" * 128
+            ),
+            mock.patch.object(provision.hostcheck, "refuse_if_qemu_running"),
+            mock.patch.object(provision, "_require_tool"),
+            mock.patch.object(provision, "_qemu_identity", return_value=(uid, gid)),
+            mock.patch.object(provision.os, "chown"),
+            mock.patch.object(provision.subprocess, "run", side_effect=fake_run),
+            mock.patch.object(provision.subprocess, "Popen", fake_qemu),
+            mock.patch.object(provision.time, "sleep"),
+        ]
+
+    def test_stage_payload_copies_the_image_and_never_mutates_the_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            release = root / "release"
+            release.mkdir()
+            for relative in guest.TRUSTED_RELEASE_FILES:
+                path = release / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("# release\n", encoding="utf-8")
+            unit = release / guest.UNIT_SOURCE
+            unit.parent.mkdir(parents=True, exist_ok=True)
+            unit.write_text("[Unit]\n", encoding="utf-8")
+            image = root / "operator-image.tar"
+            image.write_bytes(b"private-image-bytes")
+            os.chmod(image, 0o600)
+            state = root / "vm-001"
+            state.mkdir(mode=0o700)
+            source_inode = image.stat().st_ino
+            staging = provision._stage_payload(state, release, image)
+            source = image.stat()
+            self.assertEqual(stat.S_IMODE(source.st_mode), 0o600)
+            self.assertEqual(image.read_bytes(), b"private-image-bytes")
+            self.assertEqual(source.st_ino, source_inode)
+            staged = staging / "image" / "vprouter-image.tar"
+            self.assertNotEqual(staged.stat().st_ino, source_inode)
+            self.assertEqual(staged.read_bytes(), b"private-image-bytes")
+            self.assertEqual(stat.S_IMODE(staged.stat().st_mode), 0o644)
+
+    def test_self_signal_during_provision_reaps_the_qemu_child(self) -> None:
+        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            with self.subTest(signal=signum.name):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = pathlib.Path(temporary)
+                    arguments = self._pipeline_arguments(root)
+                    state = pathlib.Path(arguments.state_root) / "vm-001"
+                    image_id = guest.DEPLOYED_IMAGE_ID
+
+                    class FakeQemu:
+                        returncode = None
+                        pid = 9001
+
+                        def __init__(self, argv, **kwargs):
+                            del argv, kwargs
+
+                        def poll(self):
+                            return self.returncode
+
+                        def wait(self, timeout=None):
+                            del timeout
+                            self.returncode = -15
+                            return -15
+
+                    terminated = []
+
+                    def fake_run(argv, **kwargs):
+                        del kwargs
+                        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+                    def fake_wait(process, serial, timeout):
+                        del process, serial, timeout
+                        os.kill(os.getpid(), signum)
+                        raise AssertionError("signal handler did not raise")
+
+                    patches = self._pipeline_patches(
+                        arguments, fake_run, FakeQemu
+                    ) + [
+                        mock.patch.object(
+                            provision, "_wait_for_marker", side_effect=fake_wait
+                        ),
+                        mock.patch.object(
+                            provision,
+                            "_terminate",
+                            side_effect=lambda process: terminated.append(process),
+                        ),
+                    ]
+                    try:
+                        with contextlib.ExitStack() as stack:
+                            for patch in patches:
+                                stack.enter_context(patch)
+                            provision.install_signal_handlers()
+                            with self.assertRaises(hostcheck.Refusal) as raised:
+                                provision.provision(arguments)
+                        self.assertIn("ProvisionInterrupted", str(raised.exception))
+                        self.assertEqual(len(terminated), 1)
+                        record = json.loads((state / "provision.json").read_text())
+                        self.assertEqual(record["test_status"], "PROVISION_FAILED")
+                    finally:
+                        for handled in (
+                            signal.SIGTERM,
+                            signal.SIGHUP,
+                            signal.SIGINT,
+                        ):
+                            signal.signal(handled, signal.SIG_DFL)
 
 
 class SecretTests(unittest.TestCase):
@@ -1357,7 +1605,7 @@ class NameTests(unittest.TestCase):
             guest.validate_name("Production-Router")
 
     def test_state_path(self) -> None:
-        self.assertEqual(guest.state_path(1), pathlib.Path("/DATA/vprouter-lab/leaklab/vm-001"))
+        self.assertEqual(guest.state_path(1), pathlib.Path("/var/lib/vprlab/vm-001"))
         with self.assertRaises(guest.GeneratorError):
             guest.state_path(0)
 
@@ -1410,21 +1658,35 @@ class HarnessQGA:
         image_id: str = guest.DEPLOYED_IMAGE_ID,
         boot_id: str = "11111111-2222-3333-4444-555555555555",
         boot_ids: list[str] | None = None,
-        handshake: bytes = b"peerkey\t1700000000\n",
-        tailscale_state: str = "NeedsLogin",
+        handshake: bytes | None = None,
+        tailscale_state: str = "Running",
+        exit_node: bool = True,
         login_url: str | None = LOGIN_URL,
         docker_pids: list[str] | None = None,
         overrides: list | None = None,
         write_after: bool = True,
         raise_after: bool = False,
+        guest_clock: int | None = None,
+        container_running: bool = True,
+        wg0_ifindex: int = 10,
+        wg0_after_action: str = "absent",
     ) -> None:
         self.events = events
         self.pcap = pcap
         self.after_nonce = after_nonce
         self.image_id = image_id
         self.boot_ids = list(boot_ids or [boot_id])
-        self.handshake = handshake
+        self.guest_clock = int(time.time()) if guest_clock is None else int(guest_clock)
+        self.handshake = (
+            f"peerkey\t{self.guest_clock}\n".encode("ascii")
+            if handshake is None
+            else handshake
+        )
         self.tailscale_state = tailscale_state
+        self.exit_node = exit_node
+        self.container_running = container_running
+        self.wg0_ifindex = wg0_ifindex
+        self.wg0_after_action = wg0_after_action
         self.login_url = login_url
         self.docker_pids = list(docker_pids or ["111", "222"])
         self.overrides = list(overrides or [])
@@ -1476,12 +1738,63 @@ class HarnessQGA:
             return ExecResult(
                 exitcode=0, stdout=self._boot_id().encode() + b"\n", stderr=b""
             )
-        if "latest-handshakes" in command:
-            return ExecResult(exitcode=0, stdout=self.handshake, stderr=b"")
-        if "tailscale status --json" in command:
+        if command.strip() == "date +%s":
+            return ExecResult(
+                exitcode=0, stdout=f"{self.guest_clock}\n".encode("ascii"), stderr=b""
+            )
+        if "orchestrate.py status" in command:
             return ExecResult(
                 exitcode=0,
-                stdout=json.dumps({"BackendState": self.tailscale_state}).encode(),
+                stdout=json.dumps(
+                    {"name": guest.DEFAULT_NAME, "state": "READY", "heartbeat": 1}
+                ).encode(),
+                stderr=b"",
+            )
+        if "latest-handshakes" in command:
+            return ExecResult(exitcode=0, stdout=self.handshake, stderr=b"")
+        if "ip -j link show wg0" in command and "echo absent" in command:
+            action_ran = any(
+                entry[0] == "exec" and "ip link del wg0" in str(entry[1])
+                for entry in self.events
+            )
+            if not self.container_running:
+                return ExecResult(exitcode=0, stdout=b"stopped\n", stderr=b"")
+            if action_ran:
+                if self.wg0_after_action == "absent":
+                    return ExecResult(exitcode=0, stdout=b"absent\n", stderr=b"")
+                if self.wg0_after_action == "unchanged":
+                    return ExecResult(
+                        exitcode=0,
+                        stdout=json.dumps(
+                            [{"ifname": "wg0", "ifindex": self.wg0_ifindex}]
+                        ).encode(),
+                        stderr=b"",
+                    )
+                return ExecResult(
+                    exitcode=0,
+                    stdout=json.dumps(
+                        [{"ifname": "wg0", "ifindex": self.wg0_ifindex + 1}]
+                    ).encode(),
+                    stderr=b"",
+                )
+            return ExecResult(
+                exitcode=0,
+                stdout=json.dumps(
+                    [{"ifname": "wg0", "ifindex": self.wg0_ifindex}]
+                ).encode(),
+                stderr=b"",
+            )
+        if "tailscale status --json" in command:
+            node = {
+                "Online": True,
+                "ExitNodeOption": self.exit_node,
+                "AdvertisedRoutes": ["0.0.0.0/0"] if self.exit_node else [],
+            }
+            return ExecResult(
+                exitcode=0,
+                stdout=json.dumps(
+                    {"BackendState": self.tailscale_state, "Self": node}
+                ).encode(),
                 stderr=b"",
             )
         if "docker logs" in command:
@@ -1550,6 +1863,7 @@ class RunPhaseTests(unittest.TestCase):
             bridge=guest.BRIDGE,
             tcpdump="tcpdump",
             evidence_root=str(self.evidence),
+            capture_size_cap=2 * 1024 * 1024 * 1024,
             run_lock=str(self.lock),
             owner_file=str(self.root / "owner.json"),
         )
@@ -1566,13 +1880,17 @@ class RunPhaseTests(unittest.TestCase):
         capture_stop_error: bool = False,
         poweroff_override=None,
         client_kwargs: dict | None = None,
+        scan_report_override=None,
+        scan_kwargs: dict | None = None,
+        admission_raises: bool = False,
         **argument_overrides,
     ):
         arguments = self._arguments(phase, duration, **argument_overrides)
         client_kwargs = dict(client_kwargs or {})
+        self.events.clear()
 
-        def start_capture(interface, pcap, stats, *, tcpdump, popen=None, timeout=15.0):
-            del tcpdump, popen, timeout
+        def start_capture(interface, pcap, stats, *, tcpdump, evidence_fd=None, popen=None, timeout=15.0):
+            del tcpdump, popen, timeout, evidence_fd
             self.events.append(("capture_start",))
             self.pcap = pathlib.Path(pcap)
             pcap_slot[0] = self.pcap
@@ -1589,54 +1907,101 @@ class RunPhaseTests(unittest.TestCase):
                 stats=pathlib.Path(stats),
             )
 
-        def stop_capture(capture, timeout=20.0):
-            del capture, timeout
+        def stop_capture(capture, timeout=20.0, evidence_fd=None):
+            del capture, timeout, evidence_fd
             self.events.append(("capture_stop",))
             if capture_stop_error:
                 raise OSError("injected capture stop failure")
             return 0
 
-        def start_vm(state, *, name, tap, qemu_user, uid, gid, log_path):
+        def start_vm(state, *, name, tap, qemu_user, uid, gid, log_path=None, log_fd=None):
             del state, name, tap, qemu_user, uid, gid
             self.events.append(("vm_start",))
-            log_path = pathlib.Path(log_path)
-            self.assertTrue(str(log_path).startswith(str(self.evidence)))
-            log_path.write_text("qemu log\n", encoding="utf-8")
+            if log_fd is not None:
+                os.write(log_fd, b"qemu log\n")
+            else:
+                log_path = pathlib.Path(log_path)
+                self.assertTrue(str(log_path).startswith(str(self.evidence)))
+                log_path.write_text("qemu log\n", encoding="utf-8")
             return FakeProcess(self.events), ["qemu-system"], ["setpriv", "--", "qemu"]
 
         def fake_run(argv, **kwargs):
-            del kwargs
+            if scan_kwargs is not None:
+                scan_kwargs.update(kwargs)
             text = " ".join(str(part) for part in argv)
             if "pcapscan.py" not in text:
                 raise AssertionError(f"unexpected subprocess.run: {text}")
+
+            if scan_report_override is not None:
+                self.events.append(("scan",))
+                return subprocess.CompletedProcess(
+                    argv,
+                    scan_rc,
+                    stdout=json.dumps(scan_report_override).encode()
+                    if not isinstance(scan_report_override, bytes)
+                    else scan_report_override,
+                    stderr=b"",
+                )
+
+            def option(name):
+                return argv[argv.index(name) + 1]
+
+            def digest(path, algorithm="sha256"):
+                hasher = __import__("hashlib").new(algorithm)
+                with open(path, "rb") as stream:
+                    for chunk in iter(lambda: stream.read(65536), b""):
+                        hasher.update(chunk)
+                return hasher.hexdigest()
+
             self.events.append(("scan",))
+            report = {
+                "verdict": scan_verdict,
+                "control_before": option("--control-before"),
+                "control_after": option("--control-after"),
+                "capture_meta": {
+                    "source_sha256": digest(option("--pcap")),
+                    "stats_sha256": digest(option("--tcpdump-stats")),
+                    "capture_argv_sha256": digest(option("--capture-argv-file")),
+                    "policy_sha256": digest(option("--policy")),
+                },
+            }
             return subprocess.CompletedProcess(
                 argv,
                 scan_rc,
-                stdout=json.dumps(
-                    {
-                        "verdict": scan_verdict,
-                        "control_before": NONCE_A,
-                        "control_after": NONCE_B,
-                    }
-                ).encode(),
+                stdout=json.dumps(report).encode(),
                 stderr=b"",
             )
 
         pcap_slot: list[pathlib.Path | None] = [None]
         client = HarnessQGA(self.events, pcap_slot, **client_kwargs)
 
-        def fake_poweroff(client_arg, process):
-            del client_arg
+        def fake_poweroff(client_arg, process, *, state=None, tap=None):
+            del client_arg, state, tap
             self.events.append(("guest_poweroff",))
             if process is not None:
                 process.wait()
-            return (0, False)
+            return (0, False, False)
 
         with contextlib.ExitStack() as stack:
             enter = stack.enter_context
             enter(mock.patch.object(run_phase, "require_root"))
             enter(mock.patch.object(run_phase.hostcheck, "refuse_if_qemu_running"))
+            enter(
+                mock.patch.object(
+                    run_phase,
+                    "check_admission",
+                    side_effect=(
+                        hostcheck.Refusal("admission refused")
+                        if admission_raises
+                        else None
+                    ),
+                )
+            )
+            enter(mock.patch.object(
+                run_phase.guest,
+                "resolve_unprivileged_user",
+                return_value=(1000, 1000),
+            ))
             enter(mock.patch.object(run_phase.guest, "verify_base_image", return_value="0" * 128))
             enter(mock.patch.object(run_phase, "verify_state"))
             enter(mock.patch.object(run_phase, "verify_host_lab"))
@@ -1655,6 +2020,11 @@ class RunPhaseTests(unittest.TestCase):
             enter(mock.patch.object(run_phase, "start_capture", side_effect=start_capture))
             enter(mock.patch.object(run_phase, "stop_capture", side_effect=stop_capture))
             enter(mock.patch.object(run_phase, "start_vm", side_effect=start_vm))
+            enter(mock.patch.object(
+                run_phase,
+                "isolate_tap",
+                side_effect=lambda tap: self.events.append(("isolate_tap", tap)),
+            ))
             enter(mock.patch.object(run_phase, "wait_for_qga_or_exit", return_value=client))
             if phase == "reboot-with-router-enabled":
                 enter(mock.patch.object(run_phase, "wait_for_reboot", return_value=client))
@@ -1772,8 +2142,9 @@ class RunPhaseTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(record["result"], "PASS")
         self.assertEqual(record["expect_tunnel"], "up")
-        self.assertEqual(record["tailscale"]["backend_state"], "NeedsLogin")
+        self.assertEqual(record["tailscale"]["backend_state"], "Running")
         self.assertEqual(record["action"]["exitcode"], 0)
+        self.assertTrue(record["setup"]["active"])
         self.assertEqual(record["errors"], [])
 
     def test_idle_starts_the_router_and_expects_a_tunnel(self) -> None:
@@ -1816,12 +2187,12 @@ class RunPhaseTests(unittest.TestCase):
         self.assertIn("scan", [entry[0] for entry in events])
 
     def test_forced_poweroff_is_invalid(self) -> None:
-        def force_poweroff(client, process):
-            del client
+        def force_poweroff(client, process, *, state=None, tap=None):
+            del client, state, tap
             self.events.append(("forced_poweroff",))
             if process is not None:
                 process.wait()
-            return (-9, True)
+            return (-9, True, False)
 
         code, record, _client, _events, _stdout, _stderr, _dir = self._run(
             "start-router", poweroff_override=force_poweroff
@@ -1898,7 +2269,7 @@ class RunPhaseTests(unittest.TestCase):
     def test_fault_postconditions_are_mandatory(self) -> None:
         cases = {
             "stop-router": lambda name: f"systemctl is-active --quiet vprouter@{name}.service && exit 1; exit 0",
-            "kill-wireguard": lambda name: "ip link show wg0",
+            "kill-wireguard": lambda name: "echo absent",
             "kill-container": lambda name: "State.Running",
         }
         for phase, marker in cases.items():
@@ -1951,7 +2322,7 @@ class RunPhaseTests(unittest.TestCase):
         self.assertEqual(url_file.read_text(encoding="utf-8"), LOGIN_URL + "\n")
         self.assertEqual(stat.S_IMODE(url_file.stat().st_mode), 0o600)
         self.assertIn(LOGIN_URL, stderr)
-        self.assertEqual(record["tailscale"]["backend_state"], "NeedsLogin")
+        self.assertEqual(record["tailscale"]["backend_state"], "Running")
 
     # -- policy/evidence binding -----------------------------------------
 
@@ -1991,10 +2362,12 @@ class RunPhaseTests(unittest.TestCase):
         self.assertTrue(first_line.startswith("tcpdump: listening on vprlab-tap0, link-type EN10MB"))
         scan_argv = record["pcapscan_argv"]
         self.assertEqual(scan_argv[scan_argv.index("--expect-tunnel") + 1], "up")
-        self.assertEqual(
-            scan_argv[scan_argv.index("--capture-argv-file") + 1],
-            str(evidence / guest.CAPTURE_ARGV_FILE),
+        self.assertTrue(
+            scan_argv[scan_argv.index("--capture-argv-file") + 1].endswith(
+                "/" + guest.CAPTURE_ARGV_FILE
+            )
         )
+        self.assertIn("/proc/self/fd/", scan_argv[scan_argv.index("--pcap") + 1])
         policy = json.loads((evidence / "policy.json").read_text())
         self.assertIn("gateway_mac", policy)
 
@@ -2024,6 +2397,17 @@ class RunPhaseTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(record["result"], "INVALID")
         self.assertIn("router_not_ready", record["result_reason"])
+
+    def test_reboot_boot_id_postcondition_is_consumed(self) -> None:
+        same = "11111111-2222-3333-4444-555555555555"
+        code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "reboot-with-router-enabled",
+            client_kwargs={"boot_ids": [same, same]},
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertFalse(record["boot"]["boot_id_changed"])
+        self.assertIn("postcondition_failed", record["result_reason"])
 
     def test_qemu_log_is_written_outside_the_state_directory(self) -> None:
         code, record, _client, _events, _stdout, _stderr, evidence = self._run("start-router")
@@ -2057,7 +2441,330 @@ class RunPhaseTests(unittest.TestCase):
         self.assertIn("scan_report_mismatch", record["result_reason"])
 
 
+    def test_phase_record_declares_server_side_certification(self) -> None:
+        _code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "start-router"
+        )
+        self.assertEqual(
+            record["certifies"], run_phase.CERTIFICATION
+        )
+        self.assertEqual(record["certifies"], "server_side_no_client_traffic")
+
+    def test_stale_handshake_is_not_ready(self) -> None:
+        stale = int(time.time()) - 10_000
+        code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "start-router",
+            client_kwargs={"handshake": f"peerkey\t{stale}\n".encode()},
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("router_not_ready", record["result_reason"])
+
+    def test_fault_and_idle_phases_require_running_exit_node(self) -> None:
+        cases = {
+            "idle": {},
+            "stop-router": {},
+            "kill-wireguard": {},
+            "kill-container": {},
+            "restart-docker": {},
+            "reboot-with-router-enabled": {
+                "boot_ids": [
+                    "11111111-2222-3333-4444-555555555555",
+                    "66666666-7777-8888-9999-000000000000",
+                ]
+            },
+        }
+        for phase, kwargs in cases.items():
+            with self.subTest(phase=phase):
+                for path in list(self.evidence.glob("*")):
+                    if path.is_dir():
+                        import shutil
+
+                        shutil.rmtree(path)
+                code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+                    phase,
+                    client_kwargs={"tailscale_state": "NeedsLogin", **kwargs},
+                )
+                self.assertEqual(code, 2)
+                self.assertEqual(record["result"], "INVALID")
+                self.assertIn("router_not_ready", record["result_reason"])
+
+    def test_missing_exit_node_is_not_ready(self) -> None:
+        code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "stop-router", client_kwargs={"exit_node": False}
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("router_not_ready", record["result_reason"])
+
+    def test_release_status_must_be_ready(self) -> None:
+        def not_ready(command):
+            return ExecResult(exitcode=1, stdout=b"", stderr=b"BLOCKED")
+
+        code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "stop-router",
+            client_kwargs={"overrides": [("orchestrate.py status", not_ready)]},
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("router_not_ready", record["result_reason"])
+
+    def test_start_router_allows_pre_login(self) -> None:
+        code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "start-router", client_kwargs={"tailscale_state": "NeedsLogin"}
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(record["result"], "PASS")
+        self.assertEqual(record["tailscale"]["backend_state"], "NeedsLogin")
+
+    def test_login_pass_requires_backend_state_running(self) -> None:
+        code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "login", duration=0.0, client_kwargs={"tailscale_state": "NeedsLogin"}
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("login_not_running", record["result_reason"])
+
+    def test_kill_wireguard_proof_within_one_second(self) -> None:
+        cases = {
+            "absent": ("absent", 0),
+            "ifindex changed": ("changed", 0),
+            "unchanged": ("unchanged", 2),
+        }
+        for label, (after_action, expected_code) in cases.items():
+            with self.subTest(label=label):
+                for path in list(self.evidence.glob("*")):
+                    if path.is_dir():
+                        import shutil
+
+                        shutil.rmtree(path)
+                code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+                    "kill-wireguard",
+                    client_kwargs={"wg0_after_action": after_action},
+                )
+                self.assertEqual(code, expected_code)
+                self.assertEqual(
+                    record["postcondition"]["proof"],
+                    "wg0_absent"
+                    if after_action == "absent"
+                    else "ifindex_changed"
+                    if after_action == "changed"
+                    else "wg0_unchanged",
+                )
+                if expected_code:
+                    self.assertIn("postcondition_failed", record["result_reason"])
+
+    def test_kill_wireguard_records_later_recovery(self) -> None:
+        code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "kill-wireguard"
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("recovery", record)
+        self.assertEqual(record["recovery"]["status"], "absent")
+
+    def test_capture_size_cap_is_invalid_and_still_scans(self) -> None:
+        code, record, _client, events, _stdout, _stderr, _dir = self._run(
+            "start-router", capture_size_cap=1
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("capture_size_cap", record["result_reason"])
+        self.assertIn("scan", [entry[0] for entry in events])
+        self.assertEqual(record["scan"]["exitcode"], 0)
+
+    def test_scan_runs_with_address_space_limit_and_timeout(self) -> None:
+        scan_kwargs: dict = {}
+        code, _record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "start-router", scan_kwargs=scan_kwargs
+        )
+        self.assertEqual(code, 0)
+        self.assertIs(scan_kwargs.get("preexec_fn"), run_phase.set_scan_limits)
+        self.assertEqual(scan_kwargs.get("timeout"), run_phase.SCAN_TIMEOUT)
+        pass_fds = scan_kwargs.get("pass_fds")
+        self.assertIsInstance(pass_fds, tuple)
+        self.assertTrue(pass_fds)
+
+    def test_non_object_scan_report_is_invalid(self) -> None:
+        code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "start-router", scan_report_override=[]
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("scan_report_invalid", record["result_reason"])
+
+    def test_scan_report_must_bind_the_hashed_files(self) -> None:
+        report = {
+            "verdict": "PASS",
+            "control_before": NONCE_A,
+            "control_after": NONCE_B,
+            "capture_meta": {
+                "source_sha256": "0" * 64,
+                "stats_sha256": "0" * 64,
+                "capture_argv_sha256": "0" * 64,
+                "policy_sha256": "0" * 64,
+            },
+        }
+        code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "start-router", scan_report_override=report
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("scan_report_mismatch", record["result_reason"])
+
+    def test_poweroff_failure_kills_isolates_and_retains_the_lock(self) -> None:
+        def raising_poweroff(client, process, *, state=None, tap=None):
+            del client, process, state, tap
+            self.events.append(("poweroff_raised",))
+            raise OSError("injected poweroff failure")
+
+        with mock.patch.object(run_phase.runlock, "release") as release:
+            code, record, _client, events, _stdout, _stderr, _dir = self._run(
+                "start-router", poweroff_override=raising_poweroff
+            )
+        self.assertEqual(code, 2)
+        self.assertTrue(record["qemu_survived"])
+        self.assertIn("qemu_still_running", record["result_reason"])
+        labels = [entry[0] for entry in events]
+        self.assertIn("isolate_tap", labels)
+        self.assertLess(labels.index("isolate_tap"), labels.index("capture_stop"))
+        self.assertFalse(release.called)
+
+    def test_profile_endpoint_accepts_colon_separator(self) -> None:
+        material = run_phase.SecretMaterial(
+            b"[Interface]\nPrivateKey = SECRET\n\n[Peer]\nEndpoint: 185.65.134.10:51820\n"
+        )
+        self.assertEqual(
+            run_phase.profile_endpoint(material), ("185.65.134.10", 51820)
+        )
+
+    def test_hostcheck_tap_owner_field_is_enforced_when_present(self) -> None:
+        link = {
+            "ifname": "vprlab-tap0",
+            "flags": ["UP"],
+            "master": "vprlab0",
+            "ifalias": "vprlab-owned:" + "e" * 32,
+            "linkinfo": {
+                "info_kind": "tun",
+                "info_data": {"type": "tap", "user": "opsec"},
+            },
+        }
+        self.assertIsNotNone(hostcheck.validate_tap_owner(link, "vprlab-qemu"))
+        link["linkinfo"]["info_data"]["user"] = "vprlab-qemu"
+        self.assertIsNone(hostcheck.validate_tap_owner(link, "vprlab-qemu"))
+
+
+    def test_admission_is_checked_before_any_capture(self) -> None:
+        with self.assertRaises(hostcheck.Refusal):
+            self._run("start-router", admission_raises=True)
+        self.assertNotIn("capture_start", [entry[0] for entry in self.events])
+
+    def test_duration_is_capped_at_one_hour(self) -> None:
+        arguments = self._arguments("start-router", run_phase.MAX_PHASE_DURATION + 1)
+        with mock.patch.object(run_phase, "require_root"):
+            with self.assertRaises(hostcheck.Refusal):
+                run_phase.run_phase(arguments)
+
+
+class AdmissionTests(unittest.TestCase):
+    def test_low_memory_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            with self.assertRaises(hostcheck.Refusal):
+                run_phase.check_admission(
+                    root,
+                    2 * 1024 * 1024 * 1024,
+                    mem_available=run_phase.MIN_MEMORY_AVAILABLE - 1,
+                    free_bytes=10 * 1024 * 1024 * 1024,
+                )
+
+    def test_low_disk_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            with self.assertRaises(hostcheck.Refusal):
+                run_phase.check_admission(
+                    root,
+                    2 * 1024 * 1024 * 1024,
+                    mem_available=run_phase.MIN_MEMORY_AVAILABLE,
+                    free_bytes=2 * 1024 * 1024 * 1024,
+                )
+
+    def test_sufficient_memory_and_disk_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_phase.check_admission(
+                root,
+                1024 * 1024 * 1024,
+                mem_available=run_phase.MIN_MEMORY_AVAILABLE,
+                free_bytes=2 * 1024 * 1024 * 1024 + 1,
+            )
+
+    def test_qemu_kill_verifies_pidfile_and_cmdline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            state = root / "vm-001"
+            state.mkdir()
+            fake = root / "qemu-system-fake"
+            fake.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
+            fake.chmod(0o755)
+            process = subprocess.Popen(
+                [str(fake), str(state)], start_new_session=True
+            )
+            try:
+                (state / guest.PID_FILE).write_text(
+                    f"{process.pid}\n", encoding="ascii"
+                )
+                self.assertTrue(
+                    run_phase.qemu_pid_is_ours(process, state)
+                )
+                self.assertTrue(run_phase.kill_qemu(process, state))
+                self.assertIsNotNone(process.poll())
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=10)
+
+    def test_qemu_kill_refuses_a_foreign_pidfile(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            state = root / "vm-001"
+            state.mkdir()
+            process = subprocess.Popen(["sleep", "30"])
+            try:
+                (state / guest.PID_FILE).write_text(
+                    f"{process.pid + 1}\n", encoding="ascii"
+                )
+                self.assertFalse(run_phase.qemu_pid_is_ours(process, state))
+                self.assertFalse(run_phase.kill_qemu(process, state))
+                self.assertIsNone(process.poll())
+            finally:
+                process.kill()
+                process.wait(timeout=10)
+
+
 class StateLogSafetyTests(unittest.TestCase):
+    def test_launch_environment_is_loader_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            state = root / "vm-001"
+            state.mkdir()
+            log_path = root / guest.QEMU_LOG_FILE
+            captured = {}
+
+            def fake_popen(argv, **kwargs):
+                captured.update(kwargs)
+                return object()
+
+            with mock.patch.object(run_phase.subprocess, "Popen", side_effect=fake_popen):
+                run_phase.start_vm(
+                    state,
+                    name=guest.DEFAULT_NAME,
+                    tap=guest.TAP,
+                    qemu_user=guest.QEMU_USER,
+                    uid=1000,
+                    gid=1000,
+                    log_path=log_path,
+                )
+            environment = captured["env"]
+            self.assertEqual(environment, guest.clean_environment())
+            self.assertNotIn("LD_LIBRARY_PATH", environment)
+            self.assertNotIn("QEMU_MODULE_DIR", environment)
+
     def test_state_qemu_log_symlink_is_never_followed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -2194,6 +2901,20 @@ class MainExitTests(unittest.TestCase):
             for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
                 signal.signal(signum, signal.SIG_DFL)
 
+    def test_pending_signal_is_blocked_until_the_child_handle_exists(self) -> None:
+        run_phase.install_signal_handlers()
+        try:
+            run_phase._signal_seen = False
+            with self.assertRaises(run_phase.PhaseInterrupted):
+                with run_phase.block_termination_signals():
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    self.assertFalse(run_phase._signal_seen)
+            self.assertTrue(run_phase._signal_seen)
+        finally:
+            run_phase._signal_seen = False
+            for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                signal.signal(signum, signal.SIG_DFL)
+
 
 class CaptureFileTests(unittest.TestCase):
     def test_after_nonce_is_found_in_a_growing_pcap(self) -> None:
@@ -2206,6 +2927,348 @@ class CaptureFileTests(unittest.TestCase):
                     self.assertFalse(
                         run_phase.wait_for_control_in_pcap(pcap, NONCE_A, timeout=0.01)
                     )
+
+
+class RootPathTests(unittest.TestCase):
+    def test_directory_fd_stays_anchored_after_a_rename(self) -> None:
+        import rootfs
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary)
+            (base / "lab" / "evidence").mkdir(parents=True)
+            descriptor = rootfs.open_directory(
+                base / "lab" / "evidence", create=True, anchor=base
+            )
+            try:
+                (base / "lab").rename(base / "old")
+                (base / "lab" / "evidence").mkdir(parents=True)
+                (base / "lab" / "evidence" / "sentinel").write_text(
+                    "forged", encoding="utf-8"
+                )
+                rootfs.write_bytes_at(descriptor, "capture.pcap", b"real")
+                self.assertEqual(
+                    (base / "old" / "evidence" / "capture.pcap").read_bytes(),
+                    b"real",
+                )
+                self.assertEqual(
+                    (base / "lab" / "evidence" / "sentinel").read_text(),
+                    "forged",
+                )
+                self.assertFalse(
+                    (base / "lab" / "evidence" / "capture.pcap").exists()
+                )
+            finally:
+                os.close(descriptor)
+
+    def test_intermediate_symlink_is_refused(self) -> None:
+        import rootfs
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary)
+            (base / "real").mkdir()
+            (base / "link").symlink_to(base / "real")
+            with self.assertRaises(rootfs.PathError):
+                rootfs.open_directory(base / "link" / "evidence", create=True, anchor=base)
+
+    def test_ancestry_records_refuse_user_owned_writable_or_symlink(self) -> None:
+        import rootfs
+
+        records = [
+            {"path": "/", "exists": True, "is_symlink": False, "uid": 0, "mode": 0o755},
+            {
+                "path": "/var/lib/vprlab",
+                "exists": True,
+                "is_symlink": False,
+                "uid": 1000,
+                "mode": 0o755,
+            },
+        ]
+        problems = rootfs.ancestry_problems(records, expected_uid=0)
+        self.assertTrue(any("not owned by uid 0" in problem for problem in problems))
+        records[1]["uid"] = 0
+        records[1]["mode"] = 0o777
+        self.assertTrue(
+            any("group/other writable" in problem for problem in rootfs.ancestry_problems(records))
+        )
+        records[1]["mode"] = 0o755
+        records[1]["is_symlink"] = True
+        self.assertTrue(
+            any("symlink" in problem for problem in rootfs.ancestry_problems(records))
+        )
+        records[1] = {
+            "path": "/var/lib/vprlab",
+            "exists": False,
+            "is_symlink": False,
+            "uid": None,
+            "mode": None,
+        }
+        self.assertTrue(
+            any("missing" in problem for problem in rootfs.ancestry_problems(records))
+        )
+
+
+class HostsetupTests(unittest.TestCase):
+    def _valid_inventory(self):
+        stats = {}
+        for path, mode in (
+            ("/", "0755"),
+            ("/opt", "0755"),
+            (hostsetup.TOOLS_ROOT, "0755"),
+            ("/var", "0755"),
+            ("/var/lib", "0755"),
+            (hostsetup.STATE_ROOT, "0755"),
+            (hostsetup.IMAGES_ROOT, "0755"),
+            (hostsetup.EVIDENCE_ROOT, "0700"),
+            ("/run", "0755"),
+            (hostsetup.RUN_ROOT, "0700"),
+        ):
+            stats[path] = {"type": "dir", "uid": 0, "gid": 0, "mode": mode}
+        stats[hostsetup.STATE_ROOT + "/vm-001"] = {
+            "type": "dir",
+            "uid": 123,
+            "gid": 123,
+            "mode": "0700",
+        }
+        stats[hostsetup.TOOLS_ROOT + "/SHA256SUMS"] = {
+            "type": "file",
+            "uid": 0,
+            "gid": 0,
+            "mode": "0644",
+        }
+        stats[hostsetup.IMAGES_ROOT + "/" + hostsetup.BASE_IMAGE_NAME] = {
+            "type": "file",
+            "uid": 0,
+            "gid": 0,
+            "mode": "0644",
+        }
+        users = {
+            "vprlab-qemu": {
+                "uid": 123,
+                "gid": 123,
+                "shell": "/usr/sbin/nologin",
+                "home_missing": True,
+                "primary_group": "vprlab-qemu",
+                "supplementary": ["kvm"],
+            }
+        }
+        return {"stat": stats}, {"users": users}
+
+    def test_check_mode_accepts_the_layout_and_refuses_each_mutation(self) -> None:
+        import copy
+
+        stat_inventory, group_inventory = self._valid_inventory()
+        self.assertEqual(
+            hostsetup.check_layout(stat_inventory, group_inventory), []
+        )
+
+        def mutate(change):
+            stats = copy.deepcopy(stat_inventory)
+            users = copy.deepcopy(group_inventory)
+            change(stats["stat"], users["users"]["vprlab-qemu"])
+            return hostsetup.check_layout(stats, users)
+
+        mutations = {
+            "uid 0": lambda stat, user: user.__setitem__("uid", 0),
+            "docker group": lambda stat, user: user.__setitem__(
+                "supplementary", ["kvm", "docker"]
+            ),
+            "missing kvm": lambda stat, user: user.__setitem__("supplementary", []),
+            "extra group": lambda stat, user: user.__setitem__(
+                "supplementary", ["kvm", "adm2"]
+            ),
+            "login shell": lambda stat, user: user.__setitem__(
+                "shell", "/bin/bash"
+            ),
+            "home exists": lambda stat, user: user.__setitem__(
+                "home_missing", False
+            ),
+            "tools writable": lambda stat, user: stat[hostsetup.TOOLS_ROOT].__setitem__(
+                "mode", "0775"
+            ),
+            "evidence mode": lambda stat, user: stat[
+                hostsetup.EVIDENCE_ROOT
+            ].__setitem__("mode", "0755"),
+            "run root owner": lambda stat, user: stat[hostsetup.RUN_ROOT].__setitem__(
+                "uid", 123
+            ),
+            "image file mode": lambda stat, user: stat[
+                hostsetup.IMAGES_ROOT + "/" + hostsetup.BASE_IMAGE_NAME
+            ].__setitem__("mode", "0666"),
+            "state owner": lambda stat, user: stat[
+                hostsetup.STATE_ROOT + "/vm-001"
+            ].__setitem__("uid", 0),
+            "state mode": lambda stat, user: stat[
+                hostsetup.STATE_ROOT + "/vm-001"
+            ].__setitem__("mode", "0755"),
+            "missing ancestor": lambda stat, user: stat.pop("/var/lib"),
+        }
+        for label, change in mutations.items():
+            with self.subTest(label=label):
+                self.assertTrue(mutate(change))
+
+    def test_generated_plan_runs_with_stubbed_privileges_and_refuses_locked_teardown(self):
+        import hashlib
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            tools_source = root / "source-tools"
+            image_source = root / "source-images"
+            (tools_source / "usr/bin").mkdir(parents=True)
+            qemu = tools_source / "usr/bin/qemu-system-x86_64"
+            qemu.write_bytes(b"qemu")
+            qemu.chmod(0o755)
+            image_source.mkdir()
+            image_bytes = b"base-image"
+            image = image_source / hostsetup.BASE_IMAGE_NAME
+            image.write_bytes(image_bytes)
+            digest = hashlib.sha512(image_bytes).hexdigest()
+            tools_root = root / "dest/opt/vprlab-tools"
+            state_root = root / "dest/var/lib/vprlab"
+            run_root = root / "dest/run/vprlab"
+            for parent in (tools_root.parent, state_root.parent, run_root.parent):
+                parent.mkdir(parents=True, exist_ok=True)
+            script_text = hostsetup.render_setup_script(
+                tools_source=str(tools_source),
+                images_source=str(image_source),
+                base_image_sha512=digest,
+                tools_root=str(tools_root),
+                state_root=str(state_root),
+                run_root=str(run_root),
+            )
+            script = root / "hostsetup.sh"
+            script.write_text(script_text, encoding="utf-8")
+            checked = subprocess.run(
+                ["sh", "-n", str(script)], capture_output=True, text=True
+            )
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            stub = bin_dir / "stub"
+            stub.write_text(
+                """#!/bin/sh
+name=${0##*/}
+printf '%s %s\\n' "$name" "$*" >> "$STUB_LOG"
+case "$name" in
+  id) [ "$1" = "-u" ] && echo 0; exit 0 ;;
+  getent)
+    case "$1" in
+      group) [ -f "$STUB_ROOT/group-created" ] && exit 0 ;;
+      passwd) [ -f "$STUB_ROOT/user-created" ] && exit 0 ;;
+    esac
+    exit 1 ;;
+  python3) exit 0 ;;
+  install)
+    mode=0755
+    expect_mode=0
+    for arg in "$@"; do
+      if [ "$expect_mode" = 1 ]; then mode=$arg; expect_mode=0; continue; fi
+      case "$arg" in
+        -m) expect_mode=1 ;;
+        "$STUB_ROOT"/*) mkdir -p "$arg"; chmod "$mode" "$arg" ;;
+      esac
+    done
+    exit 0 ;;
+  flock) exit "${STUB_FLOCK:-0}" ;;
+  pgrep) exit 1 ;;
+  groupadd) touch "$STUB_ROOT/group-created"; exit 0 ;;
+  useradd|usermod) touch "$STUB_ROOT/user-created"; exit 0 ;;
+  userdel|chown) exit 0 ;;
+  *) exit 0 ;;
+esac
+""",
+                encoding="utf-8",
+            )
+            stub.chmod(0o755)
+            for name in (
+                "id",
+                "getent",
+                "python3",
+                "install",
+                "flock",
+                "pgrep",
+                "useradd",
+                "groupadd",
+                "usermod",
+                "userdel",
+                "chown",
+            ):
+                (bin_dir / name).symlink_to("stub")
+            log = root / "calls.log"
+            environment = dict(os.environ)
+            environment["PATH"] = str(bin_dir) + ":" + environment.get("PATH", "")
+            environment["STUB_LOG"] = str(log)
+            environment["STUB_ROOT"] = str(root / "dest")
+            result = subprocess.run(
+                ["sh", str(script)],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = log.read_text(encoding="utf-8")
+            self.assertIn("useradd --system --no-create-home --shell /usr/sbin/nologin", calls)
+            self.assertIn("usermod -aG kvm vprlab-qemu", calls)
+            self.assertTrue((tools_root / "SHA256SUMS").is_file())
+            self.assertIn(
+                "usr/bin/qemu-system-x86_64",
+                (tools_root / "SHA256SUMS").read_text(encoding="utf-8"),
+            )
+            self.assertTrue((tools_root / "usr/bin/qemu-system-x86_64").is_file())
+            self.assertTrue((image_source / hostsetup.BASE_IMAGE_NAME).is_file())
+            self.assertTrue((state_root / "images" / hostsetup.BASE_IMAGE_NAME).is_file())
+            self.assertIn(
+                hostsetup.BASE_IMAGE_NAME,
+                (state_root / "images" / "SHA512SUMS").read_text(encoding="utf-8"),
+            )
+            self.assertTrue((state_root / "evidence").is_dir())
+            self.assertEqual(stat.S_IMODE((state_root / "evidence").stat().st_mode), 0o700)
+            self.assertTrue((state_root / "vm-001").is_dir())
+            self.assertEqual(stat.S_IMODE((state_root / "vm-001").stat().st_mode), 0o700)
+
+            busy = dict(environment, STUB_FLOCK="1")
+            (run_root / "run.lock").write_text("", encoding="utf-8")
+            result = subprocess.run(
+                ["sh", str(script), "teardown"],
+                cwd=root,
+                env=busy,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("refusing teardown", result.stderr)
+            self.assertTrue((state_root / "evidence").is_dir())
+
+            result = subprocess.run(
+                ["sh", str(script), "teardown"],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(tools_root.exists())
+            self.assertFalse((state_root / "evidence").exists())
+            self.assertIn("teardown complete", result.stdout)
+            self.assertIn("userdel vprlab-qemu", log.read_text(encoding="utf-8"))
+
+    def test_plan_is_plan_only_and_has_no_relative_destinations(self) -> None:
+        text = hostsetup.render_setup_script()
+        self.assertTrue(text.startswith("#!/bin/sh\n"))
+        self.assertIn("QEMU_USER='vprlab-qemu'", text)
+        self.assertIn("useradd --system --no-create-home", text)
+        self.assertIn("usermod -aG \"$KVM_GROUP\"", text)
+        self.assertIn("TOOLS_ROOT='/opt/vprlab-tools'", text)
+        self.assertIn("STATE_ROOT='/var/lib/vprlab'", text)
+        self.assertIn("EVIDENCE_ROOT='/var/lib/vprlab/evidence'", text)
+        self.assertIn("RUN_ROOT='/run/vprlab'", text)
+        self.assertIn("SHA256SUMS", text)
+        self.assertIn("SHA512SUMS", text)
+        self.assertIn("teardown", text)
 
 
 class ProvisionDefaultsTests(unittest.TestCase):

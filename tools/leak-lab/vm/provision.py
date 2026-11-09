@@ -31,10 +31,23 @@ import time
 
 import guest
 import hostcheck
+import rootfs
 import runlock
 
 PROVISION_TIMEOUT = 1800.0
 POWEROFF_TIMEOUT = 180.0
+
+
+class ProvisionInterrupted(RuntimeError):
+    """A termination signal arrived; unwind through the child reaper."""
+
+
+def install_signal_handlers() -> None:
+    def handle(signum, _frame):
+        raise ProvisionInterrupted(f"received signal {signum}")
+
+    for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(signum, handle)
 
 
 def _utc_now() -> str:
@@ -82,13 +95,20 @@ def _qemu_identity(user: str) -> tuple[int, int]:
 
 
 def _require_tool(path: pathlib.Path) -> None:
-    if not path.is_file() or not os.access(path, os.X_OK):
-        raise hostcheck.Refusal(f"staged tool is missing or not executable: {path}")
-    info = path.stat()
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise hostcheck.Refusal(f"staged tool is missing: {path}") from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise hostcheck.Refusal(f"staged tool is not a regular file: {path}")
+    if not os.access(path, os.X_OK):
+        raise hostcheck.Refusal(f"staged tool is not executable: {path}")
     if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
         raise hostcheck.Refusal(
             f"staged tool is writable by a non-root account: {path}"
         )
+    if os.geteuid() == 0 and info.st_uid != 0:
+        raise hostcheck.Refusal(f"staged tool is not owned by root: {path}")
 
 
 def _run_generator(
@@ -108,7 +128,7 @@ def _run_generator(
     try:
         completed = subprocess.run(
             wrapper,
-            env=guest.qemu_env({}),
+            env=guest.clean_environment(),
             check=False,
             capture_output=True,
             text=True,
@@ -175,14 +195,10 @@ def _stage_payload(
 
     (staging / "image").mkdir(mode=0o755)
     destination = staging / "image" / "vprouter-image.tar"
-    hardlinked = False
-    try:
-        os.link(image_tar, destination)
-        hardlinked = True
-    except OSError:
-        shutil.copyfile(image_tar, destination)
-    if not hardlinked:
-        os.chmod(destination, 0o644)
+    # Never hard-link an operator input: the recursive mode normalisation
+    # below would also chmod the source inode outside the lab.
+    shutil.copyfile(image_tar, destination)
+    os.chmod(destination, 0o644)
     for root, directories, files in os.walk(staging):
         os.chmod(root, stat.S_IMODE(os.stat(root).st_mode) | 0o555)
         for name in directories:
@@ -277,19 +293,23 @@ def _provision_locked(arguments: argparse.Namespace, state: pathlib.Path) -> int
 
     for tool in (guest.QEMU, guest.QEMU_IMG, guest.GENISOIMAGE):
         _require_tool(tool)
+    try:
+        guest.verify_tool_ancestry()
+    except guest.GeneratorError as exc:
+        raise hostcheck.Refusal(str(exc)) from exc
     # The global lock is held, so this check and the later QEMU launch are
     # one admission decision.
     hostcheck.refuse_if_qemu_running(self_pid=os.getpid())
 
     root = pathlib.Path(arguments.state_root)
-    if not root.exists():
-        root.mkdir(mode=0o711, parents=True)
-        os.chmod(root, 0o711)
-    root_info = root.stat()
-    if not root_info.st_mode & stat.S_IXOTH:
-        raise hostcheck.Refusal(
-            f"{root} must be traversable by the unprivileged QEMU user (mode 0711)"
+    expected_uid = 0 if os.geteuid() == 0 else os.geteuid()
+    try:
+        descriptor = rootfs.open_directory(
+            root, create=True, mode=0o755, expected_uid=expected_uid
         )
+    except rootfs.PathError as exc:
+        raise hostcheck.Refusal(f"state root is not trustworthy: {exc}") from exc
+    os.close(descriptor)
 
     release = pathlib.Path(arguments.release_dir)
     try:
@@ -397,7 +417,7 @@ def _provision_locked(arguments: argparse.Namespace, state: pathlib.Path) -> int
             log_fd = None
             process = subprocess.Popen(
                 launch_argv,
-                env=guest.qemu_env({}),
+                env=guest.clean_environment(),
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,
@@ -433,6 +453,7 @@ def _provision_locked(arguments: argparse.Namespace, state: pathlib.Path) -> int
         subprocess.SubprocessError,
         guest.GeneratorError,
         hostcheck.Refusal,
+        ProvisionInterrupted,
     ) as exc:
         record["finished_at"] = _utc_now()
         record["test_status"] = "PROVISION_FAILED"
@@ -479,12 +500,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     arguments = parser.parse_args(argv)
+    install_signal_handlers()
     try:
         guest.validate_name(arguments.name)
         guest.validate_image_id(arguments.image_id)
         return provision(arguments)
     except (hostcheck.Refusal, guest.GeneratorError, guest.IntegrityError) as exc:
         print(f"provision: {exc}", file=sys.stderr)
+        return 2
+    except ProvisionInterrupted as exc:
+        print(f"provision: interrupted ({exc})", file=sys.stderr)
         return 2
     except (OSError, runlock.LockError) as exc:
         print(f"provision: {exc.__class__.__name__}: {exc}", file=sys.stderr)

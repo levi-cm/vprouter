@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import ipaddress
 import json
 import pathlib
@@ -60,6 +61,12 @@ import netplan as netplan_mod
 import policy as policy_mod
 
 MAX_FINDINGS = 200
+#: The scanner keeps at most this many outside-window packet indexes; the
+#: total is still counted.  Fragment associations are capped at 4096 live
+#: datagrams.  Exhausting either bound is a local resource finding, never a
+#: reason to forget evidence.
+MAX_OUTSIDE_WINDOW_INDEXES = 1000
+MAX_FRAGMENT_ASSOCIATIONS = 4096
 
 #: Non-first fragments only associate with a first fragment seen at most this
 #: many seconds earlier, with no completed datagram and no reuse in between.
@@ -329,13 +336,22 @@ class _Scanner:
             self.allowed_counts["arp"] = {"outbound": 0, "inbound": 0}
         self.findings: list[dict[str, Any]] = []
         self.findings_total = 0
+        self.leak_findings_total = 0
         self.packets = 0
         self.first_ts: float | None = None
         self.last_ts: float | None = None
         self.non_monotonic_timestamps = False
-        #: (packet index, timestamp, is_control, allowed label or None,
-        #: direction "outbound"/"inbound" or None, produced a finding)
-        self.records: list[tuple[int, float, bool, str | None, str | None, bool]] = []
+        #: Bounded live classification.  No per-packet tuple is retained: the
+        #: in-window counts are accumulated as packets are parsed, and the
+        #: outside-window index list is capped.
+        self.window_counts: dict[str, dict[str, int]] = {
+            flow.label: {"outbound": 0, "inbound": 0} for flow in policy.allowed
+        }
+        self.outside_window_allowed_indexes: list[int] = []
+        self.outside_window_allowed_total = 0
+        self.outside_window_other_total = 0
+        self.before_ts: float | None = None
+        self.after_ts: float | None = None
         self.control_sightings: dict[str, list[dict[str, Any]]] = {
             "before": [],
             "after": [],
@@ -345,6 +361,7 @@ class _Scanner:
         self.fragment_states: dict[
             tuple[str, str, int, int], _FragmentState
         ] = {}
+        self.fragment_table_overflow = False
         self._current_is_control = False
         self._current_allowed: tuple[str, str] | None = None
 
@@ -376,6 +393,10 @@ class _Scanner:
         **extra: Any,
     ) -> None:
         self.findings_total += 1
+        if reason == "fragment_table_overflow":
+            self.fragment_table_overflow = True
+        else:
+            self.leak_findings_total += 1
         if len(self.findings) >= MAX_FINDINGS:
             return
         finding: dict[str, Any] = {
@@ -444,16 +465,27 @@ class _Scanner:
         findings_before = self.findings_total
         self._parse_frame(frame, ts, index)
         label, direction = self._current_allowed or (None, None)
-        self.records.append(
-            (
-                index,
-                ts,
-                self._current_is_control,
-                label,
-                direction,
-                self.findings_total > findings_before,
-            )
+        if self._current_is_control:
+            return
+        in_window = (
+            self.before_ts is not None
+            and self.after_ts is None
+            and ts > self.before_ts
         )
+        if in_window:
+            if label in self.window_counts and direction is not None:
+                self.window_counts[label][direction] += 1
+            elif label is None and self.findings_total == findings_before:
+                # A non-allowed frame inside the window is classified by its
+                # own finding (or by outside_control_window when reported).
+                pass
+            return
+        if label is not None:
+            self.outside_window_allowed_total += 1
+            if len(self.outside_window_allowed_indexes) < MAX_OUTSIDE_WINDOW_INDEXES:
+                self.outside_window_allowed_indexes.append(index)
+        elif self.findings_total == findings_before:
+            self.outside_window_other_total += 1
 
     def _parse_frame(self, frame: bytes, ts: float, index: int) -> None:
         if len(frame) < 14:
@@ -835,6 +867,28 @@ class _Scanner:
         result: _L4Result,
     ) -> None:
         state = self.fragment_states.get(key)
+        if state is None and len(self.fragment_states) >= MAX_FRAGMENT_ASSOCIATIONS:
+            # Completed datagrams are no longer live.  Evict them first; only a
+            # table full of unfinished datagrams is a resource failure.
+            for completed_key in [
+                candidate
+                for candidate, value in self.fragment_states.items()
+                if value.complete
+            ]:
+                del self.fragment_states[completed_key]
+            if len(self.fragment_states) >= MAX_FRAGMENT_ASSOCIATIONS:
+                self.add_finding(
+                    ts,
+                    src,
+                    dst,
+                    _proto_name(protocol),
+                    None,
+                    None,
+                    "fragment_table_overflow",
+                    live_associations=len(self.fragment_states),
+                    limit=MAX_FRAGMENT_ASSOCIATIONS,
+                )
+                return
         if state is not None and not state.complete:
             if ts - state.first_ts <= FRAGMENT_WINDOW_SECONDS:
                 self.add_finding(
@@ -1153,6 +1207,10 @@ class _Scanner:
             return
         sightings = self.control_sightings[role]
         sightings.append({"ts": ts, "packet": index})
+        if role == "before" and self.before_ts is None:
+            self.before_ts = ts
+        if role == "after" and self.after_ts is None:
+            self.after_ts = ts
         self._current_is_control = True
         if nonce not in self.seen_control_order:
             self.seen_control_order.append(nonce)
@@ -1205,15 +1263,39 @@ class _Scanner:
         )
 
 
-def _read_pcap(data: bytes, scanner: _Scanner, meta: dict[str, Any]) -> None:
-    if len(data) < 24:
+def _read_exact(stream, length: int) -> bytes:
+    chunks: list[bytes] = []
+    remaining = length
+    while remaining > 0:
+        chunk = stream.read(remaining)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _read_pcap_stream(stream, scanner: _Scanner, meta: dict[str, Any], digest) -> None:
+    """Classify every record from ``stream`` without loading the file.
+
+    ``digest`` is updated with the exact bytes consumed, so the runner can
+    bind the report to the capture it hashed.
+    """
+
+    def consumed(length: int) -> bytes:
+        data = _read_exact(stream, length)
+        digest.update(data)
+        return data
+
+    header = consumed(24)
+    if len(header) < 24:
         raise CaptureInvalid("truncated_global_header")
-    magic = data[0:4]
+    magic = header[0:4]
     if magic not in _PCAP_MAGIC:
         raise CaptureInvalid("unsupported_pcap_magic")
     endian, divisor, resolution, byte_order = _PCAP_MAGIC[magic]
     version_major, version_minor, _thiszone, _sigfigs, snaplen, network = struct.unpack(
-        endian + "HHiIII", data[4:24]
+        endian + "HHiIII", header[4:24]
     )
     meta.update(
         {
@@ -1233,28 +1315,28 @@ def _read_pcap(data: bytes, scanner: _Scanner, meta: dict[str, Any]) -> None:
     if network != 1:
         raise CaptureInvalid(f"unsupported_linktype_{network}")
 
-    offset = 24
-    while offset < len(data):
-        if len(data) - offset < 16:
+    while True:
+        record_header = consumed(16)
+        if not record_header:
+            break
+        if len(record_header) < 16:
             raise CaptureInvalid("truncated_record_header")
         ts_sec, ts_frac, incl_len, orig_len = struct.unpack(
-            endian + "IIII", data[offset : offset + 16]
+            endian + "IIII", record_header
         )
-        offset += 16
         if ts_frac >= divisor:
             raise CaptureInvalid("invalid_timestamp_fraction")
         if incl_len > orig_len:
             raise CaptureInvalid("record_length_inconsistent")
         if incl_len > snaplen:
             raise CaptureInvalid("record_exceeds_snaplen")
-        if len(data) - offset < incl_len:
+        frame = consumed(incl_len)
+        if len(frame) < incl_len:
             raise CaptureInvalid("truncated_record_data")
         if incl_len < orig_len:
             # The capture itself is known to be missing wire bytes.  This is
             # not a frame-content problem: stop and mark the evidence INVALID.
             raise CaptureInvalid("snaplen_truncated_record")
-        frame = data[offset : offset + incl_len]
-        offset += incl_len
         ts = float(ts_sec) + (ts_frac / divisor)
         index = scanner.packets
         scanner.packets += 1
@@ -1277,8 +1359,8 @@ def _control_report(scanner: _Scanner, role: str) -> dict[str, Any]:
     }
 
 
-def scan_capture(
-    data: bytes,
+def scan_capture_stream(
+    stream,
     policy: policy_mod.Policy,
     control_before: str,
     control_after: str,
@@ -1292,17 +1374,12 @@ def scan_capture(
     source: str | None = None,
     policy_sha256: str | None = None,
 ) -> dict[str, Any]:
-    """Scan a classic pcap and return the canonical report as a dict.
+    """Scan a classic pcap from a stream and return the canonical report.
 
-    ``control_before`` and ``control_after`` are mandatory, must be distinct
-    valid nonces, and each must be seen exactly once.  ``tcpdump_stats_text``
-    is mandatory unless ``stats_error`` records why it could not be read.
-    ``capture_argv`` must equal the exact argv ``netplan.capture_argv`` prints
-    (only the ``-w`` path may differ); its hash is bound into the report.
-    ``expect_tunnel`` is required: there is no fail-open API default.
-    When ``pcap_path`` is supplied, the argv's ``-w`` value must resolve to the
-    same file (``realpath``), tying the declared capture command to the pcap
-    that was actually submitted.
+    The file is never loaded whole: one global header, one 16-byte record
+    header and one frame are held at a time.  The retained per-run state is
+    counters, at most 1000 outside-window indexes and at most 4096 unfinished
+    fragment associations.
     """
     if not isinstance(policy, policy_mod.Policy):
         raise TypeError("policy must be a policy.Policy instance")
@@ -1327,14 +1404,18 @@ def scan_capture(
     meta: dict[str, Any] = {"format": "pcap"}
     invalid_reasons: list[str] = []
     structural_invalid = False
+    source_digest = hashlib.sha256()
     try:
-        _read_pcap(data, scanner, meta)
+        _read_pcap_stream(stream, scanner, meta, source_digest)
     except CaptureInvalid as exc:
         structural_invalid = True
         invalid_reasons.append(str(exc))
         meta["packets_read"] = scanner.packets
-    if not structural_invalid:
+    source_sha256 = source_digest.hexdigest()
+    if not structural_invalid and not scanner.fragment_table_overflow:
         scanner.finalize_fragments()
+    if scanner.fragment_table_overflow:
+        invalid_reasons.append("fragment_table_overflow")
 
     stats: dict[str, int | None] | None = None
     stats_problem: str | None = stats_error
@@ -1378,8 +1459,11 @@ def scan_capture(
     window_counts: dict[str, dict[str, int]] = {
         label: {"outbound": 0, "inbound": 0} for label in flow_labels
     }
-    outside_window_allowed: list[int] = []
-    outside_window_other: list[int] = []
+    for label, counts in scanner.window_counts.items():
+        if label in window_counts:
+            window_counts[label] = dict(counts)
+    outside_window_allowed = scanner.outside_window_allowed_total
+    outside_window_allowed_packets = list(scanner.outside_window_allowed_indexes)
 
     before_sightings = scanner.control_sightings["before"]
     after_sightings = scanner.control_sightings["after"]
@@ -1389,17 +1473,7 @@ def scan_capture(
         if not before_ts < after_ts:
             invalid_reasons.append("control_order")
         else:
-            for index, ts, is_control, label, direction, had_finding in scanner.records:
-                if is_control:
-                    continue
-                if before_ts < ts < after_ts:
-                    if label in window_counts and direction is not None:
-                        window_counts[label][direction] += 1
-                elif label is not None:
-                    outside_window_allowed.append(index)
-                elif not had_finding:
-                    outside_window_other.append(index)
-            if outside_window_other:
+            if scanner.outside_window_other_total:
                 invalid_reasons.append("outside_control_window")
 
     outbound_in_window = sum(
@@ -1437,7 +1511,7 @@ def scan_capture(
     if missing:
         invalid_reasons.append("missing_positive_controls")
 
-    if scanner.findings_total:
+    if scanner.leak_findings_total:
         verdict = "LEAK"
     elif invalid_reasons:
         verdict = "INVALID"
@@ -1447,7 +1521,7 @@ def scan_capture(
     meta.update(
         {
             "source": source,
-            "source_sha256": hashlib.sha256(data).hexdigest(),
+            "source_sha256": source_sha256,
             "policy_sha256": policy_sha256,
             "control_before": control_before,
             "control_after": control_after,
@@ -1460,8 +1534,12 @@ def scan_capture(
             "first_ts": scanner.first_ts,
             "last_ts": scanner.last_ts,
             "non_monotonic_timestamps": scanner.non_monotonic_timestamps,
-            "outside_window_allowed": len(outside_window_allowed),
-            "outside_window_allowed_packets": outside_window_allowed,
+            "outside_window_allowed": outside_window_allowed,
+            "outside_window_allowed_packets": outside_window_allowed_packets,
+            "outside_window_allowed_truncated": (
+                outside_window_allowed > len(outside_window_allowed_packets)
+            ),
+            "outside_window_other": scanner.outside_window_other_total,
             "tunnel_expectation": {
                 "value": expect_tunnel,
                 "outbound_in_window": outbound_in_window,
@@ -1497,6 +1575,21 @@ def scan_capture(
 
 
 # Convenience aliases used by callers/tests.
+def scan_capture(
+    data: bytes,
+    policy: policy_mod.Policy,
+    control_before: str,
+    control_after: str,
+    **kwargs,
+) -> dict[str, Any]:
+    """Scan in-memory pcap bytes (compatibility wrapper around the stream API)."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("scan_capture data must be bytes")
+    return scan_capture_stream(
+        io.BytesIO(bytes(data)), policy, control_before, control_after, **kwargs
+    )
+
+
 scan = scan_capture
 scan_pcap = scan_capture
 
@@ -1569,7 +1662,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        data = pathlib.Path(args.pcap).read_bytes()
+        stream = open(args.pcap, "rb")
     except OSError as exc:
         print(f"pcapscan: capture: {exc}", file=sys.stderr)
         return 2
@@ -1594,20 +1687,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pcapscan: capture argv file is not valid JSON: {exc}", file=sys.stderr)
         return 2
 
-    report = scan_capture(
-        data,
-        policy,
-        args.control_before,
-        args.control_after,
-        tcpdump_stats_text=stats_text,
-        capture_argv=capture_argv,
-        pcap_path=args.pcap,
-        expect_tunnel=args.expect_tunnel,
-        stats_error=stats_error,
-        stats_source=args.tcpdump_stats,
-        source=args.pcap,
-        policy_sha256=hashlib.sha256(policy_bytes).hexdigest(),
-    )
+    try:
+        with stream:
+            report = scan_capture_stream(
+                stream,
+                policy,
+                args.control_before,
+                args.control_after,
+                tcpdump_stats_text=stats_text,
+                capture_argv=capture_argv,
+                pcap_path=args.pcap,
+                expect_tunnel=args.expect_tunnel,
+                stats_error=stats_error,
+                stats_source=args.tcpdump_stats,
+                source=args.pcap,
+                policy_sha256=hashlib.sha256(policy_bytes).hexdigest(),
+            )
+    except OSError as exc:
+        print(f"pcapscan: capture: {exc}", file=sys.stderr)
+        return 2
     sys.stdout.write(canonical_json(report))
     return {"PASS": 0, "LEAK": 1, "INVALID": 2}[report["verdict"]]
 

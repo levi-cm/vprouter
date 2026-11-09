@@ -18,16 +18,23 @@ from guest import (
     BRIDGE,
     GATEWAY_IPV4,
     GATEWAY_MAC,
+    QEMU_USER,
     TAP,
     VM_IPV4,
     VM_MAC,
 )
 
-OWNER_TAG = "vprlab-leak-lab-m1"
 OWNER_IFALIAS_PREFIX = "vprlab-owned:"
 OWNER_FILE = pathlib.Path("/run/vprlab/owner.json")
 REQUIRED_CHAINS = ("input", "forward", "output", "postrouting")
 _OWNER_TOKEN_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def expected_owner_tag(owner_token: str) -> str:
+    """Return the exact per-run tag used by every M1-owned object."""
+    if not isinstance(owner_token, str) or _OWNER_TOKEN_RE.fullmatch(owner_token) is None:
+        raise Refusal("owner token must be 32 lowercase hex characters")
+    return OWNER_IFALIAS_PREFIX + owner_token
 
 
 class Refusal(RuntimeError):
@@ -167,16 +174,28 @@ def verify_host_network(
     gateway_mac: str = GATEWAY_MAC,
     vm_ipv4: str = VM_IPV4,
     vm_mac: str = VM_MAC,
-    owner_tag: str = OWNER_TAG,
     owner_token: str | None = None,
+    owner_tag: str | None = None,
+    tap_user: str | None = QEMU_USER,
 ) -> list[str]:
-    """Return every problem with the already-created host lab network."""
+    """Return every problem with the already-created host lab network.
+
+    ``owner_token`` is the per-run token from ``owner.json``.  The nft table
+    comment and both ifaliases must be exactly ``vprlab-owned:<token>``; the
+    old fixed ``vprlab-leak-lab-m1`` tag authorizes nothing.
+    """
     problems: list[str] = []
     links = _links(links_document)
 
-    expected_ifalias = (
-        OWNER_IFALIAS_PREFIX + owner_token if owner_token is not None else None
-    )
+    if owner_token is not None:
+        expected_ifalias = expected_owner_tag(owner_token)
+    elif owner_tag is not None:
+        expected_ifalias = owner_tag
+    else:
+        expected_ifalias = None
+        problems.append("owner token is required to verify the lab network")
+
+    table_tag = expected_ifalias
 
     bridge_entry = links.get(bridge)
     if bridge_entry is None:
@@ -238,6 +257,10 @@ def verify_host_network(
             problems.append(f"{tap} does not carry the lab ownership ifalias")
         if tap_entry.get("master") != bridge:
             problems.append(f"{tap} is not enslaved to {bridge}")
+        if tap_user is not None:
+            problem = validate_tap_owner(tap_entry, tap_user)
+            if problem is not None:
+                problems.append(problem)
 
     if not isinstance(table_document, dict) or not isinstance(
         table_document.get("nftables"), list
@@ -269,8 +292,8 @@ def verify_host_network(
                     chains.add(candidate["name"])
         if table is None:
             problems.append("nft table inet vprlab is missing")
-        elif table.get("comment") != owner_tag:
-            problems.append("nft table inet vprlab does not carry the ownership tag")
+        elif table.get("comment") != table_tag:
+            problems.append("nft table inet vprlab does not carry the per-run ownership tag")
         for chain in REQUIRED_CHAINS:
             if chain not in chains:
                 problems.append(f"nft table inet vprlab is missing chain {chain}")
@@ -301,13 +324,33 @@ def verify_host_network(
     return problems
 
 
-def validate_tap_owner(link_entry: dict[str, Any], user: str) -> str:
-    """Best-effort tap-owner check; netplan.py's ``--tap-user`` sets this."""
-    # iproute2 does not expose the tun owner in ``ip -j``.  The runner instead
-    # relies on the tap being created with netplan.py --tap-user and on QEMU's
-    # own failure if it cannot attach.  This helper exists so a future iproute2
-    # field can be wired in without changing callers.
-    return user
+def validate_tap_owner(link_entry: dict[str, Any], user: str) -> str | None:
+    """Return a problem when iproute2 reports a different tun owner.
+
+    ``ip -d -j link`` exposes ``linkinfo.info_data.user``/``group`` for tun
+    devices.  Older iproute2 versions omit them; absence is not proof of a
+    wrong owner (QEMU still fails to attach a tap it does not own), so only a
+    present, different owner is refused.
+    """
+    linkinfo = link_entry.get("linkinfo")
+    if not isinstance(linkinfo, dict):
+        return None
+    info_data = linkinfo.get("info_data")
+    if not isinstance(info_data, dict):
+        return None
+    owner = info_data.get("user")
+    if owner is None:
+        return None
+    if isinstance(owner, int) and not isinstance(owner, bool):
+        import pwd
+
+        try:
+            owner = pwd.getpwuid(owner).pw_name
+        except KeyError:
+            return f"tap owner uid {owner} has no account"
+    if owner != user:
+        return f"tap owner is {owner!r}, not {user!r}"
+    return None
 
 
 def parse_ipv4(text: str) -> str:

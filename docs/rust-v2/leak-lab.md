@@ -259,7 +259,7 @@ The host plan already installs the fixed host entry before the links come up
 and removes it in teardown. The VM side remains part of the reviewed guest
 configuration.
 
-Host (the plan uses these exact fixed values):
+Host (the plan uses these exact fixed values; do not run these by hand):
 
 ```sh
 ip neigh replace 10.250.0.2 lladdr <vm-mac> dev vprlab0 nud permanent
@@ -414,7 +414,7 @@ argv `netplan.py` prints:
 
 ```json
 ["tcpdump", "-i", "vprlab-tap0", "-nn", "-U", "--immediate-mode",
- "-s", "0", "-w", "vprlab-capture.pcap"]
+ "-s", "0", "-w", "/var/lib/vprlab/manual-capture.pcap"]
 ```
 
 Only the value after `-w` may differ from the printed command, and that value
@@ -520,6 +520,19 @@ Fragments are conservative and in-order:
   `fragment_duplicate_first`; a middle fragment whose payload is not a multiple
   of 8 bytes is `malformed_frame`.
 
+### Host resource bounds
+
+The scanner is fed from a stream and never loads the pcap. It retains only
+counters, at most 1000 outside-window packet indexes (the total is still
+reported, and `outside_window_allowed_truncated` is true), and at most 4096
+unfinished fragment associations. A full live fragment table is a
+`fragment_table_overflow` finding and the verdict is INVALID (fragment
+completeness is no longer judged); findings from actual frames still have LEAK
+precedence. The M2 runner caps a phase at 3600 s, admits a boot only with
+>= 1536 MiB `MemAvailable` and the capture cap plus 1 GiB free disk, stops the
+phase with `capture_size_cap` above the cap (default 2 GiB) while still scanning
+what exists, and runs the scanner with `RLIMIT_AS` 1 GiB and a timeout.
+
 ## Host network plan
 
 `tools/leak-lab/netplan.py` prints (never executes) a standalone `#!/bin/sh`
@@ -531,8 +544,9 @@ to paste into an interactive shell. It contains:
   either link is brought up. The VM WAN MAC is the fixed
   `52:54:00:76:70:02`; the policy must use these values;
 - tap `vprlab-tap0` created with
-  `ip tuntap add dev vprlab-tap0 mode tap user <user>` (default `opsec`,
-  configurable with `--tap-user`; `root` and uid `0` are refused), attached to
+  `ip tuntap add dev vprlab-tap0 mode tap user vprlab-qemu` (the default is the
+  dedicated QEMU account created by `vm/hostsetup.py`; `--tap-user` can name
+  another non-root account, and `root`/uid `0` are refused), attached to
   the bridge, with IPv6 disabled **before** either link is brought up;
 - a per-run owner record: setup first creates `/run/vprlab/` (mode `0700`,
   root-owned when run as root) and `/run/vprlab/owner.json` exclusively
@@ -589,13 +603,19 @@ to paste into an interactive shell. It contains:
   never reports success after a failure. Ownership is exact structured
   equality, never a `grep` substring test, so a rule comment elsewhere in a
   table or an alias such as `NOT-OWNED-<tag>-backup` can never authorize
-  deletion.
+  deletion.  An `ip -j link show` inventory that fails or does not parse is
+  **not** proof that a link is absent: teardown retains the protections and
+  exits nonzero unless a complete successful inventory lacks the object or a
+  down/detach operation is read back.  Teardown also refuses (nonzero, no
+  changes) while `/run/vprlab/run.lock` is held by a phase.
 
 ```sh
 python3 -B tools/leak-lab/netplan.py --wan-interface eno1 > lab.sh
-# review lab.sh, then run it as root; `sh -n lab.sh` only parses it
-# after a failed/aborted setup, run the same file's teardown only:
-#   ./lab.sh teardown
+# review lab.sh, then as root:
+#   ./lab.sh setup      # leaves the reviewed network running for M2 phases
+#   ./lab.sh teardown   # refuses while /run/vprlab/run.lock is held
+# `sh -n lab.sh` only parses it.  The default capture path is
+# "$RUN_DIR/manual-capture.pcap" (root-owned run directory), never the CWD.
 ```
 
 The teardown function is defined before setup exactly so the same reviewed
@@ -660,11 +680,11 @@ record, `nft create`, and the per-run `vprlab-owned:<token>` checks are the
 runtime guards.
 
 Capture command printed by the plan (note `--immediate-mode` and `-s 0`, full
-frames):
+frames). The default is inside the root-owned run directory, not the CWD:
 
 ```sh
-tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w vprlab-capture.pcap \
-  2> vprlab-capture.pcap.stderr
+tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 \
+  -w "$RUN_DIR/manual-capture.pcap" 2> "$RUN_DIR/manual-capture.pcap.stderr"
 ```
 
 `--immediate-mode` makes each packet reach the file as it is read. Do not stop
@@ -682,13 +702,13 @@ that wrote somewhere else is `INVALID`:
 ```sh
 cat > capture-argv.json <<'JSON'
 ["tcpdump", "-i", "vprlab-tap0", "-nn", "-U", "--immediate-mode",
- "-s", "0", "-w", "vprlab-capture.pcap"]
+ "-s", "0", "-w", "/var/lib/vprlab/manual-capture.pcap"]
 JSON
 
 python3 -B tools/leak-lab/pcapscan.py \
   --policy policy.json \
-  --pcap vprlab-capture.pcap \
-  --tcpdump-stats vprlab-capture.pcap.stderr \
+  --pcap /var/lib/vprlab/manual-capture.pcap \
+  --tcpdump-stats /var/lib/vprlab/manual-capture.pcap.stderr \
   --capture-argv-file capture-argv.json \
   --expect-tunnel up \
   --control-before <before-nonce> --control-after <after-nonce>
@@ -814,4 +834,7 @@ non-decreasing counters, final count binding), capture-argv provenance
 naming, netplan setup order/fixed MACs/per-run owner record/`ifalias`
 ownership/preflight, generated-script teardown behavior under stub commands
 (foreign ownership, isolation failure, duplicate rule removal, retained owner
-record on failure, signal trap), and control nonce freshness.
+record on failure, signal trap), the generated M1 setup state as accepted by
+the M2 `hostcheck` (with every single-field mutation refused), streaming
+scanner memory bounds over 50k records, fragment-table overflow and
+outside-window index caps, and control nonce freshness.

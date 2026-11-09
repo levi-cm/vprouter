@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import re
 import os
 import pathlib
 import shutil
@@ -191,6 +192,8 @@ def _apply_qemu_limits(process: subprocess.Popen) -> None:
 _OCI_INDEX = "application/vnd.oci.image.index.v1+json"
 _OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
 _IMAGE_TAR_MEMBER_CAP = 64 * 1024 * 1024
+#: Layers are streamed, never held in memory.
+_IMAGE_TAR_LAYER_CAP = 1024 * 1024 * 1024
 
 
 def verify_image_tar_chain(
@@ -198,31 +201,50 @@ def verify_image_tar_chain(
 ) -> None:
     """Prove the saved tar's OCI chain links ``index_digest`` to ``config_digest``.
 
-    Every blob on the path index.json -> index -> manifest -> config is read
-    from the tar and its SHA-256 is recomputed, so the guest-local image ID is
-    bound to the pinned host image ID by content, not by assertion.
+    Every blob on the path index.json -> index -> manifest -> config, and every
+    layer the runnable manifest names, is read from the tar and its SHA-256 is
+    recomputed, so the guest-local image ID is bound to the pinned host image
+    ID by content, not by assertion.  The archive must be unambiguous (r5b
+    review M1): no duplicate member names, a regular-file index.json, exactly
+    one runnable linux/amd64 manifest, and an attestation entry may be skipped
+    only when its platform is unknown/unknown.  Docker itself re-checks each
+    layer against the config's diff_ids when it loads the image.
     """
     import hashlib
     import tarfile
 
-    def blob(archive: tarfile.TarFile, digest: str) -> bytes:
-        algorithm, _, hexdigest = digest.partition(":")
-        if algorithm != "sha256" or len(hexdigest) != 64:
-            raise hostcheck.Refusal("image tar: unsupported digest")
+    def member_of(archive: tarfile.TarFile, name: str, cap: int) -> tarfile.TarInfo:
         try:
-            member = archive.getmember(f"blobs/sha256/{hexdigest}")
+            member = archive.getmember(name)
         except KeyError as exc:
-            raise hostcheck.Refusal(f"image tar: missing blob {digest}") from exc
-        if not member.isfile() or member.size > _IMAGE_TAR_MEMBER_CAP:
-            raise hostcheck.Refusal(f"image tar: blob {digest} is not a bounded file")
-        stream = archive.extractfile(member)
-        data = stream.read() if stream is not None else b""
-        if "sha256:" + hashlib.sha256(data).hexdigest() != digest:
-            raise hostcheck.Refusal(f"image tar: blob {digest} hash mismatch")
-        return data
+            raise hostcheck.Refusal(f"image tar: missing member {name}") from exc
+        if not member.isfile() or member.size > cap:
+            raise hostcheck.Refusal(f"image tar: {name} is not a bounded regular file")
+        return member
 
-    def manifests_of(document: dict) -> list[dict]:
-        entries = document.get("manifests")
+    def blob(archive: tarfile.TarFile, digest: object, *, cap: int = _IMAGE_TAR_MEMBER_CAP,
+             keep: bool = True) -> bytes:
+        if not isinstance(digest, str):
+            raise hostcheck.Refusal("image tar: malformed digest")
+        algorithm, _, hexdigest = digest.partition(":")
+        if algorithm != "sha256" or re.fullmatch(r"[0-9a-f]{64}", hexdigest) is None:
+            raise hostcheck.Refusal("image tar: unsupported digest")
+        member = member_of(archive, f"blobs/sha256/{hexdigest}", cap)
+        stream = archive.extractfile(member)
+        if stream is None:
+            raise hostcheck.Refusal(f"image tar: blob {digest} is unreadable")
+        hasher = hashlib.sha256()
+        kept = bytearray()
+        while chunk := stream.read(1024 * 1024):
+            hasher.update(chunk)
+            if keep:
+                kept += chunk
+        if "sha256:" + hasher.hexdigest() != digest:
+            raise hostcheck.Refusal(f"image tar: blob {digest} hash mismatch")
+        return bytes(kept)
+
+    def manifests_of(document: object) -> list[dict]:
+        entries = document.get("manifests") if isinstance(document, dict) else None
         if not isinstance(entries, list) or not entries:
             raise hostcheck.Refusal("image tar: index has no manifests")
         if not all(isinstance(entry, dict) for entry in entries):
@@ -231,34 +253,57 @@ def verify_image_tar_chain(
 
     try:
         with tarfile.open(image_tar, "r:") as archive:
+            names = archive.getnames()
+            if len(names) != len(set(names)):
+                raise hostcheck.Refusal("image tar: duplicate member names")
+            top_member = member_of(archive, "index.json", _IMAGE_TAR_MEMBER_CAP)
             try:
-                top = json.loads(archive.extractfile("index.json").read())
-            except (KeyError, AttributeError, ValueError) as exc:
+                top = json.loads(archive.extractfile(top_member).read())
+            except (AttributeError, ValueError) as exc:
                 raise hostcheck.Refusal("image tar: unreadable index.json") from exc
             if index_digest not in [m.get("digest") for m in manifests_of(top)]:
                 raise hostcheck.Refusal("image tar does not contain the pinned image index")
             index = json.loads(blob(archive, index_digest))
             configs = set()
+            runnable = 0
             for entry in manifests_of(index):
                 platform = entry.get("platform") or {}
                 annotations = entry.get("annotations") or {}
+                if not isinstance(platform, dict) or not isinstance(annotations, dict):
+                    raise hostcheck.Refusal("image tar: malformed manifest entry")
+                where = (platform.get("os"), platform.get("architecture"))
                 # BuildKit adds an attestation manifest (platform unknown/unknown)
                 # with its own config; only the runnable linux/amd64 image counts.
                 if annotations.get("vnd.docker.reference.type") == "attestation-manifest":
+                    if where != ("unknown", "unknown"):
+                        raise hostcheck.Refusal(
+                            "image tar: an attestation entry claims a runnable platform"
+                        )
                     continue
-                if (platform.get("os"), platform.get("architecture")) != ("linux", "amd64"):
+                if where != ("linux", "amd64"):
                     continue
-                if entry.get("mediaType") == _OCI_MANIFEST:
-                    manifest = json.loads(blob(archive, entry["digest"]))
-                    config = manifest.get("config", {}).get("digest")
-                    if isinstance(config, str):
-                        blob(archive, config)
-                        configs.add(config)
+                runnable += 1
+                if entry.get("mediaType") != _OCI_MANIFEST:
+                    raise hostcheck.Refusal("image tar: runnable entry is not an OCI manifest")
+                manifest = json.loads(blob(archive, entry.get("digest")))
+                if not isinstance(manifest, dict) or not isinstance(manifest.get("config"), dict):
+                    raise hostcheck.Refusal("image tar: manifest has no config")
+                config = manifest["config"].get("digest")
+                blob(archive, config)
+                configs.add(config)
+                layers = manifest.get("layers")
+                if not isinstance(layers, list) or not layers:
+                    raise hostcheck.Refusal("image tar: manifest has no layers")
+                for layer in layers:
+                    if not isinstance(layer, dict):
+                        raise hostcheck.Refusal("image tar: malformed layer descriptor")
+                    blob(archive, layer.get("digest"), cap=_IMAGE_TAR_LAYER_CAP, keep=False)
     except (OSError, tarfile.TarError, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise hostcheck.Refusal(f"image tar: {exc.__class__.__name__}") from exc
-    if configs != {config_digest}:
+    if runnable != 1 or configs != {config_digest}:
         raise hostcheck.Refusal(
-            "image tar: the pinned index does not resolve to exactly the expected config"
+            "image tar: the pinned index does not resolve to exactly one runnable "
+            "image with the expected config"
         )
 
 

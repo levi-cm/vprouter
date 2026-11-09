@@ -5170,7 +5170,8 @@ class LivePackageTests(unittest.TestCase):
 class ImageTarChainTests(unittest.TestCase):
     """Live 2026-11-09: host containerd-store ID (index) != guest classic ID (config)."""
 
-    def _tar(self, root: pathlib.Path, *, tamper: bool = False, top_extra=(), inner_extra=()):
+    def _tar(self, root: pathlib.Path, *, tamper: bool = False, top_extra=(), inner_extra=(),
+             variant: str = ""):
         import hashlib, io, tarfile
 
         blobs = {}
@@ -5183,8 +5184,22 @@ class ImageTarChainTests(unittest.TestCase):
 
         config = add({"architecture": "amd64", "os": "linux"})
         attest_config = add({"attestation": True})
-        manifest = add({"mediaType": "application/vnd.oci.image.manifest.v1+json", "config": {"digest": config}})
+        layer = add({"layer": "synthetic tar bytes"})
+        manifest = add({"mediaType": "application/vnd.oci.image.manifest.v1+json", "config": {"digest": config},
+                        "layers": [{"digest": layer}]})
         attest = add({"mediaType": "application/vnd.oci.image.manifest.v1+json", "config": {"digest": attest_config}})
+        oci = "application/vnd.oci.image.manifest.v1+json"
+        if variant == "fake attestation":
+            other = add({"architecture": "amd64", "os": "linux", "different": True})
+            second = add({"mediaType": oci, "config": {"digest": other}, "layers": [{"digest": layer}]})
+            inner_extra = [{"mediaType": oci, "digest": second,
+                            "platform": {"os": "linux", "architecture": "amd64"},
+                            "annotations": {"vnd.docker.reference.type": "attestation-manifest"}}]
+        if variant == "second same config":
+            second = add({"mediaType": oci, "config": {"digest": config}, "layers": [{"digest": layer}],
+                          "annotations": {"probe": "second"}})
+            inner_extra = [{"mediaType": oci, "digest": second,
+                            "platform": {"os": "linux", "architecture": "amd64"}}]
         index = add({"manifests": [
             {"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": manifest,
              "platform": {"os": "linux", "architecture": "amd64"}},
@@ -5199,10 +5214,25 @@ class ImageTarChainTests(unittest.TestCase):
                 info = tarfile.TarInfo(name)
                 info.size = len(data)
                 archive.addfile(info, io.BytesIO(data))
-            put("index.json", json.dumps({"manifests": [*top_extra, {"digest": index}]}).encode())
+            top = json.dumps({"manifests": [*top_extra, {"digest": index}]}).encode()
+            if variant == "symlink index":
+                put("real-index.json", top)
+                link = tarfile.TarInfo("index.json")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "real-index.json"
+                archive.addfile(link)
+            else:
+                put("index.json", top)
+            member = "blobs/sha256/" + manifest.split(":")[1]
+            if variant == "duplicate bad first":
+                put(member, b'{"different": "manifest"}')
             for digest, data in blobs.items():
                 if tamper and digest == manifest:
                     data = data + b" "
+                if variant == "tampered layer" and digest == layer:
+                    data = data + b" "
+                if variant == "missing layer" and digest == layer:
+                    continue
                 put("blobs/sha256/" + digest.split(":")[1], data)
         return path, index, config
 
@@ -5225,6 +5255,15 @@ class ImageTarChainTests(unittest.TestCase):
                              "inner": {"inner_extra": [7]}}.items():
             with self.subTest(where=name), tempfile.TemporaryDirectory() as temporary:
                 path, index, config = self._tar(pathlib.Path(temporary), **kwargs)
+                with self.assertRaises(hostcheck.Refusal):
+                    provision.verify_image_tar_chain(path, index, config)
+
+    def test_ambiguous_or_incomplete_archives_are_refused(self) -> None:
+        # r5b review (GPT M1): each of these used to be accepted.
+        for variant in ("duplicate bad first", "symlink index", "fake attestation",
+                        "second same config", "tampered layer", "missing layer"):
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as temporary:
+                path, index, config = self._tar(pathlib.Path(temporary), variant=variant)
                 with self.assertRaises(hostcheck.Refusal):
                     provision.verify_image_tar_chain(path, index, config)
 
@@ -5256,6 +5295,11 @@ class ReadinessDiagnosticsTests(unittest.TestCase):
             "tskey-auth-kAbCdEf123CNTRL-x",
             "k " + " ".join([chunk] * 4),
             "node ab12c",
+            # r5b review (GPT I1) samples
+            "peer 198.51.100.77:51820 host router-private.example",
+            "peer 2001:db8::1234",
+            "tskey-auth-abcdefghijklmno-pqrstuvwxyz012345",
+            "token 12345678-1234-1234-1234-123456789abc",
         ):
             with self.subTest(value=leaky[:16]):
                 self.assertEqual(run_phase._safe_text(leaky), "unrecognized")
@@ -5295,6 +5339,38 @@ class ReadinessDiagnosticsTests(unittest.TestCase):
                 self.assertEqual(set(recorded), {"unlisted_sha256_12", "length"})
                 self.assertNotIn(unknown or "\0", json.dumps(recorded))
         self.assertIsNone(run_phase.release_reason(None))
+
+    def test_unhashable_or_odd_health_documents_do_not_crash(self) -> None:
+        # r5b review (GPT M2): {"state": []} raised TypeError in the diagnostic.
+        for body in ('{"state": [], "reason": "READY"}', '{"state": {}, "reason": []}',
+                     '[]', '"READY"', 'not json'):
+            class Client:
+                def execute(self, program, args=(), **kwargs):
+                    if "vprouter-health.json" in args[-1]:
+                        return run_phase.ExecResult(exitcode=0, stdout=body.encode(), stderr=b"")
+                    return run_phase.ExecResult(exitcode=1, stdout=b"", stderr=b"")
+            with self.subTest(body=body):
+                record = {"tailscale": {}}
+                run_phase.record_readiness_refusal(
+                    record, Client(), guest.DEFAULT_NAME, hostcheck.Refusal("readiness failed"))
+                if body.startswith("{"):
+                    self.assertEqual(record["readiness"]["release_health_state"], "unrecognized")
+
+    def test_guest_reason_with_an_address_never_reaches_the_record(self) -> None:
+        reason = "peer 198.51.100.77:51820 host router-private.example tskey-auth-abc-def"
+        class Client:
+            def execute(self, program, args=(), **kwargs):
+                if "vprouter-health.json" in args[-1]:
+                    body = json.dumps({"state": "BLOCKED", "reason": reason})
+                    return run_phase.ExecResult(exitcode=0, stdout=body.encode(), stderr=b"")
+                return run_phase.ExecResult(exitcode=1, stdout=b"", stderr=b"")
+        record = {"tailscale": {}}
+        run_phase.record_readiness_refusal(
+            record, Client(), guest.DEFAULT_NAME, hostcheck.Refusal("readiness failed"))
+        text = json.dumps(record)
+        for fragment in ("198.51.100.77", "router-private", "tskey"):
+            self.assertNotIn(fragment, text)
+        self.assertEqual(record["readiness"]["release_health_reason"]["length"], len(reason))
 
     def test_refusal_records_gate_and_release_health(self) -> None:
         class Client:

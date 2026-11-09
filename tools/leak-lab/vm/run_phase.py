@@ -1604,7 +1604,10 @@ def record_readiness_refusal(
     if isinstance(document, dict):
         state = document.get("state")
         readiness["release_health_state"] = (
-            state if state in {"STARTING", "BLOCKED", "RECOVERING", "READY"} else "unrecognized"
+            state
+            if isinstance(state, str)
+            and state in {"STARTING", "BLOCKED", "RECOVERING", "READY"}
+            else "unrecognized"
         )
         readiness["release_health_reason"] = release_reason(document.get("reason"))
     try:

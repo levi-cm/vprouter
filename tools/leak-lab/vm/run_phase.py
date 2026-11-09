@@ -1595,7 +1595,7 @@ def record_readiness_refusal(
     try:
         result = client.execute(
             "/bin/sh",
-            ["-c", f"docker exec {shlex.quote(name)} cat /run/vprouter-health.json"],
+            ["-c", f"docker exec {shlex.quote(name)} head -c 4096 /run/vprouter-health.json"],
             timeout=15.0,
         )
         document = json.loads(result.stdout.decode("utf-8", "replace"))

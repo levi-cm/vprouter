@@ -686,9 +686,12 @@ record, `nft create`, and the per-run `vprlab-owned:<token>` checks are the
 runtime guards.
 
 Capture command printed by the plan (note `--immediate-mode` and `-s 0`, full
-frames; `-B 8192` gives the kernel capture ring 8 MiB instead of libpcap's
-2 MiB default, because a 58-minute phase lost 3 frames to kernel drops with
-the default and any drop makes the phase INVALID). The default is inside the root-owned run directory, not the CWD:
+frames; `-B 8192` enlarges the kernel capture ring, because a 58-minute phase
+lost 3 frames to kernel drops with the default and any drop makes the phase
+INVALID. Measured on debdev (tcpdump 4.99.5, libpcap 1.10.5 with TPACKET_V3,
+`--immediate-mode -s 0`): the mapped ring is 4 MiB by default and 16 MiB with
+`-B 8192`. It is an mmap'd ring, so `net.core.rmem_max` (212992) does not cap
+it.) The default is inside the root-owned run directory, not the CWD:
 
 ```sh
 tcpdump -i vprlab-tap0 -nn -U --immediate-mode -B 8192 -s 0 \

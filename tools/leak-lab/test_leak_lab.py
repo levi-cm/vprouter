@@ -4805,10 +4805,10 @@ class ClientNetplanTests(unittest.TestCase):
             "ip neigh replace 10.251.0.2 lladdr 52:54:00:76:71:02 dev vprlab1 nud permanent",
             'nft add rule inet vprlab input iifname "vprlab1" drop',
             'nft add rule inet vprlab postrouting ip saddr 10.251.0.0/24 iifname "vprlab1" oifname "eth0" masquerade',
-            'nft add rule inet vprlab forward iifname "vprlab1" oifname "eth0" accept',
-            'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab1" accept',
+            'nft add rule inet vprlab forward iifname "vprlab1" oifname "eth0" ip saddr 10.251.0.0/24 accept',
+            'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab1" ip daddr 10.251.0.0/24 accept',
             f"iptables -I DOCKER-USER -i vprlab1 -o eth0 -s 10.251.0.0/24",
-            "delete_link \"vprlab-ctap1\" tun",
+            "delete_link \"$(client_tap_name \"$n\")\" tun",
             "delete_link \"vprlab1\" bridge",
         ):
             self.assertIn(expected, plan)
@@ -4833,10 +4833,20 @@ class ClientNetplanTests(unittest.TestCase):
 
     def test_router_plan_is_unchanged_without_clients(self) -> None:
         plan = netplan.render_plan("eth0")
-        for absent in ("vprlab1", "vprlab-ctap", "10.251.0"):
+        # No client object is created by a no-client plan; the dynamic
+        # teardown block only fires when owner.json names a client index.
+        for absent in (
+            "ip tuntap add dev vprlab-ctap",
+            "ip link add vprlab1 type bridge",
+            "ip addr add 10.251.0.1/24",
+            'nft add rule inet vprlab input iifname "vprlab1"',
+        ):
             self.assertNotIn(absent, plan)
         self.assertIn("ip link add vprlab0 type bridge", plan)
+        self.assertIn("PLANNED_CLIENTS=''", plan)
+        self.assertIn("read_owner_clients", plan)
         self.assertNotIn("@@", plan)
+        self.assertNotIn("\n\n\n", plan)
 
     def test_teardown_verifies_client_objects_before_mutation(self) -> None:
         plan = netplan.render_plan("eth0", clients=(1,))
@@ -4845,9 +4855,10 @@ class ClientNetplanTests(unittest.TestCase):
             "\nisolate_tap() {", 1
         )[0]
         for needle in (
-            'link_owned "vprlab-ctap1" tun',
+            'for n in $CLIENT_INDEXES',
+            'link_owned "$tap" tun',
+            'client_neigh_ok "$ip" vprlab1',
             'link_owned "vprlab1" bridge',
-            'client_neigh_ok 10.251.0.2 vprlab1 52:54:00:76:71:02',
         ):
             self.assertIn(needle, verify_function)
         self.assertNotIn("ip link set", verify_function)
@@ -4855,8 +4866,9 @@ class ClientNetplanTests(unittest.TestCase):
         verify_call = teardown.index("if ! verify_ownership; then")
         client_isolation = teardown.index("if ! isolate_client_taps; then")
         self.assertLess(verify_call, client_isolation)
-        self.assertIn('ip neigh del 10.251.0.2 dev vprlab1', teardown)
+        self.assertIn('ip neigh del "$ip" dev vprlab1', teardown)
         self.assertIn("remove_docker_spec -i vprlab1", teardown)
+        self.assertIn('delete_link "$(client_tap_name "$n")" tun', teardown)
 
     def test_collision_check_covers_client_names_and_subnet(self) -> None:
         links = json.dumps([{"ifname": "vprlab1"}, {"ifname": "eth0", "altnames": ["vprlab-ctap1"]}])
@@ -4871,11 +4883,20 @@ class ClientNetplanTests(unittest.TestCase):
         self.assertTrue(any("vprlab1" in item for item in collisions))
         self.assertTrue(any("vprlab-ctap1" in item for item in collisions))
         self.assertTrue(any("10.251.0.0/24" in item for item in collisions))
-        # Without clients the same inventories are clean for the router lab.
+        # A no-client preflight sees the same residue: leftover client objects
+        # are never invisible to the plan that would delete the shared table.
         self.assertEqual(
             netplan.check_name_collisions(links, addresses, routes, tables, "eth0"),
-            [],
+            collisions,
         )
+        clean = netplan.check_name_collisions(
+            json.dumps([{"ifname": "eth0"}]),
+            json.dumps([]),
+            json.dumps([]),
+            json.dumps({"nftables": []}),
+            "eth0",
+        )
+        self.assertEqual(clean, [])
 
     def test_client_capture_argv_is_bound_to_the_client_tap(self) -> None:
         argv = netplan.capture_argv("/e/client.pcap", "vprlab-ctap1")
@@ -4931,6 +4952,43 @@ class ClientNetplanTests(unittest.TestCase):
             self.assertNotIn("10.251.0.2", state_after["neigh"])
             self.assertEqual(state_after["rules"], [])
             self.assertFalse(owner_after.exists())
+
+
+    def test_no_client_teardown_removes_the_clients_recorded_in_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            result, _log, state, owner_path = NetplanTests._run_lab(
+                self,
+                root,
+                netplan.render_plan("eth0", clients=(1,)),
+                {},
+                args=("setup",),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            owner = json.loads(owner_path.read_text(encoding="utf-8"))
+            self.assertEqual(owner["clients"], [1])
+            self.assertIn("vprlab1", state["links"])
+            second = tempfile.TemporaryDirectory()
+            self.addCleanup(second.cleanup)
+            teardown_root = pathlib.Path(second.name)
+            (teardown_root / "run").mkdir()
+            (teardown_root / "run" / "owner.json").write_bytes(
+                owner_path.read_bytes()
+            )
+            result, log, state_after, owner_after = NetplanTests._run_lab(
+                self,
+                teardown_root,
+                netplan.render_plan("eth0"),
+                state,
+                args=("teardown",),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("vprlab1", state_after["links"])
+            self.assertNotIn("vprlab-ctap1", state_after["links"])
+            self.assertNotIn("10.251.0.2", state_after["neigh"])
+            self.assertEqual(state_after["rules"], [])
+            self.assertFalse(owner_after.exists())
+            self.assertIn("vprlab-ctap1", log)
 
 
 class ClientHostcheckTests(unittest.TestCase):
@@ -5024,15 +5082,59 @@ CLIENT_GW_MAC = "52:54:00:76:71:01"
 CLIENT_MARKER = "VPRCLIENTMARK1:" + "ab" * 16
 
 
+def client_probe_line(sequence, stamp, *, kind="exit", ok=True, mullvad=True,
+                      run_id=CLIENT_MARKER.split(":", 1)[1]):
+    document = {"k": kind, "ok": ok, "r": run_id, "s": sequence, "t": stamp}
+    if kind == "exit":
+        document["m"] = mullvad
+    return json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+
+
+def client_probe_log(*, fault_epoch=105, post_fault_epoch=105, clock_start=90,
+                     clock_stop=110, pre_mullvad=True, pre_marker=True,
+                     post_attempts=True, leak=None):
+    """Build a well-formed log covering the positive and post-fault controls."""
+    lines = []
+    sequence = 1
+    stamp = 100
+    if pre_mullvad:
+        lines.append(client_probe_line(sequence, stamp, mullvad=True))
+        sequence += 1
+        stamp += 1
+    if pre_marker:
+        lines.append(client_probe_line(sequence, stamp, kind="marker"))
+        sequence += 1
+        stamp += 1
+    if leak is not None:
+        lines.append(client_probe_line(sequence, stamp, mullvad=leak))
+        sequence += 1
+        stamp += 1
+    if post_attempts:
+        lines.append(
+            client_probe_line(sequence, max(post_fault_epoch, stamp), ok=False, mullvad=None)
+        )
+        sequence += 1
+        lines.append(
+            client_probe_line(
+                sequence, max(post_fault_epoch, stamp), kind="marker", ok=False
+            )
+        )
+    return b"".join(lines)
+
+
+
 def client_control_frame(nonce, **kwargs):
     payload = b"VPRLEAKCTL1:" + nonce.encode("ascii")
-    return ipv4_frame(
-        udp_segment(40000, 39001, payload),
+    values = dict(
         src_ip=CLIENT_IP,
         dst_ip=CLIENT_GW,
         src_mac=CLIENT_MAC,
         dst_mac=CLIENT_GW_MAC,
-        **kwargs,
+    )
+    values.update(kwargs)
+    return ipv4_frame(
+        udp_segment(40000, 39001, payload),
+        **values,
     )
 
 
@@ -5064,6 +5166,7 @@ def scan_client(
     marker=CLIENT_MARKER,
     argv=None,
     path="/e/client-capture.pcap",
+    timestamps=None,
 ):
     if router_frames is None:
         router_frames = [wg_outbound()]
@@ -5072,7 +5175,7 @@ def scan_client(
     if argv is None:
         argv = netplan.capture_argv(path, CLIENT_TAP)
     return clientscan.scan_client_capture(
-        io.BytesIO(pcap(frames)),
+        io.BytesIO(pcap(frames, timestamps=timestamps)),
         io.BytesIO(pcap(router_frames)),
         interface=CLIENT_TAP,
         marker=marker,
@@ -5151,13 +5254,106 @@ class ClientScanTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "INVALID")
         self.assertIn("client_control_order", report["capture_meta"]["invalid_reasons"])
 
-    def test_replayed_control_is_leak(self) -> None:
+    def test_replayed_control_is_invalid_unless_a_leak_is_also_seen(self) -> None:
         report = scan_client(
             [client_control_frame(NONCE_A), client_control_frame(NONCE_A),
              client_control_frame(NONCE_B)]
         )
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("client_control_duplicate", report["capture_meta"]["invalid_reasons"])
+        report = scan_client(
+            [client_control_frame(NONCE_A), client_control_frame(NONCE_A),
+             client_control_frame(NONCE_B), self._marker_frame()]
+        )
         self.assertEqual(report["verdict"], "LEAK")
-        self.assertIn("client_control_replayed", [f["reason"] for f in report["findings"]])
+        self.assertIn("client_control_duplicate", report["capture_meta"]["invalid_reasons"])
+
+    def test_forged_non_ethernet_control_bytes_are_invalid(self) -> None:
+        payload_a = b"VPRLEAKCTL1:" + NONCE_A.encode()
+        payload_b = b"VPRLEAKCTL1:" + NONCE_B.encode()
+        report = scan_client([payload_a, payload_b])
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn(
+            "client_control_wrong_tuple",
+            report["capture_meta"]["invalid_reasons"],
+        )
+
+    def test_control_identity_and_udp_tuple_are_exact(self) -> None:
+        cases = {
+            "source mac": client_control_frame(NONCE_A, src_mac=CLIENT_GW_MAC),
+            "source ip": client_control_frame(NONCE_A, src_ip="10.251.0.99"),
+            "destination mac": client_control_frame(NONCE_A, dst_mac=VM_MAC),
+            "destination ip": client_control_frame(NONCE_A, dst_ip="10.251.0.99"),
+            "udp destination": ipv4_frame(
+                udp_segment(40000, 39002, b"VPRLEAKCTL1:" + NONCE_A.encode()),
+                src_ip=CLIENT_IP,
+                dst_ip=CLIENT_GW,
+                src_mac=CLIENT_MAC,
+                dst_mac=CLIENT_GW_MAC,
+            ),
+            "payload suffix": ipv4_frame(
+                udp_segment(40000, 39001, b"VPRLEAKCTL1:" + NONCE_A.encode() + b"X"),
+                src_ip=CLIENT_IP,
+                dst_ip=CLIENT_GW,
+                src_mac=CLIENT_MAC,
+                dst_mac=CLIENT_GW_MAC,
+            ),
+        }
+        for name, bad in cases.items():
+            with self.subTest(case=name):
+                report = scan_client([bad, client_control_frame(NONCE_B)])
+                self.assertEqual(report["verdict"], "INVALID", name)
+                self.assertIn("missing_client_controls", report["capture_meta"]["invalid_reasons"])
+
+    def test_control_ipv4_fragment_is_not_a_control(self) -> None:
+        fragmented = client_control_frame(NONCE_A, more_fragments=True, frag_units=0)
+        report = scan_client([fragmented, client_control_frame(NONCE_B)])
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("missing_client_controls", report["capture_meta"]["invalid_reasons"])
+
+    def test_control_ipv4_options_are_not_a_control(self) -> None:
+        options = client_control_frame(NONCE_A, ihl_bytes=0x46)
+        report = scan_client([options, client_control_frame(NONCE_B)])
+        self.assertEqual(report["verdict"], "INVALID")
+
+    def test_reversed_records_with_forged_timestamps_are_invalid(self) -> None:
+        report = scan_client(
+            [client_control_frame(NONCE_B), client_control_frame(NONCE_A)],
+            timestamps=[1_700_000_002, 1_700_000_001],
+        )
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("client_control_order", report["capture_meta"]["invalid_reasons"])
+        self.assertIn(
+            "capture_timestamp_regression",
+            report["capture_meta"]["invalid_reasons"],
+        )
+
+    def test_capture_timestamp_regression_is_invalid(self) -> None:
+        report = scan_client(
+            [client_control_frame(NONCE_A), client_control_frame(NONCE_B)],
+            timestamps=[1_700_000_002, 1_700_000_001],
+        )
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn(
+            "capture_timestamp_regression",
+            report["capture_meta"]["invalid_reasons"],
+        )
+
+    def test_capture_snaplen_must_be_full_frame(self) -> None:
+        frames = [client_control_frame(NONCE_A), client_control_frame(NONCE_B)]
+        report = clientscan.scan_client_capture(
+            io.BytesIO(pcap(frames, snaplen=65535)),
+            io.BytesIO(pcap([wg_outbound()])),
+            interface=CLIENT_TAP,
+            marker=CLIENT_MARKER,
+            control_before=NONCE_A,
+            control_after=NONCE_B,
+            client_stats_text=client_stats_text(len(frames)),
+            client_capture_argv=netplan.capture_argv("/e/client-capture.pcap", CLIENT_TAP),
+            client_pcap_path="/e/client-capture.pcap",
+        )
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("capture_snaplen_mismatch", report["capture_meta"]["invalid_reasons"])
 
     def test_drops_and_banner_mismatch_are_invalid(self) -> None:
         frames = [client_control_frame(NONCE_A), client_control_frame(NONCE_B)]
@@ -5190,74 +5386,195 @@ class ClientScanTests(unittest.TestCase):
 
 
 class ClientProbeTests(unittest.TestCase):
-    def line(self, payload):
-        return json.dumps(payload, separators=(",", ":")).encode() + b"\n"
+    RUN_ID = CLIENT_MARKER.split(":", 1)[1]
+
+    def evaluate(self, data, **kwargs):
+        values = dict(
+            fault_epoch=105,
+            post_fault_epoch=105,
+            clock_start=90,
+            clock_stop=110,
+            run_id=self.RUN_ID,
+        )
+        values.update(kwargs)
+        return clientprobe.evaluate_probe_log(data, **values)
 
     def test_ok_with_mullvad_true_is_pass(self) -> None:
-        data = self.line({"t": 100, "k": "exit", "ok": True, "m": True})
-        report = clientprobe.evaluate_probe_log(data, fault_epoch=200)
-        self.assertEqual(report["verdict"], "PASS")
+        data = client_probe_log()
+        report = self.evaluate(data)
+        self.assertEqual(report["verdict"], "PASS", report["invalid_reasons"])
         self.assertTrue(report["pre_fault_mullvad"])
+        self.assertTrue(report["pre_fault_marker"])
         self.assertEqual(report["counts"]["exit"]["before"]["mullvad"], 1)
 
     def test_ok_with_mullvad_false_is_leak(self) -> None:
-        data = (
-            self.line({"t": 100, "k": "exit", "ok": True, "m": True})
-            + self.line({"t": 150, "k": "exit", "ok": True, "m": False})
-        )
-        report = clientprobe.evaluate_probe_log(data, fault_epoch=200)
+        data = client_probe_log(leak=False)
+        report = self.evaluate(data)
         self.assertEqual(report["verdict"], "LEAK")
-        self.assertIn("client_real_ip", report["reason"])
+        self.assertEqual(report["reason"], "client_real_ip")
 
     def test_ok_with_null_mullvad_is_leak(self) -> None:
         data = (
-            self.line({"t": 100, "k": "exit", "ok": True, "m": True})
-            + self.line({"t": 150, "k": "exit", "ok": True, "m": None})
+            client_probe_line(1, 100, mullvad=True)
+            + client_probe_line(2, 101, kind="marker")
+            + client_probe_line(3, 150, mullvad=None)
+            + client_probe_line(4, 250, ok=False, mullvad=None)
+            + client_probe_line(5, 251, kind="marker", ok=False)
         )
-        report = clientprobe.evaluate_probe_log(data, fault_epoch=200)
+        report = self.evaluate(data)
         self.assertEqual(report["verdict"], "LEAK")
 
     def test_no_pre_fault_mullvad_success_is_invalid(self) -> None:
-        data = self.line({"t": 300, "k": "exit", "ok": True, "m": True})
-        report = clientprobe.evaluate_probe_log(data, fault_epoch=200)
+        data = (
+            client_probe_line(1, 300, mullvad=True)
+            + client_probe_line(2, 301, kind="marker")
+            + client_probe_line(3, 302, ok=False, mullvad=None)
+            + client_probe_line(4, 303, kind="marker", ok=False)
+        )
+        report = self.evaluate(data)
         self.assertEqual(report["verdict"], "INVALID")
-        self.assertEqual(report["reason"], "client_not_routed")
-        self.assertEqual(report["counts"]["exit"]["after"]["mullvad"], 1)
+        self.assertIn("client_not_routed", report["invalid_reasons"])
 
     def test_failures_only_after_the_fault_are_pass(self) -> None:
         data = (
-            self.line({"t": 100, "k": "exit", "ok": True, "m": True})
-            + self.line({"t": 300, "k": "exit", "ok": False, "m": None})
-            + self.line({"t": 301, "k": "marker", "ok": False})
+            client_probe_line(1, 100, mullvad=True)
+            + client_probe_line(2, 101, kind="marker")
+            + client_probe_line(3, 106, ok=False, mullvad=None)
+            + client_probe_line(4, 107, kind="marker", ok=False)
         )
-        report = clientprobe.evaluate_probe_log(data, fault_epoch=200)
-        self.assertEqual(report["verdict"], "PASS")
+        report = self.evaluate(data)
+        self.assertEqual(report["verdict"], "PASS", report["invalid_reasons"])
         self.assertEqual(report["counts"]["exit"]["after"]["failed"], 1)
 
     def test_malformed_and_duplicate_key_lines_are_invalid(self) -> None:
-        for data in (
+        for bad in (
             b'not json\n',
             b'{"t":1,"k":"exit","ok":true,"m":true,"extra":1}\n',
             b'{"t":1,"t":2,"k":"exit","ok":true,"m":true}\n',
-            b'{"t":true,"k":"exit","ok":true,"m":true}\n',
-            b'{"t":1,"k":"exit","ok":1,"m":true}\n',
-            b'{"t":1,"k":"bogus","ok":true}\n',
+            b'{"t":true,"k":"exit","ok":true,"m":true,"r":"' + self.RUN_ID.encode() + b'","s":1}\n',
+            b'{"t":1,"k":"exit","ok":1,"m":true,"r":"' + self.RUN_ID.encode() + b'","s":1}\n',
+            b'{"t":1,"k":"bogus","ok":true,"r":"' + self.RUN_ID.encode() + b'","s":1}\n',
         ):
-            with self.subTest(data=data):
-                report = clientprobe.evaluate_probe_log(data)
+            with self.subTest(data=bad):
+                report = self.evaluate(client_probe_log() + bad)
                 self.assertEqual(report["verdict"], "INVALID")
-                self.assertEqual(report["reason"], "probe_log_malformed")
+                self.assertIn("probe_log_malformed", report["invalid_reasons"])
+
+    def test_malformed_tail_never_masks_a_real_ip_leak(self) -> None:
+        leak = client_probe_line(1, 100, mullvad=False)
+        for tail in (b"{", b'{"t":1,"t":2}\n', b"x" * 5000 + b"\n"):
+            with self.subTest(tail=tail[:4]):
+                report = self.evaluate(leak + tail)
+                self.assertEqual(report["verdict"], "LEAK")
+                self.assertIn("probe_log_malformed", report["invalid_reasons"])
+
+    def test_missing_final_newline_keeps_the_leak_and_adds_truncation(self) -> None:
+        leak = client_probe_line(1, 100, mullvad=False)
+        report = self.evaluate(leak + client_probe_line(2, 101, kind="marker").rstrip(b"\n"))
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("probe_log_truncated", report["invalid_reasons"])
 
     def test_oversized_log_and_line_are_invalid(self) -> None:
-        report = clientprobe.evaluate_probe_log(b"x" * (1024 * 1024 + 1))
+        report = self.evaluate(b"x" * (1024 * 1024 + 1))
         self.assertEqual(report["verdict"], "INVALID")
-        report = clientprobe.evaluate_probe_log(b"x" * 5000 + b"\n")
+        report = self.evaluate(b"x" * 5000 + b"\n")
         self.assertEqual(report["verdict"], "INVALID")
+
+    def test_sequence_must_start_at_one_without_gaps(self) -> None:
+        data = (
+            client_probe_line(2, 100, mullvad=True)
+            + client_probe_line(3, 101, kind="marker")
+        )
+        report = self.evaluate(data)
+        self.assertIn("probe_sequence_gap", report["invalid_reasons"])
+
+    def test_run_id_must_match_the_phase(self) -> None:
+        data = client_probe_log().replace(
+            self.RUN_ID.encode(), b"1" * 32
+        )
+        report = self.evaluate(data)
+        self.assertIn("probe_run_mismatch", report["invalid_reasons"])
+
+    def test_timestamps_must_not_regress_or_leave_the_window(self) -> None:
+        data = (
+            client_probe_line(1, 100, mullvad=True)
+            + client_probe_line(2, 99, kind="marker")
+            + client_probe_line(3, 250, ok=False, mullvad=None)
+            + client_probe_line(4, 251, kind="marker", ok=False)
+        )
+        report = self.evaluate(data)
+        self.assertIn("probe_timestamp_regression", report["invalid_reasons"])
+        data = client_probe_log().replace(
+            client_probe_line(1, 100, mullvad=True), client_probe_line(1, 10, mullvad=True)
+        )
+        report = self.evaluate(data)
+        self.assertIn("probe_timestamp_outside_window", report["invalid_reasons"])
+
+    def test_probe_gap_above_ten_seconds_is_invalid(self) -> None:
+        data = (
+            client_probe_line(1, 100, mullvad=True)
+            + client_probe_line(2, 101, kind="marker")
+            + client_probe_line(3, 250, ok=False, mullvad=None)
+            + client_probe_line(4, 251, kind="marker", ok=False)
+        )
+        report = self.evaluate(data)
+        self.assertIn("probe_gap", report["invalid_reasons"])
+
+    def test_successful_pre_fault_marker_is_required(self) -> None:
+        data = (
+            client_probe_line(1, 100, mullvad=True)
+            + client_probe_line(2, 101, kind="marker", ok=False)
+            + client_probe_line(3, 250, ok=False, mullvad=None)
+            + client_probe_line(4, 251, kind="marker", ok=False)
+        )
+        report = self.evaluate(data)
+        self.assertIn("client_marker_not_sent", report["invalid_reasons"])
+
+    def test_post_fault_exit_and_marker_attempts_are_required(self) -> None:
+        data = (
+            client_probe_line(1, 100, mullvad=True)
+            + client_probe_line(2, 101, kind="marker")
+        )
+        report = self.evaluate(data)
+        self.assertIn("probe_post_fault_exit_missing", report["invalid_reasons"])
+        self.assertIn("probe_post_fault_marker_missing", report["invalid_reasons"])
+
+    def test_overflow_line_is_invalid(self) -> None:
+        overflow = (
+            json.dumps(
+                {"k": "overflow", "r": self.RUN_ID, "s": 3, "t": 250},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+            + b"\n"
+        )
+        data = (
+            client_probe_line(1, 100, mullvad=True)
+            + client_probe_line(2, 101, kind="marker")
+            + overflow
+        )
+        report = self.evaluate(data)
+        self.assertIn("probe_log_overflow", report["invalid_reasons"])
+
+    def test_legacy_line_without_run_binding_is_invalid(self) -> None:
+        legacy = b'{"k":"exit","m":true,"ok":true,"t":100}\n'
+        report = self.evaluate(legacy)
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("probe_log_malformed", report["invalid_reasons"])
 
     def test_marker_prefix_is_fixed(self) -> None:
         self.assertTrue(clientprobe.is_marker(CLIENT_MARKER))
         self.assertFalse(clientprobe.is_marker("VPRCLIENTMARK1:" + "A" * 32))
         self.assertFalse(clientprobe.is_marker("VPRLEAKCTL1:" + "a" * 32))
+
+    def test_cli_requires_the_fault_epoch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "probe.jsonl"
+            path.write_bytes(client_probe_log())
+            with redirect_stderr(StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    clientprobe.main(["--probe-log", str(path)])
+            self.assertEqual(raised.exception.code, 2)
 
 
 class TestFileLayoutTests(unittest.TestCase):

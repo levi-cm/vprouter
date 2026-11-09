@@ -696,7 +696,8 @@ same reviewed script:
 - client VM address `10.251.0.(N+1)` with MAC
   `52:54:00:76:71:(N+1, two hex digits)` and the permanent host neighbour;
 - the same input/output/forward protection, IPv6 silencing, scoped masquerade
-  and `DOCKER-USER` accepts as `vprlab0`, in the same `inet vprlab` table;
+  and `DOCKER-USER` accepts as `vprlab0`, in the same `inet vprlab` table; the
+  forward accepts are scoped by `ip saddr`/`ip daddr` to `10.251.0.0/24`;
 - an explicit `forward` drop between `vprlab0` and `vprlab1` in **both**
   directions before the bridge-to-WAN accepts, so neither guest can reach the
   other over the lab L2 path.
@@ -704,15 +705,21 @@ same reviewed script:
 ```sh
 python3 -B tools/leak-lab/netplan.py \
   --wan-interface eno1 --client 1 > /root/vprlab-lab.sh
-# add --client 1 to the --check-name-collisions preflight as well
+# run the --check-name-collisions preflight with --client 1; the fixed client
+# objects are inventoried even without it
 ```
 
 Every client object carries the same per-run `vprlab-owned:<token>` ifalias or
-table membership.  Teardown verifies the client bridge, tap and neighbour
-before any mutation, isolates each client tap before removing protections, and
-deletes the client objects with the router objects.  With no `--client` option
-the generated plan is exactly the unchanged M2 router plan: no `vprlab1` or
-`vprlab-ctapN` name is referenced.
+table membership.  Setup records the client indexes it created in
+`owner.json`.  Teardown reads that list, verifies the client bridge, tap and
+neighbour before any mutation, isolates each client tap before removing
+protections, and deletes every recorded client object with the router objects
+even when the plan was rendered without `--client`.  With no `--client` option
+the routine still creates no client object and the setup/capture steps are the
+unchanged M2 router steps; the only extra text is the dynamic teardown of any
+client objects recorded by an earlier client setup.  The collision preflight
+always inventories `vprlab1` and `vprlab-ctap1..9` and the `10.251.0.0/24`
+subnet, so residue is never invisible to a no-client plan.
 
 Capture command printed by the plan (note `--immediate-mode` and `-s 0`, full
 frames; `-B 8192` enlarges the kernel capture ring, because a 58-minute phase

@@ -461,15 +461,54 @@ def _stage_payload(
     return staging
 
 
-def _stage_client_payload(state: pathlib.Path, tarball: pathlib.Path) -> pathlib.Path:
-    """Stage the verified Tailscale tarball for the read-only payload ISO."""
+def _stage_client_payload(
+    state: pathlib.Path, tarball: pathlib.Path, expected_digest: str
+) -> pathlib.Path:
+    """Stage and re-hash the verified Tailscale tarball for the payload ISO.
+
+    The source is opened once without following links; the bytes written and
+    the staged copy are both hashed and must equal the pinned digest, so a
+    swap between the earlier check and the copy is caught.
+    """
+    import hashlib
+
     staging = state / "payload-client"
     staging.mkdir(mode=0o755)
     os.chmod(staging, 0o755)
     destination = staging / guest.TAILSCALE_TARBALL_NAME
-    shutil.copyfile(tarball, destination)
+    source_digest = hashlib.sha256()
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(tarball, flags)
+    try:
+        with os.fdopen(descriptor, "rb") as source, destination.open(
+            "xb"
+        ) as target:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                source_digest.update(chunk)
+                target.write(chunk)
+    except BaseException:
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+        raise
     os.chmod(destination, 0o644)
     os.chmod(staging, 0o755)
+    staged_digest = hashlib.sha256()
+    with destination.open("rb") as staged:
+        for chunk in iter(lambda: staged.read(1024 * 1024), b""):
+            staged_digest.update(chunk)
+    if (
+        source_digest.hexdigest() != expected_digest
+        or staged_digest.hexdigest() != expected_digest
+    ):
+        try:
+            destination.unlink()
+        except OSError:
+            pass
+        raise hostcheck.Refusal("staged tailscale tarball does not match the pinned digest")
     return staging
 
 
@@ -797,6 +836,13 @@ def _provision_client_locked(arguments: argparse.Namespace, state: pathlib.Path)
     tarball = pathlib.Path(
         getattr(arguments, "tailscale_tar", DEFAULT_TAILSCALE_TARBALL)
     )
+    if os.geteuid() == 0:
+        try:
+            rootfs.validate_ancestry(tarball.parent, expected_uid=0)
+        except rootfs.PathError as exc:
+            raise hostcheck.Refusal(
+                f"tailscale tarball ancestry is not root-trusted: {exc}"
+            ) from exc
     tailscale_digest = verify_tailscale_tarball(tarball)
 
     for tool in (guest.QEMU, guest.QEMU_IMG, guest.GENISOIMAGE):
@@ -848,7 +894,7 @@ def _provision_client_locked(arguments: argparse.Namespace, state: pathlib.Path)
     log_fd: int | None = None
     try:
         overlay = state / guest.OVERLAY_FILE
-        staging = _stage_client_payload(state, tarball)
+        staging = _stage_client_payload(state, tarball, tailscale_digest)
         user_data = state / "user-data"
         meta_data = state / "meta-data"
         hostname = f"vprlab-client-{arguments.index:03d}"

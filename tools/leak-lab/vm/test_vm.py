@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -42,6 +43,9 @@ import hostcheck
 import hostcopy
 import hostsetup
 import login_url
+import netplan
+import clientscan
+import clientprobe
 import policy
 import provision
 import rootfs
@@ -58,6 +62,38 @@ NONCE_A = "a" * 32
 NONCE_B = "b" * 32
 SECRET_TEXT = b"[Interface]\nPrivateKey = SUPERSECRETKEYMATERIAL\nAddress = 10.99.0.2/32\n\n[Peer]\nPublicKey = PUBLICKEYMATERIAL\nAllowedIPs = 0.0.0.0/0\nEndpoint = 185.65.134.10:51820\n"
 LOGIN_URL = "https://login.tailscale.com/a/0123456789abcdef"
+
+
+def _harness_control_frame(payload, *, src_mac=VM_MAC, src_ip=VM_IP,
+                           dst_mac=GATEWAY_MAC, dst_ip=GATEWAY):
+    udp = struct.pack("!HHHH", 40000, 39001, 8 + len(payload), 0) + payload
+    ipv4 = struct.pack(
+        "!BBHHHBBH4s4s",
+        0x45,
+        0,
+        20 + len(udp),
+        1,
+        0,
+        64,
+        17,
+        0,
+        socket.inet_aton(src_ip),
+        socket.inet_aton(dst_ip),
+    )
+    return (
+        bytes.fromhex(dst_mac.replace(":", ""))
+        + bytes.fromhex(src_mac.replace(":", ""))
+        + struct.pack("!H", 0x0800)
+        + ipv4
+        + udp
+    )
+
+
+def _harness_pcap_record(frame, timestamp):
+    ts_sec = int(timestamp)
+    return (
+        struct.pack("<IIII", ts_sec, 0, len(frame), len(frame)) + frame
+    )
 
 
 class FakeQGAServer(threading.Thread):
@@ -1810,6 +1846,7 @@ class HarnessQGA:
         self.files: dict[str, bytes] = {}
         self.shutdown_modes: list[str] = []
         self.commands: list[str] = []
+        self.harness_ts = 1_700_000_000
 
     def _boot_id(self) -> str:
         index = min(len(self.shutdown_modes), len(self.boot_ids) - 1)
@@ -1829,7 +1866,13 @@ class HarnessQGA:
                 if self.write_after:
                     payload = b"VPRLEAKCTL1:" + match.group(1).encode()
                     target = self.pcap[0] if isinstance(self.pcap, list) else self.pcap
-                    target.write_bytes(target.read_bytes() + payload)
+                    self.harness_ts += 1
+                    target.write_bytes(
+                        target.read_bytes()
+                        + _harness_pcap_record(
+                            _harness_control_frame(payload), self.harness_ts
+                        )
+                    )
                 self.events.append(("after_control", match.group(1)))
             return ExecResult(exitcode=0, stdout=b"", stderr=b"")
         for match, result in self.overrides:
@@ -1901,9 +1944,11 @@ class HarnessQGA:
             )
         if "tailscale status --json" in command:
             node = {
+                "ID": "peer-router",
                 "Online": True,
                 "ExitNodeOption": self.exit_node,
-                "AdvertisedRoutes": ["0.0.0.0/0"] if self.exit_node else [],
+                "PrimaryRoutes": ["0.0.0.0/0"] if self.exit_node else [],
+                "TailscaleIPs": ["100.64.0.9"],
             }
             return ExecResult(
                 exitcode=0,
@@ -5452,12 +5497,26 @@ class ClientGuestTests(unittest.TestCase):
         self.assertIn("https://am.i.mullvad.net/json", script)
         self.assertIn("example.com:80:", script)
         self.assertIn("X-Vprlab-Marker:", script)
-        self.assertIn('"h"', script)
-        self.assertIn("hashlib.sha256", script)
-        self.assertIn("VPRCLIENTMARK1", script)
+        # Controller decision 1: every line is bound to the phase run id and a
+        # gap-free sequence; the reversible IP hash is gone.
+        self.assertIn('"r": match.group(1)', script)
+        self.assertIn("s=sequence", script)
+        self.assertIn('"k": "overflow"', script)
+        self.assertNotIn('"h"', script)
+        self.assertNotIn("hashlib", script)
         self.assertIn('"k": "exit"', script)
         self.assertIn('"k": "marker"', script)
+        self.assertIn('"-m", "3"', script)
+        self.assertIn("timeout=4", script)
         self.assertNotIn("@ip", script)  # parses only the boolean/json, not a raw IP field
+
+    def test_client_traffic_script_compiles(self) -> None:
+        import py_compile
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "vprlab-client-traffic"
+            path.write_text(guest.client_traffic_script_text(), encoding="utf-8")
+            py_compile.compile(str(path), doraise=True)
 
     def test_client_provision_script_installs_pinned_tailscale_and_silences(self) -> None:
         text = guest.client_provision_script(1)
@@ -5572,6 +5631,24 @@ class ProvisionClientTests(unittest.TestCase):
                 )
         self.assertEqual(calls[0][-1], "2G")
 
+    def test_staged_tailscale_copy_is_rehashed_after_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            state = root / "client-001"
+            state.mkdir()
+            tarball = root / guest.TAILSCALE_TARBALL_NAME
+            tarball.write_bytes(b"tailscale")
+            digest = hashlib.sha256(b"tailscale").hexdigest()
+            staging = provision._stage_client_payload(state, tarball, digest)
+            self.assertEqual(
+                (staging / guest.TAILSCALE_TARBALL_NAME).read_bytes(),
+                b"tailscale",
+            )
+            other = root / "client-002"
+            other.mkdir()
+            with self.assertRaises(hostcheck.Refusal):
+                provision._stage_client_payload(other, tarball, "0" * 64)
+
     def test_client_provision_pipeline_is_384_mib_and_two_gibibytes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -5598,7 +5675,7 @@ class ProvisionClientTests(unittest.TestCase):
                 tailscale_tar=str(tarball),
             )
             calls: list[list[str]] = []
-            marker = "c" * 64
+            marker = hashlib.sha256(b"tailscale").hexdigest()
 
             def fake_run(argv, **kwargs):
                 del kwargs
@@ -5665,7 +5742,268 @@ class CombinedVerdictTests(unittest.TestCase):
         self.assertEqual(
             run_phase.combine_verdicts("PASS", "PASS", "PASS", errors=["x"]), "INVALID"
         )
+
+    def test_missing_or_unknown_verdict_is_invalid_unless_a_leak_exists(self) -> None:
         self.assertEqual(run_phase.combine_verdicts(None, None, None), "INVALID")
+        self.assertEqual(run_phase.combine_verdicts("PASS", None, "PASS"), "INVALID")
+        self.assertEqual(run_phase.combine_verdicts("PASS", "BOGUS", "PASS"), "INVALID")
+        self.assertEqual(run_phase.combine_verdicts("LEAK", None, "PASS"), "LEAK")
+        self.assertEqual(
+            run_phase.combine_verdicts("LEAK", None, "PASS", errors=["scanner"]),
+            "LEAK",
+        )
+
+
+class ClientExitBindingTests(unittest.TestCase):
+    def status(self, **overrides):
+        document = {
+            "BackendState": "Running",
+            "Self": {
+                "ID": "router-node",
+                "HostName": guest.DEFAULT_NAME,
+                "DNSName": guest.DEFAULT_NAME + ".tailnet.ts.net.",
+                "ExitNode": False,
+                "ExitNodeOption": False,
+                "PrimaryRoutes": [],
+                "AllowedIPs": [],
+            },
+        }
+        document.update(overrides)
+        return document
+
+    def peer(self, **overrides):
+        document = {
+            "ID": "router-node",
+            "HostName": guest.DEFAULT_NAME,
+            "ExitNodeOption": True,
+            "Online": True,
+            "TailscaleIPs": ["100.64.0.9", "fd7a::9"],
+        }
+        document.update(overrides)
+        return document
+
+    def test_router_identity_comes_from_self_id_and_addresses(self) -> None:
+        node_id, addresses = run_phase.router_exit_identity(
+            self.status(
+                Self={
+                    "ID": "router-node",
+                    "TailscaleIPs": ["100.64.0.9", "fd7a::9"],
+                }
+            )
+        )
+        self.assertEqual(node_id, "router-node")
+        self.assertEqual(addresses, ["100.64.0.9"])
+        with self.assertRaises(hostcheck.Refusal):
+            run_phase.router_exit_identity({"Self": {"TailscaleIPs": ["100.64.0.9"]}})
+
+    def test_peer_is_bound_by_id_and_refuses_hostname_collisions(self) -> None:
+        document = self.status(Peer={"a": self.peer()})
+        peer = run_phase.client_find_router_peer(
+            document, guest.DEFAULT_NAME, "router-node", ["100.64.0.9"]
+        )
+        self.assertIsNotNone(peer)
+        collision = dict(document)
+        collision["Peer"] = {
+            "a": self.peer(),
+            "b": self.peer(ID="impostor"),
+        }
+        self.assertIsNone(
+            run_phase.client_find_router_peer(
+                collision, guest.DEFAULT_NAME, "router-node", ["100.64.0.9"]
+            )
+        )
+        duplicate_id = dict(document)
+        duplicate_id["Peer"] = {"a": self.peer(), "b": self.peer()}
+        self.assertIsNone(
+            run_phase.client_find_router_peer(
+                duplicate_id, guest.DEFAULT_NAME, "router-node", ["100.64.0.9"]
+            )
+        )
+        wrong_id = dict(document)
+        wrong_id["Peer"] = {"a": self.peer(ID="impostor")}
+        self.assertIsNone(
+            run_phase.client_find_router_peer(
+                wrong_id, guest.DEFAULT_NAME, "router-node", ["100.64.0.9"]
+            )
+        )
+
+    def test_exit_node_status_must_name_the_exact_peer_and_address(self) -> None:
+        active = {
+            "ExitNodeStatus": {
+                "ID": "router-node",
+                "Online": True,
+                "TailscaleIPs": ["100.64.0.9"],
+            }
+        }
+        self.assertTrue(
+            run_phase.client_peer_is_active(active, "router-node", "100.64.0.9")
+        )
+        for status in (
+            {"ExitNodeStatus": {"ID": "wrong", "Online": True, "TailscaleIPs": ["100.64.0.9"]}},
+            {"ExitNodeStatus": {"ID": "router-node", "Online": False, "TailscaleIPs": ["100.64.0.9"]}},
+            {"ExitNodeStatus": {"ID": "router-node", "Online": True, "TailscaleIPs": ["100.64.0.10"]}},
+            {"ExitNodeStatus": None},
+            {"Self": {"ExitNode": True}},
+        ):
+            self.assertFalse(
+                run_phase.client_peer_is_active(status, "router-node", "100.64.0.9")
+            )
+
+    def test_client_identity_rejects_a_conflicting_hostname_and_dns(self) -> None:
+        self.assertEqual(
+            run_phase.client_identity_problems(
+                self.status(
+                    Self={
+                        "HostName": guest.client_name(1),
+                        "DNSName": guest.client_name(1) + ".tailnet.ts.net.",
+                    }
+                ),
+                guest.client_name(1),
+            ),
+            [],
+        )
+        self.assertTrue(
+            run_phase.client_identity_problems(
+                self.status(
+                    Self={
+                        "HostName": "production-client",
+                        "DNSName": guest.client_name(1) + ".tailnet.ts.net.",
+                    }
+                ),
+                guest.client_name(1),
+            )
+        )
+        self.assertTrue(
+            run_phase.client_identity_problems(
+                self.status(
+                    Self={
+                        "HostName": guest.client_name(1),
+                        "DNSName": "production-client.tailnet.ts.net.",
+                    }
+                ),
+                guest.client_name(1),
+            )
+        )
+        # A missing HostName may fall back to the DNS label.
+        self.assertEqual(
+            run_phase.client_identity_problems(
+                self.status(
+                    Self={
+                        "DNSName": guest.client_name(1) + ".tailnet.ts.net.",
+                    }
+                ),
+                guest.client_name(1),
+            ),
+            [],
+        )
+
+    def test_truncated_exact_read_keeps_readable_leak_evidence(self) -> None:
+        leak = (
+            b'{"k":"exit","m":false,"ok":true,"r":"'
+            + b"a" * 32
+            + b'","s":1,"t":100}\n'
+        )
+
+        class FakeClient:
+            def execute(self, program, args=(), timeout=60.0):
+                del program, timeout
+                command = args[-1] if args else ""
+                if command.startswith("stat -c %s"):
+                    return ExecResult(0, str(len(leak) + 1).encode(), b"")
+                if command.startswith("sha256sum "):
+                    return ExecResult(
+                        0,
+                        (hashlib.sha256(leak).hexdigest() + "  x\n").encode(),
+                        b"",
+                    )
+                if command.startswith("cat "):
+                    return ExecResult(0, leak, b"")
+                return ExecResult(0, b"", b"")
+
+        data, problem = run_phase.read_client_probe_log_exact(FakeClient())
+        self.assertEqual(problem, "probe_log_truncated")
+        self.assertEqual(data, leak)
+        report = clientprobe.evaluate_probe_log(
+            data,
+            fault_epoch=105,
+            post_fault_epoch=105,
+            clock_start=90,
+            clock_stop=110,
+            run_id="a" * 32,
+        )
+        self.assertEqual(report["verdict"], "LEAK")
+
+    def test_client_role_checks_use_real_route_and_exit_fields(self) -> None:
+        self.assertIn(
+            "the client advertises a default route",
+            run_phase.client_readiness_problems(
+                self.status(Self={"HostName": guest.client_name(1),
+                                  "DNSName": guest.client_name(1) + ".",
+                                  "PrimaryRoutes": ["0.0.0.0/0"]}),
+                guest.client_name(1),
+            ),
+        )
+        self.assertIn(
+            "the client advertises a default route",
+            run_phase.client_readiness_problems(
+                self.status(Self={"HostName": guest.client_name(1),
+                                  "DNSName": guest.client_name(1) + ".",
+                                  "AllowedIPs": ["::/0"]}),
+                guest.client_name(1),
+            ),
+        )
+        self.assertIn(
+            "the client advertises an exit node",
+            run_phase.client_readiness_problems(
+                self.status(Self={"HostName": guest.client_name(1),
+                                  "DNSName": guest.client_name(1) + ".",
+                                  "ExitNodeOption": True}),
+                guest.client_name(1),
+            ),
+        )
+
+
+class ClientAdmissionTests(unittest.TestCase):
+    def test_two_captures_and_two_overlays_are_reserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            cap = 1024 * 1024 * 1024
+            state_required = (
+                run_phase.OVERLAY_VIRTUAL_SIZE
+                + guest.CLIENT_OVERLAY_VIRTUAL_SIZE
+                + run_phase.DISK_HEADROOM
+            )
+            with self.assertRaises(hostcheck.Refusal):
+                run_phase.check_admission(
+                    root,
+                    cap,
+                    state_root=root,
+                    mem_available=8 * 1024 ** 3,
+                    free_bytes=2 * cap + run_phase.DISK_HEADROOM,
+                    state_free_bytes=state_required - 1,
+                    client_memory_mib=guest.CLIENT_MEMORY_MIB,
+                    capture_count=2,
+                    client_overlay=True,
+                )
+            with self.assertRaises(hostcheck.Refusal):
+                run_phase.check_admission(
+                    root,
+                    cap,
+                    mem_available=8 * 1024 ** 3,
+                    free_bytes=2 * cap + run_phase.DISK_HEADROOM - 1,
+                    capture_count=2,
+                )
+            run_phase.check_admission(
+                root,
+                cap,
+                state_root=root,
+                mem_available=8 * 1024 ** 3,
+                free_bytes=2 * cap + run_phase.DISK_HEADROOM,
+                state_free_bytes=state_required,
+                client_memory_mib=guest.CLIENT_MEMORY_MIB,
+                capture_count=2,
+                client_overlay=True,
+            )
 
 
 class ClientRunPhaseTests(unittest.TestCase):
@@ -5737,7 +6075,8 @@ class ClientRunPhaseTests(unittest.TestCase):
         values.update(overrides)
         return argparse.Namespace(**values)
 
-    def _run(self, phase="idle", duration=0.0, *, client_kwargs=None, **overrides):
+    def _run(self, phase="idle", duration=0.0, *, client_kwargs=None,
+             client_capture_dead=False, **overrides):
         arguments = self._arguments(phase, duration, **overrides)
         self.events.clear()
         events = self.events
@@ -5766,6 +6105,8 @@ class ClientRunPhaseTests(unittest.TestCase):
                 self.returncode = None
 
             def poll(self):
+                if self.label == "client" and client_capture_dead:
+                    return 1
                 return None
 
             def send_signal(self, _signum):
@@ -5774,13 +6115,29 @@ class ClientRunPhaseTests(unittest.TestCase):
             def wait(self, timeout=None):
                 return 0
 
+        def pcap_header():
+            return struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 262144, 1)
+
+        def pcap_record(frame, timestamp):
+            ts_sec = int(timestamp)
+            ts_usec = int(round((timestamp - ts_sec) * 1_000_000))
+            return (
+                struct.pack("<IIII", ts_sec, ts_usec, len(frame), len(frame))
+                + frame
+            )
+
+        self.client_record_count = 0
+
         def start_capture(interface, pcap, stats, *, tcpdump, evidence_fd=None,
                           popen=None, timeout=15.0, file_size_limit=None):
             del tcpdump, evidence_fd, popen, timeout, file_size_limit
             label = "router" if interface == guest.TAP else "client"
             self.events.append(("capture_start", label, interface))
             path = pathlib.Path(pcap)
-            path.write_bytes(b"\xd4\xc3\xb2\xa1" + b"\x00" * 20)
+            data = pcap_header()
+            if label == "router":
+                data += pcap_record(b"\x00" * 60, 1_700_000_000)
+            path.write_bytes(data)
             pathlib.Path(stats).write_text(
                 f"tcpdump: listening on {interface}, link-type EN10MB "
                 "(Ethernet), snapshot length 262144 bytes\n",
@@ -5788,8 +6145,7 @@ class ClientRunPhaseTests(unittest.TestCase):
             )
             if label == "router":
                 self.router_pcap = path
-                slot = [path]
-                self._router_slot = slot
+                self._router_slot = [path]
             else:
                 self.client_pcap = path
                 self._client_slot = [path]
@@ -5804,6 +6160,19 @@ class ClientRunPhaseTests(unittest.TestCase):
             del timeout, evidence_fd
             label = "router" if capture.pcap == self.router_pcap else "client"
             self.events.append(("capture_stop", label))
+            if label == "router":
+                count = 1
+            else:
+                count = self.client_record_count
+            interface = guest.TAP if label == "router" else client_tap
+            pathlib.Path(capture.stats).write_text(
+                f"tcpdump: listening on {interface}, link-type EN10MB "
+                "(Ethernet), snapshot length 262144 bytes\n"
+                f"{count} packets captured\n"
+                f"{count} packets received by filter\n"
+                "0 packets dropped by kernel\n",
+                encoding="utf-8",
+            )
             return 0
 
         def start_vm(state, *, name, tap, qemu_user, uid, gid, log_path=None,
@@ -5826,11 +6195,44 @@ class ClientRunPhaseTests(unittest.TestCase):
                 self.events.append(("quiet",))
 
         class ClientQGA:
-            def __init__(self):
+            def __init__(self, *, marker_fail=False, leak_only=False,
+                         truncate_cat=False, truncate_final_cat=False,
+                         stop_suffix=b""):
                 self.exit_node_active = False
                 self.log = b""
                 self.commands = []
                 self.clock = 1_700_000_000
+                self.run_id = None
+                self.sequence = 0
+                self.traffic_active = False
+                self.capture_ts = 1_700_000_000
+                self.marker_fail = marker_fail
+                self.leak_only = leak_only
+                self.truncate_cat = truncate_cat
+                self.truncate_final_cat = truncate_final_cat
+                self.stop_suffix = stop_suffix
+
+            def append_probe(self, kind, **fields):
+                self.sequence += 1
+                document = {
+                    "k": kind,
+                    "r": self.run_id,
+                    "s": self.sequence,
+                    "t": self.clock,
+                }
+                document.update(fields)
+                self.log += (
+                    json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+                    + b"\n"
+                )
+
+            def probe_pair(self):
+                if self.leak_only:
+                    self.append_probe("exit", ok=True, m=False)
+                    self.append_probe("marker", ok=not self.marker_fail)
+                    return
+                self.append_probe("exit", ok=True, m=True)
+                self.append_probe("marker", ok=not self.marker_fail)
 
             def status(self):
                 peer = {
@@ -5843,10 +6245,13 @@ class ClientRunPhaseTests(unittest.TestCase):
                 document = {
                     "BackendState": "Running",
                     "Self": {
+                        "ID": "peer-client",
                         "HostName": client_name,
                         "DNSName": client_name + ".tailnet.ts.net.",
+                        "ExitNode": False,
                         "ExitNodeOption": False,
-                        "AdvertisedRoutes": [],
+                        "PrimaryRoutes": [],
+                        "AllowedIPs": [],
                     },
                     "Peer": {guest.DEFAULT_NAME: peer},
                 }
@@ -5875,26 +6280,45 @@ class ClientRunPhaseTests(unittest.TestCase):
                     self.exit_node_active = True
                     events.append(("client_exit_set",))
                     return ExecResult(0, b"", b"")
+                if command.startswith("rm -f " + guest.CLIENT_PROBE_LOG):
+                    self.log = b""
+                    self.sequence = 0
+                    return ExecResult(0, b"", b"")
                 if "systemd-run" in command:
                     events.append(("traffic_start",))
-                    stamp = self.clock
-                    self.log = (
-                        json.dumps({"t": stamp, "k": "exit", "ok": True, "m": True}).encode()
-                        + b"\n"
-                        + json.dumps({"t": stamp, "k": "marker", "ok": True}).encode()
-                        + b"\n"
-                    )
+                    match = re.search(r"VPRCLIENTMARK1:([0-9a-f]{32})", command)
+                    if match:
+                        self.run_id = match.group(1)
+                    self.sequence = 0
+                    self.traffic_active = True
+                    self.probe_pair()
                     return ExecResult(0, b"", b"")
+                if "systemctl is-active --quiet" in command:
+                    if self.traffic_active:
+                        self.probe_pair()
+                        return ExecResult(0, b"", b"")
+                    return ExecResult(3, b"", b"")
                 if "systemctl stop vprlab-client-traffic" in command:
                     events.append(("traffic_stop",))
+                    self.traffic_active = False
+                    self.log += self.stop_suffix
+                    if self.truncate_final_cat:
+                        self.truncate_cat = True
                     return ExecResult(0, b"", b"")
                 if command.startswith("stat -c %s"):
                     return ExecResult(0, str(len(self.log)).encode() + b"\n", b"")
+                if command.startswith("sha256sum "):
+                    digest = hashlib.sha256(self.log).hexdigest()
+                    return ExecResult(0, (digest + "  " + guest.CLIENT_PROBE_LOG + "\n").encode(), b"")
                 if command.strip() == f"cat {guest.CLIENT_PROBE_LOG}":
+                    if self.truncate_cat and self.log:
+                        prefix = self.log.rsplit(b"\n", 2)[0] + b"\n"
+                        return ExecResult(0, prefix, b"")
                     return ExecResult(0, self.log, b"")
                 if "/sys/class/net" in command:
                     return ExecResult(0, b"eth0\n", b"")
                 if command.strip() == "date +%s":
+                    self.clock += 1
                     return ExecResult(0, f"{self.clock}\n".encode(), b"")
                 if "VPRLEAKCTL1:" in command:
                     match = re.search(r"VPRLEAKCTL1:([0-9a-f]{32})", command)
@@ -5915,7 +6339,21 @@ class ClientRunPhaseTests(unittest.TestCase):
             def _append_client_pcap(self, payload):
                 if getattr(self, "pcap_slot", None):
                     path = self.pcap_slot[0]
-                    path.write_bytes(path.read_bytes() + payload)
+                    frame = control_frame(payload)
+                    self.capture_ts += 1
+                    record = (
+                        struct.pack(
+                            "<IIII",
+                            int(self.capture_ts),
+                            0,
+                            len(frame),
+                            len(frame),
+                        )
+                        + frame
+                    )
+                    path.write_bytes(path.read_bytes() + record)
+                    nonlocal_record = getattr(test_case, "client_record_count", 0)
+                    test_case.client_record_count = nonlocal_record + 1
 
             def write_file(self, path, data, timeout=60.0):
                 del path, data, timeout
@@ -5928,6 +6366,33 @@ class ClientRunPhaseTests(unittest.TestCase):
                 pass
 
         client = ClientQGA(**client_kwargs)
+
+        test_case = self
+
+        def control_frame(payload):
+            source_mac = bytes.fromhex("525400767102")
+            bridge_mac = bytes.fromhex("525400767101")
+            udp = struct.pack("!HHHH", 40000, 39001, 8 + len(payload), 0) + payload
+            ipv4 = struct.pack(
+                "!BBHHHBBH4s4s",
+                0x45,
+                0,
+                20 + len(udp),
+                1,
+                0,
+                64,
+                17,
+                0,
+                socket.inet_aton("10.251.0.2"),
+                socket.inet_aton("10.251.0.1"),
+            )
+            return (
+                bridge_mac
+                + source_mac
+                + struct.pack("!H", 0x0800)
+                + ipv4
+                + udp
+            )
 
         def wait_for_qga_or_exit(socket_path, process, *, timeout=run_phase.QGA_BOOT_TIMEOUT):
             del timeout
@@ -5958,21 +6423,37 @@ class ClientRunPhaseTests(unittest.TestCase):
                 return hasher.hexdigest()
 
             if "clientscan.py" in text:
-                report = {
-                    "verdict": "PASS",
-                    "capture_meta": {
-                        "source_sha256": digest(option("--client-pcap")),
-                        "router_source_sha256": digest(option("--router-pcap")),
-                        "stats_sha256": digest(option("--client-tcpdump-stats")),
-                        "capture_argv_sha256": digest(option("--client-capture-argv-file")),
-                        "controls": {
-                            "before": {"nonce": option("--client-control-before")},
-                            "after": {"nonce": option("--client-control-after")},
-                        },
-                    },
-                }
+                # Run the REAL client scanner over the crafted evidence files.
+                with open(option("--client-pcap"), "rb") as client_stream, open(
+                    option("--router-pcap"), "rb"
+                ) as router_stream:
+                    stats_text = pathlib.Path(
+                        option("--client-tcpdump-stats")
+                    ).read_text(encoding="utf-8")
+                    argv_bytes = pathlib.Path(
+                        option("--client-capture-argv-file")
+                    ).read_bytes()
+                    report = clientscan.scan_client_capture(
+                        client_stream,
+                        router_stream,
+                        interface=option("--interface"),
+                        marker=option("--marker"),
+                        control_before=option("--client-control-before"),
+                        control_after=option("--client-control-after"),
+                        client_stats_text=stats_text,
+                        client_capture_argv=json.loads(argv_bytes.decode("utf-8")),
+                        client_pcap_path=option("--client-pcap"),
+                        capture_argv_file_sha256=hashlib.sha256(
+                            argv_bytes
+                        ).hexdigest(),
+                    )
                 self.events.append(("client_scan",))
-                return subprocess.CompletedProcess(argv, 0, json.dumps(report).encode(), b"")
+                return subprocess.CompletedProcess(
+                    argv,
+                    {"PASS": 0, "LEAK": 1, "INVALID": 2}[report["verdict"]],
+                    clientscan.canonical_json(report).encode(),
+                    b"",
+                )
             report = {
                 "verdict": "PASS",
                 "control_before": option("--control-before"),
@@ -6113,6 +6594,210 @@ class ClientRunPhaseTests(unittest.TestCase):
         )
         self.assertLess(client_after, router_after)
 
+    def test_tailscaled_is_running_before_the_exit_node_is_cleared(self) -> None:
+        _code, _record, client, _events, *_ = self._run("idle")
+        commands = client.commands
+        status = next(
+            index
+            for index, command in enumerate(commands)
+            if "tailscale status --json" in command
+        )
+        clear = next(
+            index
+            for index, command in enumerate(commands)
+            if command.rstrip().endswith("--exit-node=")
+        )
+        self.assertLess(status, clear)
+
+    def test_probe_log_is_deleted_before_the_traffic_unit_starts(self) -> None:
+        _code, _record, client, _events, *_ = self._run("idle")
+        commands = client.commands
+        removals = [
+            index
+            for index, command in enumerate(commands)
+            if command.startswith("rm -f " + guest.CLIENT_PROBE_LOG)
+        ]
+        starts = [
+            index
+            for index, command in enumerate(commands)
+            if "systemd-run" in command
+        ]
+        self.assertEqual(len(removals), 1)
+        self.assertEqual(len(starts), 1)
+        self.assertLess(removals[0], starts[0])
+
+    def test_unit_that_exited_after_one_probe_is_invalid(self) -> None:
+        def stale_start(client, *, marker, https_ip, http_ip, runtime_sec):
+            del https_ip, http_ip, runtime_sec
+            client.run_id = clientprobe.marker_run_id(marker)
+            client.sequence = 0
+            client.log = b""
+            client.probe_pair()
+
+        with mock.patch.object(
+            run_phase, "start_client_traffic", side_effect=stale_start
+        ), mock.patch.object(
+            run_phase, "client_traffic_unit_active", return_value=True
+        ):
+            code, record, _client, events, _out, _err, evidence = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertEqual(record["client"]["probe"]["verdict"], "INVALID")
+        self.assertFalse(any(entry[0] == "traffic_start" for entry in events))
+        self.assertTrue((evidence / guest.CLIENT_PROBE_FILE).stat().st_size > 0)
+
+    def test_inactive_unit_at_the_end_of_the_hold_is_invalid(self) -> None:
+        with mock.patch.object(
+            run_phase, "client_traffic_unit_active", return_value=False
+        ):
+            code, record, _client, _events, _out, _err, evidence = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertIn("client_traffic_unit_inactive", record["errors"])
+        self.assertTrue(record["client"]["probe_collected"])
+        self.assertTrue((evidence / guest.CLIENT_PROBE_FILE).stat().st_size > 0)
+
+    def test_truncated_final_probe_read_is_invalid_never_pass(self) -> None:
+        code, record, _client, _events, _out, _err, _evidence = self._run(
+            "idle", client_kwargs={"truncate_final_cat": True}
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("probe_log_truncated", record["errors"])
+
+    def test_pre_fault_real_ip_leak_returns_leak_and_collects_the_log(self) -> None:
+        code, record, _client, events, _out, _err, evidence = self._run(
+            "idle", client_kwargs={"leak_only": True}
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(record["result"], "LEAK")
+        self.assertEqual(record["client"]["probe"]["verdict"], "LEAK")
+        self.assertTrue(any(entry[0] == "traffic_stop" for entry in events))
+        self.assertTrue(record["client"]["probe_collected"])
+        self.assertIn(b'"m":false', (evidence / guest.CLIENT_PROBE_FILE).read_bytes())
+
+    def test_probe_log_is_collected_after_a_runner_exception(self) -> None:
+        with mock.patch.object(
+            run_phase, "run_router_fault", side_effect=RuntimeError("injected")
+        ):
+            code, record, _client, _events, _out, _err, evidence = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertIn("phase_exception:RuntimeError", record["errors"])
+        self.assertTrue(record["client"]["probe_collected"])
+        self.assertTrue((evidence / guest.CLIENT_PROBE_FILE).stat().st_size > 0)
+
+    def test_wrong_exit_peer_status_and_self_boolean_is_invalid(self) -> None:
+        original = run_phase.read_client_status
+
+        def wrong(client):
+            document = original(client)
+            document.pop("ExitNodeStatus", None)
+            document["ExitNodeStatus"] = {
+                "ID": "wrong-peer",
+                "Online": True,
+                "TailscaleIPs": ["100.64.0.99"],
+            }
+            document["Self"]["ExitNode"] = True
+            return document
+
+        with mock.patch.object(
+            run_phase, "read_client_status", side_effect=wrong
+        ), mock.patch.object(run_phase, "set_client_exit_node", lambda c, a: None):
+            code, record, _client, _events, _out, _err, _evidence = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+
+    def test_self_exit_node_boolean_without_a_status_is_invalid(self) -> None:
+        original = run_phase.read_client_status
+
+        def wrong(client):
+            document = original(client)
+            document.pop("ExitNodeStatus", None)
+            document["Self"]["ExitNode"] = True
+            return document
+
+        with mock.patch.object(
+            run_phase, "read_client_status", side_effect=wrong
+        ), mock.patch.object(run_phase, "set_client_exit_node", lambda c, a: None):
+            code, record, _client, _events, _out, _err, _evidence = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+
+    def test_wrong_client_hostname_with_valid_dns_name_is_invalid(self) -> None:
+        original = run_phase.read_client_status
+
+        def wrong(client):
+            document = original(client)
+            document["Self"]["HostName"] = "production-client"
+            document["Self"]["DNSName"] = (
+                guest.client_name(1) + ".tailnet.ts.net."
+            )
+            return document
+
+        with mock.patch.object(
+            run_phase, "read_client_status", side_effect=wrong
+        ):
+            code, record, _client, events, _out, _err, _evidence = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertFalse(any(entry[0] == "traffic_start" for entry in events))
+
+    def test_duplicate_key_probe_line_never_copies_guest_bytes(self) -> None:
+        secret = (
+            "198.51.100.77 tskey-auth-FAKEONLY "
+            "https://login.tailscale.com/a/0123456789abcdef"
+        )
+        key = json.dumps(secret).encode()
+        suffix = b"{" + key + b":0," + key + b":1}\n"
+        code, record, _client, _events, stdout, stderr, _evidence = self._run(
+            "idle", client_kwargs={"stop_suffix": suffix}
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("probe_log_malformed", record["client"]["probe"]["invalid_reasons"])
+        self.assertNotIn(secret, json.dumps(record))
+        self.assertNotIn(secret, stdout)
+        self.assertNotIn(secret, stderr)
+
+    def test_marker_failure_before_the_fault_is_invalid(self) -> None:
+        code, record, _client, _events, _out, _err, _evidence = self._run(
+            "idle", client_kwargs={"marker_fail": True}
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("client_marker_not_sent", record["errors"])
+
+    def test_runtime_covers_the_whole_remaining_phase(self) -> None:
+        runtime = run_phase.client_runtime_seconds(run_phase.MAX_PHASE_DURATION)
+        self.assertGreaterEqual(
+            runtime,
+            int(run_phase.MAX_PHASE_DURATION)
+            + int(run_phase.CLIENT_ROUTED_TIMEOUT)
+            + int(run_phase.ACTION_TIMEOUT)
+            + run_phase.CLIENT_REBOOT_ALLOWANCE
+            + run_phase.CLIENT_TRAFFIC_RUNTIME_MARGIN,
+        )
+
+    def test_dead_client_capture_is_detected_by_its_guard(self) -> None:
+        with mock.patch.object(run_phase, "isolate_tap"):
+            code, record, _client, _events, _out, _err, _evidence = self._run(
+                "idle", client_capture_dead=True
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("capture_ended_early", record["errors"])
+        self.assertIsNotNone(record.get("capture_ended_early_at"))
+
+    def test_orchestration_runs_the_real_clientscan_over_crafted_pcaps(self) -> None:
+        code, record, _client, _events, _out, _err, evidence = self._run("idle")
+        self.assertEqual(code, 0, record["result_reason"])
+        report = json.loads(
+            (evidence / guest.CLIENT_SCAN_REPORT_FILE).read_text(encoding="utf-8")
+        )
+        self.assertEqual(report["verdict"], "PASS")
+        self.assertEqual(report["client_packets"], 2)
+        self.assertEqual(report["capture_meta"]["stats"]["captured"], 2)
+        self.assertTrue(report["controls"]["before"]["seen"])
+        self.assertTrue(report["controls"]["after"]["seen"])
+
     def test_client_login_is_refused_with_login_phase(self) -> None:
         arguments = self._arguments("login")
         with mock.patch.object(run_phase, "require_root"), self.assertRaises(
@@ -6126,7 +6811,7 @@ class ClientRunPhaseTests(unittest.TestCase):
             run_phase.run_phase(arguments)
 
     def test_client_login_boots_only_the_client_and_writes_the_url(self) -> None:
-        code, record, client, events, _stdout, _stderr, evidence = self._run(
+        code, record, client, events, _stdout, stderr, evidence = self._run(
             "client-login", 0.0
         )
         self.assertEqual(code, 0, record["result_reason"])
@@ -6138,6 +6823,9 @@ class ClientRunPhaseTests(unittest.TestCase):
         self.assertTrue(url.startswith("https://login.tailscale.com/a/"))
         self.assertEqual(stat.S_IMODE((evidence / "login-url.txt").stat().st_mode), 0o600)
         self.assertEqual(record["client"]["running"], True)
+        # Accepted exception (controller decision 12): client-login keeps the
+        # router login behaviour and prints the URL to stderr as well.
+        self.assertIn("https://login.tailscale.com/a/", stderr)
 
 
 class TestFileLayoutTests(unittest.TestCase):

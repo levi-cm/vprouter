@@ -47,6 +47,7 @@ CLIENT_TAP_PREFIX = "vprlab-ctap"
 CLIENT_BRIDGE_MAC = "52:54:00:76:71:01"
 CLIENT_PROVISION_MAC = "52:54:00:76:71:99"
 CLIENT_BRIDGE_ADDRESS = "10.251.0.1/24"
+CLIENT_BRIDGE_IPV4 = "10.251.0.1"
 CLIENT_SUBNET_TEXT = "10.251.0.0/24"
 CLIENT_SUBNET = ipaddress.IPv4Network(CLIENT_SUBNET_TEXT)
 MAX_CLIENT_INDEX = 9
@@ -267,7 +268,7 @@ os.makedirs(run_dir, mode=0o700, exist_ok=True)
 os.chmod(run_dir, 0o700)
 token = open("/dev/urandom", "rb").read(16).hex()
 created = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-document = {"schema": 1, "token": token, "created": created}
+document = {"schema": 1, "token": token, "created": created, "clients": @@CLIENTS@@}
 try:
     fd = os.open(owner_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
 except FileExistsError:
@@ -281,6 +282,35 @@ if os.geteuid() == 0:
     os.chown(run_dir, 0, 0)
     os.chown(owner_file, 0, 0)
 print("vprlab-owned:" + token)
+"""
+
+_READ_OWNER_CLIENTS_CODE = """\
+import json, re, sys
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as handle:
+        document = json.load(handle)
+except Exception:
+    sys.exit(1)
+token = document.get("token") if isinstance(document, dict) else None
+if (
+    not isinstance(document, dict)
+    or document.get("schema") != 1
+    or not isinstance(token, str)
+    or re.fullmatch(r"[0-9a-f]{32}", token) is None
+    or not isinstance(document.get("created"), str)
+):
+    sys.exit(1)
+clients = document.get("clients", [])
+if (
+    not isinstance(clients, list)
+    or any(
+        isinstance(item, bool) or not isinstance(item, int) or not 1 <= item <= 9
+        for item in clients
+    )
+    or len(set(clients)) != len(clients)
+):
+    sys.exit(1)
+print(" ".join(str(item) for item in sorted(clients)))
 """
 
 _READ_OWNER_CODE = """\
@@ -488,12 +518,15 @@ set -eu
 #
 # Run ownership: setup creates @@RUN_DIR@@ (0700 root) and
 # @@RUN_DIR@@/owner.json exclusively (O_EXCL, 0600) with
-#   {"schema":1,"token":"<32 hex from /dev/urandom>","created":"<UTC>"}
+#   {"schema":1,"token":"<32 hex from /dev/urandom>","created":"<UTC>",
+#    "clients":[<created client indexes>]}
 # Every object created by the run carries the exact string
 #   @@OWNER_PREFIX@@<token>
 # in the vprlab0/vprlab-tap0 ifalias, the inet vprlab table comment and both
 # DOCKER-USER rule comments. Teardown reads that token and verifies every
 # existing object before any mutation; any mismatch aborts with no changes.
+# It also removes every client object the owner record names, even when this
+# plan was rendered without --client.
 # Setup first creates the links DOWN with their aliases, then the nft table
 # (input drop, output drop, forward restrictions, scoped masquerade), then the
 # DOCKER-USER accepts, then the permanent host neighbour, and only then brings
@@ -503,6 +536,9 @@ RUN_DIR="${VPRLAB_RUN_DIR:-@@RUN_DIR@@}"
 OWNER_FILE="$RUN_DIR/owner.json"
 RUN_LOCK="$RUN_DIR/run.lock"
 OWNER=""
+PLANNED_CLIENTS='@@PLANNED_CLIENTS@@'
+OWNER_CLIENTS=""
+CLIENT_INDEXES=""
 RUN_STARTED=0
 TEARDOWN_DONE=0
 
@@ -555,6 +591,21 @@ create_owner() {
   RUN_STARTED=1
 }
 
+read_owner_clients() {
+  if ! OWNER_CLIENTS=$(python3 -c '@@READ_OWNER_CLIENTS@@' "$OWNER_FILE" 2>/dev/null); then
+    echo "netplan: $OWNER_FILE has no valid client inventory; refusing teardown" >&2
+    return 1
+  fi
+  for n in $OWNER_CLIENTS; do
+    case "$n" in
+      [1-9]) : ;;
+      *) echo "netplan: invalid client index in $OWNER_FILE; refusing teardown" >&2
+         return 1 ;;
+    esac
+  done
+  return 0
+}
+
 link_owned() {
   ip -j -d link show dev "$1" 2>/dev/null | python3 -c '@@LINK_CHECK@@' "$1" "$OWNER" "$2"
 }
@@ -581,6 +632,7 @@ tap_mastered() {
 @@CLIENT_HELPERS@@
 
 verify_ownership() {
+  CLIENT_INDEXES=$(client_indexes)
   failed=0
   rc=0; link_state "@@TAP@@" || rc=$?
   case "$rc" in
@@ -718,6 +770,9 @@ do_teardown() {
     return 1
   fi
   if ! read_owner; then
+    return 1
+  fi
+  if ! read_owner_clients; then
     return 1
   fi
   if ! verify_ownership; then
@@ -887,7 +942,13 @@ do_teardown
 def _substitute(template: str, **values: str) -> str:
     result = template
     for name, value in values.items():
-        result = result.replace(f"@@{name}@@", value)
+        token = f"@@{name}@@"
+        if value == "":
+            # An empty block placeholder occupied its own line in the
+            # template.  Remove the whole line instead of leaving a stray
+            # blank line behind (the no-client plan keeps the M2 formatting).
+            result = result.replace(token + "\n", "")
+        result = result.replace(token, value)
     return result
 
 
@@ -907,8 +968,8 @@ def render_plan(
     every object before changing anything.
 
     ``clients`` adds the M3 client bridge/taps and their host rules.  With no
-    clients the generated script is the unchanged M2 router plan (no vprlab1
-    object is referenced).
+    clients no client object is created; the dynamic teardown still removes
+    client objects recorded in ``owner.json`` by an earlier client setup.
     """
     wan = _validate_iface(wan_interface, "wan_interface")
     capture_file = _safe_path_parts(
@@ -941,85 +1002,95 @@ def render_plan(
         '-m comment --comment "$OWNER" -j ACCEPT'
     )
 
-    client_helpers: list[str] = []
+    planned_clients = " ".join(str(index) for index in client_indices)
+    client_helpers: list[str] = [
+        "client_tap_name() {",
+        "  printf 'vprlab-ctap%s' \"$1\"",
+        "}",
+        "client_ipv4_for() {",
+        "  printf '10.251.0.%s' \"$(( $1 + 1 ))\"",
+        "}",
+        "client_mac_for() {",
+        "  printf '52:54:00:76:71:%02x' \"$(( $1 + 1 ))\"",
+        "}",
+        "client_indexes() {",
+        "  {",
+        "    for n in $PLANNED_CLIENTS $OWNER_CLIENTS; do",
+        "      printf '%s\\n' \"$n\"",
+        "    done",
+        "  } | sort -u | tr '\\n' ' '",
+        "}",
+        "link_isolated() {",
+        '  ip -j link show dev "$1" 2>/dev/null'
+        " | python3 -c '@@ISOLATED_CHECK@@' \"$1\"",
+        "}",
+        "link_mastered() {",
+        '  ip -j link show dev "$1" 2>/dev/null'
+        " | python3 -c '@@TAP_MASTERED@@' \"$1\"",
+        "}",
+        "isolate_named_tap() {",
+        "  name=$1",
+        "  rc=0; link_state \"$name\" || rc=$?",
+        "  if [ \"$rc\" -eq 1 ]; then",
+        '    echo "netplan: $name absent; guest already isolated"',
+        "    return 0",
+        "  fi",
+        "  if [ \"$rc\" -ne 0 ]; then",
+        '    echo "netplan: cannot inventory links; $name isolation is unproven; stopping with protections in place" >&2',
+        "    return 1",
+        "  fi",
+        "  if ! ip link set dev \"$name\" down; then",
+        '    echo "netplan: failed to set $name down; stopping with protections in place" >&2',
+        "    return 1",
+        "  fi",
+        "  if link_mastered \"$name\"; then",
+        "    if ! ip link set dev \"$name\" nomaster; then",
+        '      echo "netplan: failed to detach $name; stopping with protections in place" >&2',
+        "      return 1",
+        "    fi",
+        "  fi",
+        "  if ! link_isolated \"$name\"; then",
+        '    echo "netplan: $name is not verifiably down and detached; stopping with protections in place" >&2',
+        "    return 1",
+        "  fi",
+        "  return 0",
+        "}",
+        "isolate_client_taps() {",
+        "  for n in $CLIENT_INDEXES; do",
+        "    isolate_named_tap \"$(client_tap_name \"$n\")\" || return 1",
+        "  done",
+        "  return 0",
+        "}",
+        "client_neigh_ok() {",
+        '  ip -j neigh show "$1" dev "$2" 2>/dev/null'
+        " | python3 -c '@@NEIGH_CHECK@@' \"$1\" \"$3\"",
+        "}",
+        "client_neigh_state() {",
+        '  ip -j neigh show "$1" dev "$2" 2>/dev/null'
+        " | python3 -c '@@INVENTORY_NEIGH@@' \"$1\" \"$2\"",
+        "}",
+        "remove_docker_spec() {",
+        "  while :; do",
+        '    if iptables -C DOCKER-USER "$@" 2>/dev/null; then',
+        '      if ! iptables -D DOCKER-USER "$@"; then',
+        '        echo "netplan: failed to remove a DOCKER-USER accept" >&2',
+        "        return 1",
+        "      fi",
+        "    else",
+        "      rc=$?",
+        '      [ "$rc" -eq 1 ] && return 0',
+        '      echo "netplan: cannot inspect a DOCKER-USER rule (status $rc)" >&2',
+        "      return 1",
+        "    fi",
+        "  done",
+        "}",
+    ]
     client_link_setup: list[str] = []
     client_nft_rules: list[str] = []
     client_docker: list[str] = []
     client_neigh: list[str] = []
     client_link_up: list[str] = []
-    client_verify: list[str] = []
-    client_isolate: list[str] = []
-    client_neigh_del: list[str] = []
-    client_docker_del: list[str] = []
-    client_link_del: list[str] = []
     if client_indices:
-        client_helpers = [
-            "link_isolated() {",
-            '  ip -j link show dev "$1" 2>/dev/null'
-            " | python3 -c '@@ISOLATED_CHECK@@' \"$1\"",
-            "}",
-            "link_mastered() {",
-            '  ip -j link show dev "$1" 2>/dev/null'
-            " | python3 -c '@@TAP_MASTERED@@' \"$1\"",
-            "}",
-            "isolate_named_tap() {",
-            "  name=$1",
-            "  rc=0; link_state \"$name\" || rc=$?",
-            "  if [ \"$rc\" -eq 1 ]; then",
-            '    echo "netplan: $name absent; guest already isolated"',
-            "    return 0",
-            "  fi",
-            "  if [ \"$rc\" -ne 0 ]; then",
-            '    echo "netplan: cannot inventory links; $name isolation is unproven; stopping with protections in place" >&2',
-            "    return 1",
-            "  fi",
-            "  if ! ip link set dev \"$name\" down; then",
-            '    echo "netplan: failed to set $name down; stopping with protections in place" >&2',
-            "    return 1",
-            "  fi",
-            "  if link_mastered \"$name\"; then",
-            "    if ! ip link set dev \"$name\" nomaster; then",
-            '      echo "netplan: failed to detach $name; stopping with protections in place" >&2',
-            "      return 1",
-            "    fi",
-            "  fi",
-            "  if ! link_isolated \"$name\"; then",
-            '    echo "netplan: $name is not verifiably down and detached; stopping with protections in place" >&2',
-            "    return 1",
-            "  fi",
-            "  return 0",
-            "}",
-            "isolate_client_taps() {",
-            *[
-                f"  isolate_named_tap {client_tap(index)} || return 1"
-                for index in client_indices
-            ],
-            "  return 0",
-            "}",
-            "client_neigh_ok() {",
-            '  ip -j neigh show "$1" dev "$2" 2>/dev/null'
-            " | python3 -c '@@NEIGH_CHECK@@' \"$1\" \"$3\"",
-            "}",
-            "client_neigh_state() {",
-            '  ip -j neigh show "$1" dev "$2" 2>/dev/null'
-            " | python3 -c '@@INVENTORY_NEIGH@@' \"$1\" \"$2\"",
-            "}",
-            "remove_docker_spec() {",
-            "  while :; do",
-            '    if iptables -C DOCKER-USER "$@" 2>/dev/null; then',
-            '      if ! iptables -D DOCKER-USER "$@"; then',
-            '        echo "netplan: failed to remove a DOCKER-USER accept" >&2',
-            "        return 1",
-            "      fi",
-            "    else",
-            "      rc=$?",
-            '      [ "$rc" -eq 1 ] && return 0',
-            '      echo "netplan: cannot inspect a DOCKER-USER rule (status $rc)" >&2',
-            "      return 1",
-            "    fi",
-            "  done",
-            "}",
-        ]
         client_link_setup = [
             f"ip tuntap add dev {client_tap(client_indices[0])} mode tap user {tap_user}",
             f"ip link set dev {client_tap(client_indices[0])} alias \"$OWNER\"",
@@ -1046,8 +1117,8 @@ def render_plan(
             f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname != "{wan}" oifname "{CLIENT_BRIDGE}" drop',
             f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{CLIENT_BRIDGE}" meta nfproto ipv6 drop',
             f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward oifname "{CLIENT_BRIDGE}" meta nfproto ipv6 drop',
-            f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{CLIENT_BRIDGE}" oifname "{wan}" accept',
-            f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{wan}" oifname "{CLIENT_BRIDGE}" accept',
+            f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{CLIENT_BRIDGE}" oifname "{wan}" ip saddr {CLIENT_SUBNET_TEXT} accept',
+            f'nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{wan}" oifname "{CLIENT_BRIDGE}" ip daddr {CLIENT_SUBNET_TEXT} accept',
             f'nft add rule {TABLE_FAMILY} {TABLE_NAME} output oifname "{CLIENT_BRIDGE}" meta nfproto ipv4 drop',
             f'nft add rule {TABLE_FAMILY} {TABLE_NAME} postrouting ip saddr {CLIENT_SUBNET_TEXT} iifname "{CLIENT_BRIDGE}" oifname "{wan}" masquerade',
         ]
@@ -1061,80 +1132,91 @@ def render_plan(
                 f"dev {CLIENT_BRIDGE} nud permanent"
             )
             client_link_up.append(f"ip link set {client_tap(index)} up")
-            client_verify += [
-                "  rc=0; link_state "
-                f'"{client_tap(index)}" || rc=$?',
-                '  case "$rc" in',
-                f'    0) if ! link_owned "{client_tap(index)}" tun; then',
-                f'         echo "netplan: refusing teardown: {client_tap(index)} exists but is not owned by this run" >&2',
-                "         failed=1",
-                "       fi ;;",
-                "    1) : ;;",
-                '    *) echo "netplan: cannot inventory links; retaining protection and refusing teardown" >&2',
-                "       failed=1 ;;",
-                "  esac",
-            ]
-            client_neigh_del += [
-                f"  rc=0; client_neigh_state {client_ipv4(index)} {CLIENT_BRIDGE} || rc=$?",
-                '  case "$rc" in',
-                f'    0) if ! ip neigh del {client_ipv4(index)} dev {CLIENT_BRIDGE}; then',
-                f'         echo "netplan: failed to remove the client neighbour {client_ipv4(index)}" >&2',
-                "         failed=1",
-                "       fi ;;",
-                f'    1) echo "netplan: no client neighbour for {client_ipv4(index)}" ;;',
-                '    *) echo "netplan: cannot inventory client neighbours; retaining protection" >&2',
-                "       return 1 ;;",
-                "  esac",
-            ]
-        client_verify += [
-            "  rc=0; link_state "
-            f'"{CLIENT_BRIDGE}" || rc=$?',
-            '  case "$rc" in',
-            f'    0) if ! link_owned "{CLIENT_BRIDGE}" bridge; then',
-            f'         echo "netplan: refusing teardown: {CLIENT_BRIDGE} exists but is not owned by this run" >&2',
-            "         failed=1",
-            "       fi ;;",
-            "    1) : ;;",
-            '    *) echo "netplan: cannot inventory links; retaining protection and refusing teardown" >&2',
-            "       failed=1 ;;",
-            "  esac",
-        ]
-        for index in client_indices:
-            client_verify += [
-                f"  rc=0; client_neigh_state {client_ipv4(index)} {CLIENT_BRIDGE} || rc=$?",
-                '  case "$rc" in',
-                f'    0) if ! client_neigh_ok {client_ipv4(index)} {CLIENT_BRIDGE} {client_mac(index)}; then',
-                f'         echo "netplan: refusing teardown: client neighbour {client_ipv4(index)} is not this run\'s fixed permanent entry" >&2',
-                "         failed=1",
-                "       fi ;;",
-                "    1) : ;;",
-                '    *) echo "netplan: cannot inventory client neighbours; retaining protection and refusing teardown" >&2',
-                "       failed=1 ;;",
-                "  esac",
-            ]
         client_link_up.append(f"ip link set {CLIENT_BRIDGE} up")
-        client_isolate = [
-            "if ! isolate_client_taps; then",
-            '  echo "netplan: teardown stopped with the DROP table and DOCKER-USER accepts still installed" >&2',
-            "  return 1",
-            "fi",
-        ]
-        client_docker_del = [
-            "remove_docker_spec "
-            f"-i {CLIENT_BRIDGE} -o {wan} -s {CLIENT_SUBNET_TEXT} "
-            '-m comment --comment "$OWNER" -j ACCEPT || failed=1',
-            "remove_docker_spec "
-            f"-i {wan} -o {CLIENT_BRIDGE} -d {CLIENT_SUBNET_TEXT} "
-            "-m conntrack --ctstate ESTABLISHED,RELATED "
-            '-m comment --comment "$OWNER" -j ACCEPT || failed=1',
-        ]
-        for index in client_indices:
-            client_link_del.append(
-                f'delete_link "{client_tap(index)}" tun || failed=1'
-            )
-        client_link_del.append(
-            f'delete_link "{CLIENT_BRIDGE}" bridge || failed=1'
-        )
+
+    # Teardown and verification are dynamic: they cover every client index the
+    # run or the owner record names, so a plan rendered without --client still
+    # removes client objects created by an earlier client setup.
+    client_verify = [
+        "  if [ -n \"$CLIENT_INDEXES\" ]; then",
+        "    for n in $CLIENT_INDEXES; do",
+        "      tap=$(client_tap_name \"$n\")",
+        "      rc=0; link_state \"$tap\" || rc=$?",
+        "      case \"$rc\" in",
+        "        0) if ! link_owned \"$tap\" tun; then",
+        "             echo \"netplan: refusing teardown: $tap exists but is not owned by this run\" >&2",
+        "             failed=1",
+        "           fi ;;",
+        "        1) : ;;",
+        "        *) echo \"netplan: cannot inventory links; retaining protection and refusing teardown\" >&2",
+        "           failed=1 ;;",
+        "      esac",
+        "      ip=$(client_ipv4_for \"$n\")",
+        "      rc=0; client_neigh_state \"$ip\" vprlab1 || rc=$?",
+        "      case \"$rc\" in",
+        "        0) if ! client_neigh_ok \"$ip\" vprlab1 \"$(client_mac_for \"$n\")\"; then",
+        "             echo \"netplan: refusing teardown: client neighbour $ip is not this run's fixed permanent entry\" >&2",
+        "             failed=1",
+        "           fi ;;",
+        "        1) : ;;",
+        "        *) echo \"netplan: cannot inventory client neighbours; retaining protection and refusing teardown\" >&2",
+        "           failed=1 ;;",
+        "      esac",
+        "    done",
+        "    rc=0; link_state \"vprlab1\" || rc=$?",
+        "    case \"$rc\" in",
+        "      0) if ! link_owned \"vprlab1\" bridge; then",
+        "           echo \"netplan: refusing teardown: vprlab1 exists but is not owned by this run\" >&2",
+        "           failed=1",
+        "         fi ;;",
+        "      1) : ;;",
+        "      *) echo \"netplan: cannot inventory links; retaining protection and refusing teardown\" >&2",
+        "         failed=1 ;;",
+        "    esac",
+        "  fi",
+    ]
+    client_isolate = [
+        "if ! isolate_client_taps; then",
+        '  echo "netplan: teardown stopped with the DROP table and DOCKER-USER accepts still installed" >&2',
+        "  return 1",
+        "fi",
+    ]
+    client_neigh_del = [
+        "  if [ -n \"$CLIENT_INDEXES\" ]; then",
+        "    for n in $CLIENT_INDEXES; do",
+        "      ip=$(client_ipv4_for \"$n\")",
+        "      rc=0; client_neigh_state \"$ip\" vprlab1 || rc=$?",
+        "      case \"$rc\" in",
+        "        0) if ! ip neigh del \"$ip\" dev vprlab1; then",
+        "             echo \"netplan: failed to remove the client neighbour $ip\" >&2",
+        "             failed=1",
+        "           fi ;;",
+        "        1) echo \"netplan: no client neighbour for $ip\" ;;",
+        "        *) echo \"netplan: cannot inventory client neighbours; retaining protection\" >&2",
+        "           return 1 ;;",
+        "      esac",
+        "    done",
+        "  fi",
+    ]
+    client_docker_del = [
+        "if [ -n \"$CLIENT_INDEXES\" ]; then",
+        "  remove_docker_spec "
+        f"-i {CLIENT_BRIDGE} -o {wan} -s {CLIENT_SUBNET_TEXT} "
+        '-m comment --comment "$OWNER" -j ACCEPT || failed=1',
+        "  remove_docker_spec "
+        f"-i {wan} -o {CLIENT_BRIDGE} -d {CLIENT_SUBNET_TEXT} "
+        "-m conntrack --ctstate ESTABLISHED,RELATED "
+        '-m comment --comment "$OWNER" -j ACCEPT || failed=1',
+        "fi",
+    ]
+    client_link_del = [
+        "if [ -n \"$CLIENT_INDEXES\" ]; then",
+        "  for n in $CLIENT_INDEXES; do",
+        "    delete_link \"$(client_tap_name \"$n\")\" tun || failed=1",
+        "  done",
+        f"  delete_link \"{CLIENT_BRIDGE}\" bridge || failed=1",
+        "fi",
+    ]
 
     def block(lines: list[str]) -> str:
         return "\n".join(lines) + "\n" if lines else ""
@@ -1164,6 +1246,7 @@ def render_plan(
         TABLE_NAME=TABLE_NAME,
         RUN_DIR=DEFAULT_RUN_DIR,
         OWNER_PREFIX=OWNER_PREFIX,
+        PLANNED_CLIENTS=planned_clients,
         TAP_USER=tap_user,
         CAPTURE_LINE=capture_line,
         STATS_Q=stats_q,
@@ -1171,8 +1254,11 @@ def render_plan(
         DOCKER_IN=f"iptables -I DOCKER-USER {docker_spec_in}",
         DOCKER_SPEC_OUT=docker_spec_out,
         DOCKER_SPEC_IN=docker_spec_in,
-        CREATE_OWNER=_CREATE_OWNER_CODE,
+        CREATE_OWNER=_CREATE_OWNER_CODE.replace(
+            "@@CLIENTS@@", json.dumps(client_indices)
+        ),
         READ_OWNER=_READ_OWNER_CODE,
+        READ_OWNER_CLIENTS=_READ_OWNER_CLIENTS_CODE,
         LINK_CHECK=_LINK_CHECK_CODE,
         NFT_CHECK=_NFT_CHECK_CODE,
         NEIGH_CHECK=_NEIGH_CHECK_CODE,
@@ -1184,8 +1270,9 @@ def render_plan(
     )
     if not client_indices:
         # Empty client placeholders would otherwise leave stray blank lines.
-        # The no-client plan stays the unchanged router plan, down to its
-        # formatting.
+        # The no-client plan executes exactly the unchanged router steps; the
+        # only extra text is the dynamic teardown of client objects recorded
+        # by an earlier client setup.
         result = re.sub(r"\n{3,}", "\n\n", result)
     return result
 
@@ -1438,10 +1525,15 @@ def check_name_collisions(
     tables = _tables_from_nft_json(tables_json)
 
     collisions: set[str] = set()
-    client_indices = sorted({validate_client_index(index) for index in clients})
-    lab_names = {BRIDGE, TAP}
-    if client_indices:
-        lab_names.update({CLIENT_BRIDGE, *(client_tap(index) for index in client_indices)})
+    # Every fixed client object is inventoried even when this render has no
+    # --client: residue from an earlier client setup is never invisible to the
+    # preflight, and the no-client plan must not ignore vprlab1.
+    lab_names = {
+        BRIDGE,
+        TAP,
+        CLIENT_BRIDGE,
+        *(client_tap(index) for index in range(1, MAX_CLIENT_INDEX + 1)),
+    }
     for name in sorted(lab_names):
         if name in links:
             collisions.add(f"link {name} already exists")
@@ -1463,7 +1555,7 @@ def check_name_collisions(
             collisions.add(
                 f"{LAB_SUBNET_TEXT} overlaps existing address/route {network}"
             )
-        if client_indices and network.overlaps(CLIENT_SUBNET):
+        if network.overlaps(CLIENT_SUBNET):
             collisions.add(
                 f"{CLIENT_SUBNET_TEXT} overlaps existing address/route {network}"
             )

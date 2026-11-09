@@ -4,17 +4,20 @@
 This scanner does not classify client WAN traffic: the client tap legitimately
 carries Tailscale/DERP UDP, retries and TLS.  It proves three things only:
 
-* the client capture's tcpdump stats are complete (banner, zero drops,
-  ``captured == received``, final count equals the record count);
+* the client capture's tcpdump stats are complete (banner, full-frame snaplen,
+  zero drops, ``captured == received``, final count equals the record count);
 * exactly one client before-control and one client after-control datagram
-  (``VPRLEAKCTL1:<nonce>``) appear on the client tap, in order;
+  (``VPRLEAKCTL1:<nonce>``) appear on the client tap, in record and timestamp
+  order.  Each control is parsed strictly as Ethernet II / IPv4 (no options or
+  fragments) / UDP to port 39001 from the client VM MAC and IPv4 to the client
+  bridge MAC and IPv4, with the exact payload;
 * the per-phase plaintext marker (``VPRCLIENTMARK1:<32 hex>``) appears in no
   frame of either the client or the router capture.  A single clear
   occurrence is a real-IP/untunnelled-traffic leak.
 
-The raw bytes of every record in both pcaps are searched.  A marker split
-across two frames is out of scope (documented in the M3 design) because the
-client sends it in one HTTP request.
+The raw bytes of every record in both pcaps are searched for the marker.  A
+marker split across two frames is out of scope (documented in the M3 design)
+because the client sends it in one HTTP request.
 
 The scanner reuses :mod:`pcapscan`'s strict pcap walker, tcpdump-stats parser
 and :mod:`netplan`'s exact capture-argv check.  It never executes a command.
@@ -26,6 +29,8 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
+import struct
 import sys
 from typing import Any
 
@@ -34,6 +39,151 @@ import pcapscan
 import policy as policy_mod
 
 MAX_MARKER_FINDINGS = 200
+CONTROL_UDP_PORT = 39001
+#: tcpdump with ``-s 0`` records full frames and writes this global snaplen.
+FULL_CAPTURE_SNAPLEN = 262144
+_ETHERTYPE_IPV4 = 0x0800
+_IPPROTO_UDP = 17
+_CLIENT_TAP_RE = re.compile(r"^vprlab-ctap([1-9])$")
+
+
+def _client_identity(interface: str) -> tuple[str, str]:
+    """Return ``(client MAC, client IPv4)`` for one fixed client tap name."""
+    match = _CLIENT_TAP_RE.fullmatch(interface) if isinstance(interface, str) else None
+    if match is None:
+        raise ValueError("interface must be a fixed client tap vprlab-ctap1..9")
+    index = int(match.group(1))
+    return netplan.client_mac(index), netplan.client_ipv4(index)
+
+
+def _mac(value: bytes) -> str:
+    return ":".join(f"{byte:02x}" for byte in value)
+
+
+def _parse_control(
+    frame: bytes,
+    *,
+    client_mac: str,
+    client_ipv4: str,
+    bridge_mac: str,
+    bridge_ipv4: str,
+) -> bytes | None:
+    """Return the UDP payload of an exact client control datagram, else None."""
+    if len(frame) < 14 + 20 + 8:
+        return None
+    destination, source = _mac(frame[0:6]), _mac(frame[6:12])
+    if struct.unpack("!H", frame[12:14])[0] != _ETHERTYPE_IPV4:
+        return None
+    packet = frame[14:]
+    if len(packet) < 20 or packet[0] != 0x45:
+        return None
+    total_length = struct.unpack("!H", packet[2:4])[0]
+    if total_length != len(packet):
+        return None
+    flags_fragment = struct.unpack("!H", packet[6:8])[0]
+    if flags_fragment & 0x3FFF:  # MF or a non-zero fragment offset
+        return None
+    if packet[9] != _IPPROTO_UDP:
+        return None
+    if (
+        source != client_mac
+        or destination != bridge_mac
+        or packet[12:16] != bytes(int(part) for part in client_ipv4.split("."))
+        or packet[16:20] != bytes(int(part) for part in bridge_ipv4.split("."))
+    ):
+        return None
+    segment = packet[20:]
+    if len(segment) < 8:
+        return None
+    _sport, dport, udp_length = struct.unpack("!HHH", segment[0:6])
+    if dport != CONTROL_UDP_PORT or udp_length != len(segment):
+        return None
+    return segment[8:]
+
+
+def _scan_raw(
+    stream,
+    *,
+    where: str,
+    marker: bytes,
+    controls: dict[str, bytes],
+    identity: tuple[str, str] | None,
+) -> dict[str, Any]:
+    """Walk one pcap and return packets, digests, controls and marker hits."""
+    digest = hashlib.sha256()
+    meta: dict[str, Any] = {}
+    control_sightings: list[dict[str, Any]] = []
+    control_like_wrong_tuple = 0
+    marker_hits: list[dict[str, Any]] = []
+    packets = 0
+    timestamp_regression = False
+    previous_timestamp: float | None = None
+    try:
+        for index, ts, frame in pcapscan.iter_pcap_records(
+            stream, digest=digest, meta=meta
+        ):
+            packets += 1
+            if previous_timestamp is not None and ts < previous_timestamp:
+                timestamp_regression = True
+            previous_timestamp = ts
+            if identity is not None:
+                client_mac, client_ipv4 = identity
+                payload = _parse_control(
+                    frame,
+                    client_mac=client_mac,
+                    client_ipv4=client_ipv4,
+                    bridge_mac=netplan.CLIENT_BRIDGE_MAC,
+                    bridge_ipv4=netplan.CLIENT_BRIDGE_IPV4,
+                )
+                if payload is not None:
+                    for nonce, expected in controls.items():
+                        if payload == expected:
+                            control_sightings.append(
+                                {
+                                    "nonce": nonce,
+                                    "packet": index,
+                                    "ts": ts,
+                                    "capture": where,
+                                }
+                            )
+                else:
+                    for expected in controls.values():
+                        if expected in frame:
+                            control_like_wrong_tuple += 1
+            else:
+                # The router tap must never carry the client control payload.
+                for nonce, expected in controls.items():
+                    position = frame.find(expected)
+                    while position >= 0:
+                        control_sightings.append(
+                            {
+                                "nonce": nonce,
+                                "packet": index,
+                                "ts": ts,
+                                "capture": where,
+                            }
+                        )
+                        position = frame.find(expected, position + 1)
+            position = frame.find(marker)
+            while position >= 0:
+                if len(marker_hits) < MAX_MARKER_FINDINGS:
+                    marker_hits.append(
+                        {"capture": where, "packet": index, "ts": ts}
+                    )
+                position = frame.find(marker, position + 1)
+        structural = None
+    except pcapscan.CaptureInvalid as exc:
+        structural = str(exc)
+    return {
+        "packets": packets,
+        "sha256": digest.hexdigest(),
+        "meta": meta,
+        "controls": control_sightings,
+        "control_like_wrong_tuple": control_like_wrong_tuple,
+        "marker_hits": marker_hits,
+        "timestamp_regression": timestamp_regression,
+        "structural_invalid": structural,
+    }
 
 
 def _sightings(entries: list[dict[str, Any]], nonce: str) -> list[dict[str, Any]]:
@@ -50,56 +200,6 @@ def _control_report(entries: list[dict[str, Any]], nonce: str) -> dict[str, Any]
         "last_packet": found[-1]["packet"] if found else None,
         "first_ts": found[0]["ts"] if found else None,
         "last_ts": found[-1]["ts"] if found else None,
-    }
-
-
-def _scan_raw(
-    stream,
-    *,
-    where: str,
-    marker: bytes,
-    controls: dict[str, bytes],
-) -> dict[str, Any]:
-    """Walk one pcap and return packets, digests, controls and marker hits."""
-    digest = hashlib.sha256()
-    meta: dict[str, Any] = {}
-    control_sightings: list[dict[str, Any]] = []
-    marker_hits: list[dict[str, Any]] = []
-    packets = 0
-    try:
-        for index, ts, frame in pcapscan.iter_pcap_records(
-            stream, digest=digest, meta=meta
-        ):
-            packets += 1
-            for nonce, payload in controls.items():
-                position = frame.find(payload)
-                while position >= 0:
-                    control_sightings.append(
-                        {
-                            "nonce": nonce,
-                            "packet": index,
-                            "ts": ts,
-                            "capture": where,
-                        }
-                    )
-                    position = frame.find(payload, position + 1)
-            position = frame.find(marker)
-            while position >= 0:
-                if len(marker_hits) < MAX_MARKER_FINDINGS:
-                    marker_hits.append(
-                        {"capture": where, "packet": index, "ts": ts}
-                    )
-                position = frame.find(marker, position + 1)
-        structural = None
-    except pcapscan.CaptureInvalid as exc:
-        structural = str(exc)
-    return {
-        "packets": packets,
-        "sha256": digest.hexdigest(),
-        "meta": meta,
-        "controls": control_sightings,
-        "marker_hits": marker_hits,
-        "structural_invalid": structural,
     }
 
 
@@ -135,6 +235,7 @@ def scan_client_capture(
         raise ValueError("client controls must be distinct")
     if client_stats_text is None and client_stdio_error is None:
         raise ValueError("a client tcpdump stats file is required")
+    identity = _client_identity(interface)
 
     marker_bytes = marker.encode("ascii")
     controls = {
@@ -142,10 +243,18 @@ def scan_client_capture(
         control_after: policy_mod.CONTROL_PREFIX + control_after.encode("ascii"),
     }
     client = _scan_raw(
-        client_stream, where="client", marker=marker_bytes, controls=controls
+        client_stream,
+        where="client",
+        marker=marker_bytes,
+        controls=controls,
+        identity=identity,
     )
     router = _scan_raw(
-        router_stream, where="router", marker=marker_bytes, controls=controls
+        router_stream,
+        where="router",
+        marker=marker_bytes,
+        controls=controls,
+        identity=None,
     )
     invalid_reasons: list[str] = []
     findings: list[dict[str, Any]] = []
@@ -153,10 +262,17 @@ def scan_client_capture(
     for capture in (client, router):
         if capture["structural_invalid"] is not None:
             invalid_reasons.append(capture["structural_invalid"])
+        if capture["timestamp_regression"]:
+            invalid_reasons.append("capture_timestamp_regression")
+        snaplen = capture["meta"].get("snaplen")
+        if snaplen != FULL_CAPTURE_SNAPLEN:
+            invalid_reasons.append("capture_snaplen_mismatch")
     if client["packets"] == 0:
         invalid_reasons.append("zero_packets")
     if router["packets"] == 0:
         invalid_reasons.append("router_zero_packets")
+    if client["control_like_wrong_tuple"]:
+        invalid_reasons.append("client_control_wrong_tuple")
 
     stats: dict[str, int | None] | None = None
     stats_problem: str | None = client_stdio_error
@@ -221,13 +337,16 @@ def scan_client_capture(
     if missing:
         invalid_reasons.append("missing_client_controls")
     if before["seen"] and after["seen"]:
+        if not before["first_packet"] < after["first_packet"]:
+            invalid_reasons.append("client_control_order")
         if not before["first_ts"] < after["first_ts"]:
             invalid_reasons.append("client_control_order")
-    replayed = before["packets"] > 1 or after["packets"] > 1
-    if replayed:
-        findings.append({"reason": "client_control_replayed"})
-    # A control seen on the router tap too is not expected and means the client
-    # control was routed beyond its own bridge; keep it visible as a finding.
+    # A duplicated control is an evidence defect, not a leak, unless the
+    # marker search independently found a leak.
+    if before["packets"] > 1 or after["packets"] > 1:
+        invalid_reasons.append("client_control_duplicate")
+    # A control seen on the router tap too means it was routed beyond its own
+    # bridge; keep it visible as a finding.
     if router["controls"]:
         findings.append({"reason": "client_control_on_router_tap"})
 
@@ -254,6 +373,7 @@ def scan_client_capture(
         "router_packets": router["packets"],
         "client_pcap": client["meta"],
         "router_pcap": router["meta"],
+        "expected_snaplen": FULL_CAPTURE_SNAPLEN,
         "controls": {"before": before, "after": after},
         "missing_controls": missing,
         "marker_occurrences": len(marker_occurrences),

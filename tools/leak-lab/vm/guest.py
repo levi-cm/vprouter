@@ -895,11 +895,10 @@ def boot_control_spec(
 _CLIENT_TRAFFIC_SCRIPT = r'''#!/usr/bin/env python3
 """vprlab M3 client traffic: continuous HTTPS exit and HTTP marker probes.
 
-Every loop appends at most two JSON lines to the probe log.  It never records
-the reported IP or location: the exit probe keeps only the Mullvad boolean and
-at most the first 12 hex characters of the IP's SHA-256.
+Every loop appends at most two JSON lines to the probe log.  Every line carries
+the phase marker id (``r``) and a gap-free sequence number (``s``).  It never
+records the reported IP or location: only the Mullvad boolean is kept.
 """
-import hashlib
 import json
 import os
 import re
@@ -909,29 +908,44 @@ import time
 
 LOG = "@@PROBE_LOG@@"
 MAX_LOG = 1024 * 1024
-MARKER_RE = re.compile(r"^VPRCLIENTMARK1:[0-9a-f]{32}$")
+MARKER_RE = re.compile(r"^VPRCLIENTMARK1:([0-9a-f]{32})$")
 
 
-def append(document):
+def write_document(document):
     payload = (
         json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
     ).encode("ascii")
     descriptor = os.open(LOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     try:
-        if os.fstat(descriptor).st_size + len(payload) <= MAX_LOG:
-            os.write(descriptor, payload)
+        if os.fstat(descriptor).st_size + len(payload) > MAX_LOG:
+            return False
+        os.write(descriptor, payload)
+        return True
     finally:
         os.close(descriptor)
 
 
+def emit(state, document, stamp):
+    sequence = state["s"]
+    line = dict(document, r=state["r"], s=sequence, t=stamp)
+    if write_document(line):
+        state["s"] = sequence + 1
+        return True
+    overflow = {"k": "overflow", "r": state["r"], "s": sequence, "t": stamp}
+    if write_document(overflow):
+        state["s"] = sequence + 1
+    state["overflow"] = True
+    return False
+
+
 def exit_probe(ip):
     command = [
-        "curl", "-sS", "-m", "5", "--resolve",
+        "curl", "-sS", "-m", "3", "--resolve",
         "am.i.mullvad.net:443:" + ip, "https://am.i.mullvad.net/json",
     ]
     try:
         result = subprocess.run(
-            command, capture_output=True, timeout=10, check=False
+            command, capture_output=True, timeout=4, check=False
         )
     except (OSError, subprocess.SubprocessError):
         return {"ok": False, "m": None}
@@ -946,22 +960,18 @@ def exit_probe(ip):
     flag = document.get("mullvad_exit_ip")
     if not isinstance(flag, bool):
         return {"ok": False, "m": None}
-    line = {"ok": True, "m": flag}
-    reported = document.get("ip")
-    if isinstance(reported, str) and reported:
-        line["h"] = hashlib.sha256(reported.encode("utf-8")).hexdigest()[:12]
-    return line
+    return {"ok": True, "m": flag}
 
 
 def marker_probe(marker, ip):
     command = [
-        "curl", "-sS", "-m", "5", "--resolve", "example.com:80:" + ip,
+        "curl", "-sS", "-m", "3", "--resolve", "example.com:80:" + ip,
         "-H", "X-Vprlab-Marker: " + marker,
         "http://example.com/?vprlab=" + marker,
     ]
     try:
         result = subprocess.run(
-            command, capture_output=True, timeout=10, check=False
+            command, capture_output=True, timeout=4, check=False
         )
     except (OSError, subprocess.SubprocessError):
         return {"ok": False}
@@ -972,7 +982,8 @@ def main():
     if len(sys.argv) != 4:
         raise SystemExit("usage: vprlab-client-traffic MARKER HTTPS-IP HTTP-IP")
     marker, https_ip, http_ip = sys.argv[1:4]
-    if MARKER_RE.fullmatch(marker) is None:
+    match = MARKER_RE.fullmatch(marker)
+    if match is None:
         raise SystemExit("invalid marker")
     for value in (https_ip, http_ip):
         if re.fullmatch(r"(?:[0-9]{1,3}\.){3}[0-9]{1,3}", value) is None:
@@ -981,10 +992,11 @@ def main():
         LOG, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
     )
     os.close(descriptor)
-    while True:
+    state = {"r": match.group(1), "s": 1, "overflow": False}
+    while not state["overflow"]:
         stamp = int(time.time())
-        append({"t": stamp, "k": "exit", **exit_probe(https_ip)})
-        append({"t": stamp, "k": "marker", **marker_probe(marker, http_ip)})
+        emit(state, {"k": "exit", **exit_probe(https_ip)}, stamp)
+        emit(state, {"k": "marker", **marker_probe(marker, http_ip)}, stamp)
         time.sleep(1.0)
 
 

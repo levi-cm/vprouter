@@ -117,18 +117,25 @@ python3 -B tools/leak-lab/vm/run_phase.py \
 
 Flow: admission (`MemAvailable` must cover 1536 MiB + the client's 256 MiB;
 the measured value is recorded); start both captures (`vprlab-tap0` unchanged
-and `vprlab-ctap1` with the same flags); boot the client; run
-`tailscale set --exit-node=`; send the client before-control
-(`VPRLEAKCTL1:<nonce>`) to `10.251.0.1:39001`; require the client to be
-Running with its fixed name and no advertised exit node; boot the router and
-make it READY; select the router peer by HostName `zz-vprtest-01-do-not-use`,
-`ExitNodeOption: true`, online; `tailscale set --exit-node=<peer IPv4>
---exit-node-allow-lan-access=false`; wait until the client reports it active;
-start the transient traffic unit and require a pre-fault Mullvad success
-within 90 s (`client_not_routed` otherwise); hold for `--duration`; stop the
-unit; clear the exit node; send the client after-control; send the router
-after-control; shut both VMs down and stop both captures only after both QEMUs
-exited; then scan.
+and `vprlab-ctap1` with the same flags, each attached to its own capture
+guard); boot the client; wait for `BackendState == Running` (tailscaled must be
+up before `tailscale set`); run `tailscale set --exit-node=` and wait until no
+exit node is reported; send the client before-control (`VPRLEAKCTL1:<nonce>`)
+to `10.251.0.1:39001`; require the client to be Running with its exact
+`Self.HostName`, no advertised exit node and no default route; boot the router
+and make it READY; read the router's own `Self.ID`/`Self.TailscaleIPs` through
+QGA and select exactly that peer (HostName `zz-vprtest-01-do-not-use`,
+`ExitNodeOption: true`, online; a duplicate ID or HostName collision is
+refused); `tailscale set --exit-node=<peer IPv4>
+--exit-node-allow-lan-access=false`; wait until `ExitNodeStatus` names that ID,
+contains the address and is online; delete any stale probe log, start the
+transient traffic unit and require a pre-fault Mullvad success **and** a
+successful marker probe within 90 s (`client_not_routed` /
+`client_marker_not_sent` otherwise); hold for `--duration`; require the unit
+still active, stop it, read the exact size/hash/newline-bound probe log; clear
+the exit node; send the client after-control; send the router after-control;
+shut both VMs down and stop both captures only after both QEMUs exited; then
+scan.
 
 For every accepted phase the router is made READY before the fault, including
 `start-router` (whose action is then an idempotent `systemctl start`), because
@@ -145,27 +152,42 @@ object with the index/name/memory/tap/nonces, resolved probe IPs, probe
 counts, exit-node booleans, the client scan/probe verdicts and the combined
 result.  The client's own Tailscale state, auth keys, login URL (beyond
 `login-url.txt`) and any non-Mullvad IP are never recorded; the exit probe
-keeps only `mullvad_exit_ip` and at most the first 12 hex of the reported IP's
-SHA-256.
+keeps only `mullvad_exit_ip`.  The earlier `h` SHA-256 prefix was removed in
+the fix round because 48 bits over an IPv4 address is reversible.
+`client-login` keeps the router login behaviour of printing the URL to stderr;
+that accepted exception is recorded in the M3 design.
+
+Every probe line carries the phase marker id `r` and a gap-free sequence `s`.
+The runner deletes the log before launch, requires the unit to be active at the
+end of the hold, reads the stopped file only when its guest-reported size and
+SHA-256 match the bytes read and it ends with a newline, and collects the log
+on every exit path while the client VM is still up.
 
 `clientscan.py` (invoked by the runner through the retained evidence fd) checks
 only what is provable on the client path:
 
 - client tcpdump stats: exact banner for `vprlab-ctapN`, zero drops,
-  `captured == received`, final count equals the record count, and the exact
-  client capture argv;
+  `captured == received`, final count equals the record count, the exact
+  client capture argv, and a full-frame snaplen (262144, from `-s 0`);
 - exactly one client before-control and one after-control in the client pcap,
-  in order (missing/reordered is INVALID, a replay is LEAK);
+  in record and timestamp order (missing/reordered/duplicated is INVALID); each
+  control is parsed as Ethernet II / IPv4 without options or fragments / UDP to
+  39001 from the client VM to the bridge with the exact payload;
 - the per-phase plaintext marker `VPRCLIENTMARK1:<32 hex>` in no frame of the
   client **or** router capture (raw bytes of every record; a split marker is
   out of scope).  One clear occurrence is LEAK `marker_in_clear`.
 
 `clientprobe.py` parses `client-probe.jsonl` strictly (exact key sets, no
-duplicate keys, bounded 1 MiB/4 KiB lines).  Verdict: any successful exit
-probe with `m` not `true` (including `null`) is LEAK; no pre-fault Mullvad
-success is INVALID `client_not_routed`; failures after the fault are expected
-and counted only.  The final phase result is the worst of the router scan, the
-client scan, the probe verdict and runner errors: LEAK > INVALID > PASS.
+duplicate keys, bounded 1 MiB/4 KiB lines, `r`/`s` binding).  Verdict: any
+well-formed successful exit probe with `m` not `true` (including `null`) is
+LEAK, even if other lines are malformed or the log is truncated; no pre-fault
+Mullvad success is INVALID `client_not_routed`; no pre-fault successful marker
+probe is INVALID `client_marker_not_sent`; a foreign run id, sequence gap,
+timestamp regression/out-of-window value, probe gap above 10 s, missing
+post-fault exit/marker attempt, overflow line or read-quality problem is
+INVALID.  Failures after the fault are expected and counted only.  The final
+phase result is the worst of the router scan, the client scan, the probe
+verdict and runner errors: LEAK > INVALID > PASS; a missing verdict is INVALID.
 
 ### Host layout: the M1 plan plus hostsetup
 
@@ -524,8 +546,9 @@ expects `up`.  Readiness is now a precondition, not a recorded field:
 
 "A fresh handshake" means `wg show wg0 latest-handshakes` inside the router
 netns reports an age below 180 s using the guest's own clock.  "Exit node
-advertised" means `tailscale status --json` has `Self.ExitNodeOption: true` or
-`0.0.0.0/0` in `Self.AdvertisedRoutes`.  `phase.json` records
+advertised" means `tailscale status --json` has `Self.ExitNodeOption: true`
+(the release's own readiness check uses that field; `Self.AdvertisedRoutes` is
+not emitted).  `phase.json` records
 `certifies: "server_side_no_client_traffic"` for router-only phases: these
 phases certify the server-side window and capture, not client traffic through
 the exit node.  M3 phases run with `--client N` and record

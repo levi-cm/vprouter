@@ -133,7 +133,13 @@ CLIENT_MEMORY_MIB = guest.CLIENT_MEMORY_MIB
 MIN_CLIENT_MEMORY_AVAILABLE = MIN_MEMORY_AVAILABLE + CLIENT_MEMORY_MIB * guest.MIB
 CLIENT_ROUTED_TIMEOUT = 90.0
 CLIENT_READY_TIMEOUT = 180.0
-CLIENT_TRAFFIC_RUNTIME_MARGIN = 120
+#: The traffic unit may outlive the hold by this margin; RuntimeMaxSec must
+#: cover the pre-fault wait, the fault action, a possible reboot, the hold and
+#: this margin.  The runner still stops the unit explicitly.
+CLIENT_TRAFFIC_RUNTIME_MARGIN = 600
+CLIENT_REBOOT_ALLOWANCE = int(
+    QGA_BOOT_TIMEOUT + ROUTER_ACTIVE_TIMEOUT + ROUTER_HANDSHAKE_TIMEOUT
+)
 CLIENT_PROBE_READ_LIMIT = 1024 * 1024
 DISK_HEADROOM = 1024 * 1024 * 1024
 DEFAULT_CAPTURE_SIZE_CAP = 2 * 1024 * 1024 * 1024
@@ -1881,14 +1887,17 @@ def check_admission(
     free_bytes: int | None = None,
     state_free_bytes: int | None = None,
     client_memory_mib: int = 0,
+    capture_count: int = 1,
+    client_overlay: bool = False,
 ) -> None:
     """Refuse to boot a guest without host memory and disk headroom.
 
-    The evidence filesystem must hold the pcap cap plus 1 GiB.  The state
-    filesystem is separate evidence-wise and must hold the guest's 4 GiB
-    overlay plus the same 1 GiB headroom; a guest can fill its own disk
-    without sending a single packet.  ``client_memory_mib`` adds the second
-    (client) VM's memory to the admission floor.
+    The evidence filesystem must hold every planned capture cap plus 1 GiB.
+    The state filesystem must hold the router's 4 GiB overlay, the client's
+    2 GiB overlay when a client VM runs, plus the same 1 GiB headroom; a guest
+    can fill its own disk without sending a single packet.
+    ``client_memory_mib`` adds the second (client) VM's memory to the admission
+    floor.
     """
     available = read_mem_available() if mem_available is None else mem_available
     required_memory = MIN_MEMORY_AVAILABLE + max(0, int(client_memory_mib)) * guest.MIB
@@ -1899,19 +1908,23 @@ def check_admission(
         )
     if free_bytes is None:
         free_bytes = _free_bytes(evidence_root)
-    required = int(capture_size_cap) + DISK_HEADROOM
+    captures = max(1, int(capture_count))
+    required = int(capture_size_cap) * captures + DISK_HEADROOM
     if free_bytes < required:
         raise hostcheck.Refusal(
-            f"free disk is below the capture cap plus {DISK_HEADROOM // (1024 * 1024)} MiB"
+            "free disk is below "
+            f"{captures} capture cap(s) plus {DISK_HEADROOM // (1024 * 1024)} MiB"
         )
     if state_root is not None or state_free_bytes is not None:
         if state_free_bytes is None:
             state_free_bytes = _free_bytes(state_root)
         state_required = OVERLAY_VIRTUAL_SIZE + DISK_HEADROOM
+        if client_overlay:
+            state_required += guest.CLIENT_OVERLAY_VIRTUAL_SIZE
         if state_free_bytes < state_required:
             raise hostcheck.Refusal(
-                "free space on the state filesystem is below the 4 GiB overlay "
-                f"plus {DISK_HEADROOM // (1024 * 1024)} MiB headroom"
+                "free space on the state filesystem is below the "
+                f"{state_required // (1024 * 1024)} MiB overlay reservation"
             )
 
 
@@ -2809,19 +2822,54 @@ def read_client_status(client: QGAClient) -> dict | None:
     return document if isinstance(document, dict) else None
 
 
-def _bare_hostname(document: dict) -> str | None:
+def _dns_label(document: dict) -> str | None:
     node = document.get("Self")
     if not isinstance(node, dict):
         return None
-    hostname = node.get("HostName")
-    if isinstance(hostname, str) and tsnames.is_client_node(hostname):
-        return hostname
     dns_name = node.get("DNSName")
     if isinstance(dns_name, str) and dns_name:
-        label = dns_name.split(".", 1)[0]
-        if tsnames.is_client_node(label):
-            return label
+        return dns_name.split(".", 1)[0]
     return None
+
+
+def client_identity_problems(document: dict, expected_name: str) -> list[str]:
+    """Require the client's own identity to be exactly the expected label.
+
+    ``Self.HostName`` is authoritative when present.  A present but different
+    value is refused; there is no DNS fallback that could hide a conflicting
+    hostname.  A DNSName that disagrees is refused as well.  Only a missing
+    HostName falls back to the DNSName label.
+    """
+    if not isinstance(document, dict):
+        return ["the client status is unavailable"]
+    node = document.get("Self")
+    if not isinstance(node, dict):
+        return ["the client status has no Self node"]
+    problems: list[str] = []
+    hostname = node.get("HostName")
+    label = _dns_label(document)
+    if isinstance(hostname, str):
+        if hostname != expected_name:
+            problems.append("the client name is not the expected client label")
+        if label is not None and label != expected_name:
+            problems.append("the client DNS name disagrees with the expected label")
+    elif label is not None:
+        if label != expected_name:
+            problems.append("the client name is not the expected client label")
+    else:
+        problems.append("the client name is unavailable")
+    return problems
+
+
+def _default_route_present(node: dict) -> bool:
+    for field in ("PrimaryRoutes", "AllowedIPs"):
+        routes = node.get(field)
+        if not isinstance(routes, list):
+            continue
+        for route in routes:
+            if isinstance(route, str) and route in ("0.0.0.0/0", "::/0"):
+                return True
+    return False
 
 
 def client_readiness_problems(
@@ -2833,16 +2881,15 @@ def client_readiness_problems(
     problems: list[str] = []
     if document.get("BackendState") != "Running":
         problems.append("the client Tailscale backend is not Running")
-    if _bare_hostname(document) != expected_name:
-        problems.append("the client name is not the expected client label")
+    problems.extend(client_identity_problems(document, expected_name))
     node = document.get("Self")
     if isinstance(node, dict):
-        if node.get("ExitNodeOption") is True:
+        # ExitNodeOption is the field `tailscale status --json` emits to say
+        # this node offers itself as an exit node.  Self.ExitNode is the
+        # node's own role flag as well; either set makes it an exit node.
+        if node.get("ExitNodeOption") is True or node.get("ExitNode") is True:
             problems.append("the client advertises an exit node")
-        routes = node.get("AdvertisedRoutes")
-        if isinstance(routes, list) and any(
-            route in ("0.0.0.0/0", "::/0") for route in routes
-        ):
+        if _default_route_present(node):
             problems.append("the client advertises a default route")
     return problems
 
@@ -2867,6 +2914,8 @@ def wait_client_running(
         for problem in problems:
             if problem in (
                 "the client name is not the expected client label",
+                "the client DNS name disagrees with the expected label",
+                "the client name is unavailable",
                 "the client advertises an exit node",
                 "the client advertises a default route",
             ):
@@ -2876,82 +2925,128 @@ def wait_client_running(
     raise hostcheck.Refusal(f"the client did not become ready ({last})")
 
 
-def client_find_router_peer(
-    document: object, router_name: str
-) -> dict | None:
-    """Find the online test exit-node peer and its first IPv4 address.
+def router_exit_identity(document: object) -> tuple[str, list[str]]:
+    """Return the router's own ``Self.ID`` and IPv4 addresses.
 
+    This is read from the router VM's own ``tailscale status --json`` through
+    QGA.  The client must then select exactly that peer; a HostName alone is
+    never sufficient.
+    """
+    if not isinstance(document, dict):
+        raise hostcheck.Refusal("the router Tailscale status is unavailable")
+    node = document.get("Self")
+    if not isinstance(node, dict):
+        raise hostcheck.Refusal("the router Tailscale status has no Self node")
+    node_id = node.get("ID")
+    if not isinstance(node_id, str) or not node_id:
+        raise hostcheck.Refusal("the router Tailscale status has no Self.ID")
+    addresses: list[str] = []
+    values = node.get("TailscaleIPs")
+    if isinstance(values, list):
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            try:
+                ipaddress.IPv4Address(value)
+            except ValueError:
+                continue
+            addresses.append(value)
+    if not addresses:
+        raise hostcheck.Refusal("the router has no Tailscale IPv4 address")
+    return node_id, addresses
+
+
+def client_find_router_peer(
+    document: object,
+    router_name: str,
+    router_id: str,
+    router_addresses: list[str],
+) -> dict | None:
+    """Find exactly the router peer and its first matching IPv4 address.
+
+    The peer must be the single peer carrying the router's own ``Self.ID``,
+    with the exact test HostName, ``ExitNodeOption`` true and online.  A
+    second peer with the same HostName is an ambiguity and refuses the phase.
     The returned document is host-side only and never recorded: the peer's
     Tailscale address is a non-Mullvad IP.
     """
-    if not isinstance(document, dict):
+    if not isinstance(document, dict) or not isinstance(router_id, str):
         return None
     peers = document.get("Peer")
     if not isinstance(peers, dict):
         return None
-    for peer in peers.values():
-        if not isinstance(peer, dict):
+    by_id = [
+        peer
+        for peer in peers.values()
+        if isinstance(peer, dict) and peer.get("ID") == router_id
+    ]
+    if len(by_id) != 1:
+        return None
+    peer = by_id[0]
+    if peer.get("HostName") != router_name:
+        return None
+    hostname_collisions = [
+        other
+        for key, other in peers.items()
+        if isinstance(other, dict)
+        and other is not peer
+        and other.get("HostName") == router_name
+    ]
+    if hostname_collisions:
+        return None
+    if peer.get("ExitNodeOption") is not True or peer.get("Online") is not True:
+        return None
+    expected = set(router_addresses)
+    addresses = peer.get("TailscaleIPs")
+    if not isinstance(addresses, list):
+        return None
+    for address in addresses:
+        if not isinstance(address, str):
             continue
-        if peer.get("HostName") != router_name:
+        try:
+            ipaddress.IPv4Address(address)
+        except ValueError:
             continue
-        if peer.get("ExitNodeOption") is not True or peer.get("Online") is not True:
-            continue
-        addresses = peer.get("TailscaleIPs")
-        if not isinstance(addresses, list):
-            continue
-        for address in addresses:
-            if not isinstance(address, str):
-                continue
-            try:
-                parsed = ipaddress.IPv4Address(address)
-            except ValueError:
-                continue
-            if parsed.is_global or parsed in ipaddress.IPv4Network("100.64.0.0/10"):
-                return peer
+        if address in expected:
+            return peer
     return None
 
 
-def client_peer_ipv4(peer: dict) -> str:
+def client_peer_ipv4(peer: dict, expected: list[str] | None = None) -> str:
+    allowed = set(expected or ())
     for address in peer.get("TailscaleIPs") or ():
-        if isinstance(address, str):
-            try:
-                ipaddress.IPv4Address(address)
-            except ValueError:
-                continue
+        if not isinstance(address, str):
+            continue
+        try:
+            ipaddress.IPv4Address(address)
+        except ValueError:
+            continue
+        if not allowed or address in allowed:
             return address
-    raise hostcheck.Refusal("the router exit-node peer has no IPv4 address")
+    raise hostcheck.Refusal("the router exit-node peer has no expected IPv4 address")
 
 
-def client_peer_is_active(document: object, peer: dict) -> bool:
+def client_peer_is_active(
+    document: object, router_id: str, address: str
+) -> bool:
+    """Require an explicit ExitNodeStatus for the exact router peer.
+
+    There is deliberately no ``Self.ExitNode``/HostName shortcut: only the
+    status naming the router's own node ID and the selected address counts.
+    """
     if not isinstance(document, dict):
         return False
-    expected_id = peer.get("ID")
-    expected_ips = {
-        address
-        for address in peer.get("TailscaleIPs") or ()
-        if isinstance(address, str)
-    }
     status = document.get("ExitNodeStatus")
-    if isinstance(status, dict):
-        if status.get("Online") is False:
-            return False
-        if expected_id is not None and status.get("ID") == expected_id:
-            return True
-        ips = status.get("TailscaleIPs")
-        if isinstance(ips, list) and expected_ips.intersection(
-            item for item in ips if isinstance(item, str)
-        ):
-            return True
-    node = document.get("Self")
-    if isinstance(node, dict):
-        exit_node = node.get("ExitNode")
-        if exit_node is True:
-            return True
-        if isinstance(exit_node, str) and (
-            exit_node == expected_id or exit_node in expected_ips
-        ):
-            return True
-    return False
+    if not isinstance(status, dict):
+        return False
+    if status.get("ID") != router_id:
+        return False
+    if status.get("Online") is not True:
+        return False
+    addresses = status.get("TailscaleIPs")
+    if not isinstance(addresses, list):
+        return False
+    return address in addresses
 
 
 def set_client_exit_node(client: QGAClient, address: str) -> None:
@@ -2979,7 +3074,11 @@ def clear_client_exit_node(client: QGAClient) -> None:
 
 
 def wait_client_exit_node(
-    client: QGAClient, peer: dict, *, timeout: float | None = None
+    client: QGAClient,
+    router_id: str,
+    address: str,
+    *,
+    timeout: float | None = None,
 ) -> dict:
     if timeout is None:
         timeout = CLIENT_READY_TIMEOUT
@@ -2987,10 +3086,59 @@ def wait_client_exit_node(
     while time.monotonic() < deadline:
         check_interrupt()
         document = read_client_status(client)
-        if client_peer_is_active(document, peer):
+        if client_peer_is_active(document, router_id, address):
             return document
         time.sleep(1.0)
     raise hostcheck.Refusal("the client did not report the test exit node as active")
+
+
+def client_exit_node_cleared(document: object) -> bool:
+    if not isinstance(document, dict):
+        return False
+    if isinstance(document.get("ExitNodeStatus"), dict):
+        return False
+    node = document.get("Self")
+    if isinstance(node, dict):
+        if node.get("ExitNode") is True:
+            return False
+        value = node.get("ExitNode")
+        if isinstance(value, str) and value:
+            return False
+    return True
+
+
+def wait_client_exit_cleared(
+    client: QGAClient, *, timeout: float | None = None
+) -> None:
+    """Wait until no exit node is selected, after tailscaled is running."""
+    if timeout is None:
+        timeout = CLIENT_READY_TIMEOUT
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        check_interrupt()
+        if client_exit_node_cleared(read_client_status(client)):
+            return
+        time.sleep(1.0)
+    raise hostcheck.Refusal("the client did not clear its exit node")
+
+
+def clear_client_probe_log(client: QGAClient) -> None:
+    """Delete the probe log before launch and prove it is absent.
+
+    The log is bound to this run; a stale line from a previous phase must never
+    be able to satisfy a positive control.
+    """
+    result = client.execute(
+        "/bin/sh",
+        [
+            "-c",
+            f"rm -f {guest.CLIENT_PROBE_LOG}; "
+            f"if [ -e {guest.CLIENT_PROBE_LOG} ]; then exit 1; fi",
+        ],
+        timeout=15.0,
+    )
+    if result.exitcode != 0:
+        raise hostcheck.Refusal("cannot remove the client probe log")
 
 
 def start_client_traffic(
@@ -3010,6 +3158,7 @@ def start_client_traffic(
         raise hostcheck.Refusal("the client traffic runtime is invalid")
     if runtime_sec <= 0:
         raise hostcheck.Refusal("the client traffic runtime must be positive")
+    clear_client_probe_log(client)
     command = (
         f"systemctl reset-failed {guest.CLIENT_TRAFFIC_UNIT} 2>/dev/null || true; "
         f"systemd-run --unit={guest.CLIENT_TRAFFIC_UNIT} "
@@ -3032,7 +3181,11 @@ def stop_client_traffic(client: QGAClient) -> None:
 
 
 def read_client_probe_log(client: QGAClient) -> tuple[bytes | None, str | None]:
-    """Read the bounded probe log; return ``(data, problem)``."""
+    """Read the bounded probe log while the unit may still be writing.
+
+    This tolerant read is only for the pre-fault wait.  The final evidence read
+    is :func:`read_client_probe_log_exact`.
+    """
     stat = client.execute(
         "/bin/sh",
         ["-c", f"stat -c %s {guest.CLIENT_PROBE_LOG} 2>/dev/null || true"],
@@ -3050,6 +3203,81 @@ def read_client_probe_log(client: QGAClient) -> tuple[bytes | None, str | None]:
     if result.exitcode != 0 or len(result.stdout) > CLIENT_PROBE_READ_LIMIT:
         return None, "probe_log_unreadable"
     return result.stdout, None
+
+
+def read_client_probe_log_exact(client: QGAClient) -> tuple[bytes | None, str | None]:
+    """Read the stopped log and require exact size, SHA-256 and a final newline.
+
+    A prefix that happens to end on a JSON boundary is still a truncated
+    transfer; only the exact bytes the guest hashed are accepted evidence.
+    The received bytes are returned with the problem when a transfer is
+    rejected, so a well-formed leak inside them is never masked.
+    """
+    stat = client.execute(
+        "/bin/sh",
+        ["-c", f"stat -c %s {guest.CLIENT_PROBE_LOG} 2>/dev/null || true"],
+        timeout=15.0,
+    )
+    size_text = stat.stdout.decode("ascii", "replace").strip()
+    if not size_text.isdigit():
+        return None, "probe_log_missing"
+    size = int(size_text)
+    if size <= 0:
+        return b"", "probe_log_empty"
+    if size > CLIENT_PROBE_READ_LIMIT:
+        return None, "probe_log_oversized"
+    digest_result = client.execute(
+        "/bin/sh",
+        ["-c", f"sha256sum {guest.CLIENT_PROBE_LOG} 2>/dev/null || true"],
+        timeout=30.0,
+    )
+    digest_text = digest_result.stdout.decode("ascii", "replace").strip()
+    digest = digest_text.split(None, 1)[0] if digest_text else ""
+    if digest_result.exitcode != 0 or len(digest) != 64:
+        return None, "probe_log_unreadable"
+    result = client.execute(
+        "/bin/sh", ["-c", f"cat {guest.CLIENT_PROBE_LOG}"], timeout=30.0
+    )
+    if result.exitcode != 0 or len(result.stdout) > CLIENT_PROBE_READ_LIMIT:
+        return None, "probe_log_unreadable"
+    data = result.stdout
+    if len(data) != size:
+        return data, "probe_log_truncated"
+    if hashlib.sha256(data).hexdigest() != digest:
+        return data, "probe_log_hash_mismatch"
+    if not data.endswith(b"\n"):
+        return data, "probe_log_truncated"
+    return data, None
+
+
+def collect_client_probe(
+    client: QGAClient,
+    evidence: EvidenceDirectory,
+    record: dict,
+    note,
+) -> bytes:
+    """Read exact probe evidence and persist it.
+
+    Called on the success path and again from ``finally`` on every error path
+    while the client VM is still up.  A read problem is a fixed reason; the
+    evidence file is still created (empty) so the hash field is unambiguous.
+    """
+    if record["client"].get("probe_collected"):
+        return evidence.read_bytes(guest.CLIENT_PROBE_FILE)
+    data, problem = read_client_probe_log_exact(client)
+    if problem is not None:
+        note(problem)
+        if data is None:
+            data = b""
+    else:
+        record["client"]["probe_log_read"] = "exact"
+    evidence.open_new(guest.CLIENT_PROBE_FILE, data, mode=0o600)
+    record["client"]["probe_log_sha256"] = evidence.hash(guest.CLIENT_PROBE_FILE)
+    record["hashes"]["client_probe_sha256"] = record["client"][
+        "probe_log_sha256"
+    ]
+    record["client"]["probe_collected"] = True
+    return data
 
 
 def resolve_probe_ips(resolver=None) -> dict[str, str]:
@@ -3087,8 +3315,20 @@ def resolve_probe_ips(resolver=None) -> dict[str, str]:
 
 
 def client_runtime_seconds(duration: float) -> int:
-    value = int(duration) + CLIENT_TRAFFIC_RUNTIME_MARGIN
-    if value > int(MAX_PHASE_DURATION) + CLIENT_TRAFFIC_RUNTIME_MARGIN:
+    """Cover the whole remaining phase, not just the hold.
+
+    The unit starts before the pre-fault wait and stays up across the fault
+    action (including a possible reboot) and the hold.  RuntimeMaxSec is only a
+    backstop: the runner stops the unit explicitly.
+    """
+    value = (
+        int(duration)
+        + int(CLIENT_ROUTED_TIMEOUT)
+        + int(ACTION_TIMEOUT)
+        + CLIENT_REBOOT_ALLOWANCE
+        + CLIENT_TRAFFIC_RUNTIME_MARGIN
+    )
+    if value <= 0:
         raise hostcheck.Refusal("client traffic runtime is out of range")
     return value
 
@@ -3102,28 +3342,30 @@ def client_traffic_unit_active(client: QGAClient) -> bool:
     return result.exitcode == 0
 
 
-def wait_client_first_mullvad(
-    client: QGAClient, *, timeout: float = CLIENT_ROUTED_TIMEOUT
-) -> bool:
-    """Wait for a successful exit probe with ``mullvad_exit_ip: true``."""
+def wait_client_probe_control(
+    client: QGAClient,
+    run_id: str,
+    *,
+    timeout: float | None = None,
+) -> dict[str, bool]:
+    """Wait for a Mullvad success and a successful marker probe.
+
+    A non-Mullvad success is returned immediately as a leak so the caller can
+    stop waiting; the final collection still runs from the ``finally`` path.
+    """
+    if timeout is None:
+        timeout = CLIENT_ROUTED_TIMEOUT
     deadline = time.monotonic() + timeout
+    flags = {"leak": False, "mullvad": False, "marker": False}
     while time.monotonic() < deadline:
         check_interrupt()
         data, problem = read_client_probe_log(client)
         if data is not None and problem is None:
-            try:
-                entries = clientprobe.parse_probe_log(data)
-            except clientprobe.ProbeError:
-                entries = []
-            for entry in entries:
-                if (
-                    entry.get("k") == "exit"
-                    and entry.get("ok") is True
-                    and entry.get("m") is True
-                ):
-                    return True
+            flags = clientprobe.probe_prefix_flags(data, run_id=run_id)
+            if flags["leak"] or (flags["mullvad"] and flags["marker"]):
+                return flags
         time.sleep(1.0)
-    return False
+    return flags
 
 
 def cleanup_client_units(client: QGAClient) -> None:
@@ -3307,15 +3549,21 @@ def combine_verdicts(
     *,
     errors: list[str] | tuple[str, ...] = (),
 ) -> str:
-    """Return the worst of the router, client-scan and probe verdicts."""
-    values = [
-        verdict
-        for verdict in (router_verdict, client_scan_verdict, probe_verdict)
-        if verdict is not None
-    ]
+    """Return the worst of the router, client-scan and probe verdicts.
+
+    A missing or unknown verdict is INVALID, never silently PASS; only a real
+    LEAK elsewhere keeps precedence over that defect.
+    """
+    raw = (router_verdict, client_scan_verdict, probe_verdict)
+    values = [verdict for verdict in raw if isinstance(verdict, str)]
     if "LEAK" in values:
         return "LEAK"
-    if errors or any(value != "PASS" for value in values) or not values:
+    if (
+        errors
+        or len(values) != len(raw)
+        or any(value not in ("PASS", "INVALID") for value in values)
+        or any(value != "PASS" for value in values)
+    ):
         return "INVALID"
     return "PASS"
 
@@ -3386,6 +3634,8 @@ def _run_client_phase_locked(
         int(arguments.capture_size_cap),
         state_root=router_state.parent,
         client_memory_mib=CLIENT_MEMORY_MIB,
+        capture_count=2,
+        client_overlay=True,
     )
     if not login_only:
         verify_state(router_state, qemu_uid=uid, qemu_gid=gid, base=base)
@@ -3612,6 +3862,10 @@ def _run_client_phase_locked(
             evidence.write_json(
                 guest.CLIENT_CAPTURE_ARGV_FILE, client_capture.argv
             )
+            # Both captures are bond to their own guard: a dead tcpdump trips
+            # capture_ended_early and isolates the corresponding tap at once.
+            router_guard.attach_capture(router_capture.process)
+            client_guard.attach_capture(client_capture.process)
             record["timestamps"]["capture_started"] = utc_now()
             guard_check()
 
@@ -3755,11 +4009,18 @@ def _run_client_phase_locked(
             )
             return 0 if record["result"] == "PASS" else 2
 
-        clear_client_exit_node(client_client)
+        # Tailscaled must be running before `tailscale set` is usable.  The
+        # design's clear-before-wait order races the daemon socket; wait first,
+        # then clear any persisted exit node and prove it is gone.
         document = wait_client_running(client_client, client_name)
         record["client"]["running"] = True
         record["client"]["advertises_exit_node"] = False
         record["timestamps"]["client_ready"] = utc_now()
+        guard_check()
+        clear_client_exit_node(client_client)
+        wait_client_exit_cleared(client_client)
+        record["client"]["exit_node"]["cleared"] = True
+        record["timestamps"]["client_exit_cleared"] = utc_now()
         guard_check()
         # Client before-control is sent before the router exists.
         client_wan = record["client"]["wan_device"]
@@ -3847,21 +4108,31 @@ def _run_client_phase_locked(
         record["timestamps"]["router_active"] = utc_now()
         guard_check()
 
-        # Exit node: find the router peer in the client's status and use it.
+        # Exit node: bind the client's peer to the router's own Self.ID and
+        # Tailscale addresses.  HostName alone is not an identity.
+        router_id, router_addresses = router_exit_identity(
+            read_tailscale_status(router_client, name)
+        )
         peer = client_find_router_peer(
-            read_client_status(client_client), name
+            read_client_status(client_client),
+            name,
+            router_id,
+            router_addresses,
         )
         if peer is None:
             note("client_exit_peer_missing")
             raise hostcheck.Refusal("the client cannot see the test exit node")
-        set_client_exit_node(client_client, client_peer_ipv4(peer))
-        wait_client_exit_node(client_client, peer)
+        exit_ipv4 = client_peer_ipv4(peer, router_addresses)
+        set_client_exit_node(client_client, exit_ipv4)
+        wait_client_exit_node(client_client, router_id, exit_ipv4)
         record["client"]["exit_node"]["active"] = True
+        record["client"]["exit_node"]["router_peer_bound"] = True
         record["timestamps"]["exit_node_active"] = utc_now()
         guard_check()
 
         probe_ips = resolve_probe_ips()
         record["client"]["probe_ips"] = dict(probe_ips)
+        record["client"]["probe_clock_start"] = read_guest_clock(client_client)
         start_client_traffic(
             client_client,
             marker=marker,
@@ -3871,10 +4142,22 @@ def _run_client_phase_locked(
         )
         traffic_started = True
         record["timestamps"]["traffic_started"] = utc_now()
-        if not wait_client_first_mullvad(client_client):
+        probe_flags = wait_client_probe_control(
+            client_client, clientprobe.marker_run_id(marker)
+        )
+        if probe_flags["leak"]:
+            # Do not wait for the positive controls: the leak is already real
+            # evidence and the final probe verdict keeps LEAK precedence.
+            note("client_real_ip")
+            raise hostcheck.Refusal("the client leaked a real IP before the fault")
+        if not probe_flags["mullvad"]:
             note("client_not_routed")
             raise hostcheck.Refusal("no pre-fault Mullvad client success")
+        if not probe_flags["marker"]:
+            note("client_marker_not_sent")
+            raise hostcheck.Refusal("no pre-fault successful marker probe")
         record["client"]["pre_fault_mullvad"] = True
+        record["client"]["pre_fault_marker"] = True
         record["timestamps"]["pre_fault_control"] = utc_now()
 
         record["client"]["fault_epoch"] = read_guest_clock(client_client)
@@ -3926,6 +4209,7 @@ def _run_client_phase_locked(
             )
         if not action_ok:
             note("action_failed")
+        record["client"]["post_fault_epoch"] = read_guest_clock(client_client)
         guard_check()
         if arguments.phase == "login":
             pass
@@ -3940,19 +4224,15 @@ def _run_client_phase_locked(
         if arguments.phase == "kill-wireguard" and router_client is not None:
             record["recovery"] = read_wg0_state(router_client, name)
 
+        if not client_traffic_unit_active(client_client):
+            note("client_traffic_unit_inactive")
+            raise hostcheck.Refusal(
+                "the client traffic unit is not active at the end of the hold"
+            )
         stop_client_traffic(client_client)
         traffic_started = False
-        probe_data, probe_problem = read_client_probe_log(client_client)
-        if probe_problem is not None:
-            note(probe_problem)
-            probe_data = b""
-        evidence.open_new(guest.CLIENT_PROBE_FILE, probe_data, mode=0o600)
-        record["client"]["probe_log_sha256"] = evidence.hash(
-            guest.CLIENT_PROBE_FILE
-        )
-        record["hashes"]["client_probe_sha256"] = record["client"][
-            "probe_log_sha256"
-        ]
+        record["client"]["probe_clock_stop"] = read_guest_clock(client_client)
+        collect_client_probe(client_client, evidence, record, note)
         clear_client_exit_node(client_client)
         record["client"]["exit_node"]["active"] = False
         record["client"]["nonces"]["after_exitcode"] = emit_client_control(
@@ -3999,6 +4279,20 @@ def _run_client_phase_locked(
                 record["cleanup"]["services"] = exc.__class__.__name__
                 note("cleanup_failed")
         if client_client is not None:
+            try:
+                if not login_only and not record["client"].get("probe_collected"):
+                    if traffic_started:
+                        stop_client_traffic(client_client)
+                        traffic_started = False
+                    if record["client"].get("probe_clock_stop") is None:
+                        record["client"]["probe_clock_stop"] = read_guest_clock(
+                            client_client
+                        )
+                    collect_client_probe(
+                        client_client, evidence, record, note
+                    )
+            except BaseException:  # noqa: BLE001
+                note("probe_collection_failed")
             try:
                 cleanup_client_units(client_client)
                 record["client"]["cleanup"] = "ok"
@@ -4150,9 +4444,15 @@ def _run_client_phase_locked(
         probe_report = clientprobe.evaluate_probe_log(
             probe_bytes,
             fault_epoch=record["client"].get("fault_epoch"),
+            run_id=clientprobe.marker_run_id(marker),
+            clock_start=record["client"].get("probe_clock_start"),
+            clock_stop=record["client"].get("probe_clock_stop"),
+            post_fault_epoch=record["client"].get("post_fault_epoch"),
         )
         record["client"]["probe"] = probe_report
-        if probe_report["verdict"] != "PASS":
+        if probe_report["verdict"] == "LEAK":
+            note("client_real_ip")
+        elif probe_report["verdict"] != "PASS":
             note(probe_report.get("reason") or "client_probe_invalid")
 
     if lab_policy is not None:

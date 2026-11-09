@@ -593,6 +593,8 @@ class QemuArgvTests(unittest.TestCase):
                 "-nn",
                 "-U",
                 "--immediate-mode",
+                "-B",
+                "8192",
                 "-s",
                 "0",
                 "-w",

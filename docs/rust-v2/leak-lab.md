@@ -42,7 +42,8 @@ alongside.
 │        │   run owner record /run/vprlab/owner.json (token 0600)       │
  │        │                                                          │
  │   vprlab-tap0  <---- tcpdump -i vprlab-tap0 -nn -U                 │
- │                       --immediate-mode -s 0 -w FILE 2> STATS      │
+ │                       --immediate-mode -B 8192 -s 0 -w FILE        │
+ │                       2> STATS                                     │
  └────────┼──────────────────────────────────────────────────────────┘
           │ tap lives on the host, outside the VM
  ┌────────┴──────────────────────────┐
@@ -414,7 +415,7 @@ argv `netplan.py` prints:
 
 ```json
 ["tcpdump", "-i", "vprlab-tap0", "-nn", "-U", "--immediate-mode",
- "-s", "0", "-w", "/run/vprlab/manual-capture.pcap"]
+ "-B", "8192", "-s", "0", "-w", "/run/vprlab/manual-capture.pcap"]
 ```
 
 Only the value after `-w` may differ from the printed command, and that value
@@ -685,10 +686,12 @@ record, `nft create`, and the per-run `vprlab-owned:<token>` checks are the
 runtime guards.
 
 Capture command printed by the plan (note `--immediate-mode` and `-s 0`, full
-frames). The default is inside the root-owned run directory, not the CWD:
+frames; `-B 8192` gives the kernel capture ring 8 MiB instead of libpcap's
+2 MiB default, because a 58-minute phase lost 3 frames to kernel drops with
+the default and any drop makes the phase INVALID). The default is inside the root-owned run directory, not the CWD:
 
 ```sh
-tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 \
+tcpdump -i vprlab-tap0 -nn -U --immediate-mode -B 8192 -s 0 \
   -w "$RUN_DIR/manual-capture.pcap" 2> "$RUN_DIR/manual-capture.pcap.stderr"
 ```
 
@@ -717,7 +720,7 @@ that wrote somewhere else is `INVALID`:
 ```sh
 cat > capture-argv.json <<'JSON'
 ["tcpdump", "-i", "vprlab-tap0", "-nn", "-U", "--immediate-mode",
- "-s", "0", "-w", "/run/vprlab/manual-capture.pcap"]
+ "-B", "8192", "-s", "0", "-w", "/run/vprlab/manual-capture.pcap"]
 JSON
 
 python3 -B tools/leak-lab/pcapscan.py \

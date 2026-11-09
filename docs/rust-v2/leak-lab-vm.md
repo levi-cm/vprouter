@@ -364,7 +364,7 @@ single-use), and refuses an existing nonce.
 
 Normal phase:
 
-1. root starts `tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w ...`
+1. root starts `tcpdump -i vprlab-tap0 -nn -U --immediate-mode -B 8192 -s 0 -w ...`
    in the root-only evidence directory, with stderr redirected to the stats
    file, and waits for the pcap header;
 2. QEMU test boot, QGA ready, silence check;

@@ -1289,6 +1289,8 @@ def tcpdump_argv(interface: str, pcap: pathlib.Path) -> list[str]:
         "-nn",
         "-U",
         "--immediate-mode",
+        "-B",
+        "8192",
         "-s",
         "0",
         "-w",

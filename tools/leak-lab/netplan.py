@@ -154,6 +154,8 @@ def capture_argv(capture_file: str = DEFAULT_CAPTURE) -> list[str]:
         "-nn",
         "-U",
         "--immediate-mode",
+        "-B",
+        "8192",
         "-s",
         "0",
         "-w",

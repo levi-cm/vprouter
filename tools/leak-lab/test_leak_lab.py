@@ -62,6 +62,8 @@ CAPTURE_ARGV = [
     "-nn",
     "-U",
     "--immediate-mode",
+    "-B",
+    "8192",
     "-s",
     "0",
     "-w",
@@ -806,6 +808,9 @@ class PcapScanTests(unittest.TestCase):
             [item if item != "-s" else "-snaplen" for item in CAPTURE_ARGV],
             [item if item != "0" else "65535" for item in CAPTURE_ARGV],
             [item if item != "vprlab-tap0" else "eth0" for item in CAPTURE_ARGV],
+            # the pre-buffer argv (libpcap's 2 MiB default ring) and a smaller ring
+            [item for item in CAPTURE_ARGV if item not in ("-B", "8192")],
+            [item if item != "8192" else "2048" for item in CAPTURE_ARGV],
             CAPTURE_ARGV[:-1] + [""],
             "tcpdump -i vprlab-tap0",
         )
@@ -2823,7 +2828,7 @@ class NetplanTests(unittest.TestCase):
             'nft add rule inet vprlab postrouting ip saddr 10.250.0.0/24 iifname "vprlab0" oifname "eth0" masquerade',
             'nft add rule inet vprlab forward iifname "vprlab0" oifname "eth0" accept',
             'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab0" accept',
-            "tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w "
+            "tcpdump -i vprlab-tap0 -nn -U --immediate-mode -B 8192 -s 0 -w "
             "\"$RUN_DIR\"/'manual-capture.pcap'",
         ):
             self.assertIn(expected, plan)
@@ -2835,7 +2840,7 @@ class NetplanTests(unittest.TestCase):
         self.assertTrue(plan.startswith("#!/bin/sh\n"))
         self.assertIn("set -eu", plan.splitlines()[1])
         self.assertIn("# not for interactive paste", plan)
-        self.assertIn("tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w", plan)
+        self.assertIn("tcpdump -i vprlab-tap0 -nn -U --immediate-mode -B 8192 -s 0 -w", plan)
         self.assertIn('if [ "${1:-}" = "teardown" ]; then', plan)
         self.assertIn("\ndo_teardown\n", plan)
 
@@ -3377,6 +3382,8 @@ class NetplanTests(unittest.TestCase):
                 "-nn",
                 "-U",
                 "--immediate-mode",
+                "-B",
+                "8192",
                 "-s",
                 "0",
                 "-w",
@@ -3397,7 +3404,7 @@ class NetplanTests(unittest.TestCase):
             "capture_argv_invalid",
         )
         self.assertIn(
-            "tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w /var/tmp/phase.pcap",
+            "tcpdump -i vprlab-tap0 -nn -U --immediate-mode -B 8192 -s 0 -w /var/tmp/phase.pcap",
             plan,
         )
 

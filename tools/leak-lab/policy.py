@@ -93,7 +93,7 @@ _TOP_KEYS = frozenset(
         "ipv6_allowed",
     }
 )
-_TOP_REQUIRED = _TOP_KEYS - {"gateway_mac"}
+_TOP_REQUIRED = _TOP_KEYS
 _FLOW_KEYS = frozenset({"proto", "dst_ipv4", "dst_port", "label"})
 _CONTROL_KEYS = frozenset({"sink_ipv4", "sink_udp_port"})
 
@@ -159,7 +159,7 @@ class Policy:
     vm_wan_mac: str
     vm_wan_ipv4: str
     gateway_ipv4: str
-    gateway_mac: str | None
+    gateway_mac: str
     allowed: tuple[Flow, ...]
     allow_arp: bool
     positive_control: PositiveControl
@@ -174,19 +174,17 @@ class Policy:
         return {(flow.dst_ipv4, flow.dst_port): flow.label for flow in self.allowed}
 
     def to_dict(self) -> dict[str, Any]:
-        document: dict[str, Any] = {
+        return {
             "schema_version": self.schema_version,
             "vm_wan_mac": self.vm_wan_mac,
             "vm_wan_ipv4": self.vm_wan_ipv4,
             "gateway_ipv4": self.gateway_ipv4,
+            "gateway_mac": self.gateway_mac,
             "allowed": [flow.to_dict() for flow in self.allowed],
             "allow_arp": self.allow_arp,
             "positive_control": self.positive_control.to_dict(),
             "ipv6_allowed": self.ipv6_allowed,
         }
-        if self.gateway_mac is not None:
-            document["gateway_mac"] = self.gateway_mac
-        return document
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -351,16 +349,9 @@ def parse_policy(source: bytes | str | Mapping[str, Any]) -> Policy:
     if not isinstance(allow_arp, bool):
         raise PolicyError("allow_arp must be a JSON boolean")
 
-    gateway_mac: str | None = None
-    if "gateway_mac" in obj:
-        gateway_mac = _require_unicast_mac(obj["gateway_mac"], "gateway_mac")
-        if gateway_mac == mac:
-            raise PolicyError("gateway_mac must differ from vm_wan_mac")
-    elif allow_arp:
-        raise PolicyError(
-            "gateway_mac is required when allow_arp is true: gateway-to-VM ARP "
-            "is allowed only from the declared gateway MAC"
-        )
+    gateway_mac = _require_unicast_mac(obj["gateway_mac"], "gateway_mac")
+    if gateway_mac == mac:
+        raise PolicyError("gateway_mac must differ from vm_wan_mac")
 
     if obj["ipv6_allowed"] is not False:
         raise PolicyError(

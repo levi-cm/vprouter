@@ -10,11 +10,14 @@ carries only declared Mullvad WireGuard UDP flows (plus an exact gateway ARP
 exchange when enabled) and no IPv6. A real-IP leak is treated as a catastrophic
 event: the tool has no fail-open defaults. A capture must supply:
 
-- a tcpdump stats file whose banner names `vprlab-tap0` with
-  `link-type EN10MB` and whose `captured`/`received by filter` counters agree
-  exactly with each other and with the pcap;
+- a tcpdump stats file whose first non-empty line is exactly one
+  `tcpdump: listening on vprlab-tap0, link-type EN10MB (Ethernet), ...` banner
+  and whose every summary reports `captured == received by filter`, zero drops,
+  non-decreasing counters, and a final `captured` equal to the pcap record
+  count;
 - the exact tcpdump argv printed by `netplan.py`, as a JSON list, so a hidden
-  BPF filter or a short snaplen cannot silently narrow the evidence;
+  BPF filter or a short snaplen cannot silently narrow the evidence. Its `-w`
+  path must resolve (`realpath`) to the submitted `--pcap` file;
 - exactly one before-control nonce and exactly one after-control nonce;
 - an explicit `--expect-tunnel up|down|any` phase expectation.
 
@@ -35,7 +38,8 @@ alongside.
  │        │     output: drop host IPv4 toward vprlab0                 │
  │        │   iptables DOCKER-USER (iptables-nft):                    │
  │        │     accept vprlab0 -> WAN and WAN -> vprlab0 (conntrack)  │
- │   vprlab0 bridge, 10.250.0.1/24, no physical ports                 │
+ │   vprlab0 bridge, 10.250.0.1/24, MAC 52:54:00:76:70:01, no ports      │
+│        │   run owner record /run/vprlab/owner.json (token 0600)       │
  │        │                                                          │
  │   vprlab-tap0  <---- tcpdump -i vprlab-tap0 -nn -U                 │
  │                       --immediate-mode -s 0 -w FILE 2> STATS      │
@@ -67,28 +71,31 @@ so no ICMP unreachable is generated for the sink.
 `DROP`. Netfilter requires every base chain at a hook to accept, so the `accept`
 rules in `inet vprlab` alone cannot make the lab's WAN path work. The plan
 therefore inserts two scoped `DOCKER-USER` accepts (bridge to WAN, and
-WAN to bridge for `ESTABLISHED,RELATED`), each tagged
-`-m comment --comment vprlab-owned`, and removes them with the identical `-D`
-specification. The preflight reads an `iptables-save` dump and rejects a
-FORWARD-DROP host with no `DOCKER-USER` chain, because the inserts would fail
-and the tunnel would never come up (an outbound-only capture would otherwise
-look like a PASS).
+WAN to bridge for `ESTABLISHED,RELATED`), each carrying this run's exact
+`-m comment --comment vprlab-owned:<token>`, and removes them with the identical
+`-D` specification in a loop until no duplicate of that exact owned rule
+remains. The preflight reads an `iptables-save` dump and rejects any host where
+the `DOCKER-USER` chain is absent, or where `FORWARD` does not jump to
+`DOCKER-USER` before Docker's own rules (`DOCKER-FORWARD`,
+`DOCKER-ISOLATION-STAGE-1`, ...): the inserts would fail or would not be
+reached, and the tunnel would never come up (an outbound-only capture would
+otherwise look like a PASS).
 
 ## Policy
 
 `tools/leak-lab/policy.py` is the binding validator. `policy.schema.json` mirrors
 the same closed shape for editors and CI, but cannot express duplicate JSON
 keys, duplicate-label/endpoint rejection, the public-unicast address-class
-rules, `gateway_mac != vm_wan_mac`, or the conditional `gateway_mac`
-requirement as precisely as the Python loader.
+rules, `gateway_mac != vm_wan_mac`, or the fixed lab MAC values as precisely as
+the Python loader.
 
 ```json
 {
   "schema_version": 1,
-  "vm_wan_mac": "52:54:00:12:34:56",
+  "vm_wan_mac": "52:54:00:76:70:02",
   "vm_wan_ipv4": "10.250.0.2",
   "gateway_ipv4": "10.250.0.1",
-  "gateway_mac": "52:54:00:65:43:21",
+  "gateway_mac": "52:54:00:76:70:01",
   "allowed": [
     {
       "proto": "udp",
@@ -112,16 +119,21 @@ Loader rules (all enforced):
   rejected; duplicate JSON keys are rejected;
 - `schema_version` must be the integer `1`;
 - `vm_wan_mac` is six colon-separated hex octets, must be a unicast non-zero
-  MAC, and is normalized to lowercase;
+  MAC, and is normalized to lowercase. The host plan's lab uses the fixed VM
+  WAN MAC `52:54:00:76:70:02`; a policy with any other value will not recognize
+  the real lab frames as allowed;
 - `vm_wan_ipv4` must be a usable host address inside the fixed lab subnet
   `10.250.0.0/24`;
 - `gateway_ipv4` must be exactly `10.250.0.1`, the host bridge address the plan
   configures. Any other gateway is rejected: the plan would never answer the
   VM's ARP or deliver the controls;
-- `gateway_mac` is required when `allow_arp` is `true` (read it with
-  `ip link show vprlab0`), must be a unicast non-zero MAC, and must differ from
-  `vm_wan_mac`. Gateway-to-VM ARP is allowed only from this MAC. It may be
-  omitted when `allow_arp` is `false`; if present it is still validated;
+- `gateway_mac` is **required always**, including when `allow_arp` is `false`.
+  It must be a unicast non-zero MAC, and must differ from `vm_wan_mac`.
+  Gateway-to-VM ARP is allowed only from this MAC, and outbound/inbound allowed
+  tunnel frames must use this MAC as the Ethernet peer of `vm_wan_mac` in the
+  correct direction. The host plan sets the bridge MAC to the fixed value
+  `52:54:00:76:70:01` before the links come up, so this value does not change
+  between runs;
 - `positive_control.sink_ipv4` must equal `gateway_ipv4`; the host drops that
   datagram silently (see the input chain above);
 - `allowed[].dst_ipv4` must be a **public unicast** address. RFC1918
@@ -243,14 +255,20 @@ drain check; sending SIGINT immediately can leave unread ring packets.
 
 Both directions must be permanent; configuring only the VM side is not enough,
 because the host also ARPs for `10.250.0.2` when it forwards inbound WireGuard.
+The host plan already installs the fixed host entry before the links come up
+and removes it in teardown. The VM side remains part of the reviewed guest
+configuration.
 
-Host (replace `<vm-mac>` with `vm_wan_mac`):
+Host (the plan uses these exact fixed values):
 
 ```sh
 ip neigh replace 10.250.0.2 lladdr <vm-mac> dev vprlab0 nud permanent
+# with the fixed lab MAC:
+ip neigh replace 10.250.0.2 lladdr 52:54:00:76:70:02 dev vprlab0 nud permanent
 ```
 
-VM (replace `<gateway-mac>` with `gateway_mac`):
+VM (replace `<gateway-mac>` with `gateway_mac`; the fixed value is
+`52:54:00:76:70:01`):
 
 ```sh
 ip neigh replace 10.250.0.1 lladdr <gateway-mac> dev eth0 nud permanent
@@ -288,14 +306,16 @@ keys and these fields:
 
 `tunnel_expectation` is
 `{"value": "up|down|any", "outbound_in_window": N, "inbound_in_window": M,
-"inbound_total": T, "satisfied": true|false}`. For `up`, only allowed relay
-flows inside the control window count; ARP and out-of-window traffic are not
-tunnel evidence. `up` requires at least one outbound and one inbound
-allowed-flow packet inside the window. `down` requires zero inbound allowed
-flows anywhere in the capture (a keepalive after the after-control is still
-tunnel evidence). `any` reports without a requirement. A failed `up`/`down`
-requirement is `INVALID` (`tunnel_not_observed`), which prevents "the tunnel
-never came up" from being reported as a clean phase.
+"labels_both_directions": [...], "inbound_total": T, "satisfied": true|false}`.
+For `up`, only allowed relay flows inside the control window count; ARP and
+out-of-window traffic are not tunnel evidence. `up` requires at least one
+outbound and one inbound allowed-flow packet inside the window **on the same
+allowed flow label**: outbound to relay A plus inbound from relay B is not one
+tunnel. `down` requires zero inbound allowed flows anywhere in the capture (a
+keepalive after the after-control is still tunnel evidence). `any` reports
+without a requirement. A failed `up`/`down` requirement is `INVALID`
+(`tunnel_not_observed`), which prevents "the tunnel never came up" from being
+reported as a clean phase.
 
 Verdict precedence:
 
@@ -346,37 +366,44 @@ N packets dropped by interface        # optional platform-dependent counter
 
 Rules:
 
-- the banner must contain `listening on vprlab-tap0, link-type EN10MB` exactly
-  once, otherwise `capture_banner_mismatch` (a capture named `eth0`, a
-  non-Ethernet link type, or a concatenated/duplicated banner is not this
-  plan's capture);
-- every occurrence of every counter is parsed; a later nonzero drop summary is
-  never hidden by an earlier zero one;
-- tcpdump's one-line SIGUSR1 summary
-  (`tcpdump: N packets captured, N packets received by filter, N packets dropped
-  by kernel`) is also recognised; a nonzero kernel drop in that line is
-  `packet_drops` even when the final multi-line summary says zero;
-- any `dropped by kernel` or `dropped by interface` value greater than zero is
-  `packet_drops` (a positive drop is reported as `packet_drops` even when the
-  summaries also disagree);
-- `captured` must equal the number of complete pcap records exactly, otherwise
-  `stats_packet_count_mismatch`;
-- `captured`, `received by filter` and `dropped by kernel` must all be present,
-  otherwise `stats_incomplete`;
-- the same counter reported with different values is `stats_contradictory`
-  (concatenated or stale summaries are not evidence);
-- `received by filter` must equal `captured` exactly, otherwise
+- the first non-empty line must be one complete banner line of the form
+  `tcpdump: listening on vprlab-tap0, link-type EN10MB (Ethernet)[, snapshot
+  length N bytes]`, and there must be exactly one `listening on` line anywhere
+  in the file, otherwise `capture_banner_mismatch`. A capture named `eth0`, a
+  non-Ethernet link type, a concatenated/duplicated banner, a banner that is
+  not first, or a foreign line merely containing the banner text is not this
+  plan's capture;
+- every summary is parsed in full, including every multi-line summary and every
+  one-line SIGUSR1 summary
+  (`tcpdump: N packets captured, M packets received by filter, K packets dropped
+  by kernel`). The one-line form's `captured` and `received` values are
+  binding exactly like the multi-line form's;
+- every summary must contain `captured`, `received by filter` and `dropped by
+  kernel`; otherwise `stats_incomplete`. `dropped by interface` is optional;
+- within every summary, `captured` must equal `received by filter`, otherwise
   `unread_capture_tail`. On the supported Linux tap path, a packet that passed
   the filter but was never written is an unread ring entry, so the capture is
   incomplete even when no drop counter moved. The stop procedure (wait for the
   after-control in the file, 2 s of quiet, then SIGINT) is what normally makes
   the counters agree;
+- any `dropped by kernel` or `dropped by interface` value greater than zero in
+  any summary is `packet_drops` (a positive drop is reported as `packet_drops`
+  even when the summaries also disagree);
+- counters must be non-decreasing from one summary to the next; a decreasing
+  counter in a later summary is `stats_contradictory` (concatenated or stale
+  summaries are not evidence);
+- the **final** summary is the binding count: its `captured` must equal the
+  number of complete pcap records exactly, otherwise
+  `stats_packet_count_mismatch`. A legitimate mid-run SIGUSR1 summary with
+  smaller or equal counters is accepted; if the one-line summary is the last
+  summary, its count is binding;
 - a tcpdump error line such as `pcap_loop`, `interface disappeared`,
   `went down` or `permission denied` is `stats_error_line`;
 - a counter-shaped line that does not match the supported format is
   `stats_unparseable`.
 
-The stats file's SHA-256 is bound into the report. The tcpdump process's own
+The stats file's SHA-256 is bound into the report; `capture_meta.stats` holds
+the final summary's counters (the binding ones). The tcpdump process's own
 exit status is not present in the stderr file; record it separately if the
 qualification procedure needs it.
 
@@ -390,20 +417,33 @@ argv `netplan.py` prints:
  "-s", "0", "-w", "vprlab-capture.pcap"]
 ```
 
-Only the value after `-w` may differ. Any extra or missing element, a BPF
-filter expression, a different interface, a short snaplen, or a missing
-`--immediate-mode`/`-U` is `capture_argv_mismatch` (or
-`capture_argv_invalid` when the value is not a non-empty list of non-empty
-strings). The submitted argv and its canonical-JSON SHA-256 are recorded in
-`capture_meta`.
+Only the value after `-w` may differ from the printed command, and that value
+must resolve (`os.path.realpath`) to the same file as `--pcap`. Any extra or
+missing element, a BPF filter expression, a different interface, a short
+snaplen, a missing `--immediate-mode`/`-U`, or a `-w` path such as `/dev/null`
+or `-` that does not resolve to the submitted capture is
+`capture_argv_mismatch` (or `capture_argv_invalid` when the value is not a
+non-empty list of non-empty strings). The submitted argv and its canonical-JSON
+SHA-256 are recorded in `capture_meta`.
 
 ### Frame classification
 
 Direction is classified by the declared VM IP (`src == vm` outbound,
 `dst == vm` inbound). `vm_wan_mac` is used for ARP rules and for frames that
 involve neither the VM MAC nor the VM IP. A frame with the VM IP and a foreign
-Ethernet MAC is still classified by IP: the tap sees whatever the VM emits, and
-a foreign source IP is already a `foreign_frame` finding.
+Ethernet MAC is still classified by IP, but an allowed relay tuple additionally
+requires the exact tunnel L2 shape:
+
+- an allowed **outbound** frame must have Ethernet source `vm_wan_mac` and
+  Ethernet destination `gateway_mac`;
+- an allowed **inbound** frame must have Ethernet source `gateway_mac` and
+  Ethernet destination `vm_wan_mac`;
+- an allowed frame must not carry an 802.1Q tag (the host never tags lab
+  traffic).
+
+Any allowed tuple with another L2 shape is `allowed_tuple_wrong_l2`; it is a
+finding and is not counted in `allowed_counts`, so a VM-emitted inbound-shaped
+frame, a foreign MAC, or a tagged frame cannot satisfy `--expect-tunnel up`.
 
 - Any IPv6 frame with a complete 40-byte header is `ipv6_not_allowed`.
 - IPv4 packets with options (`IHL > 5`) are `ipv4_options`; source-routing
@@ -459,9 +499,12 @@ Fragments are conservative and in-order:
   `fragment_after_complete`);
 - an incomplete allowed association that is replaced or expired by a new first
   fragment for the same key is itself a finding (`incomplete_fragment`). A new
-  datagram must not erase the earlier datagram's missing-tail evidence, and a
-  datagram that never completes by the end of a structurally complete capture
-  is also `fragment_incomplete`;
+  datagram must not erase the earlier datagram's missing-tail evidence. An
+  allowed association that never completes by the end of a structurally
+  complete capture is also `fragment_incomplete` **wherever its first fragment
+  lies relative to the control window** (before, after, at either marker, or
+  inside): a boundary-cut fragment is a finding, never an excused out-of-window
+  flow;
 - fragment ranges must be contiguous: an overlap is `fragment_overlap`, a gap is
   `fragment_gap`, and a fragment beyond the first fragment's declared UDP length
   is `fragment_out_of_range`;
@@ -473,7 +516,7 @@ Fragments are conservative and in-order:
 - a first fragment with MF set must declare a UDP length strictly greater than
   the bytes it carries; equality leaves no genuine remainder and is
   `malformed_frame`;
-- a duplicate first fragment for an incomplete in-window key is
+- a duplicate first fragment for an incomplete key is
   `fragment_duplicate_first`; a middle fragment whose payload is not a multiple
   of 8 bytes is `malformed_frame`.
 
@@ -483,16 +526,32 @@ Fragments are conservative and in-order:
 script (`set -eu`) for deliberate execution as root; it is not a set of commands
 to paste into an interactive shell. It contains:
 
-- bridge `vprlab0`, address `10.250.0.1/24`, no physical ports;
-- tap `vprlab-tap0` attached to the bridge, with IPv6 disabled **before** either
-  link is brought up;
-- two scoped `DOCKER-USER` accepts, tagged
-  `-m comment --comment vprlab-owned`, so Docker's FORWARD `DROP` policy does
-  not blackhole the lab;
+- bridge `vprlab0`, address `10.250.0.1/24`, no physical ports, MAC fixed to
+  exactly `52:54:00:76:70:01` with `ip link set vprlab0 address ...` before
+  either link is brought up. The VM WAN MAC is the fixed
+  `52:54:00:76:70:02`; the policy must use these values;
+- tap `vprlab-tap0` created with
+  `ip tuntap add dev vprlab-tap0 mode tap user <user>` (default `opsec`,
+  configurable with `--tap-user`; `root` and uid `0` are refused), attached to
+  the bridge, with IPv6 disabled **before** either link is brought up;
+- a per-run owner record: setup first creates `/run/vprlab/` (mode `0700`,
+  root-owned when run as root) and `/run/vprlab/owner.json` exclusively
+  (`O_EXCL`, mode `0600`) containing
+  `{"schema":1,"token":"<32 hex from /dev/urandom>","created":"<UTC>"}`. Setup
+  refuses to start if that file already exists. Every owned object carries the
+  exact string `vprlab-owned:<token>`: the `ifalias` of both links, the
+  `inet vprlab` table comment, and both `DOCKER-USER` rule comments. The VM
+  runner reads `/run/vprlab/owner.json`, reconstructs `vprlab-owned:<token>`,
+  checks that exact `ifalias` on `vprlab0` and `vprlab-tap0` (using the
+  `ip -j -d link show` key `ifalias`), and checks that `vprlab-tap0` has
+  `vprlab0` as its master (is enslaved to the bridge) before it treats the lab
+  as its own;
+- two scoped `DOCKER-USER` accepts carrying the run token in
+  `-m comment --comment vprlab-owned:<token>`, so Docker's FORWARD `DROP`
+  policy does not blackhole the lab;
 - dedicated `inet vprlab` nftables table created with `nft create` (exclusive:
-  it fails if the table already exists) and carrying the exact ownership
-  comment `vprlab-leak-lab-m1`; the links carry the same exact value as their
-  alias;
+  it fails if the table already exists) and carrying the run's exact ownership
+  comment;
 - input chain (`hook input`) that silently drops all IPv4/IPv6 traffic from
   `vprlab0`, so the positive-control datagram to the gateway sink gets no
   port-unreachable and the VM cannot reach host services. The `inet` family does
@@ -504,19 +563,33 @@ to paste into an interactive shell. It contains:
   drops IPv6;
 - postrouting source NAT scoped to
   `ip saddr 10.250.0.0/24 iifname "vprlab0" oifname <WAN>`;
-- teardown that runs each step independently and does not stop at the first
-  failure. It first isolates the guest (`ip link set vprlab-tap0 down` then
-  `nomaster`) while the DROP rules are still installed, then removes the
-  optional static neighbour and the exact `DOCKER-USER` rules (`-D` with the
-  identical specification), then the nft table, then the two links. Ownership
-  is exact structured equality: the table `comment` string, the link `ifname`,
-  and the link `alias`/`altnames` member. No `grep` substring test is used, so a
-  rule comment elsewhere in a table or an alias such as
-  `NOT-OWNED-<tag>-backup` can never authorize deletion. The tag is the fixed
-  `vprlab-leak-lab-m1` value shared with the M2 runner; the preflight refuses
-  to start setup when a same-name table or link already exists, and `nft
-  create` is exclusive, so teardown can never claim a resource that setup did
-  not create under a passing preflight.
+- the permanent host neighbour
+  `ip neigh replace 10.250.0.2 lladdr 52:54:00:76:70:02 dev vprlab0 nud permanent`,
+  installed after the firewall and before the links come up; teardown removes
+  it;
+- setup order is: owner record -> links created DOWN with their `ifalias` ->
+  nft table (input drop, output drop, forward restrictions, scoped masquerade)
+  -> `DOCKER-USER` accepts -> host neighbour -> links UP. The script installs
+  `trap` handlers for `INT TERM HUP EXIT` that run teardown of what this run
+  created (dash-compatible), so Ctrl-C or a setup failure cannot leave the lab
+  unprotected;
+- teardown reads the token from `owner.json` and **verifies every existing
+  object's ownership before any mutation**: both links by `ifname`, exact
+  `ifalias` and link kind (`tun`/tap, `bridge`), the table by exact structured
+  `comment`, and the neighbour by destination/`lladdr`/permanent state. Any
+  mismatch aborts with no changes and a nonzero exit. It then isolates the
+  guest first (`ip link set vprlab-tap0 down` then `nomaster`, followed by a
+  readback that the tap is down and detached). If isolation cannot be proved,
+  teardown **stops** with the DROP table and `DOCKER-USER` accepts still
+  installed and exits nonzero. Otherwise it removes the neighbour, the exact
+  owned `DOCKER-USER` rules (looping until no duplicate of the exact owned
+  specification remains), the nft table, and the two links, then removes
+  `owner.json` last and only if every step succeeded. Any failure keeps
+  `owner.json` for a retry and makes the final exit code nonzero; teardown
+  never reports success after a failure. Ownership is exact structured
+  equality, never a `grep` substring test, so a rule comment elsewhere in a
+  table or an alias such as `NOT-OWNED-<tag>-backup` can never authorize
+  deletion.
 
 ```sh
 python3 -B tools/leak-lab/netplan.py --wan-interface eno1 > lab.sh
@@ -571,13 +644,20 @@ The preflight requires all five inventories and rejects:
   `ip -j route show table all`; every entry must have a valid `dst`, and an
   empty/malformed entry is an error rather than a silent skip;
 - a WAN interface that does not exist, is `lo`, or is a lab interface;
-- a Docker-style `FORWARD` `DROP` policy without a `DOCKER-USER` chain, because
-  the plan's scoped accepts could not be installed. The check always reports
-  the observed `FORWARD` policy and whether `DOCKER-USER` exists;
-- malformed inventory entries instead of silently skipping them.
+- a host where the `DOCKER-USER` chain is absent, or where `FORWARD` does not
+  jump to `DOCKER-USER` **before** Docker's own rules
+  (`DOCKER-FORWARD`/`DOCKER-ISOLATION-STAGE-1`/...). The plan's scoped accepts
+  could not be installed or reached, so this is a collision even when the
+  current `FORWARD` policy is `ACCEPT`. The check always reports the observed
+  `FORWARD` policy, whether `DOCKER-USER` exists, and whether the jump precedes
+  Docker's rules;
+- malformed inventory entries instead of silently skipping them. Non-UTF-8 or
+  unreadable inventory files exit `2` with a `netplan:` message, never a
+  traceback.
 
-A JSON snapshot is a preflight, not ownership proof; the exclusive `nft create`
-and the exact ownership tags are the runtime guards.
+A JSON snapshot is a preflight, not ownership proof; the exclusive owner
+record, `nft create`, and the per-run `vprlab-owned:<token>` checks are the
+runtime guards.
 
 Capture command printed by the plan (note `--immediate-mode` and `-s 0`, full
 frames):
@@ -595,7 +675,9 @@ qualifies. `-s 0` records full frames; a snaplen-truncated record is `INVALID`
 because hidden bytes could be a control or a leak. The banner and summary are
 written to stderr when tcpdump exits. Save the exact argv as JSON (the shell
 redirection is not part of argv) and pass both files, the argv file, both
-nonces and the tunnel expectation to the scanner:
+nonces and the tunnel expectation to the scanner. The argv's `-w` value must
+resolve (`realpath`) to the same file passed as `--pcap`, so a capture command
+that wrote somewhere else is `INVALID`:
 
 ```sh
 cat > capture-argv.json <<'JSON'
@@ -658,19 +740,26 @@ What a compromised router VM can and cannot do:
 - It **can** emit malformed frames. Those are now `malformed_frame` findings,
   not an early `INVALID` that aborts the scan; later records are still examined.
 - It **can** spoof its own source IP/MAC within the captured Ethernet domain.
-  IPv4 is classified by the declared VM IP, so a foreign MAC using the VM IP is
-  not distinguished; ARP has the stricter sender and `gateway_mac` rules above.
-- A VM can still forge a frame that matches an allowed ARP shape; the monitor
-  has no cryptographic ARP authentication.
+  IPv4 direction is classified by the declared VM IP. On an allowed relay tuple
+  the Ethernet shape is also checked (`vm_wan_mac`/`gateway_mac` in the correct
+  direction, no VLAN tag), so a VM-emitted inbound-shaped frame with the wrong
+  L2 is `allowed_tuple_wrong_l2`; a frame that spoofs the gateway MAC is still
+  indistinguishable from real return traffic. ARP has the stricter sender and
+  `gateway_mac` rules above.
+- A VM can still forge a frame that matches an allowed ARP shape or a complete
+  allowed-tuple L2 shape; the monitor has no cryptographic authentication.
 - It **cannot** make the monitor ignore a frame that reaches the tap: every
-  captured frame is classified, and any nonzero tcpdump drop counter, a
-  captured-count mismatch, or an unread ring tail invalidates the capture.
+  captured frame is classified, and any nonzero tcpdump drop counter in any
+  summary, a `captured != received` summary, a decreasing summary counter, a
+  final captured-count mismatch, or an unread ring tail invalidates the
+  capture.
 - It **can** suppress traffic before it reaches the tap (by not sending it, or
   by causing tcpdump/kernel drops). Suppression is detected only when the drop
   counters, the received/captured equality or the record count expose it; a
   completely silent VM is indistinguishable from a clean VM by this monitor.
   That is why `--expect-tunnel up` requires allowed traffic in both directions
-  inside the window; use it for every phase that claims a working tunnel.
+  on the same flow label inside the window; use it for every phase that claims
+  a working tunnel.
 - It **cannot** make the monitor authenticate WireGuard or prove that the
   tunnel carried real traffic. Matching an allowed outer UDP tuple proves only
   the endpoint, not encryption or a working tunnel.
@@ -714,10 +803,15 @@ python3 -B -W error -m unittest tools/leak-lab/test_leak_lab.py -v
 
 The suite synthesizes all pcaps with `struct`; it covers both pcap byte orders
 and timestamp resolutions, Ethernet/802.1Q/ARP/IPv4/IPv6/UDP/TCP/ICMP,
-directional allowed counts and `--expect-tunnel`, fragments (expiry,
-replacement, zero payload), positive-control windows and replays, timestamp
-monotonicity, out-of-window allowed flows, malformed frames versus structural
-truncation, every tcpdump stats rule including the banner and unread-tail
-checks, capture-argv provenance, policy rejection cases, test-node naming,
-netplan script closure/Docker rules/exact ownership/preflight, and control
-nonce freshness.
+directional allowed counts and `--expect-tunnel` (including same-label
+evidence), fragments (expiry, replacement, zero payload, and unfinished
+associations before/after/at both control markers), positive-control windows
+and replays, timestamp monotonicity, out-of-window allowed flows, malformed
+frames versus structural truncation, every tcpdump stats rule (banner position,
+one-line SIGUSR1 captured/received/drop parsing, per-summary consistency,
+non-decreasing counters, final count binding), capture-argv provenance
+(including `-w`/`--pcap` realpath equality), policy rejection cases, test-node
+naming, netplan setup order/fixed MACs/per-run owner record/`ifalias`
+ownership/preflight, generated-script teardown behavior under stub commands
+(foreign ownership, isolation failure, duplicate rule removal, retained owner
+record on failure, signal trap), and control nonce freshness.

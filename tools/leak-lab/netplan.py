@@ -8,12 +8,18 @@ nftables or iptables.  It prints the exact privileged commands as a standalone
 ``ip -j link``, ``ip -j addr``, ``ip -j route show table all``,
 ``nft -j list tables`` and an ``iptables-save`` dump.
 
+Every setup run creates a fresh owner record in ``/run/vprlab/owner.json``
+(exclusive create, mode 0600, 32 hexadecimal characters from ``/dev/urandom``).
+Every object the run creates carries the exact string
+``vprlab-owned:<token>``: the ``ifalias`` of ``vprlab0`` and ``vprlab-tap0``,
+the ``inet vprlab`` nft table comment, and the two ``DOCKER-USER`` rule
+comments.  Teardown reads that token and verifies every existing object before
+it mutates anything.
+
 The generated nftables table is ``inet vprlab``.  Nothing here resets the
 ruleset, edits a table other than Docker's ``DOCKER-USER`` chain (where it
 inserts and later removes only its own exactly tagged rules), or deletes an
-object it did not create: the table and the two links carry a per-run ownership
-tag, are created exclusively, and teardown verifies exact structured ownership
-before deleting anything.  The scoped DOCKER-USER accepts are required because
+object it did not create.  The scoped DOCKER-USER accepts are required because
 Docker on Debian 13 installs an iptables-nft FORWARD policy of DROP that an
 accept in another nft base chain cannot override.
 """
@@ -23,6 +29,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import os
 import pathlib
 import re
 import shlex
@@ -31,14 +38,22 @@ from typing import Any
 
 BRIDGE = "vprlab0"
 TAP = "vprlab-tap0"
+
+#: Fixed lab MAC addresses.  The bridge MAC is set explicitly before either
+#: link comes up, so a policy does not silently change from run to run.
+BRIDGE_MAC = "52:54:00:76:70:01"
+VM_WAN_MAC = "52:54:00:76:70:02"
+
 TABLE_FAMILY = "inet"
 TABLE_NAME = "vprlab"
 BRIDGE_ADDRESS = "10.250.0.1/24"
 LAB_SUBNET_TEXT = "10.250.0.0/24"
 LAB_SUBNET = ipaddress.IPv4Network(LAB_SUBNET_TEXT)
-OWNER_TAG = "vprlab-leak-lab-m1"
-IPTABLES_COMMENT = "vprlab-owned"
+OWNER_PREFIX = "vprlab-owned:"
+DEFAULT_RUN_DIR = "/run/vprlab"
+DEFAULT_TAP_USER = "opsec"
 DEFAULT_CAPTURE = "vprlab-capture.pcap"
+VM_WAN_IPV4 = "10.250.0.2"
 
 _IFACE_RE = re.compile(r"^[A-Za-z0-9_.:@-]{1,15}$")
 _TAP_USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$")
@@ -65,6 +80,8 @@ def _validate_iface(name: str, what: str) -> str:
 def _validate_tap_user(user: str) -> str:
     if not isinstance(user, str) or _TAP_USER_RE.fullmatch(user) is None:
         raise NetplanError("tap user must be a conventional account name")
+    if user == "root" or (user.isdigit() and int(user) == 0):
+        raise NetplanError("tap user must not be root or uid 0")
     return user
 
 
@@ -90,12 +107,15 @@ def capture_argv(capture_file: str = DEFAULT_CAPTURE) -> list[str]:
     ]
 
 
-def check_capture_argv(argv: Any) -> str | None:
+def check_capture_argv(argv: Any, pcap_path: str | os.PathLike[str] | None = None) -> str | None:
     """Compare a submitted argv with :func:`capture_argv`.
 
     Returns ``None`` when it matches exactly except for the ``-w`` path,
     ``capture_argv_invalid`` when the value is not a non-empty list of
     non-empty strings, and ``capture_argv_mismatch`` for any other difference.
+    When ``pcap_path`` is supplied, the ``-w`` value must resolve to exactly
+    that file (``realpath`` equality), tying the declared command to the pcap
+    that was actually scanned.
     """
     if (
         not isinstance(argv, list)
@@ -112,81 +132,174 @@ def check_capture_argv(argv: Any) -> str | None:
             continue
         if got != want:
             return "capture_argv_mismatch"
+    if pcap_path is not None:
+        try:
+            expected_path = os.path.realpath(os.fspath(pcap_path))
+        except TypeError:
+            return "capture_argv_mismatch"
+        if os.path.realpath(argv[write_index]) != expected_path:
+            return "capture_argv_mismatch"
     return None
 
 
-def render_plan(
-    wan_interface: str,
-    *,
-    capture_file: str = DEFAULT_CAPTURE,
-    stats_file: str | None = None,
-    tap_user: str | None = None,
-    owner_tag: str | None = None,
-) -> str:
-    """Return the complete standalone setup/capture/teardown script.
-
-    ``owner_tag`` defaults to the fixed ``vprlab-leak-lab-m1`` string shared
-    with the M2 runner.  It may be overridden for tests; teardown always
-    compares the exact string, never a substring.
-    """
-    wan = _validate_iface(wan_interface, "wan_interface")
-    argv = capture_argv(capture_file)
-    if stats_file is None:
-        stats_file = capture_file + ".stderr"
-    if not isinstance(stats_file, str) or not stats_file or "\n" in stats_file:
-        raise NetplanError("stats_file must be a non-empty single-line path")
-    if owner_tag is None:
-        owner_tag = OWNER_TAG
-    if (
-        not isinstance(owner_tag, str)
-        or re.fullmatch(r"vprlab-leak-lab-m1(?:-[a-z0-9]+)?", owner_tag) is None
-    ):
-        raise NetplanError("owner_tag must be vprlab-leak-lab-m1 with an optional suffix")
-    tap_user_option = ""
-    if tap_user is not None:
-        tap_user_option = " user " + _validate_tap_user(tap_user)
-
-    capture_line = " ".join(shlex.quote(part) for part in argv)
-    stats_q = shlex.quote(stats_file)
-
-    docker_out = (
-        f"iptables -I DOCKER-USER -i {BRIDGE} -o {wan} "
-        f"-s {LAB_SUBNET_TEXT} -m comment --comment {IPTABLES_COMMENT} -j ACCEPT"
-    )
-    docker_in = (
-        f"iptables -I DOCKER-USER -i {wan} -o {BRIDGE} "
-        f"-d {LAB_SUBNET_TEXT} -m conntrack --ctstate ESTABLISHED,RELATED "
-        f"-m comment --comment {IPTABLES_COMMENT} -j ACCEPT"
-    )
-    docker_out_del = docker_out.replace("-I DOCKER-USER", "-D DOCKER-USER", 1)
-    docker_in_del = docker_in.replace("-I DOCKER-USER", "-D DOCKER-USER", 1)
-
-    nft_owner_check = f"""python3 -c '
-import json, sys
+# ---------------------------------------------------------------------------
+# Embedded helpers for the generated POSIX shell script.
+#
+# These snippets use double quotes only: they are wrapped in ``python3 -c '...'``
+# single quotes in the generated script.  Keeping them out of the f-string also
+# keeps shell ``${...}`` and nft ``{ ... }`` braces readable.
+# ---------------------------------------------------------------------------
+_CREATE_OWNER_CODE = """\
+import datetime, json, os, sys
+run_dir = sys.argv[1]
+owner_file = os.path.join(run_dir, "owner.json")
+os.makedirs(run_dir, mode=0o700, exist_ok=True)
+os.chmod(run_dir, 0o700)
+token = open("/dev/urandom", "rb").read(16).hex()
+created = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+document = {"schema": 1, "token": token, "created": created}
 try:
-    doc = json.load(sys.stdin)
+    fd = os.open(owner_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+except FileExistsError:
+    print("netplan: " + owner_file + " already exists; refusing setup", file=sys.stderr)
+    sys.exit(1)
+with os.fdopen(fd, "w", encoding="utf-8") as handle:
+    os.fchmod(handle.fileno(), 0o600)
+    json.dump(document, handle, sort_keys=True)
+    handle.write("\\n")
+if os.geteuid() == 0:
+    os.chown(run_dir, 0, 0)
+    os.chown(owner_file, 0, 0)
+print("vprlab-owned:" + token)
+"""
+
+_READ_OWNER_CODE = """\
+import json, re, sys
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as handle:
+        document = json.load(handle)
 except Exception:
     sys.exit(1)
-tables = [e["table"] for e in doc.get("nftables", []) if isinstance(e, dict) and "table" in e]
-ok = len(tables) == 1 and tables[0].get("family") == "inet" and tables[0].get("name") == "vprlab" and tables[0].get("comment") == "{owner_tag}"
-sys.exit(0 if ok else 1)
-'"""
+token = document.get("token") if isinstance(document, dict) else None
+if (
+    not isinstance(document, dict)
+    or document.get("schema") != 1
+    or not isinstance(token, str)
+    or re.fullmatch(r"[0-9a-f]{32}", token) is None
+    or not isinstance(document.get("created"), str)
+):
+    sys.exit(1)
+print("vprlab-owned:" + token)
+"""
 
-    link_owner_check = f"""python3 -c '
+_LINK_CHECK_CODE = """\
+import json, sys
+name, owner, kind = sys.argv[1:4]
+try:
+    document = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(document, list):
+    sys.exit(1)
+entries = [entry for entry in document if isinstance(entry, dict) and entry.get("ifname") == name]
+if len(entries) != 1:
+    sys.exit(1)
+entry = entries[0]
+info = entry.get("linkinfo")
+kind_ok = True
+if isinstance(info, dict):
+    kind_ok = info.get("info_kind") == kind
+    if kind == "tun":
+        data = info.get("info_data")
+        if isinstance(data, dict):
+            kind_ok = kind_ok and data.get("type") == "tap"
+ok = entry.get("ifalias") == owner and kind_ok
+sys.exit(0 if ok else 1)
+"""
+
+_NFT_CHECK_CODE = """\
+import json, sys
+owner = sys.argv[1]
+try:
+    document = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(document, dict):
+    sys.exit(1)
+tables = [entry["table"] for entry in document.get("nftables", []) if isinstance(entry, dict) and isinstance(entry.get("table"), dict)]
+ok = (
+    len(tables) == 1
+    and tables[0].get("family") == "inet"
+    and tables[0].get("name") == "vprlab"
+    and tables[0].get("comment") == owner
+)
+sys.exit(0 if ok else 1)
+"""
+
+_NEIGH_CHECK_CODE = """\
+import json, sys
+ip, mac = sys.argv[1:3]
+try:
+    document = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(document, list):
+    sys.exit(1)
+entries = [entry for entry in document if isinstance(entry, dict) and entry.get("dst") == ip]
+if not entries:
+    sys.exit(0)
+if len(entries) != 1:
+    sys.exit(1)
+entry = entries[0]
+state = entry.get("state") if isinstance(entry.get("state"), list) else []
+state = [str(item).lower() for item in state]
+permanent = str(entry.get("nud_state", "")).lower() == "permanent" or "permanent" in state
+sys.exit(0 if entry.get("lladdr") == mac and permanent else 1)
+"""
+
+_NEIGH_PRESENT_CODE = """\
+import json, sys
+try:
+    document = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+sys.exit(0 if isinstance(document, list) and document else 1)
+"""
+
+_TAP_MASTERED_CODE = """\
 import json, sys
 name = sys.argv[1]
 try:
-    doc = json.load(sys.stdin)
+    document = json.load(sys.stdin)
 except Exception:
     sys.exit(1)
-if not isinstance(doc, list):
+if not isinstance(document, list):
     sys.exit(1)
-entries = [e for e in doc if isinstance(e, dict) and e.get("ifname") == name]
-ok = len(entries) == 1 and (entries[0].get("alias") == "{owner_tag}" or "{owner_tag}" in entries[0].get("altnames", []))
-sys.exit(0 if ok else 1)
-'"""
+entries = [entry for entry in document if isinstance(entry, dict) and entry.get("ifname") == name]
+if len(entries) != 1:
+    sys.exit(1)
+sys.exit(0 if entries[0].get("master") else 1)
+"""
 
-    return f"""#!/bin/sh
+_ISOLATED_CHECK_CODE = """\
+import json, sys
+name = sys.argv[1]
+try:
+    document = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(document, list):
+    sys.exit(1)
+entries = [entry for entry in document if isinstance(entry, dict) and entry.get("ifname") == name]
+if len(entries) != 1:
+    sys.exit(1)
+entry = entries[0]
+ok = str(entry.get("operstate", "")).lower() == "down" and not entry.get("master")
+sys.exit(0 if ok else 1)
+"""
+
+
+_PLAN_TEMPLATE = """#!/bin/sh
 set -eu
 # vprlab host network setup plan
 # PLAN ONLY: netplan.py never executes anything. This file is a standalone
@@ -194,7 +307,7 @@ set -eu
 # not for interactive paste: `set -eu` would stay active in your shell. The
 # capture point is the host tap, outside the router VM.
 #
-# Host default/WAN interface: {wan}
+# Host default/WAN interface: @@WAN@@
 #
 # Required preflight before running any command below. Generate the inventories
 # locally, then run the collision check; setup must abort unless it prints OK:
@@ -204,14 +317,15 @@ set -eu
 #   nft -j list tables > tables.json
 #   iptables-save > iptables.txt
 #   python3 -B tools/leak-lab/netplan.py --check-name-collisions \\
-#     --wan-interface {wan} \\
+#     --wan-interface @@WAN@@ \\
 #     --links-json links.json --addresses-json addresses.json \\
 #     --routes-json routes.json --tables-json tables.json \\
 #     --iptables-save iptables.txt
-# The preflight rejects an existing {LAB_SUBNET_TEXT} address or route in ANY
+# The preflight rejects an existing @@LAB_SUBNET@@ address or route in ANY
 # routing table, an existing bridge/tap name or altname, an existing inet
 # vprlab table, a non-existent or loopback WAN interface, malformed inventory
-# JSON, and a Docker FORWARD-DROP host whose DOCKER-USER chain is absent.
+# JSON, and any host where DOCKER-USER is absent or is not jumped to from
+# FORWARD before Docker's own rules.
 #
 # Required kernel setting (this plan never changes it):
 #   sysctl -n net.ipv4.ip_forward
@@ -220,132 +334,385 @@ set -eu
 #   sysctl -w net.ipv4.ip_forward=1
 #   ... run the phase ...
 #   sysctl -w net.ipv4.ip_forward=0
+#
+# Run ownership: setup creates @@RUN_DIR@@ (0700 root) and
+# @@RUN_DIR@@/owner.json exclusively (O_EXCL, 0600) with
+#   {"schema":1,"token":"<32 hex from /dev/urandom>","created":"<UTC>"}
+# Every object created by the run carries the exact string
+#   @@OWNER_PREFIX@@<token>
+# in the vprlab0/vprlab-tap0 ifalias, the inet vprlab table comment and both
+# DOCKER-USER rule comments. Teardown reads that token and verifies every
+# existing object before any mutation; any mismatch aborts with no changes.
+# Setup first creates the links DOWN with their aliases, then the nft table
+# (input drop, output drop, forward restrictions, scoped masquerade), then the
+# DOCKER-USER accepts, then the permanent host neighbour, and only then brings
+# the links up.
+
+RUN_DIR="${VPRLAB_RUN_DIR:-@@RUN_DIR@@}"
+OWNER_FILE="$RUN_DIR/owner.json"
+OWNER=""
+RUN_STARTED=0
+TEARDOWN_DONE=0
+
+read_owner() {
+  if ! OWNER=$(python3 -c '@@READ_OWNER@@' "$OWNER_FILE" 2>/dev/null); then
+    echo "netplan: no valid $OWNER_FILE; refusing teardown" >&2
+    return 1
+  fi
+  case "$OWNER" in
+    @@OWNER_PREFIX@@*) return 0 ;;
+    *)
+      echo "netplan: invalid owner token in $OWNER_FILE" >&2
+      return 1
+      ;;
+  esac
+}
+
+create_owner() {
+  if ! OWNER=$(python3 -c '@@CREATE_OWNER@@' "$RUN_DIR"); then
+    echo "netplan: cannot create $OWNER_FILE exclusively; refusing setup" >&2
+    return 1
+  fi
+  RUN_STARTED=1
+}
+
+link_owned() {
+  ip -j -d link show dev "$1" 2>/dev/null | python3 -c '@@LINK_CHECK@@' "$1" "$OWNER" "$2"
+}
+
+table_owned() {
+  nft -j list table @@TABLE_FAMILY@@ @@TABLE_NAME@@ 2>/dev/null | python3 -c '@@NFT_CHECK@@' "$OWNER"
+}
+
+neigh_ok() {
+  ip -j neigh show @@VM_IP@@ dev @@BRIDGE@@ 2>/dev/null | python3 -c '@@NEIGH_CHECK@@' "@@VM_IP@@" "@@VM_MAC@@"
+}
+
+neigh_present() {
+  ip -j neigh show @@VM_IP@@ dev @@BRIDGE@@ 2>/dev/null | python3 -c '@@NEIGH_PRESENT@@'
+}
+
+tap_isolated() {
+  ip -j link show dev @@TAP@@ 2>/dev/null | python3 -c '@@ISOLATED_CHECK@@' "@@TAP@@"
+}
+
+tap_mastered() {
+  ip -j link show dev @@TAP@@ 2>/dev/null | python3 -c '@@TAP_MASTERED@@' "@@TAP@@"
+}
+
+verify_ownership() {
+  failed=0
+  if ip link show dev @@TAP@@ >/dev/null 2>&1; then
+    if ! link_owned "@@TAP@@" tun; then
+      echo "netplan: refusing teardown: @@TAP@@ exists but is not owned by this run (ifalias or link kind mismatch)" >&2
+      failed=1
+    fi
+  fi
+  if ip link show dev @@BRIDGE@@ >/dev/null 2>&1; then
+    if ! link_owned "@@BRIDGE@@" bridge; then
+      echo "netplan: refusing teardown: @@BRIDGE@@ exists but is not owned by this run (ifalias or link kind mismatch)" >&2
+      failed=1
+    fi
+  fi
+  if nft list table @@TABLE_FAMILY@@ @@TABLE_NAME@@ >/dev/null 2>&1; then
+    if ! table_owned; then
+      echo "netplan: refusing teardown: @@TABLE_FAMILY@@ @@TABLE_NAME@@ exists without this run's exact comment" >&2
+      failed=1
+    fi
+  fi
+  if ip link show dev @@BRIDGE@@ >/dev/null 2>&1; then
+    if ! neigh_ok; then
+      echo "netplan: refusing teardown: @@VM_IP@@ neighbour on @@BRIDGE@@ is not this run's fixed permanent entry" >&2
+      failed=1
+    fi
+  fi
+  return "$failed"
+}
+
+isolate_tap() {
+  if ! ip link show dev @@TAP@@ >/dev/null 2>&1; then
+    echo "netplan: @@TAP@@ absent; guest already isolated"
+    return 0
+  fi
+  if ! ip link set dev @@TAP@@ down; then
+    echo "netplan: failed to set @@TAP@@ down; stopping with protections in place" >&2
+    return 1
+  fi
+  if tap_mastered; then
+    if ! ip link set dev @@TAP@@ nomaster; then
+      echo "netplan: failed to detach @@TAP@@ from @@BRIDGE@@; stopping with protections in place" >&2
+      return 1
+    fi
+  fi
+  if ! tap_isolated; then
+    echo "netplan: @@TAP@@ is not verifiably down and detached; stopping with protections in place" >&2
+    return 1
+  fi
+  return 0
+}
+
+remove_docker_out() {
+  while iptables -C DOCKER-USER @@DOCKER_SPEC_OUT@@ 2>/dev/null; do
+    if ! iptables -D DOCKER-USER @@DOCKER_SPEC_OUT@@; then
+      echo "netplan: failed to remove outbound DOCKER-USER accept" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
+remove_docker_in() {
+  while iptables -C DOCKER-USER @@DOCKER_SPEC_IN@@ 2>/dev/null; do
+    if ! iptables -D DOCKER-USER @@DOCKER_SPEC_IN@@; then
+      echo "netplan: failed to remove inbound DOCKER-USER accept" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
+delete_link() {
+  if ! ip link show dev "$1" >/dev/null 2>&1; then
+    echo "netplan: $1 absent"
+    return 0
+  fi
+  if ! link_owned "$1" "$2"; then
+    echo "netplan: refusing to delete $1 (ownership changed)" >&2
+    return 1
+  fi
+  if ! ip link del "$1"; then
+    echo "netplan: failed to delete $1" >&2
+    return 1
+  fi
+  return 0
+}
 
 # --- 4. teardown ---
 # Defined before setup so the same reviewed file can be run as
 #   ./lab.sh teardown
-# after a failed setup, with the same ownership tag.
-# Every step is independent: absent objects are reported, failures do not
-# stop the remaining steps, and ownership is checked against exact
-# structured fields (table comment, link ifname + alias/altname).
-do_teardown() {{
-# Every step is independent: absent objects are reported, failures do not stop
-# the remaining steps, and ownership is checked against exact structured
-# fields (table comment, link ifname + alias/altname), never a substring.
-#
-# 4a. isolate the guest FIRST, while the DROP rules are still installed.
-if ip link show dev {TAP} >/dev/null 2>&1; then
-  ip link set dev {TAP} down || echo "netplan: failed to set {TAP} down" >&2
-  ip link set dev {TAP} nomaster || echo "netplan: failed to detach {TAP} from {BRIDGE}" >&2
-else
-  echo "netplan: {TAP} absent; guest already isolated"
-fi
-
-# 4b. remove the optional static neighbour and the exact DOCKER-USER rules.
-ip neigh del 10.250.0.2 dev {BRIDGE} 2>/dev/null || echo "netplan: no static neighbour for 10.250.0.2 on {BRIDGE}"
-{docker_out_del} || echo "netplan: outbound DOCKER-USER accept not present"
-{docker_in_del} || echo "netplan: inbound DOCKER-USER accept not present"
-
-# 4c. delete the nft table only when its exact table comment is ours.
-if nft list table {TABLE_FAMILY} {TABLE_NAME} >/dev/null 2>&1; then
-  if nft -j list table {TABLE_FAMILY} {TABLE_NAME} 2>/dev/null | {nft_owner_check}
-  then
-    nft delete table {TABLE_FAMILY} {TABLE_NAME} || echo "netplan: failed to delete {TABLE_FAMILY} {TABLE_NAME}" >&2
-  else
-    echo "netplan: refusing to delete {TABLE_FAMILY} {TABLE_NAME} (exact ownership comment absent)" >&2
+# after a failed setup, with the same per-run owner record.
+# Ownership of every existing object is verified before ANY mutation.  A
+# mismatch aborts with no changes.  Isolation of the guest is proved before
+# the DROP table or DOCKER-USER accepts are touched; if isolation fails,
+# teardown stops with all protections still installed.  The owner record is
+# removed last and only after every step succeeded.
+do_teardown() {
+  if ! read_owner; then
+    return 1
   fi
-else
-  echo "netplan: {TABLE_FAMILY} {TABLE_NAME} absent"
-fi
-
-# 4d. delete the links only when the exact ifname and alias/altname are ours.
-if ip -j -d link show dev {TAP} >/dev/null 2>&1; then
-  if ip -j -d link show dev {TAP} 2>/dev/null | {link_owner_check} "{TAP}"
-  then
-    ip link del {TAP} || echo "netplan: failed to delete {TAP}" >&2
-  else
-    echo "netplan: refusing to delete {TAP} (exact ownership alias absent)" >&2
+  if ! verify_ownership; then
+    echo "netplan: teardown aborted without changes; ownership verification failed" >&2
+    return 1
   fi
-else
-  echo "netplan: {TAP} absent"
-fi
-if ip -j -d link show dev {BRIDGE} >/dev/null 2>&1; then
-  if ip -j -d link show dev {BRIDGE} 2>/dev/null | {link_owner_check} "{BRIDGE}"
-  then
-    ip link del {BRIDGE} || echo "netplan: failed to delete {BRIDGE}" >&2
-  else
-    echo "netplan: refusing to delete {BRIDGE} (exact ownership alias absent)" >&2
+  if ! isolate_tap; then
+    echo "netplan: teardown stopped with the DROP table and DOCKER-USER accepts still installed" >&2
+    return 1
   fi
-else
-  echo "netplan: {BRIDGE} absent"
-fi
-}}
-if [ "${{1:-}}" = "teardown" ]; then
-  do_teardown
-  exit 0
+  failed=0
+  if ip link show dev @@BRIDGE@@ >/dev/null 2>&1 && neigh_present; then
+    if ! ip neigh del @@VM_IP@@ dev @@BRIDGE@@; then
+      echo "netplan: failed to remove the static neighbour @@VM_IP@@ on @@BRIDGE@@" >&2
+      failed=1
+    fi
+  else
+    echo "netplan: no static neighbour for @@VM_IP@@ on @@BRIDGE@@"
+  fi
+  remove_docker_out || failed=1
+  remove_docker_in || failed=1
+  if nft list table @@TABLE_FAMILY@@ @@TABLE_NAME@@ >/dev/null 2>&1; then
+    if table_owned; then
+      if ! nft delete table @@TABLE_FAMILY@@ @@TABLE_NAME@@; then
+        echo "netplan: failed to delete @@TABLE_FAMILY@@ @@TABLE_NAME@@" >&2
+        failed=1
+      fi
+    else
+      echo "netplan: refusing to delete @@TABLE_FAMILY@@ @@TABLE_NAME@@ (ownership changed)" >&2
+      failed=1
+    fi
+  else
+    echo "netplan: @@TABLE_FAMILY@@ @@TABLE_NAME@@ absent"
+  fi
+  delete_link "@@TAP@@" tun || failed=1
+  delete_link "@@BRIDGE@@" bridge || failed=1
+  if [ "$failed" -ne 0 ]; then
+    echo "netplan: teardown incomplete; $OWNER_FILE retained for retry" >&2
+    return 1
+  fi
+  if ! rm -f "$OWNER_FILE"; then
+    echo "netplan: failed to remove $OWNER_FILE" >&2
+    return 1
+  fi
+  echo "netplan: teardown complete"
+  return 0
+}
+
+cleanup() {
+  status=$?
+  trap - INT TERM HUP EXIT
+  if [ "$RUN_STARTED" -eq 1 ] && [ "$TEARDOWN_DONE" -eq 0 ]; then
+    if ! do_teardown; then
+      if [ "$status" -eq 0 ]; then
+        status=1
+      fi
+    fi
+    TEARDOWN_DONE=1
+  fi
+  exit "$status"
+}
+trap cleanup INT TERM HUP EXIT
+
+if [ "${1:-}" = "teardown" ]; then
+  if do_teardown; then
+    exit 0
+  fi
+  exit 1
 fi
 
-
-# --- 1. isolated bridge and tap (the bridge has no physical ports) ---
-ip tuntap add dev {TAP} mode tap{tap_user_option}
-ip link set dev {TAP} alias "{owner_tag}"
-ip link add {BRIDGE} type bridge
-ip link set dev {BRIDGE} alias "{owner_tag}"
-ip link set {TAP} master {BRIDGE}
-sysctl -w net.ipv6.conf.{BRIDGE}.disable_ipv6=1
-sysctl -w net.ipv6.conf.{TAP}.disable_ipv6=1
-ip link set {TAP} up
-ip link set {BRIDGE} up
-ip addr add {BRIDGE_ADDRESS} dev {BRIDGE}
+# --- 1. per-run owner record, then links created DOWN with aliases ---
+create_owner
+ip tuntap add dev @@TAP@@ mode tap user @@TAP_USER@@
+ip link set dev @@TAP@@ alias "$OWNER"
+ip link add @@BRIDGE@@ type bridge
+ip link set @@BRIDGE@@ address @@BRIDGE_MAC@@
+ip link set dev @@BRIDGE@@ alias "$OWNER"
+ip link set dev @@TAP@@ master @@BRIDGE@@
+sysctl -w net.ipv6.conf.@@BRIDGE@@.disable_ipv6=1
+sysctl -w net.ipv6.conf.@@TAP@@.disable_ipv6=1
+ip addr add @@BRIDGE_ADDRESS@@ dev @@BRIDGE@@
 
 # --- 2. forwarding protection and the dedicated nftables table ---
-# Debian 13 installs Docker's firewall through iptables-nft, and Docker sets
-# the iptables FORWARD policy to DROP. An accept in inet vprlab cannot override
-# another base chain at the same hook, so add two scoped DOCKER-USER accepts
-# for the lab bridge <-> WAN. They carry an exact comment tag and are removed
-# with the identical -D specification in teardown.
-{docker_out}
-{docker_in}
 # `create` is exclusive: it fails if the object already exists, so setup stops
 # instead of adding rules to a pre-existing table. The table comment is the
-# ownership record checked by teardown.
-nft create table {TABLE_FAMILY} {TABLE_NAME} '{{ comment "{owner_tag}"; }}'
+# per-run ownership record checked by teardown.
+nft create table @@TABLE_FAMILY@@ @@TABLE_NAME@@ "{ comment \\"$OWNER\\"; }"
 # The input chain silently drops every IPv4/IPv6 packet arriving from the
 # untrusted VM.  No reject/ICMP is generated, so the positive-control UDP to
 # the gateway sink is discarded without a port-unreachable that the scanner
 # would call a leak.  The inet family does not see ARP, so gateway ARP works.
-nft create chain {TABLE_FAMILY} {TABLE_NAME} input '{{ type filter hook input priority filter; policy accept; }}'
-nft add rule {TABLE_FAMILY} {TABLE_NAME} input iifname "{BRIDGE}" drop
-nft create chain {TABLE_FAMILY} {TABLE_NAME} forward '{{ type filter hook forward priority filter; policy accept; }}'
-nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{BRIDGE}" oifname != "{wan}" drop
-nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname != "{wan}" oifname "{BRIDGE}" drop
-nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{BRIDGE}" meta nfproto ipv6 drop
-nft add rule {TABLE_FAMILY} {TABLE_NAME} forward oifname "{BRIDGE}" meta nfproto ipv6 drop
-nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{BRIDGE}" oifname "{wan}" accept
-nft add rule {TABLE_FAMILY} {TABLE_NAME} forward iifname "{wan}" oifname "{BRIDGE}" accept
+nft create chain @@TABLE_FAMILY@@ @@TABLE_NAME@@ input '{ type filter hook input priority filter; policy accept; }'
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ input iifname "@@BRIDGE@@" drop
+nft create chain @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward '{ type filter hook forward priority filter; policy accept; }'
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@BRIDGE@@" oifname != "@@WAN@@" drop
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname != "@@WAN@@" oifname "@@BRIDGE@@" drop
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@BRIDGE@@" meta nfproto ipv6 drop
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward oifname "@@BRIDGE@@" meta nfproto ipv6 drop
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@BRIDGE@@" oifname "@@WAN@@" accept
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ forward iifname "@@WAN@@" oifname "@@BRIDGE@@" accept
 # Host-originated IPv4 toward the lab is dropped as well. ARP is not IPv4, so
 # the host can still answer neighbour discovery; no ICMP unreachable escapes.
-nft create chain {TABLE_FAMILY} {TABLE_NAME} output '{{ type filter hook output priority filter; policy accept; }}'
-nft add rule {TABLE_FAMILY} {TABLE_NAME} output oifname "{BRIDGE}" meta nfproto ipv4 drop
-nft create chain {TABLE_FAMILY} {TABLE_NAME} postrouting '{{ type nat hook postrouting priority srcnat; policy accept; }}'
-nft add rule {TABLE_FAMILY} {TABLE_NAME} postrouting ip saddr {LAB_SUBNET_TEXT} iifname "{BRIDGE}" oifname "{wan}" masquerade
-# Static neighbours (only needed when the policy uses allow_arp: false). The
-# VM side needs the symmetric permanent gateway entry. With allow_arp: true
-# the gateway_mac policy field and the ARP rules do the same job.
-#   ip neigh replace 10.250.0.2 lladdr <vm-mac> dev {BRIDGE} nud permanent
+nft create chain @@TABLE_FAMILY@@ @@TABLE_NAME@@ output '{ type filter hook output priority filter; policy accept; }'
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ output oifname "@@BRIDGE@@" meta nfproto ipv4 drop
+nft create chain @@TABLE_FAMILY@@ @@TABLE_NAME@@ postrouting '{ type nat hook postrouting priority srcnat; policy accept; }'
+nft add rule @@TABLE_FAMILY@@ @@TABLE_NAME@@ postrouting ip saddr @@LAB_SUBNET@@ iifname "@@BRIDGE@@" oifname "@@WAN@@" masquerade
 
-# --- 3. capture outside the VM ---
+# --- 3. Docker forwarding accepts, then the static host neighbour ---
+# Debian 13 installs Docker's firewall through iptables-nft, and Docker sets
+# the iptables FORWARD policy to DROP. An accept in inet vprlab cannot override
+# another base chain at the same hook, so add two scoped DOCKER-USER accepts
+# for the lab bridge <-> WAN. They carry the per-run comment and are removed
+# with the identical -D specification in teardown, looping until no duplicate
+# of that exact owned rule remains.
+@@DOCKER_OUT@@
+@@DOCKER_IN@@
+# The host needs the VM resolvable without ARP when allow_arp is false.  The
+# VM side needs the symmetric permanent gateway entry; the VM MAC here is the
+# fixed address the policy must use.
+ip neigh replace @@VM_IP@@ lladdr @@VM_MAC@@ dev @@BRIDGE@@ nud permanent
+
+# --- 4. bring the links up only after every protection is installed ---
+ip link set @@TAP@@ up
+ip link set @@BRIDGE@@ up
+
+# --- 5. capture outside the VM ---
 # The exact argv below must be supplied to pcapscan.py as --capture-argv-file
 # (a JSON list, without the shell redirection). Stop the capture only after the
 # after-control has appeared in the pcap file: --immediate-mode writes it
 # immediately, then wait 2 s of quiet and send SIGINT (Ctrl-C). The resulting
-# stderr must report received == captured and zero drops.
+# stderr must report received == captured for every summary and zero drops.
 # -s 0 records full frames so the scanner never sees snaplen-truncated records.
-{capture_line} 2> {stats_q} || echo "netplan: tcpdump exited nonzero" >&2
+# The -w path in the submitted argv must resolve (realpath) to the same file.
+@@CAPTURE_LINE@@ 2> @@STATS_Q@@ || echo "netplan: tcpdump exited nonzero" >&2
 
+TEARDOWN_DONE=1
 do_teardown
 
 """
+
+
+def _substitute(template: str, **values: str) -> str:
+    result = template
+    for name, value in values.items():
+        result = result.replace(f"@@{name}@@", value)
+    return result
+
+
+def render_plan(
+    wan_interface: str,
+    *,
+    capture_file: str = DEFAULT_CAPTURE,
+    stats_file: str | None = None,
+    tap_user: str | None = None,
+) -> str:
+    """Return the complete standalone setup/capture/teardown script.
+
+    The plan generates a fresh per-run ownership token from ``/dev/urandom``
+    when it runs.  There is no static tag an older or concurrent run could
+    share, and teardown verifies the token stored in ``owner.json`` against
+    every object before changing anything.
+    """
+    wan = _validate_iface(wan_interface, "wan_interface")
+    argv = capture_argv(capture_file)
+    if stats_file is None:
+        stats_file = capture_file + ".stderr"
+    if not isinstance(stats_file, str) or not stats_file or "\n" in stats_file:
+        raise NetplanError("stats_file must be a non-empty single-line path")
+    if tap_user is None:
+        tap_user = DEFAULT_TAP_USER
+    tap_user = _validate_tap_user(tap_user)
+
+    capture_line = " ".join(shlex.quote(part) for part in argv)
+    stats_q = shlex.quote(stats_file)
+
+    docker_spec_out = (
+        f"-i {BRIDGE} -o {wan} -s {LAB_SUBNET_TEXT} "
+        '-m comment --comment "$OWNER" -j ACCEPT'
+    )
+    docker_spec_in = (
+        f"-i {wan} -o {BRIDGE} -d {LAB_SUBNET_TEXT} "
+        "-m conntrack --ctstate ESTABLISHED,RELATED "
+        '-m comment --comment "$OWNER" -j ACCEPT'
+    )
+
+    return _substitute(
+        _PLAN_TEMPLATE,
+        WAN=wan,
+        BRIDGE=BRIDGE,
+        TAP=TAP,
+        BRIDGE_MAC=BRIDGE_MAC,
+        VM_MAC=VM_WAN_MAC,
+        VM_IP=VM_WAN_IPV4,
+        BRIDGE_ADDRESS=BRIDGE_ADDRESS,
+        LAB_SUBNET=LAB_SUBNET_TEXT,
+        TABLE_FAMILY=TABLE_FAMILY,
+        TABLE_NAME=TABLE_NAME,
+        RUN_DIR=DEFAULT_RUN_DIR,
+        OWNER_PREFIX=OWNER_PREFIX,
+        TAP_USER=tap_user,
+        CAPTURE_LINE=capture_line,
+        STATS_Q=stats_q,
+        DOCKER_OUT=f"iptables -I DOCKER-USER {docker_spec_out}",
+        DOCKER_IN=f"iptables -I DOCKER-USER {docker_spec_in}",
+        DOCKER_SPEC_OUT=docker_spec_out,
+        DOCKER_SPEC_IN=docker_spec_in,
+        CREATE_OWNER=_CREATE_OWNER_CODE,
+        READ_OWNER=_READ_OWNER_CODE,
+        LINK_CHECK=_LINK_CHECK_CODE,
+        NFT_CHECK=_NFT_CHECK_CODE,
+        NEIGH_CHECK=_NEIGH_CHECK_CODE,
+        NEIGH_PRESENT=_NEIGH_PRESENT_CODE,
+        ISOLATED_CHECK=_ISOLATED_CHECK_CODE,
+        TAP_MASTERED=_TAP_MASTERED_CODE,
+    )
 
 
 def _load_json(text: str, what: str) -> Any:
@@ -473,18 +840,25 @@ def _tables_from_nft_json(text: str) -> set[tuple[str, str]]:
     return tables
 
 
+_DOCKER_TARGET_PREFIX = "DOCKER"
+
+
 def iptables_summary(text: str) -> dict[str, Any]:
     """Parse an ``iptables-save`` dump.
 
-    Returns the filter ``FORWARD`` policy and whether the ``DOCKER-USER`` chain
-    exists.  Malformed dumps raise :class:`NetplanError` instead of being
-    guessed at.
+    Returns the filter ``FORWARD`` policy, whether the ``DOCKER-USER`` chain
+    exists, and whether ``FORWARD`` jumps to ``DOCKER-USER`` before Docker's
+    own jumps (``DOCKER-FORWARD``, ``DOCKER-ISOLATION-STAGE-1``, ...).  The
+    plan's accepts are inserted at the top of ``DOCKER-USER``, so the jump must
+    exist and must come before Docker's terminating rules.  Malformed dumps
+    raise :class:`NetplanError` instead of being guessed at.
     """
     if not isinstance(text, str):
         raise NetplanError("iptables-save input must be text")
     table: str | None = None
     saw_filter = False
     chains: dict[str, str] = {}
+    forward_jumps: list[str] = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -513,6 +887,20 @@ def iptables_summary(text: str) -> dict[str, Any]:
                 raise NetplanError(
                     f"iptables-save rule outside a table: {line!r}"
                 )
+            parts = line.split()
+            if len(parts) < 3 or not parts[1]:
+                raise NetplanError(f"malformed iptables-save rule: {line!r}")
+            if table == "filter" and parts[1] == "FORWARD":
+                target: str | None = None
+                for index, token in enumerate(parts[2:], start=2):
+                    if token in ("-j", "-g") and index + 1 < len(parts):
+                        target = parts[index + 1]
+                        break
+                if target is None:
+                    raise NetplanError(
+                        f"iptables-save FORWARD rule has no -j/-g target: {line!r}"
+                    )
+                forward_jumps.append(target)
             continue
         raise NetplanError(f"malformed iptables-save line: {line!r}")
     if not saw_filter:
@@ -522,9 +910,30 @@ def iptables_summary(text: str) -> dict[str, Any]:
     policy = chains["FORWARD"]
     if policy not in ("ACCEPT", "DROP"):
         raise NetplanError("iptables FORWARD must have an ACCEPT or DROP policy")
+    docker_user = "DOCKER-USER" in chains
+    user_index = next(
+        (index for index, target in enumerate(forward_jumps) if target == "DOCKER-USER"),
+        None,
+    )
+    first_docker_index = next(
+        (
+            index
+            for index, target in enumerate(forward_jumps)
+            if target.startswith(_DOCKER_TARGET_PREFIX)
+            and target != "DOCKER-USER"
+        ),
+        None,
+    )
+    docker_user_first = (
+        docker_user
+        and user_index is not None
+        and (first_docker_index is None or user_index < first_docker_index)
+    )
     return {
         "forward_policy": policy,
-        "docker_user": "DOCKER-USER" in chains,
+        "docker_user": docker_user,
+        "docker_user_first": docker_user_first,
+        "forward_jumps": forward_jumps,
     }
 
 
@@ -541,9 +950,10 @@ def check_name_collisions(
     All four JSON inventories are required: a name check without address/route
     ownership cannot prove that adding ``10.250.0.0/24`` is safe, and route
     collection must cover every table.  When an ``iptables-save`` dump is
-    supplied, a Docker-style FORWARD DROP without a ``DOCKER-USER`` chain is a
-    collision because the plan's scoped accepts cannot be installed.  Malformed
-    entries raise :class:`NetplanError` instead of being skipped.
+    supplied, ``DOCKER-USER`` must exist and ``FORWARD`` must jump to it before
+    Docker's own rules; otherwise the plan's scoped accepts cannot be installed
+    or cannot be reached.  Malformed entries raise :class:`NetplanError`
+    instead of being skipped.
     """
     links, altnames = _links_from_ip_json(links_json)
     addresses = _addresses_from_ip_json(addresses_json)
@@ -574,11 +984,16 @@ def check_name_collisions(
             )
     if iptables_save is not None:
         summary = iptables_summary(iptables_save)
-        if summary["forward_policy"] == "DROP" and not summary["docker_user"]:
+        if not summary["docker_user"]:
             collisions.add(
-                "iptables FORWARD policy is DROP and the DOCKER-USER chain is "
-                "absent; the plan's scoped DOCKER-USER accepts cannot be "
-                "installed and Docker would blackhole the lab WAN"
+                "DOCKER-USER chain is absent from the filter table; FORWARD "
+                "cannot jump to it and the plan's scoped accepts cannot be "
+                "installed"
+            )
+        elif not summary["docker_user_first"]:
+            collisions.add(
+                "FORWARD does not jump to DOCKER-USER before Docker's own rules; "
+                "the plan's scoped accepts would not be reached"
             )
     return sorted(collisions)
 
@@ -646,7 +1061,7 @@ def main(argv: list[str] | None = None) -> int:
                 texts["iptables"],
             )
             summary = iptables_summary(texts["iptables"])
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             print(f"netplan: {exc}", file=sys.stderr)
             return 2
         except NetplanError as exc:
@@ -655,7 +1070,9 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "INFO: iptables FORWARD policy "
             f"{summary['forward_policy']}; DOCKER-USER "
-            f"{'present' if summary['docker_user'] else 'absent'}"
+            f"{'present' if summary['docker_user'] else 'absent'}; "
+            f"jump before Docker rules "
+            f"{'yes' if summary['docker_user_first'] else 'no'}"
         )
         if collisions:
             for collision in collisions:

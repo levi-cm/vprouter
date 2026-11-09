@@ -6,24 +6,32 @@ outside the VM (on the host tap) and classifies every frame by the declared VM
 WAN MAC/IP.  Anything that is not an explicitly allowed WireGuard UDP flow (or
 an exact gateway ARP exchange when enabled) is a leak finding.
 
-Evidence rules (M1, round 2):
+Evidence rules (M1, round 3):
 
-* a tcpdump stats file is mandatory; every summary line is parsed, every drop
-  counter must be zero, ``packets received by filter`` must equal ``packets
-  captured`` (otherwise ``unread_capture_tail``), and ``captured`` must equal the
-  number of complete pcap records.  The stats banner must name
-  ``vprlab-tap0`` with ``link-type EN10MB``;
+* a tcpdump stats file is mandatory; every summary form is parsed in full,
+  including the one-line SIGUSR1 form, every summary must have ``captured ==
+  received by filter`` and zero drops, counters must be non-decreasing across
+  summaries in order, the final summary's ``captured`` must equal the number of
+  complete pcap records, and the single ``listening on vprlab-tap0, link-type
+  EN10MB`` banner must be the first non-empty line;
 * the capture argv supplied with ``--capture-argv-file`` must equal the exact
-  argv ``netplan.py`` prints, except for the ``-w`` file path; its hash is bound
-  into the report;
+  argv ``netplan.py`` prints, except that the ``-w`` path must resolve
+  (``realpath``) to the submitted pcap; its hash is bound into the report;
 * exactly one ``control-before`` and one ``control-after`` nonce are mandatory,
   they must differ, each must be seen exactly once, ``ts(before) < ts(after)``,
   and record timestamps must never decrease;
 * all records are classified.  Allowed flows that fall outside the control
   window are counted as ``outside_window_allowed`` instead of invalidating the
   capture; any finding anywhere in the capture is still ``LEAK``;
+* an allowed relay tuple additionally requires the exact tunnel L2 shape
+  (outbound: source ``vm_wan_mac``, destination ``gateway_mac``; inbound: the
+  reverse; no 802.1Q tag), otherwise it is ``allowed_tuple_wrong_l2`` and is
+  not counted;
 * ``--expect-tunnel up`` requires allowed traffic in both directions inside the
-  window, ``--expect-tunnel down`` requires no inbound allowed flow;
+  window on the same flow label, ``--expect-tunnel down`` requires no inbound
+  allowed flow;
+* an incomplete allowed fragment association is ``fragment_incomplete``
+  wherever it lies relative to the control window;
 * any leak finding makes the verdict ``LEAK`` even when the capture is also
   invalid (``invalid_reasons`` reports the capture defects alongside);
 * a complete record with a malformed frame is a ``malformed_frame`` finding and
@@ -83,6 +91,11 @@ _PCAP_MAGIC: dict[bytes, tuple[str, int, str, str]] = {
 #: else (wrong interface, wrong link type, no banner) leaves the capture
 #: provenance unproven.
 REQUIRED_STATS_BANNER = "listening on vprlab-tap0, link-type EN10MB"
+_STATS_BANNER_RE = re.compile(
+    r"^tcpdump: listening on vprlab-tap0, link-type EN10MB \(Ethernet\)"
+    r"(?:, snapshot length [0-9]+ bytes)?$"
+)
+_STATS_BANNER_LIKE_RE = re.compile(r"listening on", re.IGNORECASE)
 
 #: Expected tunnel evidence values for ``--expect-tunnel``.
 EXPECT_TUNNEL_VALUES = ("up", "down", "any")
@@ -166,76 +179,139 @@ def _proto_name(protocol: int) -> str:
     return "ipv4"
 
 
+def check_stats_banner(text: str) -> bool:
+    """Validate the capture banner line as a whole.
+
+    tcpdump writes exactly one ``listening on vprlab-tap0, link-type EN10MB
+    (Ethernet), snapshot length ...`` line and it is the first non-empty line
+    of stderr.  A banner for another interface/link type, a banner that is not
+    first, or any additional ``listening on`` line (including the same banner
+    repeated or a foreign line containing that text) fails provenance.
+    """
+    nonempty = [line.strip() for line in text.splitlines() if line.strip()]
+    if not nonempty:
+        return False
+    if _STATS_BANNER_RE.fullmatch(nonempty[0]) is None:
+        return False
+    return not any(_STATS_BANNER_LIKE_RE.search(line) for line in nonempty[1:])
+
+
 def parse_tcpdump_stats(text: str) -> tuple[dict[str, int | None], str | None]:
     """Parse every tcpdump 4.99 stderr summary line.
 
     Returns ``(stats, problem)``.  A non-empty ``problem`` is an INVALID reason.
 
-    The parser is deliberately all-or-nothing: every recognised counter line is
-    collected, and *any* of the following makes the capture invalid:
+    The parser is deliberately all-or-nothing.  tcpdump may emit several
+    summaries: one multi-line summary at exit, and one-line SIGUSR1 summaries
+    during the run (``tcpdump: N packets captured, M packets received by
+    filter, K packets dropped by kernel``).  Every summary is parsed fully and
+    must satisfy all of the following:
 
-    * a tcpdump error line (``pcap_loop``, interface disappeared, ...);
-    * a counter-shaped line that does not match the supported format;
-    * a missing ``captured``, ``received by filter`` or ``dropped by kernel``
-      counter;
-    * a nonzero kernel or interface drop counter (checked over every summary);
-    * the same counter reported with two different values (concatenated or
-      stale summaries are contradictory evidence);
-    * ``received by filter`` unequal to ``captured``.  On the supported Linux
-      capture path (TPACKET_V3 tap), packets that passed the filter but were
-      never written are ring entries tcpdump did not read before SIGINT, so
-      they are invisible to classification (``unread_capture_tail``).  The
-      runner drains the capture with ``--immediate-mode``, waits 2 s of quiet
-      after the after-control appears in the file, then sends SIGINT; the
-      resulting counters must agree exactly.
+    * it contains ``captured``, ``received by filter`` and ``dropped by
+      kernel`` (``dropped by interface`` is optional);
+    * ``captured == received by filter`` (otherwise ``unread_capture_tail``:
+      packets passed the filter but were never written to the pcap);
+    * both drop counters are zero (``packet_drops``);
+    * counters never decrease from one summary to the next
+      (``stats_contradictory``; concatenated or stale summaries are not
+      evidence).
+
+    The final summary is the binding one: its ``captured`` value is compared
+    with the number of pcap records by :func:`scan_capture`.  A one-line
+    SIGUSR1 summary is therefore just as binding as a multi-line summary when
+    it is the last one.  A legitimate mid-run summary carries values no larger
+    than the final summary and is accepted.
     """
-    values: dict[str, set[int]] = {
-        "captured": set(),
-        "received": set(),
-        "dropped_kernel": set(),
-        "dropped_interface": set(),
-    }
+    summaries: list[tuple[dict[str, int], bool]] = []
+    current: dict[str, int] = {}
+    current_conflict = False
+    any_drop = False
     error_line = False
     shape_problem = False
-    one_line_kernel_drops = False
+
+    def flush() -> None:
+        nonlocal current, current_conflict
+        if current:
+            summaries.append((dict(current), current_conflict))
+            current = {}
+            current_conflict = False
+
     for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _STATS_BANNER_RE.fullmatch(stripped) is not None:
+            continue
         match = _STATS_LINE_RE.match(line)
         if match is not None:
             key = _STATS_COUNTER_NAME[match.group(2).lower()]
-            values[key].add(int(match.group(1)))
+            value = int(match.group(1))
+            if key == "captured" and "captured" in current:
+                # A new multi-line summary starts when "captured" repeats.
+                flush()
+            if key in current and current[key] != value:
+                current_conflict = True
+            current[key] = value
+            if key in ("dropped_kernel", "dropped_interface") and value:
+                any_drop = True
             continue
         one_line = _STATS_ONELINE_RE.match(line)
         if one_line is not None:
-            if int(one_line.group(3)):
-                one_line_kernel_drops = True
-            continue
-        if not line.strip():
+            flush()
+            summaries.append(
+                (
+                    {
+                        "captured": int(one_line.group(1)),
+                        "received": int(one_line.group(2)),
+                        "dropped_kernel": int(one_line.group(3)),
+                    },
+                    False,
+                )
+            )
             continue
         if line.lstrip().startswith("tcpdump:") and _STATS_ERROR_RE.search(line):
             error_line = True
             continue
         if _STATS_COUNTER_SHAPE_RE.match(line):
             shape_problem = True
+    flush()
 
+    final = summaries[-1][0] if summaries else {}
     stats: dict[str, int | None] = {
-        key: (max(found) if found else None) for key, found in values.items()
+        "captured": final.get("captured"),
+        "received": final.get("received"),
+        "dropped_kernel": final.get("dropped_kernel"),
+        "dropped_interface": final.get("dropped_interface"),
     }
     if error_line:
         return stats, "stats_error_line"
     if shape_problem:
         return stats, "stats_unparseable"
-    if not any(values.values()):
+    if not summaries:
         return stats, "stats_unparseable"
-    if any(not values[key] for key in _STATS_REQUIRED):
+    if any_drop or any(
+        summary.get("dropped_kernel", 0) or summary.get("dropped_interface", 0)
+        for summary, _conflict in summaries
+    ):
+        return stats, "packet_drops"
+    if any(
+        any(key not in summary for key in _STATS_REQUIRED)
+        for summary, _conflict in summaries
+    ):
         return stats, "stats_incomplete"
-    if (stats["dropped_kernel"] or 0) or (stats["dropped_interface"] or 0):
-        return stats, "packet_drops"
-    if one_line_kernel_drops:
-        return stats, "packet_drops"
-    if any(len(found) > 1 for found in values.values()):
+    if any(conflict for _summary, conflict in summaries):
         return stats, "stats_contradictory"
-    if stats["received"] != stats["captured"]:
+    if any(
+        summary["captured"] != summary["received"]
+        for summary, _conflict in summaries
+    ):
         return stats, "unread_capture_tail"
+    previous: dict[str, int] = {}
+    for summary, _conflict in summaries:
+        for key, value in summary.items():
+            if key in previous and value < previous[key]:
+                return stats, "stats_contradictory"
+            previous[key] = value
     return stats, None
 
 
@@ -643,6 +719,9 @@ class _Scanner:
                 more_fragments,
                 extra,
                 direction,
+                src_mac,
+                dst_mac,
+                vlan,
             )
             return
 
@@ -670,6 +749,28 @@ class _Scanner:
             direction=direction,
             fragmented=more_fragments,
         )
+        if result.label is not None:
+            l2_problem = self._allowed_l2_problem(
+                direction, src_mac, dst_mac, vlan
+            )
+            if l2_problem is not None:
+                self.add_finding(
+                    ts,
+                    src,
+                    dst,
+                    proto_name,
+                    result.src_port,
+                    result.dst_port,
+                    "allowed_tuple_wrong_l2",
+                    detail=l2_problem,
+                    **extra,
+                )
+                result = _L4Result(
+                    reason="allowed_tuple_wrong_l2",
+                    src_port=result.src_port,
+                    dst_port=result.dst_port,
+                    udp_length=result.udp_length,
+                )
         if more_fragments:
             self._register_first_fragment(
                 ts,
@@ -683,19 +784,46 @@ class _Scanner:
         if result.label is not None:
             self.count_allowed(result.label, direction)
         elif result.reason is not None:
-            self.add_finding(
-                ts,
-                src,
-                dst,
-                proto_name,
-                result.src_port,
-                result.dst_port,
-                result.reason,
-                **({"detail": result.detail} if result.detail else {}),
-                **extra,
-            )
+            if result.reason != "allowed_tuple_wrong_l2":
+                self.add_finding(
+                    ts,
+                    src,
+                    dst,
+                    proto_name,
+                    result.src_port,
+                    result.dst_port,
+                    result.reason,
+                    **({"detail": result.detail} if result.detail else {}),
+                    **extra,
+                )
 
     # --------------------------------------------------------------- fragments
+    def _allowed_l2_problem(
+        self,
+        direction: str,
+        src_mac: str,
+        dst_mac: str,
+        vlan: int | None,
+    ) -> str | None:
+        """Return why an allowed-tuple frame is not a real tunnel frame.
+
+        The tap sits on the host bridge, so a genuine outbound frame from the
+        VM has Ethernet source ``vm_wan_mac`` and destination ``gateway_mac``;
+        a genuine inbound frame is the reverse.  The host never tags lab
+        traffic, so any 802.1Q tag on an allowed tuple is also wrong.  A VM can
+        still spoof these MACs, but an accidental or replayed/forged frame with
+        the VM's own MAC as the inbound source is rejected.
+        """
+        if vlan is not None:
+            return "vlan_tagged"
+        if direction == "out":
+            if src_mac == self.policy.vm_wan_mac and dst_mac == self.policy.gateway_mac:
+                return None
+        else:
+            if src_mac == self.policy.gateway_mac and dst_mac == self.policy.vm_wan_mac:
+                return None
+        return "mac_mismatch"
+
     def _register_first_fragment(
         self,
         ts: float,
@@ -760,6 +888,9 @@ class _Scanner:
         more_fragments: bool,
         extra: dict[str, Any],
         direction: str,
+        src_mac: str,
+        dst_mac: str,
+        vlan: int | None,
     ) -> None:
         key = (src, dst, protocol, identification)
         state = self.fragment_states.get(key)
@@ -789,6 +920,22 @@ class _Scanner:
             detail = state.reason
         elif state.complete:
             reason = "fragment_after_complete"
+        elif (l2_problem := self._allowed_l2_problem(
+            direction, src_mac, dst_mac, vlan
+        )) is not None:
+            self.add_finding(
+                ts,
+                src,
+                dst,
+                proto_name,
+                None,
+                None,
+                "allowed_tuple_wrong_l2",
+                detail=l2_problem,
+                **extra,
+            )
+            state.reported = True
+            return
         elif more_fragments and len(payload) % 8:
             reason = "malformed_frame"
             detail = "invalid_fragment_length"
@@ -827,26 +974,17 @@ class _Scanner:
         )
 
     def finalize_fragments(self) -> None:
-        """Reject an allowed fragmented datagram that never completed.
+        """Reject any allowed fragmented datagram that never completed.
 
         Only called after the whole pcap was read.  If the capture itself was
         structurally truncated, incompleteness is expected and the verdict is
-        INVALID rather than an inferred LEAK.  Only datagrams whose first
-        fragment lies inside a valid control window are judged: an
-        out-of-window fragment cannot turn an already-INVALID capture into a
-        LEAK merely because the phase boundary cut it.
+        INVALID rather than an inferred LEAK.  Every unfinished allowed
+        association is judged, wherever it lies relative to the control
+        window: an out-of-window boundary must not erase missing-tail
+        evidence, and the finding is reported regardless of whether the
+        capture also has an invalid reason.
         """
-        before = self.control_sightings["before"]
-        after = self.control_sightings["after"]
-        if not before or not after:
-            return
-        before_ts = before[0]["ts"]
-        after_ts = after[0]["ts"]
-        if not before_ts < after_ts:
-            return
         for state in self.fragment_states.values():
-            if not before_ts < state.first_ts < after_ts:
-                continue
             if (
                 state.label is not None
                 and not state.complete
@@ -1145,9 +1283,10 @@ def scan_capture(
     control_before: str,
     control_after: str,
     *,
+    expect_tunnel: str,
     tcpdump_stats_text: str | None,
     capture_argv: list[str],
-    expect_tunnel: str = "any",
+    pcap_path: str | None = None,
     stats_error: str | None = None,
     stats_source: str | None = None,
     source: str | None = None,
@@ -1160,6 +1299,10 @@ def scan_capture(
     is mandatory unless ``stats_error`` records why it could not be read.
     ``capture_argv`` must equal the exact argv ``netplan.capture_argv`` prints
     (only the ``-w`` path may differ); its hash is bound into the report.
+    ``expect_tunnel`` is required: there is no fail-open API default.
+    When ``pcap_path`` is supplied, the argv's ``-w`` value must resolve to the
+    same file (``realpath``), tying the declared capture command to the pcap
+    that was actually submitted.
     """
     if not isinstance(policy, policy_mod.Policy):
         raise TypeError("policy must be a policy.Policy instance")
@@ -1198,9 +1341,7 @@ def scan_capture(
     stats_sha256: str | None = None
     stats_banner_ok = False
     if tcpdump_stats_text is not None:
-        stats_banner_ok = (
-            tcpdump_stats_text.count(REQUIRED_STATS_BANNER) == 1
-        )
+        stats_banner_ok = check_stats_banner(tcpdump_stats_text)
         if not stats_banner_ok:
             invalid_reasons.append("capture_banner_mismatch")
     if stats_problem is None and tcpdump_stats_text is not None:
@@ -1215,7 +1356,7 @@ def scan_capture(
     ):
         invalid_reasons.append("stats_packet_count_mismatch")
 
-    argv_problem = netplan_mod.check_capture_argv(capture_argv)
+    argv_problem = netplan_mod.check_capture_argv(capture_argv, pcap_path)
     if argv_problem is not None:
         invalid_reasons.append(argv_problem)
     capture_argv_sha256: str | None = None
@@ -1265,13 +1406,20 @@ def scan_capture(
         counts["outbound"] for counts in window_counts.values()
     )
     inbound_in_window = sum(counts["inbound"] for counts in window_counts.values())
+    labels_both_directions = sorted(
+        label
+        for label, counts in window_counts.items()
+        if counts["outbound"] > 0 and counts["inbound"] > 0
+    )
     inbound_total = sum(
         counts["inbound"]
         for label, counts in scanner.allowed_counts.items()
         if label != "arp"
     )
     if expect_tunnel == "up":
-        tunnel_satisfied = outbound_in_window > 0 and inbound_in_window > 0
+        # Both directions must be on the same declared relay flow: outbound
+        # to relay A and inbound from relay B is not one tunnel.
+        tunnel_satisfied = bool(labels_both_directions)
     elif expect_tunnel == "down":
         # A "down" phase must show no inbound allowed flow anywhere in the
         # capture: a keepalive after the after-control is still tunnel evidence.
@@ -1318,6 +1466,7 @@ def scan_capture(
                 "value": expect_tunnel,
                 "outbound_in_window": outbound_in_window,
                 "inbound_in_window": inbound_in_window,
+                "labels_both_directions": labels_both_directions,
                 "inbound_total": inbound_total,
                 "satisfied": tunnel_satisfied,
             },
@@ -1452,6 +1601,7 @@ def main(argv: list[str] | None = None) -> int:
         args.control_after,
         tcpdump_stats_text=stats_text,
         capture_argv=capture_argv,
+        pcap_path=args.pcap,
         expect_tunnel=args.expect_tunnel,
         stats_error=stats_error,
         stats_source=args.tcpdump_stats,

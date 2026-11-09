@@ -10,29 +10,11 @@
     "vm_wan_mac",
     "vm_wan_ipv4",
     "gateway_ipv4",
+    "gateway_mac",
     "allowed",
     "allow_arp",
     "positive_control",
     "ipv6_allowed"
-  ],
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "allow_arp": {
-            "const": true
-          }
-        },
-        "required": [
-          "allow_arp"
-        ]
-      },
-      "then": {
-        "required": [
-          "gateway_mac"
-        ]
-      }
-    }
   ],
   "properties": {
     "schema_version": {
@@ -40,7 +22,7 @@
     },
     "vm_wan_mac": {
       "type": "string",
-      "description": "Unicast, non-zero MAC; six colon-separated hex octets.",
+      "description": "Unicast, non-zero MAC; the fixed lab VM WAN address is 52:54:00:76:70:02.",
       "pattern": "^[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}$"
     },
     "vm_wan_ipv4": {
@@ -53,7 +35,7 @@
     },
     "gateway_mac": {
       "type": "string",
-      "description": "The host bridge MAC (ip link show vprlab0). Required when allow_arp is true; gateway-to-VM ARP is allowed only from this MAC. Must be unicast, non-zero and different from vm_wan_mac.",
+      "description": "Required always. The plan sets the host bridge MAC to exactly 52:54:00:76:70:01. Gateway-to-VM ARP and inbound tunnel evidence are allowed only from this MAC. Must be unicast, non-zero and different from vm_wan_mac.",
       "pattern": "^[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}$"
     },
     "allowed": {
@@ -141,7 +123,16 @@
       "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$"
     },
     "unicast_ipv4": {
-      "$ref": "#/$defs/ipv4",
+      "allOf": [
+        {
+          "$ref": "#/$defs/ipv4"
+        },
+        {
+          "not": {
+            "pattern": "^(?:0\\.|127\\.|169\\.254\\.|22[4-9]\\.|23[0-9]\\.|24[0-9]\\.|25[0-5]\\.)"
+          }
+        }
+      ],
       "description": "Additionally rejects 0.0.0.0/8, 127/8, 224/4, 240/4 and 169.254/16; the Python loader is binding."
     },
     "lab_host": {

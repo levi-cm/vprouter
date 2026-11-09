@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Print only the interactive Tailscale login URL from the running router.
 
-The router unit is started by a phase (for example ``start-router`` with a long
-duration).  Run this command on debdev while that phase is live:
+Run this command as root on debdev only when **no** leak-lab phase is running.
+A QEMU socket chardev serves exactly one QGA client, so the helper refuses
+(exit 2) while the runner holds ``/run/vprlab/run.lock``.  During a phase use
+the ``login`` phase instead: it polls the URL through the runner's own QGA
+connection and writes it to ``<evidence>/login-url.txt``.
 
     python3 -B tools/leak-lab/vm/login_url.py --index 1 --wait 120
 
@@ -21,6 +24,7 @@ import sys
 import time
 
 import guest
+import runlock
 from qga import QGAError, wait_for_qga
 
 LOGIN_URL_RE = re.compile(r"https://login\.tailscale\.com/[A-Za-z0-9/_-]+")
@@ -70,7 +74,15 @@ def main(argv: list[str] | None = None) -> int:
         help="poll for this many seconds before giving up",
     )
     parser.add_argument("--connect-timeout", type=float, default=10.0)
+    parser.add_argument("--run-lock", default=str(runlock.RUN_LOCK))
     arguments = parser.parse_args(argv)
+    # A runner holds one QGA connection for the whole phase; a second client
+    # cannot complete the handshake.  Refuse loudly instead of timing out.
+    try:
+        runlock.ensure_unlocked(arguments.run_lock)
+    except runlock.LockError as exc:
+        print(f"login_url: {exc}", file=sys.stderr)
+        return 2
     try:
         guest.validate_name(arguments.name)
     except guest.GeneratorError as exc:

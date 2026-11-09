@@ -7,8 +7,11 @@ Only parsers and process inspection live here.  The callers execute ``ip``,
 
 from __future__ import annotations
 
+import json
+import os
 import pathlib
 import re
+import stat
 from typing import Any
 
 from guest import (
@@ -21,7 +24,10 @@ from guest import (
 )
 
 OWNER_TAG = "vprlab-leak-lab-m1"
+OWNER_IFALIAS_PREFIX = "vprlab-owned:"
+OWNER_FILE = pathlib.Path("/run/vprlab/owner.json")
 REQUIRED_CHAINS = ("input", "forward", "output", "postrouting")
+_OWNER_TOKEN_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 class Refusal(RuntimeError):
@@ -95,6 +101,60 @@ def _link_kind(entry: dict[str, Any]) -> str:
     return kind if isinstance(kind, str) else ""
 
 
+def _is_tap(entry: dict[str, Any]) -> bool:
+    """Accept the real iproute2 shape for a persistent tap.
+
+    Linux represents a tap as link kind ``tun`` with
+    ``linkinfo.info_data.type == "tap"``.  Some tooling prints ``info_kind:
+    "tap"``; accept that too, but never a plain tun device.
+    """
+    linkinfo = entry.get("linkinfo")
+    if not isinstance(linkinfo, dict):
+        return False
+    if linkinfo.get("info_kind") == "tap":
+        return True
+    if linkinfo.get("info_kind") != "tun":
+        return False
+    info_data = linkinfo.get("info_data")
+    return isinstance(info_data, dict) and info_data.get("type") == "tap"
+
+
+def load_owner_token(
+    path: str | pathlib.Path = OWNER_FILE, *, require_root: bool | None = None
+) -> str:
+    """Read the M1 ownership document: schema 1 and a 32-hex token."""
+    path = pathlib.Path(path)
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise Refusal("owner document is missing") from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise Refusal("owner document must be a regular file")
+    if info.st_mode & 0o077:
+        raise Refusal("owner document must be mode 0600")
+    if require_root is None:
+        require_root = os.geteuid() == 0
+    if require_root and info.st_uid != 0:
+        raise Refusal("owner document must be owned by root")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
+            document = json.load(stream)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise Refusal("owner document is not valid JSON") from exc
+    if not isinstance(document, dict):
+        raise Refusal("owner document must be an object")
+    if document.get("schema") != 1:
+        raise Refusal("owner document schema must be 1")
+    token = document.get("token")
+    if not isinstance(token, str) or _OWNER_TOKEN_RE.fullmatch(token) is None:
+        raise Refusal("owner document token must be 32 lowercase hex characters")
+    return token
+
+
 def verify_host_network(
     links_document: object,
     table_document: object,
@@ -108,10 +168,15 @@ def verify_host_network(
     vm_ipv4: str = VM_IPV4,
     vm_mac: str = VM_MAC,
     owner_tag: str = OWNER_TAG,
+    owner_token: str | None = None,
 ) -> list[str]:
     """Return every problem with the already-created host lab network."""
     problems: list[str] = []
     links = _links(links_document)
+
+    expected_ifalias = (
+        OWNER_IFALIAS_PREFIX + owner_token if owner_token is not None else None
+    )
 
     bridge_entry = links.get(bridge)
     if bridge_entry is None:
@@ -123,6 +188,11 @@ def verify_host_network(
             problems.append(f"{bridge} MAC is not the fixed gateway MAC {gateway_mac}")
         if "UP" not in _decode(bridge_entry.get("flags")):
             problems.append(f"{bridge} is not up")
+        if (
+            expected_ifalias is not None
+            and bridge_entry.get("ifalias") != expected_ifalias
+        ):
+            problems.append(f"{bridge} does not carry the lab ownership ifalias")
         addresses = None
         if addresses_document is not None:
             if not isinstance(addresses_document, list):
@@ -157,13 +227,17 @@ def verify_host_network(
     if tap_entry is None:
         problems.append(f"tap {tap} is missing")
     else:
-        if _link_kind(tap_entry) != "tap":
+        if not _is_tap(tap_entry):
             problems.append(f"{tap} is not a tap")
         if "UP" not in _decode(tap_entry.get("flags")):
             problems.append(f"{tap} is not up")
-        master = tap_entry.get("master")
-        if master is not None and master != bridge:
-            problems.append(f"{tap} is attached to {master}, not {bridge}")
+        if (
+            expected_ifalias is not None
+            and tap_entry.get("ifalias") != expected_ifalias
+        ):
+            problems.append(f"{tap} does not carry the lab ownership ifalias")
+        if tap_entry.get("master") != bridge:
+            problems.append(f"{tap} is not enslaved to {bridge}")
 
     if not isinstance(table_document, dict) or not isinstance(
         table_document.get("nftables"), list

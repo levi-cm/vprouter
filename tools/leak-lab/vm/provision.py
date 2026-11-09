@@ -22,7 +22,6 @@ import datetime
 import json
 import os
 import pathlib
-import pwd
 import shutil
 import signal
 import stat
@@ -32,13 +31,20 @@ import time
 
 import guest
 import hostcheck
+import runlock
 
 PROVISION_TIMEOUT = 1800.0
-POWEROFF_TIMEOUT = 120.0
+POWEROFF_TIMEOUT = 180.0
 
 
 def _utc_now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def require_root() -> None:
+    """Separate function so offline tests can exercise the rest as non-root."""
+    if os.geteuid() != 0:
+        raise hostcheck.Refusal("provisioning requires root")
 
 
 def _atomic_json(path: pathlib.Path, document: dict) -> None:
@@ -51,17 +57,69 @@ def _atomic_json(path: pathlib.Path, document: dict) -> None:
         stream.write("\n")
 
 
+def _write_json_fd(descriptor: int, document: dict) -> None:
+    payload = (
+        json.dumps(document, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    os.ftruncate(descriptor, 0)
+    os.write(descriptor, payload)
+    os.fsync(descriptor)
+
+
+def _open_private(path: pathlib.Path, flags: int, mode: int = 0o600) -> int:
+    """Open a leaf without following a symlink planted by the state owner."""
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return os.open(path, flags, mode)
+
+
 def _qemu_identity(user: str) -> tuple[int, int]:
     try:
-        record = pwd.getpwnam(user)
-    except KeyError as exc:
-        raise hostcheck.Refusal(f"unknown unprivileged user {user!r}") from exc
-    return record.pw_uid, record.pw_gid
+        return guest.resolve_unprivileged_user(user)
+    except guest.GeneratorError as exc:
+        raise hostcheck.Refusal(str(exc)) from exc
 
 
 def _require_tool(path: pathlib.Path) -> None:
     if not path.is_file() or not os.access(path, os.X_OK):
         raise hostcheck.Refusal(f"staged tool is missing or not executable: {path}")
+    info = path.stat()
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise hostcheck.Refusal(
+            f"staged tool is writable by a non-root account: {path}"
+        )
+
+
+def _run_generator(
+    argv: list[str],
+    *,
+    uid: int,
+    gid: int,
+    what: str,
+    timeout: float,
+    umask: int | None = None,
+) -> None:
+    """Run qemu-img/genisoimage as the QEMU user, never as root."""
+    if umask is None:
+        wrapper = guest.build_setpriv_argv(argv, uid, gid)
+    else:
+        wrapper = guest.build_private_tool_argv(argv, uid, gid, umask=umask)
+    try:
+        completed = subprocess.run(
+            wrapper,
+            env=guest.qemu_env({}),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise hostcheck.Refusal(
+            f"{what} could not run as the QEMU user: {exc.__class__.__name__}"
+        ) from exc
+    if completed.returncode != 0:
+        raise hostcheck.Refusal(f"{what} failed with status {completed.returncode}")
 
 
 def _copy_release(source: pathlib.Path, destination: pathlib.Path) -> None:
@@ -98,10 +156,15 @@ def create_state_directory(path: pathlib.Path, *, uid: int | None = None, gid: i
 def _stage_payload(
     state: pathlib.Path, release: pathlib.Path, image_tar: pathlib.Path
 ) -> pathlib.Path:
-    """Stage release + image tar for the read-only payload ISO."""
+    """Stage release + image tar for the read-only payload ISO.
+
+    Staging is created while the state directory is still root-owned; every
+    entry is made world-readable so ``genisoimage`` (running as the QEMU user)
+    can read it after the directory is handed over.
+    """
     staging = state / "payload"
-    staging.mkdir(mode=0o700)
-    os.chmod(staging, 0o700)
+    staging.mkdir(mode=0o755)
+    os.chmod(staging, 0o755)
     _copy_release(release, staging / "release")
     (staging / "unit").mkdir(mode=0o755)
     unit = release / guest.UNIT_SOURCE
@@ -120,6 +183,14 @@ def _stage_payload(
         shutil.copyfile(image_tar, destination)
     if not hardlinked:
         os.chmod(destination, 0o644)
+    for root, directories, files in os.walk(staging):
+        os.chmod(root, stat.S_IMODE(os.stat(root).st_mode) | 0o555)
+        for name in directories:
+            path = pathlib.Path(root) / name
+            os.chmod(path, stat.S_IMODE(path.stat().st_mode) | 0o555)
+        for name in files:
+            path = pathlib.Path(root) / name
+            os.chmod(path, stat.S_IMODE(path.stat().st_mode) | 0o444)
     return staging
 
 
@@ -130,7 +201,11 @@ def _wait_for_marker(process: subprocess.Popen, serial: pathlib.Path, timeout: f
     while time.monotonic() < deadline:
         if serial.is_file():
             try:
-                with serial.open("rb") as stream:
+                flags = os.O_RDONLY
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                descriptor = os.open(serial, flags)
+                with os.fdopen(descriptor, "rb") as stream:
                     stream.seek(0, os.SEEK_END)
                     size = stream.tell()
                     stream.seek(max(0, size - 262144))
@@ -176,12 +251,20 @@ def _terminate(process: subprocess.Popen) -> None:
 
 
 def provision(arguments: argparse.Namespace) -> int:
-    if os.geteuid() != 0:
-        raise hostcheck.Refusal("provisioning requires root")
+    require_root()
     state = guest.state_path(arguments.index, pathlib.Path(arguments.state_root))
     if state.exists():
         raise hostcheck.Refusal(f"state directory already exists: {state}")
 
+    lock_fd = runlock.acquire(arguments.run_lock)
+    try:
+        return _provision_locked(arguments, state)
+    finally:
+        runlock.release(lock_fd)
+
+
+def _provision_locked(arguments: argparse.Namespace, state: pathlib.Path) -> int:
+    uid, gid = _qemu_identity(arguments.qemu_user)
     base = pathlib.Path(arguments.base_image)
     digest = guest.verify_base_image(base, pathlib.Path(arguments.checksum_manifest))
 
@@ -194,9 +277,10 @@ def provision(arguments: argparse.Namespace) -> int:
 
     for tool in (guest.QEMU, guest.QEMU_IMG, guest.GENISOIMAGE):
         _require_tool(tool)
+    # The global lock is held, so this check and the later QEMU launch are
+    # one admission decision.
     hostcheck.refuse_if_qemu_running(self_pid=os.getpid())
 
-    uid, gid = _qemu_identity(arguments.qemu_user)
     root = pathlib.Path(arguments.state_root)
     if not root.exists():
         root.mkdir(mode=0o711, parents=True)
@@ -209,7 +293,7 @@ def provision(arguments: argparse.Namespace) -> int:
 
     release = pathlib.Path(arguments.release_dir)
     try:
-        create_state_directory(state, uid=uid, gid=gid)
+        create_state_directory(state)
     except FileExistsError as exc:
         raise hostcheck.Refusal(f"state directory already exists: {state}") from exc
 
@@ -230,62 +314,75 @@ def provision(arguments: argparse.Namespace) -> int:
     }
 
     process: subprocess.Popen | None = None
+    record_fd: int | None = None
+    log_fd: int | None = None
     try:
         overlay = state / guest.OVERLAY_FILE
-        environment = guest.qemu_env(dict(os.environ))
-        subprocess.run(
-            guest.build_qemu_img_create_argv(base, overlay),
-            env=environment,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        os.chmod(overlay, 0o600)
-        os.chown(overlay, uid, gid)
-
         staging = _stage_payload(state, release, image_tar)
         user_data = state / "user-data"
         meta_data = state / "meta-data"
         hostname = f"vprlab-{arguments.index:03d}"
-        user_data.write_text(
-            guest.build_user_data(
-                hostname=hostname,
-                name=arguments.name,
-                image_id=image_id,
-                ipv6_mode=arguments.ipv6_mode,
+        for path, text in (
+            (
+                user_data,
+                guest.build_user_data(
+                    hostname=hostname,
+                    name=arguments.name,
+                    image_id=image_id,
+                    ipv6_mode=arguments.ipv6_mode,
+                ),
             ),
-            encoding="utf-8",
-        )
-        meta_data.write_text(
-            guest.build_meta_data(
-                hostname=hostname, instance_id=f"vprlab-vm-{arguments.index:03d}"
+            (
+                meta_data,
+                guest.build_meta_data(
+                    hostname=hostname,
+                    instance_id=f"vprlab-vm-{arguments.index:03d}",
+                ),
             ),
-            encoding="utf-8",
+        ):
+            descriptor = _open_private(
+                path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644
+            )
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(text)
+        record_fd = _open_private(
+            state / "provision.json", os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600
         )
-        os.chmod(user_data, 0o644)
-        os.chmod(meta_data, 0o644)
+        log_fd = _open_private(
+            state / guest.QEMU_LOG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+        )
+        _write_json_fd(record_fd, record)
+
+        # From here on every write inside the state directory is done by the
+        # QEMU user; root only keeps the already-open descriptors above.
+        os.chmod(state, 0o700)
+        os.chown(state, uid, gid)
+
+        _run_generator(
+            guest.build_qemu_img_create_argv(base, overlay),
+            uid=uid,
+            gid=gid,
+            what="qemu-img create",
+            timeout=120,
+            umask=0o077,
+        )
 
         seed = state / guest.SEED_ISO
-        subprocess.run(
+        payload_iso = state / guest.PAYLOAD_ISO
+        _run_generator(
             guest.build_seed_iso_argv(seed, user_data, meta_data),
-            env=environment,
-            check=True,
-            capture_output=True,
-            text=True,
+            uid=uid,
+            gid=gid,
+            what="genisoimage seed",
             timeout=120,
         )
-        payload_iso = state / guest.PAYLOAD_ISO
-        subprocess.run(
+        _run_generator(
             guest.build_payload_iso_argv(payload_iso, staging),
-            env=environment,
-            check=True,
-            capture_output=True,
-            text=True,
+            uid=uid,
+            gid=gid,
+            what="genisoimage payload",
             timeout=600,
         )
-        os.chmod(seed, 0o644)
-        os.chmod(payload_iso, 0o644)
 
         qemu_argv = guest.build_qemu_argv("provision", state, name=arguments.name)
         launch_argv = guest.build_launch_argv(
@@ -296,10 +393,11 @@ def provision(arguments: argparse.Namespace) -> int:
         record["payload_iso"] = str(payload_iso)
         record["seed_iso"] = str(seed)
 
-        with (state / guest.QEMU_LOG_FILE).open("xb") as log:
+        with os.fdopen(log_fd, "wb") as log:
+            log_fd = None
             process = subprocess.Popen(
                 launch_argv,
-                env=environment,
+                env=guest.qemu_env({}),
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,
@@ -307,7 +405,7 @@ def provision(arguments: argparse.Namespace) -> int:
             )
         record["qemu_pid"] = process.pid
         record["qemu_started_at"] = _utc_now()
-        _atomic_json(state / "provision.json", record)
+        _write_json_fd(record_fd, record)
 
         marker = _wait_for_marker(
             process, state / guest.SERIAL_FILE, PROVISION_TIMEOUT
@@ -326,7 +424,8 @@ def provision(arguments: argparse.Namespace) -> int:
         record["finished_at"] = _utc_now()
         record["qemu_exit_status"] = status
         record["test_status"] = "PROVISIONED_OFFLINE_READY"
-        _atomic_json(state / "provision.json", record)
+        if record_fd is not None:
+            _write_json_fd(record_fd, record)
         print(json.dumps({"state": str(state), "status": record["test_status"]}, sort_keys=True))
         return 0
     except (
@@ -338,15 +437,22 @@ def provision(arguments: argparse.Namespace) -> int:
         record["finished_at"] = _utc_now()
         record["test_status"] = "PROVISION_FAILED"
         record["failure"] = exc.__class__.__name__
-        try:
-            _atomic_json(state / "provision.json", record)
-        except OSError:
-            pass
+        if record_fd is not None:
+            try:
+                _write_json_fd(record_fd, record)
+            except OSError:
+                pass
         detail = str(exc) if isinstance(exc, hostcheck.Refusal) else exc.__class__.__name__
         raise hostcheck.Refusal(f"provisioning failed: {detail}") from exc
     finally:
         if process is not None:
             _terminate(process)
+        for descriptor in (log_fd, record_fd):
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -360,6 +466,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-image", default=str(guest.BASE_IMAGE))
     parser.add_argument("--checksum-manifest", default=str(guest.CHECKSUM_MANIFEST))
     parser.add_argument("--qemu-user", default=guest.QEMU_USER)
+    parser.add_argument("--run-lock", default=str(runlock.RUN_LOCK))
     parser.add_argument(
         "--ipv6-mode",
         default="netns-safe",
@@ -379,7 +486,7 @@ def main(argv: list[str] | None = None) -> int:
     except (hostcheck.Refusal, guest.GeneratorError, guest.IntegrityError) as exc:
         print(f"provision: {exc}", file=sys.stderr)
         return 2
-    except OSError as exc:
+    except (OSError, runlock.LockError) as exc:
         print(f"provision: {exc.__class__.__name__}: {exc}", file=sys.stderr)
         return 2
 

@@ -55,12 +55,19 @@ ip neigh replace 10.250.0.2 dev vprlab0 \
     lladdr 52:54:00:76:70:02 nud permanent
 ```
 
-`run_phase.py` refuses unless `vprlab0` carries exactly `52:54:00:76:70:01`,
-the tap is up, the `inet vprlab` table exists with its ownership comment and
-the four chains, and the host neighbour for `10.250.0.2` is `PERMANENT` with
-the VM MAC. It also refuses if any other QEMU system process is visible. Use
-the current `netplan.py` plan: it also installs the scoped `DOCKER-USER`
-accepts that make the host's Docker `FORWARD` policy allow the lab bridge.
+`run_phase.py` also reads `/run/vprlab/owner.json` (root-owned 0600, schema 1,
+token 32 lowercase hex characters) and requires both `vprlab0` and
+`vprlab-tap0` to carry `ifalias` exactly `vprlab-owned:<token>` in
+`ip -d -j link show`. It refuses unless `vprlab0` carries exactly
+`52:54:00:76:70:01`, the tap is a real tun/tap of subtype `tap` and is
+enslaved to `vprlab0`, the `inet vprlab` table exists with its ownership
+comment and the four chains, and the host neighbour for `10.250.0.2` is
+`PERMANENT` with the VM MAC. It also refuses if any other QEMU system process
+is visible. Admission is serialised by a non-blocking `flock` on
+`/run/vprlab/run.lock` (root 0600), held from before that check until the
+guest has exited. Use the current `netplan.py` plan: it also installs the
+scoped `DOCKER-USER` accepts that make the host's Docker `FORWARD` policy
+allow the lab bridge.
 
 ## Sizing, state and base image
 
@@ -76,8 +83,15 @@ accepts that make the host's Docker `FORWARD` policy allow the lab bridge.
   state directory is refused. `leaklab/` itself must be traversable by opsec
   (0711 or 0755).
 - The directory is opsec-owned because QEMU runs unprivileged and must create
-  its overlay, locks, sockets and serial log there. `evidence/` below it is
-  root-owned 0700. The state directory contains no profile bytes.
+  its overlay, locks, sockets and serial log there. Evidence is **not** kept
+  below it: every run writes to
+  `/DATA/vprouter-lab/leaklab/evidence/<phase>-<UTC>-<name>/`, created by root
+  as mode 0700 and owned by root. The root `tcpdump` writes the pcap there, so
+  an opsec process (or an escaped guest) cannot substitute it between capture
+  and scan. The qcow2 intentionally becomes secret-bearing after the first
+  phase (it contains `/etc/vprouter/<name>.conf` and the Tailscale login
+  state); the state directory therefore also contains profile bytes after a
+  phase, and the whole directory is destroyed when the lab node is retired.
 - Staged tools:
   `/DATA/vprouter-lab/lab-tools/root/usr/bin/{qemu-system-x86_64,qemu-img,genisoimage}`
   with `LD_LIBRARY_PATH=/DATA/vprouter-lab/lab-tools/root/usr/lib/x86_64-linux-gnu`
@@ -129,14 +143,20 @@ python3 -B tools/leak-lab/vm/provision.py \
 
 - `-netdev tap,id=wan,ifname=vprlab-tap0,script=no,downscript=no`, one
   `virtio-net-pci` with MAC `52:54:00:76:70:02`; no user netdev and no seed.
-- QEMU runs as `opsec` via `setpriv` (QEMU needs the tap created with
-  `netplan.py --tap-user opsec`), with
-  `-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny`.
-- QGA (`org.qemu.guest_agent.0`) and QMP unix sockets, `serial.log`, `pidfile`
-  and `-display none` live in the state directory.
-- The guest boots with `ipv6.disable=1 net.ifnames=0` (GRUB drop-in), no DHCP,
-  no cloud-init, no SSH, no time sync, no DNS configuration and a static
-  permanent neighbour for the gateway.
+- QEMU runs as `opsec` via `setpriv --reuid/--regid --clear-groups
+  --no-new-privs --inh-caps=-all --bounding-set=-all` (QEMU needs the tap
+  created with `netplan.py --tap-user opsec`), with
+  `-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny`,
+  `-nodefaults`, `-no-user-config` and a minimal environment. `--qemu-user
+  root` (or any uid 0) is refused before any process starts.
+- QGA (`org.qemu.guest_agent.0`), `serial.log`, `pidfile` and `-display none`
+  live in the state directory. There is deliberately **no QMP socket**: it was
+  unused and would let a local opsec process attach an uncaptured NIC.
+- The guest boots with `net.ifnames=0` and, by default, the netns-safe IPv6
+  mode (no `ipv6.disable=1`; see the caveat below), no DHCP, no cloud-init, no
+  SSH, no time sync, no DNS configuration and a static permanent neighbour for
+  the gateway. `qemu-img`, `genisoimage` and every qcow2 parse run as the QEMU
+  user via `setpriv`, never as root.
 
 ### IPv6 mode caveat (release constraint)
 
@@ -167,7 +187,8 @@ NIC and any IPv6 frame on the tap is still a pcapscan finding.
 
 Provisioning disables **and masks**:
 
-- `systemd-timesyncd.service`;
+- `systemd-timesyncd.service`, `chrony.service`, `chronyd.service`,
+  `ntp.service`, `ntpsec.service`, `openntpd.service`;
 - `apt-daily.timer/service`, `apt-daily-upgrade.timer/service`,
   `unattended-upgrades.timer/service`;
 - `man-db.timer`, `e2scrub_all.timer`, `e2scrub_reap.service`,
@@ -176,8 +197,12 @@ Provisioning disables **and masks**:
   `LLMNR=no`, `MulticastDNS=no`, `DNSStubListener=no`);
 - `ssh.service`, `ssh.socket`, `sshd.service`;
 - `dhclient.service`, `dhcpcd.service`, `NetworkManager*`, `networking.service`,
-  `ifupdown-wait-online.service`;
-- all `cloud-init` units, plus `/etc/cloud/cloud-init.disabled`.
+  `ifupdown-wait-online.service`, `ifup@.service`;
+- Debian 13 cloud-init 25.x units `cloud-init-local.service`,
+  `cloud-init-main.service`, `cloud-init-network.service`,
+  `cloud-config.service`, `cloud-final.service`,
+  `cloud-init-hotplugd.service`/`.socket` (and the compatibility
+  `cloud-init.service`), plus `/etc/cloud/cloud-init.disabled`.
 
 It also runs `swapoff -a` and comments any active swap line in `/etc/fstab`, so
 the test boot has no swap. `docker.service` is enabled but restarted after the
@@ -204,13 +229,19 @@ all of these hold, and refuses the phase otherwise:
   `/proc/cmdline` (kernel-disable), or the sysctl tree exists with
   `all/default.disable_ipv6=1` (netns-safe);
 - `/proc/swaps` has no active swap;
-- every unit above is `masked` or not installed, and `cloud-init.disabled`
-  exists;
+- every unit above is `masked` or not installed and none of them is active,
+  and `cloud-init.disabled` exists;
 - the NIC is found by MAC, has `10.250.0.2/24`, the default route via
-  `10.250.0.1`, a `PERMANENT` neighbour with the gateway MAC, no `inet6`
-  address, and `/run/systemd/netif/links/<ifindex>` reports
-  `DHCP4_CLIENT=0` and `DHCP6_CLIENT=0`;
-- no `dhclient`, `dhcpcd` or `NetworkManager` process exists;
+  `10.250.0.1`, a `PERMANENT` neighbour with the gateway MAC (queried as
+  `ip -4 -o neigh show dev "$interface"`) and no `inet6` address;
+- DHCP is off: the static networkd file contains `DHCP=no`, there is no
+  `/run/systemd/netif/leases/<ifindex>` file, `networkctl status` shows no
+  DHCP lease line, and no `dhclient`, `dhcpcd`, `udhcpc`, `dhcp6c` or
+  `NetworkManager` process exists. Debian 13's systemd 257 link-state file
+  does **not** contain `DHCP4_CLIENT=0`/`DHCP6_CLIENT=0`; those checks were
+  removed. `networkctl` text output is not a stable API, so it is an extra
+  fail-closed signal rather than the sole proof;
+- `systemctl list-units 'cloud-init*' --state=active` is empty;
 - `/etc/resolv.conf` has no `nameserver` line;
 - `/etc/docker/daemon.json` parses exactly to the object above;
 - `qemu-guest-agent` is active;
@@ -228,21 +259,46 @@ single-use), and refuses an existing nonce.
 Normal phase:
 
 1. root starts `tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w ...`
-   with stderr redirected to the stats file, and waits for the pcap header;
+   in the root-only evidence directory, with stderr redirected to the stats
+   file, and waits for the pcap header;
 2. QEMU test boot, QGA ready, silence check;
 3. the profile and site JSON are written through QGA (`0600 root:root`);
 4. BEFORE control via `guest-exec` using the exact `control.py` command,
    bound to the actual WAN device found by MAC;
 5. phase action, then the requested duration;
-6. AFTER control via QGA;
-7. SIGINT tcpdump, wait for its summary; run `pcapscan.py` with the policy and
-   both nonces; write the evidence directory; exit with pcapscan's code.
+6. AFTER control via QGA, followed **in this order** by: stop/disable the
+   router and reboot units; `guest-shutdown powerdown`; wait for QEMU to exit
+   (a forced SIGKILL makes the phase INVALID `forced_poweroff`); verify the
+   AFTER nonce is present in the pcap (tcpdump runs with `-U
+   --immediate-mode`); wait 2 s of quiet; SIGINT tcpdump and wait for its
+   summary;
+7. run `pcapscan.py` with the extracted policy, `--expect-tunnel` from the
+   fixed phase table and both nonces; write the evidence directory; exit with
+   the **final** result (0 PASS, 1 LEAK, 2 INVALID). The same order is used on
+   every error path, so the capture stays alive until QEMU has exited and
+   teardown traffic after AFTER is still scanned (a leak there is LEAK).
 
-Failure phases (`stop-router`, `kill-wireguard`, `kill-container`,
-`restart-docker`) first start `vprouter@NAME.service` **inside the measured
-window** (after BEFORE), wait for it to be active, then apply the failure. This
-is necessary because provisioning never enables the unit and each phase boots a
-fresh copy of the overlay. `start-router` simply starts it; `idle` does nothing;
+The expectation is no longer an operator choice. Every phase in this milestone
+expects `up`:
+
+| phase | expectation | proof after the action |
+|---|---|---|
+| `start-router` | up | unit active and a WireGuard handshake in the router netns |
+| `idle`, `login` | up | router started in-window, handshake observed |
+| `reboot-with-router-enabled` | up | changed boot ID, boot-control token, handshake |
+| `stop-router` | up | unit is inactive |
+| `kill-wireguard` | up | `wg0` is absent in the router netns |
+| `kill-container` | up | the router container is not running |
+| `restart-docker` | up | a new Docker daemon PID and working `docker info` |
+
+Setup phases (`idle`, `login`, `stop-router`, `kill-wireguard`,
+`kill-container`, `restart-docker`) first start `vprouter@NAME.service`
+**inside the measured window** (after BEFORE), require exit 0 and a live
+WireGuard handshake before the action; a failed or inactive setup aborts the
+injection and makes the phase INVALID. `start-router` starts the unit as its
+action. `login` additionally polls the Tailscale login URL through the
+runner's own QGA connection and writes only the URL to
+`<evidence>/login-url.txt` (0600) and stderr while the duration elapses.
 `kill-wireguard` runs:
 
 ```sh
@@ -258,27 +314,33 @@ in the transport container's namespace by `host/orchestrate.py`.
 
 A reboot phase enables `vprouter@NAME.service`, then stages through QGA:
 
-- `/run/vprlab-boot-control.json` (mode 0600) with the nonce, sink port, VM IP
-  and MAC;
+- `/var/lib/vprlab/boot-control.json` (mode 0600) with the nonce, a random
+  32-hex boot token, sink port, VM IP and MAC. `/run` is recreated by the
+  reboot this unit exists to observe, so the specification lives in persistent
+  root-only state and is consumed (unlinked) on the intended boot;
 - `/etc/systemd/system/vprlab-boot-control.service`, a `Type=oneshot` unit with
   `DefaultDependencies=no`, `After=systemd-networkd.service` and
   `Before=network-online.target docker.service`;
-- `/usr/local/sbin/vprlab-boot-control.py` (installed at provisioning) which
-  finds the NIC by MAC, waits for the static address, sends exactly one
-  `VPRLEAKCTL1:<nonce>` datagram with `SO_BINDTODEVICE`, writes
-  `/run/vprlab-boot-control-sent` (0600) and unlinks the nonce file.
+- `/usr/local/sbin/vprlab-boot-control.py` (installed at provisioning and
+  refreshed before use) which finds the NIC by MAC, waits for the static
+  address, sends exactly one `VPRLEAKCTL1:<nonce>` datagram with
+  `SO_BINDTODEVICE`, writes the boot token to
+  `/var/lib/vprlab/boot-control-sent` (0600) and unlinks the specification.
 
 The guest is rebooted with QGA `guest-shutdown reboot`. The runner reconnects
-only after `/proc/sys/kernel/random/boot_id` changes, waits for the sent
-marker, re-runs the silence check with the router expected `enabled`, waits for
-`vprouter@NAME` to become active, waits the duration, emits AFTER via QGA, and
-disables/removes the boot-control and router units again before poweroff. The
-unit carries no nonce. Because the unit runs before `docker.service` and the
-static neighbour removes ARP, its datagram is the first frame of the new boot.
+only after `/proc/sys/kernel/random/boot_id` changes, requires the sent file to
+contain the same boot token and the specification to be gone, re-runs the
+silence check with the router expected `enabled`, waits for the unit to be
+active and a WireGuard handshake to appear, records the Tailscale
+`BackendState`, waits the duration, emits AFTER via QGA, and disables/removes
+the boot-control and router units again before poweroff. The unit carries no
+nonce. Because the unit runs before `docker.service` and the static neighbour
+removes ARP, its datagram is the first frame of the new boot.
 
-The initial (staging) boot of a reboot phase is also captured. It is expected
-to be silent; any frame from it lands outside the BEFORE/AFTER window and
-pcapscan reports `INVALID`, never `PASS`.
+The initial (staging) boot of a reboot phase is also captured. Allowed
+WireGuard frames from it are counted as `outside_window_allowed`; any other
+frame is a finding (LEAK), and a missing/duplicated control is INVALID. It is
+never silently certified.
 
 ## Secrets
 
@@ -287,12 +349,18 @@ pcapscan reports `INVALID`, never `PASS`.
   not a symlink.
 - The profile is read once into a `SecretMaterial` object whose `repr` is
   redacted. It is never printed, logged, hashed into a record, copied into the
-  state directory or used in any argv. Only `[Peer] Endpoint` is extracted, and
-  it must equal the policy's allowed Mullvad flow (a mismatch is refused).
+  state directory or used in any argv. Only `[Peer] Endpoint` is extracted;
+  the runner builds the single-flow policy from it and refuses a non-public
+  address or any extra allowed flow.
 - At test time the profile is written to `/etc/vprouter/<name>.conf` and the
   site JSON to `/etc/vprouter/<name>.json` through QGA. Writes go through a
   root-only 0700 staging directory, are `chmod 0600`, `chown root:root`, moved
   into place, and re-checked with `stat` (`600 root root`).
+- Guest-supplied QGA error text is untrusted: it is stripped of control
+  characters and truncated to 200 printable characters before it can reach an
+  exception or log line. File contents written through QGA never appear in
+  errors, and a timeout closes the desynchronised stream instead of reading a
+  stale reply.
 - The site JSON is exactly what `host/orchestrate.py` accepts:
 
 ```json
@@ -329,25 +397,28 @@ directory.
 
 ## Interactive login and exit-node approval
 
-1. Start a long phase, for example:
+1. Run the `login` phase with a duration long enough for the operator to log
+   in, for example:
 
    ```sh
    python3 -B tools/leak-lab/vm/run_phase.py \
-     --phase start-router --duration 900 --index 1 \
-     --policy policy.json --profile-file /root/vprouter-lab.conf \
+     --phase login --duration 900 --index 1 \
+     --profile-file /root/vprouter-lab.conf \
      --used-nonces /root/leaklab-used-nonces.txt
    ```
 
-2. While it runs, fetch only the URL:
+   The runner starts the router, polls the login URL through its own QGA
+   connection, writes only `https://login.tailscale.com/...` to
+   `<evidence>/login-url.txt` (0600) and prints it to stderr, then waits the
+   duration and records the Tailscale `BackendState`.
+
+2. `login_url.py` remains available only when **no phase is running**. A QEMU
+   socket chardev serves one QGA client, so the helper takes the global run
+   lock non-blockingly and refuses (exit 2) while a phase holds it:
 
    ```sh
    python3 -B tools/leak-lab/vm/login_url.py --index 1 --wait 300
    ```
-
-   It reads `docker exec <name> tailscale status --json` (`AuthURL`) and the
-   container log through QGA and prints exactly one
-   `https://login.tailscale.com/...` URL. Open it and log in to the throw-away
-   tailnet account.
 
 3. In the Tailscale admin console, approve the new machine as an **exit node**
    (Machines → the test node → Edit route settings → Use as exit node). The
@@ -356,12 +427,15 @@ directory.
    provider check (`https://am.i.mullvad.net/json`). Until then it stays
    `BLOCKED` and retries `tailscale up`, which is expected.
 
-4. `stop-router` or end the phase. The login state stays in the state
-   directory until it is destroyed.
+4. End the login phase. The login state stays in the state directory until it
+   is destroyed, so later phases reuse it.
 
 ## Policy and evidence
 
-A typical phase policy is the M1 shape plus the review-time `gateway_mac` key:
+The runner **builds** the policy itself. It reads only the `[Peer] Endpoint`
+line from the profile (never decoding or logging the key), requires a public
+unicast IPv4 address and port, and emits exactly one allowed flow plus the
+fixed lab facts:
 
 ```json
 {
@@ -371,8 +445,8 @@ A typical phase policy is the M1 shape plus the review-time `gateway_mac` key:
   "gateway_ipv4": "10.250.0.1",
   "gateway_mac": "52:54:00:76:70:01",
   "allowed": [
-    {"proto": "udp", "dst_ipv4": "<Mullvad endpoint>", "dst_port": 51820,
-     "label": "mullvad-lab"}
+    {"proto": "udp", "dst_ipv4": "<profile endpoint>", "dst_port": 51820,
+     "label": "profile-endpoint"}
   ],
   "allow_arp": false,
   "positive_control": {"sink_ipv4": "10.250.0.1", "sink_udp_port": 39001},
@@ -380,34 +454,41 @@ A typical phase policy is the M1 shape plus the review-time `gateway_mac` key:
 }
 ```
 
-The M1 loader accepts `allow_arp: false` (static neighbours on both sides).
-The currently reviewed version of the loader also makes `gateway_mac` a
-required top-level key even when `allow_arp` is false; the VM runner therefore
-requires it and requires it to equal the fixed host bridge MAC. If a later
-loader makes it optional again, the runner still requires the fixed value
-because the guest's permanent neighbour uses it. This adaptation is entirely
-inside `vm/`.
+There is no operator-supplied policy or extra endpoint. The built document is
+written to `<evidence>/policy.json` (0600) and that copy - not a path re-read
+later - is passed to `pcapscan.py`, which requires `gateway_mac` in all cases.
+The parser is case-insensitive for `[Peer]`/`Endpoint` like the release's
+`configparser` use.
 
 Evidence per phase is under
-`<state>/evidence/<phase>-<UTC>/`, directory 0700:
+`/DATA/vprouter-lab/leaklab/evidence/<phase>-<UTC>-<name>/`, created and
+validated as root-owned 0700 (outside the opsec-owned state directory):
 
 - `capture.pcap` (full frames, 0600), `capture.pcap.stderr` (tcpdump summary,
-  0600), `capture-argv.json` (the exact tcpdump argv, 0600; pcapscan rejects a
-  mismatch with `netplan.capture_argv` except for the `-w` path);
-- `scan.json` (pcapscan's canonical report, 0600); the runner passes
-  `--capture-argv-file` and `--expect-tunnel` (required, no default: `up` for
-  phases where the tunnel must carry traffic, `down` where it must be gone,
-  `any` only for report-only phases). A clean capture of a phase whose
-  setup or action failed is reported INVALID (`phase_action_failed`), never
-  PASS;
+  0600, whose first non-empty line is the
+  `tcpdump: listening on vprlab-tap0, link-type EN10MB` banner),
+  `capture-argv.json` (the exact tcpdump argv, 0600; its `-w` path is exactly
+  the `--pcap` path passed to pcapscan, which rejects any other difference);
+- `qemu.log` (0600) - QEMU's output is opened by root here, never through a
+  path in the state directory;
+- `policy.json` (0600), `scan.json` (pcapscan's canonical report, 0600) and
+  `login-url.txt` (0600, `login` phase only);
 - `phase.json` (0600) with schema/phase/name, exact QEMU, launch, tcpdump and
-  pcapscan argv, both nonces and the used-nonces path, setup/action commands
-  and exit codes, control transports, silence results, timestamps, durations,
-  base SHA-512, policy SHA-256, pcap/stats/scan SHA-256 and the verdict. It
+  pcapscan argv, both nonces and the used-nonces path, setup/action/
+  postcondition commands and exit codes, control transports, silence results,
+  Tailscale backend state, timestamps, durations, base SHA-512, policy
+  SHA-256, pcap/stats/scan SHA-256, the raw scanner verdict under
+  `scan.verdict`, the effective `result`, and `result_reason`/`errors`. It
   never contains profile bytes or key material.
 
-Exit code is pcapscan's: `0` PASS, `1` LEAK, `2` INVALID (also used for a
-runner refusal before a scan).
+The effective result is final and unambiguous in both `phase.json` and the
+single JSON line printed to stdout: `result`/`verdict` are PASS, LEAK or
+INVALID; `scan_verdict` keeps pcapscan's raw verdict. Any setup, action,
+postcondition, cleanup, control, capture or QEMU-exit error makes the run
+INVALID, with a `result_reason` listing the failures, unless the capture
+contains a finding (LEAK keeps precedence). Exit code is the effective result:
+`0` PASS, `1` LEAK, `2` INVALID (also used for a refusal before a scan and for
+any unexpected exception; a crash is never reported as LEAK).
 
 ## Naming
 
@@ -431,12 +512,12 @@ name.
   The positive controls only prove the monitor was working.
 - The monitor sees the outer WireGuard UDP tuple, not the tunnel contents, and
   it does not authenticate WireGuard or prove a working tunnel.
-- Container DNS: the guest has no nameserver. Docker's default fallback
-  resolvers (`8.8.8.8`/`8.8.4.4`) are expected to be used inside containers and
-  routed through `wg0`; the host tap must never see them. If the installed
-  Docker leaves resolver-less containers instead, the release's Mullvad probe
-  stays `BLOCKED` (no leak, but no login either). This is the main portability
-  assumption of M2.
+- Container DNS: the guest has no nameserver. The deployed
+  `docker-compose.yaml` sets `dns: [9.9.9.9]` on the router, so Docker's
+  `8.8.8.8`/`8.8.4.4` fallback is not the expected path. Traffic to the
+  compose-supplied resolver must stay inside `wg0`; if it ever appears on the
+  tap it is a finding. If the release's Mullvad probe stays `BLOCKED`, there is
+  no leak but no login either.
 - The image tar is not in the repository; the controller must produce it (for
   example with `docker save`) from the deployed image ID and pass its path.
 - `docker compose` must be present as a `docker` CLI plugin; Debian 13's
@@ -450,8 +531,31 @@ name.
   `ip -j`; a QEMU permission failure is the backstop.
 - The state directory (including the qcow2, which contains the lab profile
   after the first phase and the Tailscale login state) is a secret-bearing
-  artifact. It is opsec-owned 0700 so unprivileged QEMU can use it; `evidence/`
-  is root 0700. Delete the whole directory when the lab node is retired.
+  artifact. It is opsec-owned 0700 so unprivileged QEMU can use it. Evidence
+  lives separately under root-owned
+  `/DATA/vprouter-lab/leaklab/evidence/`. Delete the whole state directory when
+  the lab node is retired. Target-scoped evidence remains until the controller
+  removes it.
+- Provisioning leaves `payload/`, `payload.iso` and `seed.iso` in the state
+  directory after a successful run (roughly the release plus image-tar size).
+  This is intentional for inspection; the state directory already holds the
+  image and is destroyed/reprovisioned as a unit. `provision.json` and
+  `qemu.log` are also there.
+- `poweroff_vm` waits 180 s for QEMU, above the release unit's
+  `TimeoutStopSec=120s`; a forced SIGKILL still makes the phase INVALID
+  (`forced_poweroff`).
+- `install_guest_file` stages in a 0700 root-only directory and moves into
+  place; the move from tmpfs `/run` to `/etc` may be a copy+unlink, so "atomic"
+  is not guaranteed across filesystems.
+- The staging boot of a reboot phase is captured. Allowed WireGuard frames
+  outside the control window are counted as `outside_window_allowed`; any
+  other frame is a finding, so the phase still cannot silently PASS.
+- `--tap`/`--bridge` are fixed to `vprlab-tap0`/`vprlab0`; pcapscan's argv and
+  stats banner are bound to those names, so an override is refused rather than
+  producing a late `capture_argv_mismatch`.
+- `ControllerDecisionTests` previously ran after the `__main__` guard; the
+  behavioural runner suite now runs under discovery and when the file is run
+  directly.
 - The guest clock has no NTP. It starts from the host RTC; verify it is sane
   before relying on TLS and WireGuard timestamps.
 
@@ -462,18 +566,20 @@ name.
 python3 -B tools/leak-lab/vm/provision.py --index 1 \
   --image-tar /root/vprouter-image.tar
 
-# a phase (root, debdev); tcpdump and the guest stop at the end
+# a phase (root, debdev); the capture stays alive until the guest exits
 python3 -B tools/leak-lab/vm/run_phase.py \
   --phase start-router --duration 120 --index 1 \
-  --policy policy.json --profile-file /root/vprouter-lab.conf \
+  --profile-file /root/vprouter-lab.conf \
   --used-nonces /root/leaklab-used-nonces.txt
 
 # offline tests
 python3 -B -W error -m unittest discover -s tools/leak-lab/vm -p 'test_*.py' -v
 ```
 
-The suite has 42 tests and uses a fake unix-socket guest agent; it never runs
-QEMU, tcpdump, ip, nft, docker or a network command.
+The suite has 96 tests. It executes the real phase runner and provision
+helpers with fake process/QGA/scanner layers, plus a fake unix-socket guest
+agent; it never runs QEMU, tcpdump, ip, nft, docker, qemu-img, genisoimage or a
+network command.
 
 ## What the release code required (findings)
 
@@ -499,5 +605,7 @@ QEMU, tcpdump, ip, nft, docker or a network command.
   router namespace, addressed from the profile, and made the router's default
   route. Killing it from the router namespace is therefore
   `nsenter -t <router-pid> -n ip link del wg0`.
-- Provisioning does not enable `vprouter@.service`; the only paths that start
-  it are the `start-router` phase and `reboot-with-router-enabled`.
+- Provisioning does not enable `vprouter@.service`. The paths that start it
+  are `start-router` (action), `idle` and `login` (setup), the four failure
+  phases (setup), and the enabled unit at boot for
+  `reboot-with-router-enabled`.

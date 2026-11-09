@@ -69,7 +69,6 @@ UNIT_SOURCE = "host/vprouter@.service"
 SERIAL_FILE = "serial.log"
 QEMU_LOG_FILE = "qemu.log"
 PID_FILE = "qemu.pid"
-QMP_SOCKET = "qmp.sock"
 QGA_SOCKET = "qga.sock"
 OVERLAY_FILE = "guest.qcow2"
 SEED_ISO = "seed.iso"
@@ -88,13 +87,20 @@ SANDBOX = "on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=de
 BOOT_CONTROL_UNIT = "vprlab-boot-control.service"
 BOOT_CONTROL_UNIT_PATH = "/etc/systemd/system/" + BOOT_CONTROL_UNIT
 BOOT_CONTROL_SCRIPT = "/usr/local/sbin/vprlab-boot-control.py"
-BOOT_CONTROL_SPEC = "/run/vprlab-boot-control.json"
-BOOT_CONTROL_SENT = "/run/vprlab-boot-control-sent"
+#: Persistent, root-only staging area.  ``/run`` is recreated by the reboot
+#: that this one-shot unit exists to observe, so the specification must not
+#: live there (review I1).
+BOOT_CONTROL_DIR = "/var/lib/vprlab"
+BOOT_CONTROL_SPEC = BOOT_CONTROL_DIR + "/boot-control.json"
+BOOT_CONTROL_SENT = BOOT_CONTROL_DIR + "/boot-control-sent"
 
 ROUTER_UNIT_TEMPLATE = "/etc/systemd/system/vprouter@.service"
 
 #: Units that must never run on the test boot.  "mask" is stronger than
 #: "disable": a package or dependency cannot re-enable a masked unit.
+#: Debian 13 ships cloud-init 25.x, whose active names are ``cloud-init-main``
+#: and ``cloud-init-network``; the old ``cloud-init.service`` name still appears
+#: for compatibility and is harmless when absent.
 SILENCE_MASK_UNITS = (
     "systemd-timesyncd.service",
     "apt-daily.timer",
@@ -117,11 +123,20 @@ SILENCE_MASK_UNITS = (
     "NetworkManager-wait-online.service",
     "networking.service",
     "ifupdown-wait-online.service",
+    "ifup@.service",
+    "chrony.service",
+    "chronyd.service",
+    "ntp.service",
+    "ntpsec.service",
+    "openntpd.service",
     "cloud-init.service",
     "cloud-init-local.service",
+    "cloud-init-main.service",
+    "cloud-init-network.service",
     "cloud-config.service",
     "cloud-final.service",
     "cloud-init-hotplugd.service",
+    "cloud-init-hotplugd.socket",
 )
 
 _NAME_RE = re.compile(r"^[a-z][a-z0-9-]{1,49}$")
@@ -235,6 +250,8 @@ def build_qemu_argv(
 
     argv = [
         str(QEMU),
+        "-nodefaults",
+        "-no-user-config",
         "-accel",
         "kvm",
         "-machine",
@@ -285,8 +302,8 @@ def build_qemu_argv(
         f"file:{state / SERIAL_FILE}",
         "-pidfile",
         str(state / PID_FILE),
-        "-qmp",
-        f"unix:{state / QMP_SOCKET},server=on,wait=off",
+        # No QMP socket: it is unused by the lab and would let any local
+        # process attach an uncaptured NIC (review M3/pi I12).
         "-chardev",
         f"socket,id=qga0,path={state / QGA_SOCKET},server=on,wait=off",
         "-device",
@@ -301,6 +318,58 @@ def build_qemu_argv(
     return argv
 
 
+def resolve_unprivileged_user(user: str = QEMU_USER) -> tuple[int, int]:
+    """Return ``(uid, gid)`` for a non-root account; refuse uid 0."""
+    import pwd
+
+    try:
+        record = pwd.getpwnam(user)
+    except KeyError as exc:
+        raise GeneratorError(f"unknown unprivileged user {user!r}") from exc
+    if record.pw_uid == 0:
+        raise GeneratorError("QEMU must never run as uid 0")
+    return record.pw_uid, record.pw_gid
+
+
+def build_setpriv_argv(
+    argv: list[str],
+    uid: int,
+    gid: int,
+    *,
+    setpriv: str = "/usr/bin/setpriv",
+) -> list[str]:
+    """Wrap ``argv`` in setpriv with every extra privilege removed."""
+    if isinstance(uid, bool) or isinstance(gid, bool):
+        raise GeneratorError("uid and gid must be integers")
+    if not isinstance(uid, int) or not isinstance(gid, int):
+        raise GeneratorError("uid and gid must be integers")
+    if uid == 0:
+        raise GeneratorError("QEMU and its tools must never run as uid 0")
+    return [
+        setpriv,
+        f"--reuid={uid}",
+        f"--regid={gid}",
+        "--clear-groups",
+        "--no-new-privs",
+        "--inh-caps=-all",
+        "--bounding-set=-all",
+        "--",
+    ] + list(argv)
+
+
+def build_private_tool_argv(
+    argv: list[str], uid: int, gid: int, *, umask: int = 0o077
+) -> list[str]:
+    """Run a generator tool as the QEMU user with a private umask."""
+    if not 0 <= umask <= 0o777:
+        raise GeneratorError("umask must be an octal mode")
+    return build_setpriv_argv(
+        ["/bin/sh", "-c", f"umask {umask:03o}; exec \"$@\"", "vprlab-tool", *argv],
+        uid,
+        gid,
+    )
+
+
 def build_launch_argv(
     qemu_argv: list[str],
     user: str = QEMU_USER,
@@ -313,20 +382,8 @@ def build_launch_argv(
     if (uid is None) != (gid is None):
         raise GeneratorError("uid and gid must be supplied together")
     if uid is None:
-        import pwd
-
-        try:
-            record = pwd.getpwnam(user)
-        except KeyError as exc:
-            raise GeneratorError(f"unknown unprivileged user {user!r}") from exc
-        uid, gid = record.pw_uid, record.pw_gid
-    return [
-        setpriv,
-        f"--reuid={uid}",
-        f"--regid={gid}",
-        "--clear-groups",
-        "--",
-    ] + list(qemu_argv)
+        uid, gid = resolve_unprivileged_user(user)
+    return build_setpriv_argv(list(qemu_argv), int(uid), int(gid), setpriv=setpriv)
 
 
 def build_qemu_img_create_argv(base: pathlib.Path, overlay: pathlib.Path) -> list[str]:
@@ -348,6 +405,7 @@ def build_qemu_img_info_argv(overlay: pathlib.Path) -> list[str]:
     return [
         str(QEMU_IMG),
         "info",
+        "-U",
         "--output=json",
         "--backing-chain",
         str(overlay),
@@ -450,7 +508,7 @@ def networkd_text() -> str:
     )
 
 
-def grub_dropin_text(ipv6_mode: str = "kernel-disable") -> str:
+def grub_dropin_text(ipv6_mode: str = "netns-safe") -> str:
     if ipv6_mode not in {"kernel-disable", "netns-safe"}:
         raise GeneratorError("ipv6_mode must be kernel-disable or netns-safe")
     if ipv6_mode == "kernel-disable":
@@ -511,9 +569,10 @@ WantedBy=multi-user.target
 def boot_control_script_text() -> str:
     """Guest-side sender for the boot-phase BEFORE control.
 
-    The nonce and sink are read from a mode-0600 runtime file, sent once with
-    ``SO_BINDTODEVICE``, and the file is deleted afterwards.  The unit itself
-    contains no secret.
+    The nonce, boot token and sink are read from a mode-0600 persistent file
+    (``/var/lib/vprlab``); ``/run`` is recreated by the reboot this unit exists
+    to observe.  The datagram is sent once with ``SO_BINDTODEVICE``, the token
+    is written to the sent marker, and the specification is unlinked.
     """
     return '''#!/usr/bin/env python3
 """One-shot vprlab boot control: send the staged nonce, then delete it."""
@@ -562,6 +621,9 @@ def main():
     nonce = spec["nonce"]
     if len(nonce) != 32 or any(ch not in "0123456789abcdef" for ch in nonce):
         raise SystemExit("vprlab boot control: invalid nonce")
+    token = spec.get("boot_token", "")
+    if len(token) != 32 or any(ch not in "0123456789abcdef" for ch in token):
+        raise SystemExit("vprlab boot control: invalid boot token")
     payload = PREFIX + nonce.encode("ascii")
     channel = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     channel.setsockopt(
@@ -574,7 +636,7 @@ def main():
     channel.close()
     descriptor = os.open(SENT, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w", encoding="ascii") as stream:
-        stream.write("sent\\n")
+        stream.write(token + "\\n")
     os.unlink(SPEC)
 
 
@@ -588,12 +650,15 @@ def boot_control_spec(
     sink_ipv4: str,
     sink_udp_port: int,
     *,
+    boot_token: str,
     vm_ipv4: str = VM_IPV4,
     vm_mac: str = VM_MAC,
     device: str = "",
 ) -> str:
     if not re.fullmatch(r"[0-9a-f]{32}", nonce):
         raise GeneratorError("boot control nonce must be 32 lowercase hex characters")
+    if not re.fullmatch(r"[0-9a-f]{32}", boot_token):
+        raise GeneratorError("boot token must be 32 lowercase hex characters")
     if ipaddress.IPv4Address(sink_ipv4) != ipaddress.IPv4Address(GATEWAY_IPV4):
         raise GeneratorError("boot control sink must be the lab gateway")
     if isinstance(sink_udp_port, bool) or not 1 <= int(sink_udp_port) <= 65535:
@@ -603,6 +668,7 @@ def boot_control_spec(
     return (
         json.dumps(
             {
+                "boot_token": boot_token,
                 "device": device,
                 "nonce": nonce,
                 "sink_ipv4": sink_ipv4,
@@ -751,17 +817,20 @@ for unit in \
     ssh.service ssh.socket sshd.service \
     dhclient.service dhcpcd.service \
     NetworkManager.service NetworkManager-wait-online.service \
-    networking.service ifupdown-wait-online.service; do
+    networking.service ifupdown-wait-online.service ifup@.service \
+    chrony.service chronyd.service ntp.service ntpsec.service openntpd.service; do
     systemctl disable --now "$unit" >/dev/null 2>&1 || true
     systemctl mask "$unit" >/dev/null 2>&1 || true
 done
 touch /etc/cloud/cloud-init.disabled
 for unit in \
-    cloud-init.service cloud-init-local.service cloud-config.service \
-    cloud-final.service cloud-init-hotplugd.service; do
-    systemctl disable "$unit" >/dev/null 2>&1 || true
+    cloud-init.service cloud-init-local.service cloud-init-main.service \
+    cloud-init-network.service cloud-config.service cloud-final.service \
+    cloud-init-hotplugd.service cloud-init-hotplugd.socket; do
+    systemctl disable --now "$unit" >/dev/null 2>&1 || true
     systemctl mask "$unit" >/dev/null 2>&1 || true
 done
+install -d -m 0700 -o root -g root @@BOOT_CONTROL_DIR@@
 
 install -d -m 0755 /etc/systemd/resolved.conf.d
 cat > /etc/systemd/resolved.conf.d/99-vprlab.conf <<'EOF'
@@ -821,7 +890,7 @@ def provision_script(
     *,
     name: str = DEFAULT_NAME,
     image_id: str = DEPLOYED_IMAGE_ID,
-    ipv6_mode: str = "kernel-disable",
+    ipv6_mode: str = "netns-safe",
     boot_control_script: str | None = None,
 ) -> str:
     """Return the guest-side provisioning script embedded in cloud-init."""
@@ -853,6 +922,7 @@ def provision_script(
         "@@GRUB@@": grub_dropin_text(ipv6_mode),
         "@@IPV6_SYSCTL@@": ipv6_sysctl,
         "@@BOOT_CONTROL_SCRIPT@@": BOOT_CONTROL_SCRIPT,
+        "@@BOOT_CONTROL_DIR@@": BOOT_CONTROL_DIR,
         "@@BOOT_CONTROL_PY@@": boot_control_script
         if boot_control_script is not None
         else boot_control_script_text(),
@@ -869,7 +939,7 @@ def build_user_data(
     hostname: str,
     name: str = DEFAULT_NAME,
     image_id: str = DEPLOYED_IMAGE_ID,
-    ipv6_mode: str = "kernel-disable",
+    ipv6_mode: str = "netns-safe",
 ) -> str:
     """Return a cloud-init NoCloud user-data document (JSON is valid YAML)."""
     if not re.fullmatch(r"[a-z][a-z0-9-]{2,49}", hostname):
@@ -921,10 +991,20 @@ def silence_check_script(
     name: str = DEFAULT_NAME,
     image_id: str = DEPLOYED_IMAGE_ID,
     expect_router_disabled: bool = True,
+    vm_mac: str = VM_MAC,
 ) -> str:
-    """Return the script the runner executes over QGA before every test boot."""
+    """Return the script the runner executes over QGA before every test boot.
+
+    Debian 13 runs systemd 257.  Its networkd link-state file has no
+    ``DHCP4_CLIENT=0``/``DHCP6_CLIENT=0`` keys, so DHCP-off is proven from the
+    static ``.network`` file, ``networkctl status`` and the absence of a lease
+    file for this interface instead.  ``networkctl`` text output is not a
+    stable API; the file and lease checks are authoritative and the text check
+    is an additional fail-closed signal.
+    """
     validate_name(name)
     validate_image_id(image_id)
+    validate_mac(vm_mac)
     masked = " ".join(SILENCE_MASK_UNITS)
     expected_state = "disabled" if expect_router_disabled else "enabled"
     return f'''#!/bin/sh
@@ -959,19 +1039,28 @@ for unit in {masked}; do
         ""|not-found) ok "absent:$unit" ;;
         *) bad "unit_not_masked:$unit=$state" ;;
     esac
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+        bad "unit_active:$unit"
+    fi
 done
+active_cloud_init=$(systemctl list-units 'cloud-init*' --state=active --no-legend --no-pager 2>/dev/null || true)
+if [ -n "$active_cloud_init" ]; then
+    bad "cloud_init_unit_active"
+else
+    ok cloud_init_units_inactive
+fi
 
 [ -f /etc/cloud/cloud-init.disabled ] && ok cloud_init_disabled || bad cloud_init_enabled
 
 interface=""
 for directory in /sys/class/net/*; do
     [ -e "$directory/address" ] || continue
-    [ "$(cat "$directory/address")" = "{VM_MAC}" ] && interface="${{directory##*/}}"
+    [ "$(cat "$directory/address")" = "{vm_mac}" ] && interface="${{directory##*/}}"
 done
 if [ -n "$interface" ]; then
     ok "interface:$interface"
 else
-    bad "interface_missing:{VM_MAC}"
+    bad "interface_missing:{vm_mac}"
 fi
 
 if [ -n "$interface" ]; then
@@ -979,18 +1068,34 @@ if [ -n "$interface" ]; then
         && ok static_address || bad static_address
     ip -4 -o route show default | grep -q "default via {GATEWAY_IPV4} dev $interface" \
         && ok static_gateway || bad static_gateway
-    ip -4 -o neigh show "$interface" | grep -F "{GATEWAY_IPV4}" \
+    ip -4 -o neigh show dev "$interface" | grep -F "{GATEWAY_IPV4}" \
         | grep -Fi "lladdr {GATEWAY_MAC}" | grep -q PERMANENT \
         && ok static_neighbor || bad static_neighbor
     ip -6 -o addr show dev "$interface" 2>/dev/null | grep -q inet6 \
         && bad ipv6_address || ok ipv6_address_absent
     index=$(cat "/sys/class/net/$interface/ifindex")
-    link_state="/run/systemd/netif/links/$index"
-    if [ -f "$link_state" ]; then
-        grep -qx 'DHCP4_CLIENT=0' "$link_state" && ok dhcp4_off || bad dhcp4_client
-        grep -qx 'DHCP6_CLIENT=0' "$link_state" && ok dhcp6_off || bad dhcp6_client
+    network_file=${{VPRLAB_NETWORK_FILE:-/etc/systemd/network/10-vprlab-wan.network}}
+    lease_dir=${{VPRLAB_LEASE_DIR:-/run/systemd/netif/leases}}
+    if [ -f "$network_file" ] \
+        && grep -Eq '^[[:space:]]*DHCP=no[[:space:]]*$' "$network_file"; then
+        ok dhcp_off_network_file
     else
-        bad networkd_link_state_missing
+        bad dhcp_network_file
+    fi
+    if [ -e "$lease_dir/$index" ]; then
+        bad dhcp_lease_present
+    else
+        ok dhcp_lease_absent
+    fi
+    if command -v networkctl >/dev/null 2>&1; then
+        status_text=$(networkctl status "$interface" --no-pager 2>/dev/null || true)
+        if printf '%s\\n' "$status_text" | grep -Eqi 'DHCP[46]?[[:space:]]+(Client|Lease)'; then
+            bad dhcp_client_configured
+        else
+            ok dhcp_client_absent
+        fi
+    else
+        bad networkctl_missing
     fi
 fi
 
@@ -998,7 +1103,8 @@ for command_file in /proc/[0-9]*/comm; do
     [ -r "$command_file" ] || continue
     process=$(cat "$command_file")
     case "$process" in
-        dhclient|dhcpcd|NetworkManager) bad "dhcp_client_running:$process" ;;
+        dhclient|dhcpcd|udhcpc|dhcp6c|NetworkManager) bad "dhcp_client_running:$process" ;;
+        chronyd|ntpd|openntpd|systemd-timesyncd) bad "time_sync_running:$process" ;;
     esac
 done
 

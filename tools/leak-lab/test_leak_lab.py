@@ -3034,6 +3034,7 @@ class NetplanTests(unittest.TestCase):
         result = subprocess.run(
             ["sh", str(script), *args],
             env=environment,
+            cwd=root,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -3156,6 +3157,7 @@ class NetplanTests(unittest.TestCase):
                     process = subprocess.Popen(
                         ["sh", str(script)],
                         env=environment,
+                        cwd=root,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         start_new_session=True,

@@ -30,6 +30,19 @@ from dataclasses import dataclass
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_CONNECT_TIMEOUT = 120.0
 MAX_FILE_CHUNK = 65536
+#: Guest-provided error text is untrusted.  It is truncated and stripped of
+#: control characters before it can reach an exception or a log line.
+MAX_GUEST_ERROR_TEXT = 200
+
+
+def _bounded_guest_text(value: object, limit: int = MAX_GUEST_ERROR_TEXT) -> str:
+    """Return printable, length-bounded text from an untrusted frame field."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+    printable = "".join(ch for ch in value if ch.isprintable())
+    return printable[:limit]
 
 
 class QGAError(RuntimeError):
@@ -164,7 +177,7 @@ class QGAClient:
                     continue
             self._fill(deadline)
 
-    def _read_response(self, deadline: float) -> object:
+    def _read_response(self, deadline: float, expected_id: int | None = None) -> object:
         while True:
             end = self._buffer.find(b"\n")
             if end >= 0:
@@ -176,13 +189,25 @@ class QGAClient:
                 if "execute" in document and "return" not in document:
                     # The unsolicited greeting or a stray notification.
                     continue
+                reply_id = document.get("id")
+                if (
+                    expected_id is not None
+                    and reply_id is not None
+                    and reply_id != expected_id
+                ):
+                    # A late reply to an earlier timed-out request.  Never
+                    # attribute it to the current command.
+                    continue
                 error = document.get("error")
                 if error is not None:
                     if not isinstance(error, dict):
                         raise QGAError("guest agent returned a malformed error")
-                    klass = str(error.get("class", "GenericError"))
-                    description = str(error.get("desc", ""))
-                    raise QGAError(f"guest agent error {klass}: {description}".strip())
+                    klass = _bounded_guest_text(error.get("class", "GenericError"), 64)
+                    description = _bounded_guest_text(error.get("desc", ""))
+                    message = f"guest agent error {klass or 'GenericError'}"
+                    if description:
+                        message = f"{message}: {description}"
+                    raise QGAError(message)
                 if "return" not in document:
                     raise QGAProtocolError("guest agent frame has no return value")
                 return document["return"]
@@ -193,13 +218,18 @@ class QGAClient:
         self, name: str, arguments: dict | None = None, *, timeout: float | None = None
     ) -> object:
         deadline = time.monotonic() + (self.timeout if timeout is None else float(timeout))
-        document = {"execute": name}
+        self._next_id += 1
+        request_id = self._next_id
+        document = {"execute": name, "id": request_id}
         if arguments is not None:
             document["arguments"] = arguments
         self._send_json(document)
         try:
-            return self._read_response(deadline)
+            return self._read_response(deadline, request_id)
         except QGATimeout:
+            # The stream is desynchronised after a timeout.  Closing it makes
+            # every later call fail visibly instead of reading a stale reply.
+            self.close()
             raise
         except QGAError as exc:
             raise QGAError(f"{name}: {exc}") from exc
@@ -233,6 +263,7 @@ class QGAClient:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                self.close()
                 raise QGATimeout(f"guest-exec {program} timed out")
             status = self.command(
                 "guest-exec-status", {"pid": pid}, timeout=min(5.0, remaining)

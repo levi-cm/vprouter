@@ -1272,3 +1272,10 @@ Tailscale NeedsLogin. Certifies server-side only, no client traffic; legacy rele
 endpoint (5,431 out / 4,698 in), 0 findings, 0 drops; result INVALID because nobody logged in
 (BackendState NeedsLogin -> login_not_running, the correct outcome). Runner fix: an
 unrecognized login.tailscale.com string is an error only when no valid URL was found at all.
+2026-11-09 Tailscale login of zz-vprtest-01-do-not-use succeeded (BackendState Running). The
+verification login phase reported the FIRST LIVE LEAK: 1 ICMP port-unreachable from the VM to the
+Mullvad endpoint during boot, quoting the server's own WireGuard handshake (stale host NAT
+mapping reached the VM before wg0 existed). No client data, same endpoint and public IP. User
+decision: narrow allowance (ICMP 3/3 to the allowed endpoint quoting a WireGuard-shaped datagram
+from that endpoint:port to the VM; reported as allowed_icmp_quotes, never tunnel evidence; all
+other ICMP stays a LEAK). Re-scan of that real capture: PASS, 0 findings, 1 quote.

@@ -4508,3 +4508,64 @@ class NetplanInjectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IcmpQuoteAllowanceTests(unittest.TestCase):
+    """User decision 2026-11-09 after the first live LEAK: an ICMP port-
+    unreachable from the VM to the allowed endpoint that quotes that endpoint's
+    own WireGuard datagram is reported separately, not as a leak."""
+
+    def _quote(self, *, icmp_type=3, code=3, quoted_src=WG_IP, quoted_dst=VM_IP,
+               sport=WG_PORT, payload=None, options=False):
+        payload = wg_initiation() if payload is None else payload
+        inner = ipv4_packet(quoted_src, quoted_dst, 17, udp_segment(sport, 40410, payload),
+                            ihl_bytes=24 if options else None)
+        return bytes([icmp_type, code, 0, 0, 0, 0, 0, 0]) + inner
+
+    def _scan(self, icmp, **frame):
+        return scan_middle(
+            [ipv4_frame(icmp, protocol=1, **frame),
+             ipv4_frame(udp_segment(40000, WG_PORT, wg_initiation())),
+             ipv4_frame(udp_segment(WG_PORT, 40000, wg_initiation()), src_ip=WG_IP,
+                        dst_ip=VM_IP, src_mac=GW_MAC, dst_mac=VM_MAC)],
+            expect_tunnel="up",
+        )
+
+    def test_live_shape_is_allowed_and_reported_separately(self):
+        report = self._scan(self._quote())
+        self.assertEqual(report["verdict"], "PASS", reasons(report))
+        self.assertEqual(report["allowed_icmp_quotes"], {"mullvad-wg": 1})
+
+    def test_every_other_shape_stays_a_leak(self):
+        cases = {
+            "echo request": self._quote(icmp_type=8, code=0),
+            "host unreachable": self._quote(code=1),
+            "quote from another ip": self._quote(quoted_src="198.51.100.7"),
+            "quote to another ip": self._quote(quoted_dst="10.250.0.9"),
+            "quote from another port": self._quote(sport=53),
+            "quote not wireguard": self._quote(payload=b"PLAINTEXTDATA"),
+            "quote with ip options": self._quote(options=True),
+        }
+        for name, icmp in cases.items():
+            with self.subTest(case=name):
+                report = self._scan(icmp)
+                self.assertEqual(report["verdict"], "LEAK", name)
+                self.assertIn("icmp_not_allowed", reasons(report))
+
+    def test_quote_to_a_non_endpoint_destination_is_a_leak(self):
+        report = self._scan(self._quote(quoted_src="198.51.100.7"), dst_ip="198.51.100.7")
+        self.assertEqual(report["verdict"], "LEAK")
+
+    def test_inbound_icmp_is_still_a_leak(self):
+        report = self._scan(self._quote(quoted_src=VM_IP, quoted_dst=WG_IP),
+                            src_ip=WG_IP, dst_ip=VM_IP, src_mac=GW_MAC, dst_mac=VM_MAC)
+        self.assertEqual(report["verdict"], "LEAK")
+
+    def test_quote_with_wrong_l2_is_a_finding(self):
+        report = self._scan(self._quote(), dst_mac="52:54:00:00:00:99")
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("allowed_tuple_wrong_l2", reasons(report))
+
+    def test_quote_alone_is_not_tunnel_evidence(self):
+        report = scan_middle([ipv4_frame(self._quote(), protocol=1)], expect_tunnel="up")
+        self.assertNotEqual(report["verdict"], "PASS")

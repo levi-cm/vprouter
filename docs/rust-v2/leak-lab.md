@@ -815,6 +815,19 @@ What a compromised router VM can and cannot do:
   on the declared outer flow from being certified, but it does not
   authenticate the ciphertext or prove a working tunnel.
 
+- **Narrow ICMP quote allowance** (user decision, 2026-11-09, after the first
+  live LEAK). Exactly one ICMP shape is not a leak: an outbound ICMP type 3
+  code 3 (port unreachable) from the VM to an allowed endpoint, with the
+  correct lab MACs, whose quoted datagram is an option-free IPv4 UDP packet
+  from that same endpoint and port to the VM, with a WireGuard-shaped payload
+  prefix. Such a reply quotes only the endpoint's own ciphertext and goes only
+  back to it. It is counted in `allowed_icmp_quotes`, never as tunnel
+  evidence, and is accounted like allowed traffic outside the control window.
+  Every other ICMP, and any inbound ICMP, is still `icmp_not_allowed`. Live
+  cause: after a VM restart, the Mullvad server's handshake to the old NAT
+  mapping reached the VM before wg0 existed, and the kernel answered with
+  port-unreachable.
+
 This milestone does **not** cover:
 
 - the client-side WAN; that needs a separate capture and policy;

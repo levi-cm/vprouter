@@ -153,6 +153,7 @@ class _L4Result:
     udp_length: int | None = None
     detail: str | None = None
     udp_data_prefix: bytes = b""
+    icmp_quote_label: str | None = None
 
 
 @dataclass(slots=True)
@@ -372,6 +373,10 @@ class _Scanner:
         self.after = after
         self.allowed_out = policy.outbound_allowed()
         self.allowed_in = policy.inbound_allowed()
+        #: Outbound ICMP port-unreachable replies that quote a WireGuard
+        #: datagram from an allowed endpoint (user decision 2026-11-09).
+        #: Reported separately; never tunnel evidence.
+        self.allowed_icmp_quotes: dict[str, int] = {}
         self.allowed_counts: dict[str, dict[str, int]] = {
             flow.label: {"outbound": 0, "inbound": 0} for flow in policy.allowed
         }
@@ -407,6 +412,7 @@ class _Scanner:
         self.fragment_table_overflow = False
         self._current_is_control = False
         self._current_allowed: tuple[str, str] | None = None
+        self._current_icmp_quote = False
 
     # ------------------------------------------------------------------ utils
     def observe_timestamp(self, ts: float) -> None:
@@ -505,10 +511,23 @@ class _Scanner:
     def parse_frame(self, frame: bytes, ts: float, index: int) -> None:
         self._current_is_control = False
         self._current_allowed = None
+        self._current_icmp_quote = False
         findings_before = self.findings_total
         self._parse_frame(frame, ts, index)
         label, direction = self._current_allowed or (None, None)
         if self._current_is_control:
+            return
+        if self._current_icmp_quote:
+            # Narrowly allowed ICMP quote: never tunnel evidence; outside the
+            # control window it is accounted like allowed traffic, not as an
+            # unexplained record.
+            in_window_quote = (
+                self.before_ts is not None and self.after_ts is None and ts > self.before_ts
+            )
+            if not in_window_quote:
+                self.outside_window_allowed_total += 1
+                if len(self.outside_window_allowed_indexes) < MAX_OUTSIDE_WINDOW_INDEXES:
+                    self.outside_window_allowed_indexes.append(index)
             return
         in_window = (
             self.before_ts is not None
@@ -824,6 +843,20 @@ class _Scanner:
             direction=direction,
             fragmented=more_fragments,
         )
+        if result.icmp_quote_label is not None:
+            l2_problem = self._allowed_l2_problem(
+                direction, src_mac, dst_mac, vlan
+            )
+            if l2_problem is not None:
+                self.add_finding(
+                    ts, src, dst, proto_name, None, None,
+                    "allowed_tuple_wrong_l2", detail=l2_problem, **extra,
+                )
+            else:
+                label = result.icmp_quote_label
+                self.allowed_icmp_quotes[label] = self.allowed_icmp_quotes.get(label, 0) + 1
+                self._current_icmp_quote = True
+            return
         if result.label is not None:
             l2_problem = self._allowed_l2_problem(
                 direction, src_mac, dst_mac, vlan
@@ -1118,6 +1151,38 @@ class _Scanner:
                 )
 
     # --------------------------------------------------------------- IPv4 L4
+    def _allowed_icmp_quote(self, payload: bytes, src: str, dst: str) -> str | None:
+        """Return the flow label for a narrowly allowed ICMP port-unreachable.
+
+        Allowed only when ALL hold (user decision 2026-11-09): ICMP type 3 code
+        3 sent by the VM to an allowed endpoint; the quoted datagram is an
+        option-free IPv4 UDP packet from that same endpoint:port to the VM
+        whose first four payload bytes are WireGuard-shaped.  Such a reply
+        quotes only the endpoint's own ciphertext and goes only to it.
+        """
+        if len(payload) < 8 + 20 + 8 + 4:
+            return None
+        if payload[0] != 3 or payload[1] != 3:
+            return None
+        quoted = payload[8:]
+        if quoted[0] != 0x45:  # IPv4, IHL 5 (no options)
+            return None
+        if quoted[9] != IPPROTO_UDP:
+            return None
+        quoted_src = ".".join(str(octet) for octet in quoted[12:16])
+        quoted_dst = ".".join(str(octet) for octet in quoted[16:20])
+        if quoted_src != dst or quoted_dst != src:
+            return None
+        quoted_udp = quoted[20:]
+        quoted_sport = _u16(quoted_udp, 0)
+        label = self.allowed_in.get((quoted_src, quoted_sport))
+        if label is None or self.allowed_out.get((dst, quoted_sport)) != label:
+            return None
+        prefix = quoted_udp[8:12]
+        if len(prefix) < 4 or prefix[0] not in (1, 2, 3, 4) or prefix[1:4] != b"\x00\x00\x00":
+            return None
+        return label
+
     def _classify_l4(
         self,
         ts: float,
@@ -1261,6 +1326,11 @@ class _Scanner:
             )
 
         if protocol == IPPROTO_ICMP:
+            label = None
+            if direction == "out" and not fragmented:
+                label = self._allowed_icmp_quote(payload, src, dst)
+            if label is not None:
+                return _L4Result(icmp_quote_label=label)
             return _L4Result(reason="icmp_not_allowed")
 
         return _L4Result(reason="ip_protocol_not_allowed")
@@ -1657,6 +1727,7 @@ def scan_capture_stream(
         "verdict": verdict,
         "packets": scanner.packets,
         "allowed_counts": dict(scanner.allowed_counts),
+        "allowed_icmp_quotes": dict(scanner.allowed_icmp_quotes),
         "findings": scanner.findings,
         "findings_total": scanner.findings_total,
         "findings_truncated": scanner.findings_total > len(scanner.findings),

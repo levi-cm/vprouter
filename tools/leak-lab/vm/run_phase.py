@@ -1576,8 +1576,6 @@ def login_phase_wait(
             problems = record.setdefault("login_url_problems", [])
             if "login_url_unrecognized" not in problems:
                 problems.append("login_url_unrecognized")
-                if note is not None:
-                    note("login_url_unrecognized")
         if url is not None and found is None:
             found = url
             evidence.write_text("login-url.txt", url + "\n")
@@ -1588,6 +1586,11 @@ def login_phase_wait(
         if remaining <= 0:
             break
         time.sleep(min(2.0, remaining))
+    # An unrecognized login.tailscale.com string is never written out.  It is a
+    # phase error only when no valid URL was found at all: tailscaled's logs
+    # also mention other login.tailscale.com paths (found live 2026-11-09).
+    if found is None and record.get("login_url_unrecognized") and note is not None:
+        note("login_url_unrecognized")
 
 
 def wait_for_reboot(

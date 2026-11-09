@@ -4685,6 +4685,27 @@ class LoginUrlShapeTests(unittest.TestCase):
         finally:
             case.doCleanups()
 
+    def test_unrecognized_candidate_after_a_valid_url_is_not_an_error(self) -> None:
+        # Live 2026-11-09: a valid URL was printed, yet the phase reported
+        # login_url_unrecognized because later polls saw other tailscale URLs.
+        calls = {"n": 0}
+        valid = "https://login.tailscale.com/a/1873cd0401b6f7"
+
+        def fake(client, name):
+            calls["n"] += 1
+            return (valid, False) if calls["n"] == 1 else (None, True)
+
+        case = RunPhaseTests("test_login_phase_writes_only_the_url_to_a_root_only_file")
+        case.setUp()
+        try:
+            with mock.patch.object(run_phase.login_url_mod, "find_login_url_result", side_effect=fake), \
+                    mock.patch.object(run_phase.time, "sleep"):
+                code, record, *_ = case._run("login", duration=0.05)
+            self.assertNotIn("login_url_unrecognized", record.get("result_reason") or "")
+            self.assertTrue(record["login_url_unrecognized"])
+        finally:
+            case.doCleanups()
+
     def test_valid_login_url_records_its_length(self) -> None:
         case = RunPhaseTests("test_login_phase_writes_only_the_url_to_a_root_only_file")
         case.setUp()

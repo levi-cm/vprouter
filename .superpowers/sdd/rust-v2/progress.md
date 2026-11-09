@@ -1268,3 +1268,7 @@ lab device Hot Dingo -> ch-zrh-wg-001 (live catalog, non-default relay): PASS, 9
 968/968/0 stats, 519 out + 447 in WireGuard to the single endpoint, 0 findings, before-control
 = frame 0 (silent boot), after-control = last frame (silent teardown), QEMU exit 0,
 Tailscale NeedsLogin. Certifies server-side only, no client traffic; legacy release, not rust/v2.
+2026-11-09 login phase (25 min): leak scan PASS, 10,131 frames all WireGuard to the single
+endpoint (5,431 out / 4,698 in), 0 findings, 0 drops; result INVALID because nobody logged in
+(BackendState NeedsLogin -> login_not_running, the correct outcome). Runner fix: an
+unrecognized login.tailscale.com string is an error only when no valid URL was found at all.

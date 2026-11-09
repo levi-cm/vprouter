@@ -178,6 +178,9 @@ class _FragmentState:
 WIREGUARD_MESSAGE_TYPE_LENGTHS = {1: 148, 2: 92, 3: 64}
 WIREGUARD_DATA_MIN = 32
 WIREGUARD_DATA_HEADER = 16
+#: Linux ``icmp_send`` quotes at most 576 - 20 (IPv4) - 8 (ICMP) bytes of the
+#: offending datagram (route MTU >= 576, no reply options).
+ICMP_QUOTE_LIMIT = 548
 
 
 def wireguard_payload_problem(payload: bytes, *, complete: bool = True) -> str | None:
@@ -1159,15 +1162,38 @@ class _Scanner:
         option-free IPv4 UDP packet from that same endpoint:port to the VM
         whose first four payload bytes are WireGuard-shaped.  Such a reply
         quotes only the endpoint's own ciphertext and goes only to it.
+
+        The quote must also be structurally exact (round-5 review R5-C1), so
+        no byte of the ICMP message is left unexplained: the unused header
+        word is zero; the quoted datagram is unfragmented (DF allowed); its
+        IPv4 total length and UDP length agree; the WireGuard message length
+        they declare is valid for its type; and the ICMP body is either the
+        whole quoted datagram or exactly Linux's 548-byte truncation of a
+        longer one.  Nothing may follow the quote.
         """
         if len(payload) < 8 + 20 + 8 + 4:
             return None
         if payload[0] != 3 or payload[1] != 3:
             return None
+        if payload[4:8] != b"\x00\x00\x00\x00":
+            return None
         quoted = payload[8:]
         if quoted[0] != 0x45:  # IPv4, IHL 5 (no options)
             return None
         if quoted[9] != IPPROTO_UDP:
+            return None
+        if _u16(quoted, 6) & 0xBFFF:  # reserved bit, MF or offset (DF allowed)
+            return None
+        quoted_total = _u16(quoted, 2)
+        if quoted_total < 20 + 8 + 4:
+            return None
+        if len(quoted) != quoted_total and not (
+            quoted_total > ICMP_QUOTE_LIMIT and len(quoted) == ICMP_QUOTE_LIMIT
+        ):
+            return None
+        if _u16(quoted, 24) != quoted_total - 20:
+            return None
+        if wireguard_length_problem(quoted[28], quoted_total - 28) is not None:
             return None
         quoted_src = ".".join(str(octet) for octet in quoted[12:16])
         quoted_dst = ".".join(str(octet) for octet in quoted[16:20])

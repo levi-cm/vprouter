@@ -4576,3 +4576,83 @@ class IcmpQuoteAllowanceTests(unittest.TestCase):
     def test_quote_alone_is_not_tunnel_evidence(self):
         report = scan_middle([ipv4_frame(self._quote(), protocol=1)], expect_tunnel="up")
         self.assertNotEqual(report["verdict"], "PASS")
+
+    # -- round-5 review (GPT R5-C1): the quote must be structurally exact --
+    def _raw_quote(self, payload, *, total_length=None, udp_length=None,
+                   frag_field=0, unused=b"\x00\x00\x00\x00", trailer=b"",
+                   truncate_to=None):
+        udp = udp_segment(WG_PORT, 40410, payload, length=udp_length)
+        inner = ipv4_packet(WG_IP, VM_IP, 17, udp, total_length=total_length)
+        inner = inner[:6] + struct.pack("!H", frag_field) + inner[8:]
+        if truncate_to is not None:
+            inner = inner[:truncate_to]
+        return bytes([3, 3, 0, 0]) + unused + inner + trailer
+
+    def test_full_size_data_quote_truncated_by_the_kernel_is_allowed(self):
+        # Linux icmp_send quotes at most 576 - 20 - 8 = 548 bytes of the original.
+        icmp = self._raw_quote(wg_data(blocks=88), truncate_to=548)
+        report = self._scan(icmp)
+        self.assertEqual(report["verdict"], "PASS", reasons(report))
+        self.assertEqual(report["allowed_icmp_quotes"], {"mullvad-wg": 1})
+
+    def test_complete_data_and_handshake_quotes_with_df_are_allowed(self):
+        for name, payload in {"data": wg_data(), "response": wg_response(),
+                              "cookie": wg_cookie_reply()}.items():
+            with self.subTest(case=name):
+                report = self._scan(self._raw_quote(payload, frag_field=0x4000))
+                self.assertEqual(report["verdict"], "PASS", reasons(report))
+
+    def test_structurally_inexact_quotes_are_leaks(self):
+        secret = b"REAL_IP=198.51.100.77;SECRET=synthetic-canary"
+        init = wg_initiation()
+        cases = {
+            "bytes after the quoted datagram": self._raw_quote(init, trailer=secret),
+            "bytes after a truncated quote": self._raw_quote(
+                wg_data(blocks=88), truncate_to=548, trailer=secret),
+            "quoted total length 0": self._raw_quote(init, total_length=0),
+            "quoted total length 20": self._raw_quote(init, total_length=20),
+            "quoted total length 65535": self._raw_quote(init, total_length=65535),
+            "quoted total length too short": self._raw_quote(
+                init + secret, total_length=20 + 8 + len(init)),
+            "quoted udp length 8": self._raw_quote(init, udp_length=8),
+            "quoted udp length 65535": self._raw_quote(init, udp_length=65535),
+            "four-byte type-1 payload": self._raw_quote(init[:4]),
+            "four-byte type-4 payload": self._raw_quote(wg_data()[:4]),
+            "handshake with wrong length": self._raw_quote(init + b"\x00" * 16),
+            "quoted more-fragments": self._raw_quote(init, frag_field=0x2000),
+            "quoted fragment offset": self._raw_quote(init, frag_field=0x0001),
+            "quoted reserved flag": self._raw_quote(init, frag_field=0x8000),
+            "nonzero unused field": self._raw_quote(init, unused=b"\x00\x00\x05\xdc"),
+            "truncated below the kernel limit": self._raw_quote(
+                wg_data(blocks=88), truncate_to=400),
+            "truncated although it would fit": self._raw_quote(
+                init, truncate_to=100),
+            "short quoted datagram declared long": self._raw_quote(
+                wg_data(blocks=10), total_length=600, udp_length=580),
+        }
+        for name, icmp in cases.items():
+            with self.subTest(case=name):
+                report = self._scan(icmp)
+                self.assertEqual(report["verdict"], "LEAK", name)
+                self.assertEqual(report["allowed_icmp_quotes"], {}, name)
+
+    def test_inexact_quote_outside_the_control_window_is_still_a_leak(self):
+        bad = ipv4_frame(
+            self._raw_quote(wg_initiation(), trailer=b"REAL_IP=198.51.100.77"),
+            protocol=1,
+        )
+        good = ipv4_frame(self._quote(), protocol=1)
+        middle = [wg_outbound(), wg_inbound()]
+        orders = {
+            "before": [bad, *phase_frames(*middle)],
+            "after": [*phase_frames(*middle), bad],
+        }
+        for where, frames in orders.items():
+            with self.subTest(where=where):
+                report = scan(frames, expect_tunnel="up")
+                self.assertEqual(report["verdict"], "LEAK")
+                self.assertIn("icmp_not_allowed", reasons(report))
+        # an exact quote outside the window stays an allowed, counted packet
+        report = scan([good, *phase_frames(*middle)], expect_tunnel="up")
+        self.assertEqual(report["verdict"], "PASS", reasons(report))
+        self.assertEqual(report["capture_meta"]["outside_window_allowed"], 1)

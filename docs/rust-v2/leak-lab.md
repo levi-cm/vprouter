@@ -823,8 +823,15 @@ What a compromised router VM can and cannot do:
   code 3 (port unreachable) from the VM to an allowed endpoint, with the
   correct lab MACs, whose quoted datagram is an option-free IPv4 UDP packet
   from that same endpoint and port to the VM, with a WireGuard-shaped payload
-  prefix. Such a reply quotes only the endpoint's own ciphertext and goes only
-  back to it. It is counted in `allowed_icmp_quotes`, never as tunnel
+  prefix. The quote must also be structurally exact (round-5 review R5-C1):
+  the ICMP unused word is zero; the quoted datagram is unfragmented (DF is
+  allowed); its IPv4 total length and UDP length agree; the WireGuard length
+  they declare is valid for the message type; and the ICMP body is either the
+  whole quoted datagram or exactly Linux's 548-byte truncation
+  (576 - 20 - 8) of a longer one, with nothing after it. Without this, bytes
+  appended after a valid quote were accepted. Such a reply quotes only the
+  endpoint's own ciphertext and goes only back to it. It is counted in
+  `allowed_icmp_quotes`, never as tunnel
   evidence, and is accounted like allowed traffic outside the control window.
   Every other ICMP, and any inbound ICMP, is still `icmp_not_allowed`. Live
   cause: after a VM restart, the Mullvad server's handshake to the old NAT

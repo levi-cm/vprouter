@@ -1304,3 +1304,13 @@ The ICMP quotes are the VM kernel answering the server's WireGuard packets while
 bound (allowed by the user's narrow rule; same endpoint and public IP). max-vprouter healthy
 before, between and after. Certifies server-side, no client traffic, legacy release only.
 Next: client VMs (M3) so real client traffic crosses the router during each fault.
+2026-11-09 round-5 review (changes since 0097e78). GPT Sol disconnected again but its partial
+report holds R5-C1 CRITICAL, reproduced: the ICMP quote allowance accepted bytes after the quoted
+datagram (and inconsistent quoted lengths/fragments), so cleartext appended to an otherwise valid
+port-unreachable was a PASS. Fixed: the quote must be structurally exact (unused word zero,
+unfragmented quote with DF allowed, IPv4 total == UDP length + 20, WireGuard length valid for its
+type, body = whole datagram or exactly Linux's 548-byte truncation, nothing after it); 19 new
+adversarial cases incl. outside the control window. Root-owned scanner refreshed. Re-scan of all
+15 retained live captures (fd-anchored like the runner): 0 findings everywhere; the 5 fault
+phases re-scan PASS (4 real quotes all exact); captures taken before -B 8192 now read INVALID
+only for capture_argv_mismatch (contract change), with 0 findings, so nothing was hidden.

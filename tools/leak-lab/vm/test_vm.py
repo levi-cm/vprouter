@@ -1207,7 +1207,7 @@ class RefusalTests(unittest.TestCase):
             )
             with mock.patch.object(provision, "require_root"), mock.patch.object(
                 provision.guest, "verify_base_image", return_value="0" * 128
-            ), mock.patch.object(
+            ), mock.patch.object(provision, "verify_image_tar_chain"), mock.patch.object(
                 provision.hostcheck, "refuse_if_qemu_running"
             ), mock.patch.object(provision, "_require_tool"):
                 with self.assertRaises(hostcheck.Refusal):
@@ -1339,7 +1339,7 @@ class ProvisionPipelineTests(unittest.TestCase):
             gid = os.getegid()
             with mock.patch.object(provision, "require_root"), mock.patch.object(
                 provision.guest, "verify_base_image", return_value="0" * 128
-            ), mock.patch.object(
+            ), mock.patch.object(provision, "verify_image_tar_chain"), mock.patch.object(
                 provision.hostcheck, "refuse_if_qemu_running"
             ), mock.patch.object(
                 provision, "_require_tool"
@@ -1414,6 +1414,7 @@ class ProvisionPipelineTests(unittest.TestCase):
             mock.patch.object(
                 provision.guest, "verify_base_image", return_value="0" * 128
             ),
+            mock.patch.object(provision, "verify_image_tar_chain"),
             mock.patch.object(provision.hostcheck, "refuse_if_qemu_running"),
             mock.patch.object(provision, "_require_tool"),
             mock.patch.object(provision, "_qemu_identity", return_value=(uid, gid)),
@@ -3833,6 +3834,9 @@ esac
                     )
                 )
                 stack.enter_context(
+                    mock.patch.object(provision, "verify_image_tar_chain")
+                )
+                stack.enter_context(
                     mock.patch.object(provision, "check_provision_admission")
                 )
                 stack.enter_context(mock.patch.object(provision, "_require_tool"))
@@ -5121,3 +5125,61 @@ class LivePackageTests(unittest.TestCase):
             line for line in script.splitlines() if "docker.io" in line and "docker-compose" in line
         )
         self.assertIn("docker-cli", install.split())
+
+
+class ImageTarChainTests(unittest.TestCase):
+    """Live 2026-11-09: host containerd-store ID (index) != guest classic ID (config)."""
+
+    def _tar(self, root: pathlib.Path, *, tamper: bool = False):
+        import hashlib, io, tarfile
+
+        blobs = {}
+
+        def add(document: dict) -> str:
+            data = json.dumps(document).encode()
+            digest = "sha256:" + hashlib.sha256(data).hexdigest()
+            blobs[digest] = data
+            return digest
+
+        config = add({"architecture": "amd64", "os": "linux"})
+        attest_config = add({"attestation": True})
+        manifest = add({"mediaType": "application/vnd.oci.image.manifest.v1+json", "config": {"digest": config}})
+        attest = add({"mediaType": "application/vnd.oci.image.manifest.v1+json", "config": {"digest": attest_config}})
+        index = add({"manifests": [
+            {"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": manifest,
+             "platform": {"os": "linux", "architecture": "amd64"}},
+            {"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": attest,
+             "platform": {"os": "unknown", "architecture": "unknown"},
+             "annotations": {"vnd.docker.reference.type": "attestation-manifest"}},
+        ]})
+        path = root / "image.tar"
+        with tarfile.open(path, "w") as archive:
+            def put(name, data):
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+            put("index.json", json.dumps({"manifests": [{"digest": index}]}).encode())
+            for digest, data in blobs.items():
+                if tamper and digest == manifest:
+                    data = data + b" "
+                put("blobs/sha256/" + digest.split(":")[1], data)
+        return path, index, config
+
+    def test_valid_chain_binds_index_to_config_ignoring_attestations(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path, index, config = self._tar(pathlib.Path(temporary))
+            provision.verify_image_tar_chain(path, index, config)
+
+    def test_wrong_config_or_index_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path, index, config = self._tar(pathlib.Path(temporary))
+            with self.assertRaises(hostcheck.Refusal):
+                provision.verify_image_tar_chain(path, index, "sha256:" + "0" * 64)
+            with self.assertRaises(hostcheck.Refusal):
+                provision.verify_image_tar_chain(path, "sha256:" + "1" * 64, config)
+
+    def test_tampered_blob_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path, index, config = self._tar(pathlib.Path(temporary), tamper=True)
+            with self.assertRaises(hostcheck.Refusal):
+                provision.verify_image_tar_chain(path, index, config)

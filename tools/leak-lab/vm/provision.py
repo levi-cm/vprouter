@@ -188,6 +188,78 @@ def _apply_qemu_limits(process: subprocess.Popen) -> None:
             continue
 
 
+_OCI_INDEX = "application/vnd.oci.image.index.v1+json"
+_OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
+_IMAGE_TAR_MEMBER_CAP = 64 * 1024 * 1024
+
+
+def verify_image_tar_chain(
+    image_tar: pathlib.Path, index_digest: str, config_digest: str
+) -> None:
+    """Prove the saved tar's OCI chain links ``index_digest`` to ``config_digest``.
+
+    Every blob on the path index.json -> index -> manifest -> config is read
+    from the tar and its SHA-256 is recomputed, so the guest-local image ID is
+    bound to the pinned host image ID by content, not by assertion.
+    """
+    import hashlib
+    import tarfile
+
+    def blob(archive: tarfile.TarFile, digest: str) -> bytes:
+        algorithm, _, hexdigest = digest.partition(":")
+        if algorithm != "sha256" or len(hexdigest) != 64:
+            raise hostcheck.Refusal("image tar: unsupported digest")
+        try:
+            member = archive.getmember(f"blobs/sha256/{hexdigest}")
+        except KeyError as exc:
+            raise hostcheck.Refusal(f"image tar: missing blob {digest}") from exc
+        if not member.isfile() or member.size > _IMAGE_TAR_MEMBER_CAP:
+            raise hostcheck.Refusal(f"image tar: blob {digest} is not a bounded file")
+        stream = archive.extractfile(member)
+        data = stream.read() if stream is not None else b""
+        if "sha256:" + hashlib.sha256(data).hexdigest() != digest:
+            raise hostcheck.Refusal(f"image tar: blob {digest} hash mismatch")
+        return data
+
+    def manifests_of(document: dict) -> list[dict]:
+        entries = document.get("manifests")
+        if not isinstance(entries, list) or not entries:
+            raise hostcheck.Refusal("image tar: index has no manifests")
+        return entries
+
+    try:
+        with tarfile.open(image_tar, "r:") as archive:
+            try:
+                top = json.loads(archive.extractfile("index.json").read())
+            except (KeyError, AttributeError, ValueError) as exc:
+                raise hostcheck.Refusal("image tar: unreadable index.json") from exc
+            if index_digest not in [m.get("digest") for m in manifests_of(top)]:
+                raise hostcheck.Refusal("image tar does not contain the pinned image index")
+            index = json.loads(blob(archive, index_digest))
+            configs = set()
+            for entry in manifests_of(index):
+                platform = entry.get("platform") or {}
+                annotations = entry.get("annotations") or {}
+                # BuildKit adds an attestation manifest (platform unknown/unknown)
+                # with its own config; only the runnable linux/amd64 image counts.
+                if annotations.get("vnd.docker.reference.type") == "attestation-manifest":
+                    continue
+                if (platform.get("os"), platform.get("architecture")) != ("linux", "amd64"):
+                    continue
+                if entry.get("mediaType") == _OCI_MANIFEST:
+                    manifest = json.loads(blob(archive, entry["digest"]))
+                    config = manifest.get("config", {}).get("digest")
+                    if isinstance(config, str):
+                        blob(archive, config)
+                        configs.add(config)
+    except (OSError, tarfile.TarError, ValueError, KeyError, TypeError) as exc:
+        raise hostcheck.Refusal(f"image tar: {exc.__class__.__name__}") from exc
+    if configs != {config_digest}:
+        raise hostcheck.Refusal(
+            "image tar: the pinned index does not resolve to exactly the expected config"
+        )
+
+
 def _require_tool(path: pathlib.Path) -> None:
     try:
         info = path.lstat()
@@ -393,6 +465,13 @@ def _provision_locked(arguments: argparse.Namespace, state: pathlib.Path) -> int
     if image_tar.stat().st_size <= 0:
         raise hostcheck.Refusal("image tar is empty")
     image_id = guest.validate_image_id(arguments.image_id)
+    verify_image_tar_chain(
+        image_tar,
+        guest.validate_image_id(
+            getattr(arguments, "image_index_digest", guest.DEPLOYED_IMAGE_INDEX_DIGEST)
+        ),
+        image_id,
+    )
 
     for tool in (guest.QEMU, guest.QEMU_IMG, guest.GENISOIMAGE):
         _require_tool(tool)
@@ -592,7 +671,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--index", type=int, default=guest.DEFAULT_INDEX)
     parser.add_argument("--state-root", default=str(guest.STATE_ROOT))
     parser.add_argument("--name", default=guest.DEFAULT_NAME)
-    parser.add_argument("--image-id", default=guest.DEPLOYED_IMAGE_ID)
+    parser.add_argument("--image-id", default=guest.DEPLOYED_IMAGE_ID,
+                        help="guest-local (classic store) image ID = config digest")
+    parser.add_argument("--image-index-digest", default=guest.DEPLOYED_IMAGE_INDEX_DIGEST,
+                        help="host containerd-store image ID = OCI index digest")
     parser.add_argument("--image-tar", required=True)
     parser.add_argument("--release-dir", default=str(guest.RELEASE_DIR))
     parser.add_argument("--base-image", default=str(guest.BASE_IMAGE))

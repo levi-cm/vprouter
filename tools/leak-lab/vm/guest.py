@@ -67,8 +67,17 @@ VM_SUBNET = ipaddress.IPv4Network("10.250.0.0/24")
 
 DEFAULT_NAME = "zz-vprtest-01-do-not-use"
 DEFAULT_INDEX = 1
-DEPLOYED_IMAGE_ID = (
+#: The deployed host runs Docker 29 with the containerd image store, whose
+#: image ID is the OCI *index* digest.  The guest's Docker 26 uses the classic
+#: store, whose image ID is the *config* digest of the same image.  Provision
+#: hash-verifies the saved tar's index -> manifest -> config chain, so the
+#: guest ID below is cryptographically bound to the host index digest
+#: (found live on 2026-11-09).
+DEPLOYED_IMAGE_INDEX_DIGEST = (
     "sha256:62c283e6a4d350992ed2b9a99a48c7834e60e1c9af92f9e1699a2b2d0c920de3"
+)
+DEPLOYED_IMAGE_ID = (
+    "sha256:9ed5a99d20587da5a0203c90bdc5984bdb78997025e0b8b9c50da4e43f13c61a"
 )
 
 TRUSTED_RELEASE_FILES = (

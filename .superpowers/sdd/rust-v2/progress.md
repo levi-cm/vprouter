@@ -1241,3 +1241,16 @@ identity, from the r5 reviewer's suggestion) -> r7 PASS. Controller fixed R7-M1.
 hash, exact relation_checks, audit-call regression test, docs). Final suite: 24/44/9/84/14 OK.
 DeepSeek passed the user's quality gate (zero code corrections; findings closed in one round).
 Still offline preparation only: no performance claim, real runs NOT_RUN, release_ready=false.
+
+2026-11-09 Real-credential leak lab (user authorised the 5 lab Mullvad devices and 10+ Tailscale
+test users; test exit nodes named zz-vprtest-NN-do-not-use; VM as small as possible).
+Findings: rust/v2 has no activation path (runtime-gap-analysis.md, 5d32906), so leak tests
+target the deployed legacy release in a silent 512 MiB VM. The 534-config zip and conf/ hold
+only "Grown Turtle" = the live production key (excluded). All 5 lab keys handshake, probed in an
+isolated netns against non-default relays (the June relay data is stale). M1 external tap monitor
+and M2 VM runner were built by DeepSeek and reviewed each round by GPT-6.1 Sol, Opus 5.5 and
+Pi DeepSeek. Monitor rounds 1-3 FAIL->fixed (2fc1779, b0c06f8, 8ccbcdc). Runner round 1 FAIL
+(2 Critical: failed phases PASS, capture stopped before poweroff) -> fixed (e1535b8). Combined
+review FAIL, 0 Critical / ~12 Important (host trust/ownership/lifecycle/resource bounds; the
+scanner fuzz found no leak-hiding PASS). A fix round moving the lab to root-owned paths with a
+dedicated vprlab-qemu user is in progress. No VM booted, no lab network created yet.

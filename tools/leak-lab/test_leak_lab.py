@@ -4885,6 +4885,44 @@ class ClientNetplanTests(unittest.TestCase):
         self.assertNotIn('neigh show "$1" dev "$2"', plan)
         self.assertIn('client_neigh_state "$ip" vprlab1', plan)
 
+    def test_client_neighbour_check_is_scoped_by_device(self) -> None:
+        # Pi R3-M2: client_neigh_ok passes the device and the embedded check
+        # matches dst AND dev over the complete inventory.
+        plan = netplan.render_plan("eth0", clients=(1,))
+        function = plan.split("client_neigh_ok() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn('"$1" "$2" "$3"', function)
+        self.assertIn('client_neigh_ok "$ip" vprlab1', plan)
+        code = netplan._CLIENT_NEIGH_CHECK_CODE
+        self.assertIn(code, plan)
+        mac = "52:54:00:76:71:02"
+
+        def run(document):
+            return subprocess.run(
+                [sys.executable, "-I", "-c", code, "10.251.0.2", "vprlab1", mac],
+                input=json.dumps(document),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).returncode
+
+        ours = {"dst": "10.251.0.2", "dev": "vprlab1", "lladdr": mac,
+                "state": ["PERMANENT"]}
+        foreign = {"dst": "10.251.0.2", "dev": "docker0",
+                   "lladdr": "02:42:ac:11:00:02", "state": ["REACHABLE"]}
+        self.assertEqual(run([ours]), 0)
+        # The same address on another device neither blocks nor satisfies it.
+        self.assertEqual(run([foreign, ours]), 0)
+        self.assertEqual(run([dict(ours, lladdr="52:54:00:76:71:99"), foreign]), 1)
+        self.assertEqual(run([dict(ours, state=["REACHABLE"])]), 1)
+        self.assertEqual(run([foreign]), 0)
+        self.assertEqual(run([ours, ours]), 1)
+        self.assertEqual(run({"not": "a list"}), 1)
+        self.assertEqual(run([ours, "junk"]), 1)
+        # The router's own neigh_ok still uses its unchanged filtered check.
+        router = netplan.render_plan("eth0")
+        self.assertIn(netplan._NEIGH_CHECK_CODE, router)
+        self.assertIn("ip -j neigh show 10.250.0.2 dev vprlab0", router)
+
     def test_router_plan_is_unchanged_without_clients(self) -> None:
         plan = netplan.render_plan("eth0")
         # No client object is created by a no-client plan; the dynamic
@@ -5582,6 +5620,41 @@ class ClientScanTests(unittest.TestCase):
         self.assertIn("router_zero_packets", report["capture_meta"]["invalid_reasons"])
 
 
+def client_hold_samples(data, sequences, times, *, run_id=CLIENT_MARKER.split(":", 1)[1]):
+    """Build trusted hold samples that are exact prefixes of ``data``.
+
+    ``sequences`` are the last complete sequence of each sample and ``times``
+    the host ``(stat_start, stat_end)`` pairs, relative to the S_fault sample.
+    """
+    import hashlib
+
+    lines = data.splitlines(keepends=True)
+    samples = []
+    for sequence, (start, end) in zip(sequences, times):
+        size = 0
+        for line in lines:
+            try:
+                value = json.loads(line)["s"]
+            except (ValueError, KeyError, TypeError):
+                break
+            if value > sequence or not line.endswith(b"\n"):
+                break
+            size += len(line)
+        prefix = data[:size]
+        observation = clientprobe.prefix_observation(prefix, run_id=run_id)
+        samples.append(
+            {
+                "sequence": observation["sequence"],
+                "exit_sequence": observation["exit_sequence"],
+                "size": size,
+                "sha256": hashlib.sha256(prefix).hexdigest(),
+                "stat_start": float(start),
+                "stat_end": float(end),
+            }
+        )
+    return samples
+
+
 class ClientProbeTests(unittest.TestCase):
     RUN_ID = CLIENT_MARKER.split(":", 1)[1]
 
@@ -5590,13 +5663,28 @@ class ClientProbeTests(unittest.TestCase):
             fault_epoch=105,
             post_fault_epoch=105,
             clock_start=90,
-            clock_stop=110,
+            clock_stop=120,
             run_id=self.RUN_ID,
             fault_sequence=2,
-            end_sequence=1000,
             hold_seconds=15,
         )
         values.update(kwargs)
+        if "hold_samples" not in values:
+            # Default: one host window covering the whole (<= 15 s) hold,
+            # from S_fault to the last complete line (or the given S_end).
+            last = max(
+                (entry["s"] for _n, entry in clientprobe.parse_probe_log_partial(data)[0]),
+                default=0,
+            )
+            end = values.get("end_sequence", last)
+            hold = float(values["hold_seconds"] or 0)
+            values["hold_samples"] = client_hold_samples(
+                data,
+                [values["fault_sequence"] or 0, end],
+                [(0.0, 0.0), (hold, hold)],
+                run_id=self.RUN_ID,
+            )
+            values.setdefault("end_sequence", values["hold_samples"][-1]["sequence"])
         return clientprobe.evaluate_probe_log(data, **values)
 
     def test_ok_with_mullvad_true_is_pass(self) -> None:
@@ -5758,19 +5846,242 @@ class ClientProbeTests(unittest.TestCase):
         )
         self.assertEqual(report["verdict"], "INVALID")
         self.assertIn("probe_post_fault_exit_missing", report["invalid_reasons"])
-        self.assertIn("probe_hold_coverage", report["invalid_reasons"])
+        self.assertIn("probe_hold_window_empty", report["invalid_reasons"])
 
-    def test_hold_coverage_requires_an_exit_attempt_per_gap(self) -> None:
+    # --- Fix round 3: host-observed hold coverage (controller decision 2) ---
+
+    def frozen_log(self, loops, step=0):
+        """Pre-fault pair plus ``loops`` post-fault pairs.
+
+        With ``step=0`` every line is at t=100 (a frozen guest clock); a
+        positive ``step`` spaces the post-fault loops that far apart.
+        """
+        data = client_probe_line(1, 100, mullvad=True) + client_probe_line(
+            2, 100, kind="marker"
+        )
+        for index in range(loops):
+            stamp = 100 + step * (index + 1)
+            data += client_probe_line(3 + 2 * index, stamp, ok=False, mullvad=None)
+            data += client_probe_line(4 + 2 * index, stamp, kind="marker", ok=False)
+        return data
+
+    def frozen_values(self, **kwargs):
+        values = dict(
+            fault_epoch=100,
+            post_fault_epoch=100,
+            clock_start=99,
+            clock_stop=130,
+            run_id=self.RUN_ID,
+            fault_sequence=2,
+            end_sequence=6,
+            hold_seconds=30,
+        )
+        values.update(kwargs)
+        return values
+
+    def test_opus_r3_3_count_without_host_samples_never_passes(self) -> None:
+        # Opus R3-3 (E7): frozen guest clock, two post-fault loops, hold 30,
+        # S_fault=2, S_end=6.  The aggregate floor(hold/15) count PASSed on
+        # 37bafc2; without host-observed samples coverage is unproven.
+        # clock_stop=105 keeps every guest-clock check of 37bafc2 satisfied
+        # (no gap, ordered window), exactly as in the review fixture.
+        report = clientprobe.evaluate_probe_log(
+            self.frozen_log(2), **self.frozen_values(clock_stop=105)
+        )
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("probe_hold_samples_missing", report["invalid_reasons"])
+        self.assertNotIn("probe_gap", report["invalid_reasons"])
+
+    def test_burst_then_silence_leaves_an_empty_host_window(self) -> None:
+        # GPT R3-C2 at the evaluator: both loops land in the first 10 s
+        # window; the two later windows see no new exit attempt.
+        data = self.frozen_log(2)
+        samples = client_hold_samples(
+            data, [2, 6, 6, 6], [(0, 0), (10, 10), (20, 20), (30, 30)]
+        )
+        report = clientprobe.evaluate_probe_log(
+            data, hold_samples=samples, **self.frozen_values()
+        )
+        self.assertEqual(report["verdict"], "INVALID")
+        self.assertIn("probe_hold_window_empty", report["invalid_reasons"])
+        self.assertNotIn("probe_hold_window_late", report["invalid_reasons"])
+
+    def test_one_new_exit_per_host_window_passes(self) -> None:
+        data = self.frozen_log(3, step=10)
+        samples = client_hold_samples(
+            data, [2, 4, 6, 8], [(0, 0), (10, 10.2), (20, 20.1), (30, 30.3)]
+        )
+        report = clientprobe.evaluate_probe_log(
+            data,
+            hold_samples=samples,
+            **self.frozen_values(end_sequence=8),
+        )
+        self.assertEqual(report["verdict"], "PASS", report["invalid_reasons"])
+        self.assertEqual(report["hold_windows"], 3)
+
+    def test_a_marker_alone_does_not_cover_a_window(self) -> None:
+        data = self.frozen_log(2)
+        # Window 2 only adds the marker line s=4 after the exit line s=3.
+        samples = client_hold_samples(
+            data, [2, 3, 4, 6], [(0, 0), (10, 10), (20, 20), (30, 30)]
+        )
+        report = clientprobe.evaluate_probe_log(
+            data, hold_samples=samples, **self.frozen_values()
+        )
+        self.assertIn("probe_hold_window_empty", report["invalid_reasons"])
+
+    def test_host_window_longer_than_fifteen_seconds_is_invalid(self) -> None:
+        data = self.frozen_log(2)
+        samples = client_hold_samples(
+            data, [2, 4, 6], [(0, 0), (15.2, 15.3), (30, 30)]
+        )
+        report = clientprobe.evaluate_probe_log(
+            data, hold_samples=samples, **self.frozen_values()
+        )
+        self.assertIn("probe_hold_window_late", report["invalid_reasons"])
+        # Measured from the earlier size read's start to the later one's end.
+        samples = client_hold_samples(
+            data, [2, 4, 6], [(0, 0.5), (14.9, 15.01), (30, 30)]
+        )
+        report = clientprobe.evaluate_probe_log(
+            data, hold_samples=samples, **self.frozen_values()
+        )
+        self.assertIn("probe_hold_window_late", report["invalid_reasons"])
+
+    def test_deadline_sample_must_reach_and_not_overrun_the_deadline(self) -> None:
+        data = self.frozen_log(2)
+        short = client_hold_samples(data, [2, 4, 6], [(0, 0), (10, 10), (20, 20)])
+        report = clientprobe.evaluate_probe_log(
+            data, hold_samples=short, **self.frozen_values()
+        )
+        self.assertIn("probe_hold_short", report["invalid_reasons"])
+        late = client_hold_samples(
+            data, [2, 4, 6], [(0, 0), (12, 12), (26, 32.5)]
+        )
+        report = clientprobe.evaluate_probe_log(
+            data, hold_samples=late, **self.frozen_values()
+        )
+        self.assertIn("probe_hold_short", report["invalid_reasons"])
+        late = client_hold_samples(
+            data, [2, 4, 6], [(0, 0), (16, 16), (31, 32.5)]
+        )
+        report = clientprobe.evaluate_probe_log(
+            data, hold_samples=late, **self.frozen_values()
+        )
+        self.assertIn("probe_hold_deadline_late", report["invalid_reasons"])
+
+    def test_samples_must_be_prefixes_of_the_evidence(self) -> None:
+        data = self.frozen_log(2)
+        samples = client_hold_samples(
+            data, [2, 4, 6], [(0, 0), (14, 14), (30, 30)]
+        )
+        samples[1]["sha256"] = "0" * 64
+        report = clientprobe.evaluate_probe_log(
+            data, hold_samples=samples, **self.frozen_values()
+        )
+        self.assertIn("probe_hold_prefix_mismatch", report["invalid_reasons"])
+        samples = client_hold_samples(
+            data, [2, 4, 6], [(0, 0), (14, 14), (30, 30)]
+        )
+        samples[-1]["size"] = len(data) + 10
+        report = clientprobe.evaluate_probe_log(
+            data, hold_samples=samples, **self.frozen_values()
+        )
+        self.assertIn("probe_hold_prefix_mismatch", report["invalid_reasons"])
+
+    def test_sample_claims_are_recomputed_from_the_evidence(self) -> None:
+        data = self.frozen_log(2)
+        samples = client_hold_samples(
+            data, [2, 2, 6], [(0, 0), (14, 14), (30, 30)]
+        )
+        # The middle sample claims an exit it never contained.
+        samples[1]["sequence"] = 4
+        samples[1]["exit_sequence"] = 3
+        report = clientprobe.evaluate_probe_log(
+            data, hold_samples=samples, **self.frozen_values()
+        )
+        self.assertIn("probe_hold_samples_invalid", report["invalid_reasons"])
+        self.assertIn("probe_hold_window_empty", report["invalid_reasons"])
+
+    def test_samples_are_bound_to_s_fault_and_s_end(self) -> None:
+        data = self.frozen_log(2)
+        samples = client_hold_samples(
+            data, [2, 4, 6], [(0, 0), (14, 14), (30, 30)]
+        )
+        for changes in (dict(fault_sequence=1), dict(end_sequence=4)):
+            with self.subTest(changes=changes):
+                report = clientprobe.evaluate_probe_log(
+                    data, hold_samples=samples, **self.frozen_values(**changes)
+                )
+                self.assertIn(
+                    "probe_hold_samples_invalid", report["invalid_reasons"]
+                )
+        for bad in (None, [], samples[:1], [dict(samples[0], sha256="x")] + samples[1:],
+                    [dict(samples[0], stat_end=-1.0)] + samples[1:],
+                    [dict(samples[0], sequence=True)] + samples[1:]):
+            with self.subTest(bad=bad):
+                report = clientprobe.evaluate_probe_log(
+                    data, hold_samples=bad, **self.frozen_values()
+                )
+                self.assertEqual(report["verdict"], "INVALID")
+                self.assertTrue(
+                    {"probe_hold_samples_missing", "probe_hold_samples_invalid"}
+                    & set(report["invalid_reasons"])
+                )
+
+    def test_guest_clock_must_advance_across_the_hold(self) -> None:
+        data = self.frozen_log(3)
+        samples = client_hold_samples(
+            data, [2, 4, 6, 8], [(0, 0), (10, 10), (20, 20), (30, 30)]
+        )
+        report = clientprobe.evaluate_probe_log(
+            data,
+            hold_samples=samples,
+            **self.frozen_values(end_sequence=8, clock_stop=110),
+        )
+        self.assertIn("probe_clock_stalled", report["invalid_reasons"])
+
+    def test_prefix_observation_uses_complete_run_lines_only(self) -> None:
         data = (
             client_probe_line(1, 100, mullvad=True)
-            + client_probe_line(2, 101, kind="marker")
-            + client_probe_line(3, 106, ok=False, mullvad=None)
-            + client_probe_line(4, 107, kind="marker", ok=False)
+            + client_probe_line(2, 100, kind="marker")
+            + client_probe_line(3, 101, mullvad=True, run_id="1" * 32)
+            + client_probe_line(4, 101, ok=False, mullvad=None).rstrip(b"\n")
         )
-        report = self.evaluate(data, hold_seconds=60, end_sequence=4)
-        self.assertIn("probe_hold_coverage", report["invalid_reasons"])
-        report = self.evaluate(data, hold_seconds=15, end_sequence=4)
-        self.assertEqual(report["verdict"], "PASS", report["invalid_reasons"])
+        observation = clientprobe.prefix_observation(data, run_id=self.RUN_ID)
+        self.assertEqual(observation["sequence"], 2)
+        self.assertEqual(observation["exit_sequence"], 1)
+        self.assertTrue(observation["mullvad"])
+        self.assertTrue(observation["marker"])
+        self.assertEqual(clientprobe.complete_lines(b"abc"), b"")
+        self.assertEqual(clientprobe.complete_lines(b"a\nb"), b"a\n")
+        with self.assertRaises(clientprobe.ProbeError):
+            clientprobe.prefix_observation(data, run_id="zz")
+
+    def test_cli_evaluates_the_recorded_hold_samples(self) -> None:
+        data = self.frozen_log(3, step=10)
+        samples = client_hold_samples(
+            data, [2, 4, 6, 8], [(0, 0), (10, 10), (20, 20), (30, 30)]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            log = pathlib.Path(directory) / "probe.jsonl"
+            log.write_bytes(data)
+            held = pathlib.Path(directory) / "samples.json"
+            held.write_text(json.dumps(samples), encoding="utf-8")
+            common = [
+                "--probe-log", str(log), "--fault-epoch", "100",
+                "--post-fault-epoch", "100", "--fault-sequence", "2",
+                "--end-sequence", "8", "--hold-seconds", "30",
+                "--clock-start", "99", "--clock-stop", "130",
+                "--run-id", self.RUN_ID,
+            ]
+            with redirect_stdout(StringIO()):
+                self.assertEqual(
+                    clientprobe.main(common + ["--hold-samples", str(held)]), 0
+                )
+            with redirect_stderr(StringIO()):
+                with self.assertRaises(SystemExit):
+                    clientprobe.main(common)
 
     def test_clock_boundaries_must_be_ordered(self) -> None:
         data = client_probe_log()

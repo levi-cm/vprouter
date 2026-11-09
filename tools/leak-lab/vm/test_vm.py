@@ -5849,6 +5849,25 @@ class ClientExitBindingTests(unittest.TestCase):
                 run_phase.client_peer_is_active(status, "router-node", "100.64.0.9")
             )
 
+    def test_hold_samples_accept_an_offline_router_but_never_another_peer(self) -> None:
+        # During stop-router/kill-container/kill-wireguard the router's
+        # Tailscale is legitimately offline; the sample proves the selection.
+        offline = {"ExitNodeStatus": {"ID": "router-node", "Online": False,
+                                      "TailscaleIPs": ["100.64.0.9"]}}
+        self.assertTrue(run_phase.client_peer_is_active(
+            offline, "router-node", "100.64.0.9", require_online=False))
+        self.assertFalse(run_phase.client_peer_is_active(
+            offline, "router-node", "100.64.0.9"))
+        for status in (
+            {"ExitNodeStatus": {"ID": "wrong", "Online": False, "TailscaleIPs": ["100.64.0.9"]}},
+            {"ExitNodeStatus": {"ID": "router-node", "Online": False, "TailscaleIPs": ["100.64.0.10"]}},
+            {"ExitNodeStatus": None},
+            {"Self": {"ExitNode": True}},
+        ):
+            with self.subTest(status=status):
+                self.assertFalse(run_phase.client_peer_is_active(
+                    status, "router-node", "100.64.0.9", require_online=False))
+
     def test_client_identity_rejects_a_conflicting_hostname_and_dns(self) -> None:
         self.assertEqual(
             run_phase.client_identity_problems(
@@ -5920,15 +5939,17 @@ class ClientExitBindingTests(unittest.TestCase):
             def execute(self, program, args=(), timeout=60.0):
                 del program, timeout
                 command = args[-1] if args else ""
+                # The guest file holds one more byte than the transfer
+                # delivers: the guest digest covers all N bytes.
                 if command.startswith("stat -c %s"):
                     return ExecResult(0, str(len(leak) + 1).encode(), b"")
-                if command.startswith("sha256sum "):
+                if command.endswith("| sha256sum"):
                     return ExecResult(
                         0,
-                        (hashlib.sha256(leak).hexdigest() + "  x\n").encode(),
+                        (hashlib.sha256(leak + b"{").hexdigest() + "  -\n").encode(),
                         b"",
                     )
-                if command.startswith("cat "):
+                if command.startswith("head -c "):
                     return ExecResult(0, leak, b"")
                 return ExecResult(0, b"", b"")
 
@@ -6278,6 +6299,8 @@ class ClientRunPhaseTests(unittest.TestCase):
                 remaining -= step
                 if client.traffic_active and not client.silent_hold:
                     client.maybe_probe(fake_clock[0])
+                if client.ghost_writing:
+                    client.ghost_probe()
 
         def fake_monotonic():
             return fake_clock[0]
@@ -6289,7 +6312,9 @@ class ClientRunPhaseTests(unittest.TestCase):
                          silent_hold=False, cat_exit=0,
                          advertise_routes=None,
                          login_blocks_until_authenticated=False,
-                         frozen_clock=False, digest_fail=False):
+                         frozen_clock=False, digest_fail=False,
+                         prefs=None, is_active_after_stop=None,
+                         ghost_writer_after_stop=None):
                 self.exit_node_active = False
                 self.log = b""
                 self.commands = []
@@ -6317,15 +6342,42 @@ class ClientRunPhaseTests(unittest.TestCase):
                 self.next_probe_at = None
                 self.frozen_clock = frozen_clock
                 self.digest_fail = digest_fail
+                self.prefs = prefs
+                # Round 3 knobs.  is_active_after_stop=(n, word): from stop n
+                # on, `systemctl is-active` prints `word` for a stopped unit.
+                self.is_active_after_stop = is_active_after_stop
+                # ghost_writer_after_stop=n: stop n claims success, but a
+                # writer keeps appending one current-run leak line per second.
+                self.ghost_writer_after_stop = ghost_writer_after_stop
+                self.ghost_writing = False
+                # truncate_next_read=(lines, exitcode): the next content read
+                # (`cat` or `head -c N`) returns only the first `lines` lines.
+                self.truncate_next_read = None
+                # hold_plan(offset) -> bool decides whether the 1 Hz loop
+                # writes at hold offset `offset` (set with hold_started_at).
+                self.hold_plan = None
+                self.hold_started_at = None
 
             def maybe_probe(self, now):
                 """Model the 1 Hz traffic loop while the fake hold runs."""
                 if self.next_probe_at is None:
                     self.next_probe_at = now
                 while now >= self.next_probe_at:
+                    due = self.next_probe_at
+                    self.next_probe_at += 1.0
+                    if (
+                        self.hold_plan is not None
+                        and self.hold_started_at is not None
+                        and due > self.hold_started_at
+                        and not self.hold_plan(due - self.hold_started_at)
+                    ):
+                        continue
                     self.clock += 1
                     self.probe_pair()
-                    self.next_probe_at += 1.0
+
+            def ghost_probe(self):
+                """A writer that outlived a stop which claimed success."""
+                self.append_probe("exit", ok=True, m=False)
 
             def append_probe(self, kind, **fields):
                 self.sequence += 1
@@ -6421,8 +6473,17 @@ class ClientRunPhaseTests(unittest.TestCase):
                         if self.traffic_active
                         else ExecResult(3, b"", b"")
                     )
+                if "systemctl show -p MainPID --value" in command:
+                    pid = b"4242\n" if self.traffic_active else b"0\n"
+                    return ExecResult(0, pid, b"")
                 if "systemctl is-active" in command:
                     state = "active" if self.traffic_active else "inactive"
+                    if (
+                        not self.traffic_active
+                        and self.is_active_after_stop is not None
+                        and self.stop_count >= self.is_active_after_stop[0]
+                    ):
+                        state = self.is_active_after_stop[1]
                     return ExecResult(
                         0 if self.traffic_active else 3,
                         state.encode() + b"\n",
@@ -6442,6 +6503,12 @@ class ClientRunPhaseTests(unittest.TestCase):
                             else self.stop_suffix
                         )
                         self.log += suffix
+                    if (
+                        self.ghost_writer_after_stop is not None
+                        and self.stop_count == self.ghost_writer_after_stop
+                        and self.traffic_active
+                    ):
+                        self.ghost_writing = True
                     self.traffic_active = False
                     if self.truncate_final_cat and self.stop_count >= 2:
                         self.truncate_cat = True
@@ -6453,11 +6520,33 @@ class ClientRunPhaseTests(unittest.TestCase):
                         return ExecResult(1, b"", b"")
                     digest = hashlib.sha256(self.log).hexdigest()
                     return ExecResult(0, (digest + "  " + guest.CLIENT_PROBE_LOG + "\n").encode(), b"")
-                if command.strip() == f"cat {guest.CLIENT_PROBE_LOG}":
-                    if self.truncate_cat and self.log:
-                        prefix = self.log.rsplit(b"\n", 2)[0] + b"\n"
+                head = re.fullmatch(
+                    r"head -c (\d+) " + re.escape(guest.CLIENT_PROBE_LOG)
+                    + r"( \| sha256sum)?",
+                    command.strip(),
+                )
+                if head is not None and head.group(2):
+                    if self.digest_fail:
+                        return ExecResult(1, b"", b"")
+                    digest = hashlib.sha256(
+                        self.log[: int(head.group(1))]
+                    ).hexdigest()
+                    return ExecResult(0, (digest + "  -\n").encode(), b"")
+                if head is not None or command.strip() == f"cat {guest.CLIENT_PROBE_LOG}":
+                    content = (
+                        self.log[: int(head.group(1))]
+                        if head is not None
+                        else self.log
+                    )
+                    if self.truncate_next_read is not None:
+                        lines, exitcode = self.truncate_next_read
+                        self.truncate_next_read = None
+                        prefix = b"".join(content.splitlines(keepends=True)[:lines])
+                        return ExecResult(exitcode, prefix, b"")
+                    if self.truncate_cat and content:
+                        prefix = content.rsplit(b"\n", 2)[0] + b"\n"
                         return ExecResult(self.cat_exit, prefix, b"")
-                    return ExecResult(self.cat_exit, self.log, b"")
+                    return ExecResult(self.cat_exit, content, b"")
                 if "/sys/class/net" in command:
                     return ExecResult(0, b"eth0\n", b"")
                 if command.strip() == "date +%s":
@@ -6472,7 +6561,13 @@ class ClientRunPhaseTests(unittest.TestCase):
                         events.append(("client_control", match.group(1)))
                     return ExecResult(0, b"", b"")
                 if "tailscale debug prefs" in command:
-                    document = {"AdvertiseRoutes": self.advertise_routes}
+                    document = {
+                        "AdvertiseRoutes": self.advertise_routes or None,
+                        "RouteAll": False,
+                        "ShieldsUp": True,
+                    }
+                    if self.prefs is not None:
+                        document = self.prefs
                     return ExecResult(
                         0, json.dumps(document).encode(), b""
                     )
@@ -7176,6 +7271,562 @@ class ClientRunPhaseTests(unittest.TestCase):
         # Accepted exception (controller decision 12): client-login keeps the
         # router login behaviour and prints the URL to stderr as well.
         self.assertIn("https://login.tailscale.com/a/", stderr)
+
+
+    # ------------------------------------------------------------------
+    # Fix round 3 regressions.  Every hook below patches only functions
+    # that exist on 37bafc2 as well (start_client_traffic, run_router_fault,
+    # read_client_status), and the fake answers both the old cat/sha256sum
+    # reads and the new `head -c N` prefix reads, so each reproducer can be
+    # run unchanged against the old runner.
+
+    def _hooks(self, stack, *, plan=None, before_fault=None, after_fault=None,
+               status_hook=None, start_hook=None):
+        holder: dict = {}
+        original_start = run_phase.start_client_traffic
+        original_fault = run_phase.run_router_fault
+        original_status = run_phase.read_client_status
+
+        def start(client, **kwargs):
+            holder["client"] = client
+            if start_hook is not None:
+                return start_hook(original_start, client, **kwargs)
+            return original_start(client, **kwargs)
+
+        def fault(router, phase, name, record, note):
+            client = holder["client"]
+            if before_fault is not None:
+                before_fault(client)
+            result = original_fault(router, phase, name, record, note)
+            client.hold_started_at = run_phase.time.monotonic()
+            client.hold_plan = plan
+            if after_fault is not None:
+                after_fault(client)
+            return result
+
+        def status(client):
+            if status_hook is not None and getattr(client, "run_id", None):
+                replaced = status_hook(client, original_status)
+                if replaced is not None:
+                    return replaced
+            return original_status(client)
+
+        stack.enter_context(
+            mock.patch.object(run_phase, "start_client_traffic", side_effect=start)
+        )
+        stack.enter_context(
+            mock.patch.object(run_phase, "run_router_fault", side_effect=fault)
+        )
+        stack.enter_context(
+            mock.patch.object(run_phase, "read_client_status", side_effect=status)
+        )
+        return holder
+
+    def _fresh_evidence(self, label):
+        self.evidence = self.root / f"evidence-{label}"
+
+    def test_gpt_r3_c1_truncated_boundary_read_never_sets_s_fault(self) -> None:
+        # GPT R3-C1 / Pi R3-I1: a pre-fault backlog (two extra pairs after
+        # the control, or written while the action runs), a silent hold and
+        # a frozen guest clock.  The first read after the fault returns only
+        # a prefix.  37bafc2 took S_fault from it and PASSed with zero probes
+        # in the hold.
+        cases = (
+            ("gpt-exit1", "after_wait", 2, 1),
+            ("gpt-exit0", "after_wait", 2, 0),
+            ("pi-one-line", "during_action", 1, 1),
+        )
+        for label, when, lines, exitcode in cases:
+            with self.subTest(case=label):
+                self._fresh_evidence(label)
+
+                def backlog(client):
+                    client.probe_pair()
+                    client.probe_pair()
+
+                def arm(client, lines=lines, exitcode=exitcode):
+                    client.truncate_next_read = (lines, exitcode)
+
+                with contextlib.ExitStack() as stack:
+                    self._hooks(stack, before_fault=backlog, after_fault=arm)
+                    code, record, client, *_ = self._run(
+                        "stop-router",
+                        client_kwargs={"silent_hold": True, "frozen_clock": True},
+                    )
+                self.assertNotEqual(record["result"], "PASS")
+                self.assertEqual(code, 2)
+                self.assertIsNone(record["client"]["fault_sequence"])
+                self.assertIn("probe_fault_sample_untrusted", record["errors"])
+                self.assertEqual(client.sequence, 6)
+
+    def test_untrusted_boundary_read_is_invalid_even_with_a_healthy_hold(self) -> None:
+        # Decision 1: an untrusted read never establishes S_fault and makes
+        # the phase INVALID, even when the later traffic looks healthy.
+        def arm(client):
+            client.truncate_next_read = (1, 0)
+
+        with contextlib.ExitStack() as stack:
+            self._hooks(stack, after_fault=arm)
+            code, record, *_ = self._run("stop-router")
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIsNone(record["client"]["fault_sequence"])
+        self.assertIn("probe_log_truncated", record["errors"])
+
+    def test_untrusted_hold_sample_makes_the_phase_invalid(self) -> None:
+        armed = {"done": False}
+
+        def status_hook(client, _original):
+            # Arm after the S_fault sample's status call: the next content
+            # read is the first hold sample's byte transfer.
+            if client.hold_started_at is not None and not armed["done"]:
+                armed["done"] = True
+                client.truncate_next_read = (3, 1)
+            return None
+
+        with contextlib.ExitStack() as stack:
+            self._hooks(stack, status_hook=status_hook)
+            code, record, *_ = self._run("stop-router")
+        self.assertEqual(code, 2)
+        self.assertIn("probe_hold_sample_untrusted", record["errors"])
+        self.assertIn("probe_log_unreadable", record["errors"])
+        self.assertIsNotNone(record["client"]["fault_sequence"])
+
+    def test_gpt_r3_c2_burst_then_silence_is_invalid(self) -> None:
+        # GPT R3-C2 reproducer 1: two 1 Hz loops at hold +1 s and +2 s, then
+        # 28 s of silence, frozen guest clock.  PASS on 37bafc2.
+        with contextlib.ExitStack() as stack:
+            self._hooks(stack, plan=lambda offset: offset < 2.5)
+            code, record, *_ = self._run(
+                "stop-router", client_kwargs={"frozen_clock": True}
+            )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        reasons = record["client"]["probe"]["invalid_reasons"]
+        self.assertIn("probe_hold_window_empty", reasons)
+        self.assertEqual(record["client"]["hold_windows"], 3)
+        self.assertEqual(len(record["client"]["hold_samples"]), 4)
+
+    def test_gpt_r3_c2_probes_only_during_the_end_status_call(self) -> None:
+        # GPT R3-C2 reproducer 2: silent for the whole host hold; the stalled
+        # loop only writes two pairs during the status call that follows the
+        # hold deadline.  37bafc2 sampled S_end after that call and PASSed.
+        def status_hook(client, _original):
+            start = client.hold_started_at
+            if (
+                client.traffic_active
+                and start is not None
+                and run_phase.time.monotonic() >= start + 30.0 - 1e-6
+            ):
+                run_phase.time.sleep(1.0)
+                client.probe_pair()
+                run_phase.time.sleep(1.0)
+                client.probe_pair()
+            return None
+
+        with contextlib.ExitStack() as stack:
+            self._hooks(stack, status_hook=status_hook)
+            code, record, client, *_ = self._run(
+                "stop-router",
+                client_kwargs={"silent_hold": True, "frozen_clock": True},
+            )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn(
+            "probe_hold_window_empty",
+            record["client"]["probe"]["invalid_reasons"],
+        )
+        # The pairs written during the deadline status call are after S_end.
+        self.assertGreater(client.sequence, record["client"]["hold_sequence_end"])
+        self.assertEqual(
+            record["client"]["hold_sequence_end"],
+            record["client"]["fault_sequence"],
+        )
+
+    def test_silent_window_in_the_middle_of_the_hold_is_invalid(self) -> None:
+        # A 30 s silence inside a 60 s hold with a frozen guest clock: the
+        # aggregate count (>= floor(60/15)) PASSed on 37bafc2.
+        with contextlib.ExitStack() as stack:
+            self._hooks(stack, plan=lambda offset: not 10.0 <= offset < 40.0)
+            code, record, *_ = self._run(
+                "stop-router", 60.0, client_kwargs={"frozen_clock": True}
+            )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn(
+            "probe_hold_window_empty",
+            record["client"]["probe"]["invalid_reasons"],
+        )
+        self.assertGreater(record["client"]["probe"]["post_fault_exit_attempts"], 4)
+
+    def test_healthy_hold_is_sampled_every_window_and_passes(self) -> None:
+        for phase, duration, windows in (("stop-router", 30.0, 3), ("idle", 61.0, 5)):
+            with self.subTest(phase=phase):
+                self._fresh_evidence(phase)
+                code, record, *_ = self._run(phase, duration)
+                self.assertEqual(code, 0, record["result_reason"])
+                samples = record["client"]["hold_samples"]
+                self.assertEqual(record["client"]["hold_windows"], windows)
+                self.assertEqual(len(samples), windows + 1)
+                self.assertEqual(samples[0]["stat_start"], 0.0)
+                self.assertGreaterEqual(samples[-1]["stat_start"], duration)
+                for earlier, later in zip(samples, samples[1:]):
+                    self.assertLessEqual(
+                        later["stat_end"] - earlier["stat_start"],
+                        clientprobe.MAX_HOLD_SAMPLE_WINDOW,
+                    )
+                    self.assertGreater(later["exit_sequence"], earlier["sequence"])
+                self.assertTrue(all(sample["exit_node_ok"] for sample in samples))
+                self.assertEqual(record["client"]["fault_sequence"], samples[0]["sequence"])
+                self.assertEqual(record["client"]["hold_sequence_end"], samples[-1]["sequence"])
+                self.assertTrue(record["client"]["exit_node"]["reverified"])
+
+    def test_router_offline_during_the_hold_keeps_the_selection_valid(self) -> None:
+        # stop-router takes the router's Tailscale offline for the whole hold;
+        # the client still has exactly that router selected, so this is not
+        # client_exit_node_lost.
+        def status_hook(client, original):
+            if client.traffic_active and client.hold_started_at is not None:
+                document = original(client)
+                status = document.get("ExitNodeStatus")
+                if isinstance(status, dict):
+                    status = dict(status)
+                    status["Online"] = False
+                    document["ExitNodeStatus"] = status
+                return document
+            return None
+
+        with contextlib.ExitStack() as stack:
+            self._hooks(stack, status_hook=status_hook)
+            code, record, *_ = self._run("stop-router")
+        self.assertNotIn("client_exit_node_lost", record["errors"])
+        self.assertEqual(code, 0, record["errors"])
+        self.assertEqual(record["result"], "PASS")
+
+    def test_exit_node_switch_in_the_middle_of_the_hold_is_invalid(self) -> None:
+        # Opus R3-4: every sample re-checks ExitNodeStatus; a switch away and
+        # back inside the hold was invisible to the single end-of-hold check.
+        def status_hook(client, original):
+            start = client.hold_started_at
+            now = run_phase.time.monotonic()
+            if client.traffic_active and start is not None and 5.0 <= now - start <= 15.0:
+                document = original(client)
+                document["ExitNodeStatus"] = {
+                    "ID": "some-other-exit",
+                    "Online": True,
+                    "TailscaleIPs": ["100.64.0.99"],
+                }
+                return document
+            return None
+
+        with contextlib.ExitStack() as stack:
+            self._hooks(stack, status_hook=status_hook)
+            code, record, *_ = self._run("stop-router")
+        self.assertEqual(code, 2)
+        self.assertIn("client_exit_node_lost", record["errors"])
+        self.assertFalse(record["client"]["exit_node"]["reverified"])
+
+    def test_pi_r3_m1_unknown_is_active_never_proves_a_stop(self) -> None:
+        # Pi R3-M1: `is-active` prints `unknown` while a writer still runs and
+        # appends a leak after the snapshot.  37bafc2 accepted `unknown`,
+        # labelled the snapshot exact and PASSed.
+        code, record, client, *_ = self._run(
+            "idle",
+            client_kwargs={
+                "is_active_after_stop": (2, "unknown"),
+                "ghost_writer_after_stop": 2,
+            },
+        )
+        self.assertNotEqual(record["result"], "PASS")
+        self.assertIn("client_traffic_stop_failed", record["errors"])
+        self.assertFalse(record["client"]["traffic_stop_proven"])
+        self.assertFalse(record["client"]["probe_snapshot_trusted"])
+        self.assertIn(b'"m":false', client.log)
+
+    def test_writer_that_keeps_appending_after_a_claimed_stop_is_leak(self) -> None:
+        # Decision 3: the stop reports inactive and MainPID 0, but the log
+        # keeps growing.  Quiescence fails, the snapshot is untrusted and the
+        # leak the surviving writer appended is latched.  37bafc2 PASSed.
+        code, record, *_ = self._run(
+            "idle", client_kwargs={"ghost_writer_after_stop": 2}
+        )
+        self.assertEqual(code, 1, record["result_reason"])
+        self.assertEqual(record["result"], "LEAK")
+        self.assertIn("client_writer_not_quiescent", record["errors"])
+        self.assertFalse(record["client"]["traffic_stop_proven"])
+        self.assertFalse(record["client"]["probe_snapshot_trusted"])
+
+    def test_main_pid_must_be_zero_for_a_proven_stop(self) -> None:
+        original = run_phase.client_traffic_main_pid
+        calls = {"n": 0}
+
+        def main_pid(client):
+            calls["n"] += 1
+            # The boot-time stale-unit stop is call 1; lie from then on.
+            return 4242 if calls["n"] >= 2 else original(client)
+
+        with mock.patch.object(
+            run_phase, "client_traffic_main_pid", side_effect=main_pid
+        ):
+            code, record, *_ = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertIn("client_traffic_stop_failed", record["errors"])
+        self.assertFalse(record["client"]["probe_snapshot_trusted"])
+
+    def test_opus_r3_1_start_that_raises_after_launch_is_still_stopped(self) -> None:
+        # Opus R3-1: the unit started, then the QGA reply was lost.  The
+        # writer appends a leak before it is finally stopped.  37bafc2 took a
+        # trusted snapshot of the live writer first and reported INVALID.
+        def start_hook(original, client, **kwargs):
+            original(client, **kwargs)
+            raise QGAError("reply lost after systemd-run")
+
+        with contextlib.ExitStack() as stack:
+            self._hooks(stack, start_hook=start_hook)
+            code, record, *_ = self._run(
+                "idle", client_kwargs={"stop_suffix": client_leak_suffix}
+            )
+        self.assertEqual(code, 1, record["result_reason"])
+        self.assertEqual(record["result"], "LEAK")
+        self.assertTrue(record["client"]["probe_leak_observed"])
+        self.assertTrue(record["client"]["traffic_stop_proven"])
+
+    def test_opus_r3_2_untrusted_reads_never_pass_the_pre_fault_gate(self) -> None:
+        # Opus R3-2: every log transfer exits 1 but carries good lines.  The
+        # destructive fault must not run without a trusted pre-fault proof.
+        code, record, _client, events, *_ = self._run(
+            "stop-router", client_kwargs={"cat_exit": 1}
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("client_not_routed", record["errors"])
+        router_commands = [str(entry[1]) for entry in events if entry[0] == "exec"]
+        self.assertFalse(
+            any("systemctl stop vprouter@" in command for command in router_commands)
+        )
+        self.assertNotIn("pre_fault_mullvad", record["client"])
+
+    def test_client_prefs_must_keep_the_client_role(self) -> None:
+        good = {"AdvertiseRoutes": None, "RouteAll": False, "ShieldsUp": True}
+        for label, prefs, reason in (
+            ("missing-routes", {"RouteAll": False, "ShieldsUp": True}, "client_prefs_incomplete"),
+            ("accept-routes", dict(good, RouteAll=True), "client_accepts_routes"),
+            ("shields-down", dict(good, ShieldsUp=False), "client_shields_down"),
+            ("missing-shields", {"AdvertiseRoutes": [], "RouteAll": False}, "client_prefs_incomplete"),
+        ):
+            with self.subTest(case=label):
+                self._fresh_evidence(label)
+                code, record, _client, events, *_ = self._run(
+                    "idle", client_kwargs={"prefs": prefs}
+                )
+                self.assertEqual(code, 2)
+                self.assertIn(reason, record["errors"])
+                self.assertFalse(any(entry[0] == "traffic_start" for entry in events))
+        for label, prefs in (("null", good), ("empty", dict(good, AdvertiseRoutes=[]))):
+            with self.subTest(case=label):
+                self._fresh_evidence(label)
+                code, record, *_ = self._run("idle", client_kwargs={"prefs": prefs})
+                self.assertEqual(code, 0, record["result_reason"])
+
+
+class ClientProbeReadTests(unittest.TestCase):
+    """Fix round 3: the exact prefix-read primitive and the stop proof."""
+
+    LOG = guest.CLIENT_PROBE_LOG
+
+    class Guest:
+        def __init__(self, log=b"", *, stat_exit=0, digest_exit=0, data_exit=0,
+                     deliver=None, digest_of=None, states=("inactive",), main_pid="0"):
+            self.log = log
+            self.stat_exit = stat_exit
+            self.digest_exit = digest_exit
+            self.data_exit = data_exit
+            self.deliver = deliver
+            self.digest_of = digest_of
+            self.states = list(states)
+            self.main_pid = main_pid
+            self.commands = []
+
+        def execute(self, program, args=(), timeout=60.0):
+            del program, timeout
+            command = args[-1] if args else ""
+            self.commands.append(command)
+            if command.startswith("stat -c %s"):
+                return ExecResult(self.stat_exit, f"{len(self.log)}\n".encode(), b"")
+            match = re.fullmatch(r"head -c (\d+) \S+( \| sha256sum)?", command)
+            if match and match.group(2):
+                source = self.digest_of if self.digest_of is not None else self.log
+                digest = hashlib.sha256(source[: int(match.group(1))]).hexdigest()
+                return ExecResult(self.digest_exit, (digest + "  -\n").encode(), b"")
+            if match:
+                data = self.deliver if self.deliver is not None else self.log
+                return ExecResult(self.data_exit, data[: int(match.group(1))], b"")
+            if command.startswith("cat "):
+                data = self.deliver if self.deliver is not None else self.log
+                return ExecResult(self.data_exit, data, b"")
+            if command.startswith("sha256sum "):
+                source = self.digest_of if self.digest_of is not None else self.log
+                digest = hashlib.sha256(source).hexdigest()
+                return ExecResult(self.digest_exit, (digest + "  x\n").encode(), b"")
+            if "systemctl is-active" in command:
+                state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
+                return ExecResult(0 if state == "active" else 3, state.encode() + b"\n", b"")
+            if "systemctl show -p MainPID --value" in command:
+                return ExecResult(0, self.main_pid.encode() + b"\n", b"")
+            return ExecResult(0, b"", b"")
+
+    RUN_ID = "a" * 32
+
+    def line(self, sequence, *, kind="exit", ok=True, m=True):
+        document = {"k": kind, "ok": ok, "r": self.RUN_ID, "s": sequence, "t": 100}
+        if kind == "exit":
+            document["m"] = m
+        return json.dumps(document, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+
+    def test_complete_prefix_is_trusted(self) -> None:
+        log = self.line(1) + self.line(2, kind="marker")
+        read = run_phase.read_client_probe_prefix(self.Guest(log))
+        self.assertTrue(read.trusted)
+        self.assertEqual(read.data, log)
+        self.assertEqual(read.size, len(log))
+        self.assertEqual(read.sha256, hashlib.sha256(log).hexdigest())
+        self.assertLessEqual(read.stat_start, read.stat_end)
+
+    def test_every_failed_step_makes_the_read_untrusted(self) -> None:
+        log = self.line(1) + self.line(2, kind="marker")
+        cases = (
+            ("stat", dict(stat_exit=1), "probe_log_missing"),
+            ("digest", dict(digest_exit=1), "probe_log_unreadable"),
+            ("bytes-exit", dict(data_exit=1), "probe_log_unreadable"),
+            ("short", dict(deliver=self.line(1)), "probe_log_truncated"),
+            ("altered", dict(deliver=log.replace(b'"m":true', b'"m":fals')), "probe_log_hash_mismatch"),
+            ("guest-hash", dict(digest_of=log[::-1]), "probe_log_hash_mismatch"),
+        )
+        for label, knobs, problem in cases:
+            with self.subTest(case=label):
+                read = run_phase.read_client_probe_prefix(self.Guest(log, **knobs))
+                self.assertFalse(read.trusted)
+                self.assertEqual(read.problem, problem)
+                sample, _read = run_phase.take_client_probe_sample(
+                    self.Guest(log, **knobs), self.RUN_ID, base=None
+                )
+                self.assertIsNone(sample)
+
+    def test_untrusted_bytes_are_still_returned_for_leak_parsing(self) -> None:
+        log = self.line(1, m=False) + self.line(2, kind="marker")
+        read = run_phase.read_client_probe_prefix(self.Guest(log, data_exit=1))
+        self.assertFalse(read.trusted)
+        self.assertTrue(clientprobe.probe_prefix_flags(read.data)["leak"])
+
+    def test_sample_sequence_comes_from_complete_lines_only(self) -> None:
+        log = self.line(1) + self.line(2, kind="marker") + self.line(3)[:-5]
+        sample, read = run_phase.take_client_probe_sample(
+            self.Guest(log), self.RUN_ID, base=None
+        )
+        self.assertTrue(read.trusted)
+        self.assertEqual(sample["sequence"], 2)
+        self.assertEqual(sample["exit_sequence"], 1)
+        self.assertEqual(sample["size"], len(log))
+        self.assertEqual(sample["stat_start"], 0.0)
+
+    def test_final_snapshot_needs_a_non_empty_newline_terminated_log(self) -> None:
+        self.assertEqual(
+            run_phase.read_client_probe_log_exact(self.Guest(b""))[1], "probe_log_empty"
+        )
+        partial = self.line(1)[:-1]
+        self.assertEqual(
+            run_phase.read_client_probe_log_exact(self.Guest(partial)),
+            (partial, "probe_log_truncated"),
+        )
+        log = self.line(1)
+        self.assertEqual(run_phase.read_client_probe_log_exact(self.Guest(log)), (log, None))
+
+    def test_stop_proof_accepts_only_inactive_or_failed_with_main_pid_zero(self) -> None:
+        for states, main_pid, expected in (
+            (("inactive",), "0", True),
+            (("failed",), "0", True),
+            (("unknown",), "0", False),
+            (("deactivating",), "0", False),
+            (("",), "0", False),
+            (("active",), "0", False),
+            (("inactive",), "812", False),
+            (("inactive",), "", False),
+        ):
+            with self.subTest(states=states, main_pid=main_pid):
+                self.assertIs(
+                    run_phase.stop_client_traffic(
+                        self.Guest(states=states, main_pid=main_pid)
+                    ),
+                    expected,
+                )
+
+    def test_quiescence_needs_two_equal_size_reads_two_seconds_apart(self) -> None:
+        clock = [100.0]
+        guest_vm = self.Guest(self.line(1))
+
+        def sleep(seconds):
+            clock[0] += seconds
+            guest_vm.log += self.line(2)
+
+        with mock.patch.object(run_phase.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(run_phase.time, "sleep", side_effect=sleep):
+            self.assertFalse(run_phase.client_probe_writer_quiescent(guest_vm))
+        quiet = self.Guest(self.line(1))
+        start = [0.0]
+
+        def quiet_sleep(seconds):
+            clock[0] += seconds
+
+        with mock.patch.object(run_phase.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(run_phase.time, "sleep", side_effect=quiet_sleep):
+            start[0] = clock[0]
+            self.assertTrue(run_phase.client_probe_writer_quiescent(quiet))
+            self.assertGreaterEqual(
+                clock[0] - start[0], run_phase.CLIENT_STOP_QUIESCENCE_SECONDS
+            )
+        self.assertFalse(
+            run_phase.client_probe_writer_quiescent(self.Guest(self.line(1), stat_exit=1))
+        )
+
+    def test_opus_r3_2_untrusted_reads_never_set_the_positive_controls(self) -> None:
+        # Opus R3-2 at the function: every transfer exits 1 but contains a
+        # Mullvad success and a successful marker.  37bafc2 returned both
+        # controls after the timeout.
+        log = self.line(1) + self.line(2, kind="marker")
+        clock = [0.0]
+        with mock.patch.object(run_phase.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(
+                    run_phase.time, "sleep",
+                    side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+                ):
+            flags = run_phase.wait_client_probe_control(
+                self.Guest(log, data_exit=1), self.RUN_ID, timeout=3.0
+            )
+            self.assertFalse(flags["mullvad"])
+            self.assertFalse(flags["marker"])
+            self.assertFalse(flags["leak"])
+            leak = self.line(1, m=False)
+            flags = run_phase.wait_client_probe_control(
+                self.Guest(leak, data_exit=1), self.RUN_ID, timeout=3.0
+            )
+            self.assertTrue(flags["leak"])
+            flags = run_phase.wait_client_probe_control(
+                self.Guest(log), self.RUN_ID, timeout=3.0
+            )
+            self.assertTrue(flags["mullvad"] and flags["marker"])
+
+    def test_prefs_require_present_empty_routes_and_the_client_flags(self) -> None:
+        good = {"AdvertiseRoutes": None, "RouteAll": False, "ShieldsUp": True}
+        check = run_phase.client_route_advertisement_problem
+        self.assertIsNone(check(good))
+        self.assertIsNone(check(dict(good, AdvertiseRoutes=[])))
+        self.assertEqual(check({"RouteAll": False, "ShieldsUp": True}), "client_prefs_incomplete")
+        self.assertEqual(check(dict(good, AdvertiseRoutes=["10.0.0.0/8"])), "client_advertises_routes")
+        self.assertEqual(check(dict(good, AdvertiseRoutes="0.0.0.0/0")), "client_advertises_routes")
+        self.assertEqual(check(dict(good, RouteAll=True)), "client_accepts_routes")
+        self.assertEqual(check(dict(good, RouteAll=None)), "client_accepts_routes")
+        self.assertEqual(check(dict(good, ShieldsUp=False)), "client_shields_down")
+        self.assertEqual(check({"AdvertiseRoutes": []}), "client_prefs_incomplete")
+        self.assertEqual(check(None), "client_prefs_unreadable")
 
 
 class TestFileLayoutTests(unittest.TestCase):

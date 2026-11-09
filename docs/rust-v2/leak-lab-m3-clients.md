@@ -1,6 +1,7 @@
 # Leak lab M3: real client traffic through the test exit node
 
-Status: design, 2026-11-09. Applies to the legacy deployed release that the
+Status: design, 2026-11-09 (fix round 3: exact prefix reads, host-observed
+hold coverage, proven writer stop). Applies to the legacy deployed release that the
 lab already tests (`/opt/vprouter/current`). It is not rust/v2.
 
 ## Goal
@@ -22,6 +23,9 @@ exit node `zz-vprtest-01-do-not-use`. A phase PASSes only if all of these hold:
 4. **Positive controls.** Without these the phase is INVALID:
    - Before the fault, at least one client HTTPS probe succeeded with a
      Mullvad exit, which proves client traffic really crossed the router.
+   - Client traffic really flowed during the whole fault hold: the runner saw
+     a new exit attempt in every host-timed window of at most 15 s between
+     the fault boundary and the hold deadline (see "Hold coverage" below).
    - The client capture saw a before-control and an after-control nonce frame
      from the client in cleartext.
    - Both captures have 0 drops and captured == received.
@@ -81,7 +85,24 @@ The client VM must not share a bridge with the router VM. Any client frame on
 - The client neighbour helpers read the complete `ip -j neigh` inventory and
   filter `dst`/`dev` in Python, exactly like the router helper. The filtered
   `ip ... dev` form omits the `dev` key and fails with `Cannot find device`
-  when the bridge is gone, so it cannot prove absence.
+  when the bridge is gone, so it cannot prove absence. Both helpers
+  (`client_neigh_state` and the ownership check `client_neigh_ok`) match
+  `dst` **and** `dev`, so the same address on another device can neither
+  satisfy nor block the client check (fix round 3, Pi R3-M2).
+- **The router-only plan changed too (fix round 2, decision 6).** The
+  `vprlab0` forward rules are no longer unscoped accepts: the plan now
+  renders `iif vprlab0 oif <wan> ip saddr 10.250.0.0/24 accept`, a
+  conntrack-scoped return accept (`ip daddr 10.250.0.0/24 ct state
+  established,related`), and then explicit drops for every other packet
+  between `vprlab0` and the WAN. Reason: the `inet vprlab` base chains have
+  `policy accept`, so an unscoped accept, or no drop after a scoped one,
+  forwarded anything that crossed the lab bridge (for example a VM packet with
+  a source outside the lab subnet) whenever the host's own FORWARD policy is
+  not DROP. The router VM's legitimate traffic (10.250.0.2-sourced egress and
+  its conntrack replies) matches the scoped accepts unchanged. The no-client
+  plan also carries the client-teardown helpers (used only when `owner.json`
+  records clients) and the old-owner residue refusal. Every other router step
+  of the plan is unchanged.
 - Setup, teardown, the inventory and the "refuse if not ours" checks cover the
   new objects the same way as the old ones.
 - Everything else about the host stays untouched. In particular, do not
@@ -193,7 +214,12 @@ A `--client` phase requires `--duration >= 30` seconds, including
      refusal (no DNS fallback may hide a conflicting HostName). A present but
      non-string HostName is refused; DNS is used only when it is missing.
    - Refuse if the client advertises an exit node or a default route.
-   - Refuse if `tailscale debug prefs` reports a non-empty `AdvertiseRoutes`.
+   - Read `tailscale debug prefs` and refuse unless `AdvertiseRoutes` is
+     present and empty (`[]`, or JSON `null`, Go's empty slice; a missing key
+     is `client_prefs_incomplete`, any route `client_advertises_routes`),
+     `RouteAll` is exactly `false` (`client_accepts_routes`) and `ShieldsUp`
+     is exactly `true` (`client_shields_down`). The same check runs at the
+     end of `client-login`.
 5. **Router boot.** Boot the router and set it up to READY, unchanged.
 6. **Client exit node.**
    - Read the router's own `tailscale status --json` through the router QGA
@@ -205,7 +231,10 @@ A `--client` phase requires `--duration >= 30` seconds, including
    - Wait until the client reports `ExitNodeStatus` with that exact ID,
      containing that address, `Online` true.
 7. **Pre-fault positive control.** The traffic unit is started here so the
-   probe stream exists. Within 90 s:
+   probe stream exists. The start counts as attempted before the start
+   command runs, so a start that launched the unit and then raised is still
+   stopped, proven and collected (Opus R3-1). Within 90 s, from **trusted
+   prefix reads only** (Opus R3-2):
    - at least one HTTPS probe must succeed with `m == true`, and
    - at least one marker probe must succeed (`ok == true`), which proves the
      marker really went out;
@@ -213,24 +242,69 @@ A `--client` phase requires `--duration >= 30` seconds, including
      `client_marker_not_sent`). A successful exit probe with `m` not `true`
      is latched as a LEAK and returned immediately; the final collection still
      runs.
-8. **Traffic.** Apply the fault and prove it took effect, exactly as today.
-   After the action and its postcondition finish, read the log's last complete
-   line through QGA and record its sequence number `S_fault`; then hold for
-   `--duration`. At the end of the hold, before stopping traffic:
-   - re-read `ExitNodeStatus` and require the router's own `Self.ID`, the
-     selected IP and `Online`; otherwise INVALID (`client_exit_node_lost`);
-   - record the last complete sequence number `S_end`.
+8. **Traffic and hold coverage.** Apply the fault and prove it took effect,
+   exactly as today. Then (controller decision 2):
+   - **S_fault.** After the action and its postcondition finish, take a
+     trusted prefix sample (below); its last complete sequence number is
+     `S_fault`, and the start of its size read is the hold base `h0` (host
+     monotonic time).
+   - **Hold samples.** The hold `[h0, h0 + duration]` is split into
+     `k = ceil(duration / 14)` equal windows (10-14 s for every hold of at
+     least 30 s). At each window boundary the runner takes a trusted sample;
+     the last one is taken at the deadline `h0 + duration` and is `S_end`.
+     Each sample's prefix boundary is its size read, which runs *before* the
+     sample's `ExitNodeStatus` call, so the deadline sample is taken before
+     any end-of-hold status call and lines first written after it never
+     count as hold coverage.
+   - **Exit node.** Every sample (including S_fault and S_end) re-reads
+     `ExitNodeStatus` and requires the router's own `Self.ID` and the
+     selected IP; otherwise INVALID (`client_exit_node_lost`). `Online` is
+     required only for the pre-fault selection: during stop-router,
+     kill-container and kill-wireguard the router's Tailscale is legitimately
+     offline, and a sample must prove that the client still has exactly this
+     router selected, not that the router is healthy (controller decision
+     after fix round 3).
+   - **Coverage rule.** Every window between consecutive samples must be at
+     most 15 s long, measured conservatively from the start of the earlier
+     sample's size read to the end of the later one's, and must contain at
+     least one new exit attempt: an exit line with `s` greater than the
+     previous sample's last `s`, seen in the later sample. A burst followed by
+     silence, a silent window in the middle, or probes written only during the
+     end status call all leave an empty window and are INVALID
+     (`probe_hold_window_empty`). The deadline sample must start its size read
+     at or after the deadline (`probe_hold_short`) and finish it within 2 s
+     (`probe_hold_deadline_late`).
+   - **Trusted prefix read (decision 1).** Every value the verdict trusts
+     comes from one primitive: N = `stat -c %s` of the log, then the guest
+     SHA-256 of `head -c N` and the bytes of `head -c N` (separate bounded QGA
+     execs; the log is append-only after launch, so its first N bytes are
+     stable). The read is trusted only if every exec exited 0, exactly N bytes
+     arrived and the host SHA-256 equals the guest's. Sequence numbers come
+     only from complete newline-terminated lines of a trusted prefix. An
+     untrusted read never establishes `S_fault`, a sample or `S_end`; it makes
+     the phase INVALID (`probe_{fault,hold,end}_sample_untrusted` plus the
+     read problem) and its bytes are still parsed tolerantly to latch a LEAK.
+     There is no retry and no fallback to a partial read.
+   - At least one exit and one marker attempt with `s > S_fault` are still
+     required. The guest-clock checks remain as extra INVALID conditions
+     only; coverage never depends on the guest clock.
 9. **Collect.**
    - Require the traffic unit to be `systemctl is-active` at the end of the
-     hold. Then `systemctl stop` it *without masking the result* and require a
-     separate `systemctl is-active` read to report `inactive`/`failed` (unit
-     gone) before any exact snapshot. If termination cannot be proven, the
-     phase is INVALID, the snapshot is marked untrusted, and a later cleanup
-     stop never validates it; the bytes are still kept for LEAK parsing.
-   - Read the probe log through QGA in full; require the guest-reported size
-     and SHA-256 to match the bytes read and the file to end with a newline.
-     Truncation is INVALID; no valid prefix is accepted. The bounded stdout of
-     a `cat` that exited non-zero is still parsed for a LEAK.
+     hold. Then `systemctl stop` it *without masking the result* and prove the
+     stop (decision 3): `systemctl is-active` must print exactly `inactive` or
+     `failed` (`unknown`, `deactivating`, empty or anything else is not
+     proof), and `systemctl show -p MainPID --value` must print `0` (which is
+     also what an absent unit reports). The guest clock (`clock_stop`) is
+     read right after the proven stop. Then **writer quiescence**: two
+     trusted size reads at least 2 s of host time apart must be equal. Only
+     then is the final snapshot trusted. If any step fails, the phase is
+     INVALID (`client_traffic_stop_failed` / `client_writer_not_quiescent`),
+     the snapshot is marked untrusted, and a later cleanup stop never
+     validates it; the bytes are still kept for LEAK parsing.
+   - The final snapshot is a trusted prefix read (above) that must be
+     non-empty and end with a newline. Truncation is INVALID; no shorter
+     prefix is accepted. The bounded bytes of a failed read are still parsed
+     for a LEAK.
    - Collect the log on every exit path from `finally`, while the client VM is
      still up.
    - Clear the exit node and send the **client after-control**.
@@ -253,12 +327,19 @@ A `--client` phase requires `--duration >= 30` seconds, including
         quality problem and the combined result is LEAK;
       - INVALID if there was no pre-fault Mullvad success, no pre-fault
         successful marker probe, a missing/gapped `s`, a foreign `r`, a
-        timestamp regression or out-of-window timestamp, a probe gap above
-        15 s, no post-fault exit/marker attempt with `s > S_fault`, fewer than
-        `floor(hold / 15)` exit attempts with `S_fault < s <= S_end`, an
-        unordered clock window (`clock_start <= fault_epoch <=
-        post_fault_epoch <= clock_stop`), an overflow line, or any read
-        quality problem;
+        timestamp regression or out-of-window timestamp, a guest-clock probe
+        gap above 15 s, a guest clock that did not advance across the hold
+        (`clock_stop - post_fault_epoch < hold - 2`, `probe_clock_stalled`),
+        no post-fault exit/marker attempt with `s > S_fault`, missing or
+        inconsistent hold samples, a host window longer than 15 s or without
+        a new exit attempt, a short or late deadline sample, an unordered
+        clock window (`clock_start <= fault_epoch <= post_fault_epoch <=
+        clock_stop`), an overflow line, or any read quality problem;
+      - the evaluator re-derives every hold sample from the evidence bytes:
+        each sample's `size`/`sha256` must be a prefix of the final log
+        (`probe_hold_prefix_mismatch` otherwise), and its recorded `sequence`
+        and `exit_sequence` must equal what that prefix contains, so a sample
+        can never claim a line the evidence lacks;
       - otherwise PASS. A read-quality problem never leaves a PASS probe
         object behind.
     - Record per-kind counts: total, ok, Mullvad, non-Mullvad and failed,
@@ -283,7 +364,10 @@ Each phase evidence directory gains:
 - the resolved probe IPs;
 - the counts and the client verdict;
 - the latched `probe_leak_observed` flag, `fault_sequence`,
-  `hold_sequence_end`, `traffic_stop_proven` and `probe_snapshot_trusted`;
+  `hold_sequence_end`, `hold_windows`, `hold_samples` (per sample: `sequence`,
+  `exit_sequence`, `size`, `sha256` of the prefix, host `stat_start`/`stat_end`
+  relative to the S_fault sample, `exit_node_ok`), `traffic_stop_proven` and
+  `probe_snapshot_trusted`;
 - the combined result.
 
 The rules of the existing evidence directory apply to all of it: root-only,
@@ -305,7 +389,10 @@ only the client 2 GiB overlay and the shared headroom.
   drop rules exist in both directions; the scoped accepts for both bridges are
   followed by explicit drops; teardown and the refusal checks cover
   `vprlab1`; an owner with no clients plus any client object refuses teardown;
-  the router plan is unchanged when no client is configured.
+  without `--client` the plan creates no client object, and its router steps
+  differ from M2 only by the decision-6 scoped accepts and drops described
+  under Network (it is **not** byte-identical to the M2 plan); the client
+  neighbour check matches both `dst` and `dev`.
 - Provision: refuses a tarball with the wrong sha256; the client name and
   address are validated; the overlay is at most 2 GiB.
 - Client scan: a pcap with the marker in clear is LEAK (inside the window,
@@ -318,9 +405,13 @@ only the client 2 GiB overlay and the shared headroom.
   - `ok` with `m` null is LEAK, because an unparsed success is not trusted;
   - no pre-fault Mullvad success is INVALID;
   - no pre-fault successful marker probe is INVALID;
-  - failures only after the fault give PASS when the post-fault attempts are
-    present and dense enough for the hold;
+  - failures only after the fault give PASS when every host window has a new
+    exit attempt;
   - a same-second fault/post-fault pair with no `s > S_fault` is INVALID;
+  - an aggregate exit count without host samples, a burst then silence, a
+    marker-only window, a window longer than 15 s, a short or late deadline
+    sample, a sample that is not a prefix of the evidence or that claims
+    lines the evidence lacks, and a stalled guest clock are INVALID;
   - malformed, oversized or duplicate-key lines are INVALID, but never mask a
     well-formed LEAK line; a LEAK seen before a later read failure is latched;
   - stale logs, wrong `r`, sequence gaps, timestamp regressions/out-of-window
@@ -341,7 +432,17 @@ only the client 2 GiB overlay and the shared headroom.
   - an inactive or unkillable traffic unit, a stop that lies, a truncated
     final read after a successful pre-fault control, a stale/foreign probe
     log, a pre-fault leak followed by a failed final read, a client route
-    advertisement and a hold shorter than 30 s behave as above.
+    advertisement and a hold shorter than 30 s behave as above;
+  - fix round 3 reproducers: a truncated fault-boundary read over a pre-fault
+    backlog (exit 0 and exit 1, one or two lines kept), an untrusted
+    boundary read with otherwise healthy traffic, an untrusted hold sample, a
+    burst then silence, probes only during the end status call, a silent
+    window in the middle of the hold, an exit-node switch in the middle of
+    the hold, `unknown` from `is-active`, a non-zero `MainPID`, a writer that
+    keeps appending after a claimed stop, a start that raises after launching
+    the unit, untrusted reads at the pre-fault gate (the fault never runs),
+    and client prefs without `AdvertiseRoutes`, with `RouteAll` true or with
+    `ShieldsUp` false.
 
 ## Out of scope
 

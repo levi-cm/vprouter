@@ -317,3 +317,159 @@ sh /root/vprlab-lab.sh setup
 # ... phases ...
 sh /root/vprlab-lab.sh teardown
 ```
+
+---
+
+# Fix round 3
+
+Milestone: M3 — fix round for the three round-3 re-reviews of `37bafc2`
+(`leak-lab-m3-rereview3-gpt.md` FAIL, `-opus.md` PASS with Minors,
+`-pi.md` FAIL).  Repository: `/DATA/AppData/vprouter-rust-v2` (branch
+`rust/v2`, HEAD `37bafc2`).  Date: 2026-11-09.
+
+All work is in the working tree; nothing was staged, committed or pushed.  No
+privileged command (sudo, QEMU, tcpdump, `ip`, `nft`, `iptables`, docker,
+useradd, `systemctl` or network execution) was run.  Generated shell was only
+parsed (`sh -n`) or run through the repository stub harness.  Scratch
+`/var/tmp/leaklab-m3-fix3`, including the extracted `git archive 37bafc2` tree
+used for the regression check, was deleted at the end.
+
+## Design (controller decisions 1-5)
+
+- **One exact prefix-read primitive** (`vm/run_phase.py:3380`,
+  `ProbeLogRead` `:3357`).  N = `stat -c %s` (exit status kept, no `|| true`),
+  then `head -c N | sha256sum` and `head -c N` as separate bounded QGA execs.
+  Trusted only if every exec exited 0, `len(bytes) == N` and the host SHA-256
+  equals the guest's.  Untrusted reads still return their bytes for tolerant
+  LEAK parsing.  Used by the pre-fault gate, the S_fault sample, every hold
+  sample, the deadline sample and the final snapshot
+  (`read_client_probe_log_exact` `:3450` adds non-empty + final newline).
+  Sequence numbers come only from complete lines of a trusted prefix
+  (`clientprobe.prefix_observation` `clientprobe.py:230`,
+  `complete_lines` `:217`; `take_client_probe_sample` `run_phase.py:3469`).
+  The old tolerant `read_client_probe_sequence` with its 10 s retry is gone:
+  an untrusted read never sets S_fault, a sample or S_end and makes the phase
+  INVALID (`probe_{fault,hold,end}_sample_untrusted` + the read problem).
+- **Host-observed hold coverage** replaces `floor(hold/15)`.  The S_fault
+  sample's size read is the hold base `h0`; the hold is split into
+  `k = ceil(duration/14)` equal windows (`CLIENT_HOLD_SAMPLE_TARGET`,
+  `run_phase.py:145`; 10-14 s for every hold >= 30 s, above the traffic loop's
+  worst-case exit spacing and below the 15 s limit); a trusted sample is taken
+  at each boundary and at the deadline (`run_phase.py:4538-4612`).  Each
+  sample's prefix boundary is its size read, which precedes its
+  `ExitNodeStatus` re-check, so S_end is fixed before any end-of-hold status
+  call.  The record carries `hold_samples` (sequence, exit_sequence, size,
+  prefix sha256, host stat_start/stat_end relative to h0, exit_node_ok) and
+  `hold_windows`.  `evaluate_probe_log(..., hold_samples=)` re-derives every
+  sample from the evidence bytes (prefix SHA-256 must match, recorded
+  sequence/exit_sequence must equal the prefix's) and requires: first = S_fault,
+  last = S_end; each window <= 15 s from the earlier size-read start to the
+  later size-read end; a new exit attempt (`exit_sequence_i > sequence_{i-1}`)
+  in every window; deadline reached and the deadline read finished within 2 s
+  (`clientprobe.py:296-358`, `:557`).  Guest-clock checks stay as extra
+  INVALID conditions, plus `probe_clock_stalled` (`:546`, Opus R3-3's cheap
+  check).  At least one exit and one marker attempt with `s > S_fault` are
+  still required.  CLI: `--hold-samples <json>` (`clientprobe.py:642`).
+- **Proven stop** (`stop_client_traffic` `run_phase.py:3271`): `is-active`
+  must print exactly `inactive`/`failed` (`:3299`), and
+  `systemctl show -p MainPID --value` must print `0` (`:3253`).  Then writer
+  quiescence: two trusted size reads >= 2 s of host time apart must match
+  (`client_probe_writer_quiescent` `:3333`), on the end-of-hold path (`:4644`)
+  and in `finally` before a trusted collection (`:4710`).  `clock_stop` is read
+  right after the proven stop, before the 2 s wait (`:4643`; also narrows Pi
+  R3-M4's tail gap).
+
+## Finding-to-fix map
+
+Line numbers are from the fixed working tree.
+
+| ID | Fix |
+|---|---|
+| GPT R3-C1 / Pi R3-I1 — partial boundary read understates S_fault | Exact prefix primitive (`vm/run_phase.py:3380`); S_fault only from a trusted sample (`:4574`), no retry, no partial fallback; an untrusted boundary read is `probe_fault_sample_untrusted` → INVALID even with healthy traffic.  Tests `vm/test_vm.py:7309` (GPT backlog after the wait, exit 1 and exit 0; Pi backlog during the action, one line kept), `:7343` (healthy hold), `:7357` (untrusted hold sample), `:7653`/`:7679` (primitive). |
+| GPT R3-C2 — total count does not prove coverage over the hold | Host-scheduled trusted samples and per-window coverage (`vm/run_phase.py:4583-4612`, `clientprobe.py:296-358`); S_end sampled before the status call.  Tests `vm/test_vm.py:7376` (1 Hz burst at +1/+2 s then 28 s silence), `:7391` (probes only during the end status call), `:7427` (30 s silent window inside a 60 s hold), `:7443` (healthy positive control, windows/samples asserted); evaluator `test_leak_lab.py:5895`, `:5922`, `:5933`, `:5951`, `:5973`, `:5992`, `:6006`. |
+| Opus R3-1 — start that raises after launch gives a trusted live snapshot | `traffic_started = True` before `start_client_traffic` (`vm/run_phase.py:4455`); `finally` stops, proves and quiesces before collecting.  Test `vm/test_vm.py:7535` (LEAK). |
+| Opus R3-2 — positive controls from failed reads | `wait_client_probe_control` (`vm/run_phase.py:3605`) takes `mullvad`/`marker` only from trusted prefixes; LEAK from any bytes.  Tests `vm/test_vm.py:7749` (function), `:7553` (phase: the destructive fault never runs). |
+| Opus R3-3 — coverage relied on the guest clock | Superseded by host samples; plus `probe_clock_stalled` (`clientprobe.py:546`).  Tests `test_leak_lab.py:5882` (the E7 fixture without samples), `:6032`. |
+| Opus R3-4 — single end-of-hold exit check; RouteAll/ShieldsUp unchecked | Every sample re-checks `ExitNodeStatus` (`vm/run_phase.py:4560-4566`); prefs require `RouteAll` false and `ShieldsUp` true (`:2938`).  Tests `vm/test_vm.py:7465` (switch away and back mid-hold), `:7567`, `:7776`. |
+| Opus R3-4b / Pi R3-M2 — `client_neigh_ok` not scoped by device | New `_CLIENT_NEIGH_CHECK_CODE` matches `dst` and `dev` (`netplan.py:403`), called with the device (`:1097`); the router `neigh_ok` and its check are unchanged.  Test `test_leak_lab.py:4888`. |
+| Pi R3-M1 — `unknown` accepted as a proven stop | Only `inactive`/`failed` + `MainPID` 0 + quiescence (`vm/run_phase.py:3271-3300`, `:3333`).  Tests `vm/test_vm.py:7488` (`unknown` with a live writer), `:7505` (writer keeps appending after a claimed stop → LEAK), `:7518` (non-zero MainPID), `:7702`, `:7721`. |
+| Pi R3-M3 — design said the router-only plan was unchanged | Design Network section documents the decision-6 `vprlab0` scoped accepts + drops and why; the Tests bullet now says the no-client plan is not byte-identical (`docs/rust-v2/leak-lab-m3-clients.md`). |
+| Pi R3-M4 — post-hold QGA calls widen the tail gap | Partly addressed: `clock_stop` is read right after the proven stop, before the 2 s quiescence wait.  The guest gap rule itself is unchanged (false-INVALID only). |
+| Pi R3-M5 — missing `AdvertiseRoutes` accepted | Missing key → `client_prefs_incomplete`; `[]` or JSON `null` (Go's empty slice) accepted (`vm/run_phase.py:2938`).  Tests `vm/test_vm.py:7567`, `:7776`. |
+| Opus "S_fault from a failed tolerant read" note | Covered by decision 1 (no S_fault from an untrusted read). |
+
+## Regression check against `37bafc2`
+
+An extracted `git archive 37bafc2` tree received the new `test_leak_lab.py`
+and `vm/test_vm.py` unchanged (the fake answers both the old `cat`/`sha256sum`
+and the new `head -c` reads; the hooks only patch functions that exist on
+both trees).  Outcomes of the phase reproducers through the real runner,
+real `clientprobe` and real `clientscan`:
+
+| Reproducer | `37bafc2` | Fixed |
+|---|---|---|
+| GPT R3-C1 truncated boundary, backlog, `cat` exit 1 | exit 0 PASS, S_fault=2 | exit 2 INVALID, S_fault none |
+| GPT R3-C1 same, exit 0 | exit 0 PASS, S_fault=2 | exit 2 INVALID |
+| Pi R3-I1 one line kept, backlog during the action | exit 0 PASS, S_fault=1 | exit 2 INVALID |
+| Truncated boundary, healthy hold | exit 0 PASS | exit 2 INVALID |
+| GPT R3-C2 burst then silence | exit 0 PASS | exit 2 INVALID `probe_hold_window_empty` |
+| GPT R3-C2 probes only during the end status call | exit 0 PASS | exit 2 INVALID, S_end = S_fault |
+| Silent window in the middle of a 60 s hold | exit 0 PASS | exit 2 INVALID |
+| Exit-node switch mid-hold (Opus R3-4) | exit 0 PASS | exit 2 INVALID `client_exit_node_lost` |
+| Pi R3-M1 `unknown` + live writer | exit 0 PASS (leak in guest log) | exit 2 INVALID, snapshot untrusted |
+| Writer keeps appending after a claimed stop | exit 0 PASS (leak in guest log) | exit 1 LEAK |
+| Opus R3-1 start raises after launch, leak before stop | exit 2 INVALID | exit 1 LEAK |
+| Opus R3-2 every transfer exits 1 | fault ran, INVALID late | refused before the fault |
+| Control: healthy stop-router 30 s | exit 0 PASS | exit 0 PASS |
+
+Unittest run on the old tree: all 14 new regression tests (the 11 phase
+tests, `ClientProbeReadTests.test_opus_r3_2_...`,
+`ClientProbeTests.test_opus_r3_3_...`, `ClientNetplanTests.test_client_neighbour_check_is_scoped_by_device`)
+**fail by assertion** (19 failures counting subtests; no import or attribute
+error), and all pass on the fixed tree.  The old evaluator returns **PASS**
+for the Opus R3-3 fixture.
+
+## Tests run (all pass)
+
+From `tools/leak-lab`:
+
+- `python3 -B -W error -m unittest test_leak_lab` — **341 tests, OK** (was 329)
+- `python3 -B -W error -m unittest vm.test_vm` — **289 tests, OK** (was 266)
+- `py_compile` of `clientprobe.py`, `clientscan.py`, `netplan.py`,
+  `vm/guest.py`, `vm/provision.py`, `vm/run_phase.py`, `vm/test_vm.py`,
+  `test_leak_lab.py` — OK
+- `sh -n` on the rendered no-client, `--client 1` and `--client 1,2` plans — OK
+- `git diff --check` — OK
+
+Router-only verification: an AST comparison with `37bafc2` shows
+`_run_phase_locked`, `scan_evidence`, `start_capture`, `stop_capture`,
+`run_phase`, `run_router_fault`, `wait_router_ready`, `emit_control`,
+`cleanup_guest_units`, `poweroff_vm`, `check_admission`, `login_phase_wait`,
+`combine_verdicts` and `main` unchanged.  The rendered no-client plan differs
+from `37bafc2` only inside the `client_neigh_ok` helper, which runs only when
+`owner.json` records clients.
+
+## Open risk to verify live (not a false PASS)
+
+Decision 2 requires `ExitNodeStatus.Online` at **every** sample.  In
+`stop-router` and `kill-container` the router's Tailscale is down for the
+hold, so the client will likely report the peer offline within seconds and
+those phases would be INVALID `client_exit_node_lost`.  Round 2 already had
+the same check at the end of the hold; sampling makes it certain.  If live
+runs confirm this, the controller may want ID+IP (not `Online`) during the
+hold for those phases.  It can only cause a false INVALID.
+
+## Updated operator commands
+
+The probe-log CLI now also needs the recorded hold samples (the
+`client.hold_samples` list of `phase.json`, saved as JSON):
+
+```sh
+python3 -B tools/leak-lab/clientprobe.py --probe-log <file> \
+  --fault-epoch <guest-sec> --post-fault-epoch <guest-sec> \
+  --fault-sequence <s> --end-sequence <s> --hold-seconds <n> \
+  --clock-start <guest-sec> --clock-stop <guest-sec> --run-id <32 hex> \
+  --hold-samples <hold-samples.json>
+```
+
+`run_phase.py` and `netplan.py` invocations are unchanged.

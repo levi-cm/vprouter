@@ -130,12 +130,16 @@ refused); `tailscale set --exit-node=<peer IPv4>
 --exit-node-allow-lan-access=false`; wait until `ExitNodeStatus` names that ID,
 contains the address and is online; delete any stale probe log, start the
 transient traffic unit and require a pre-fault Mullvad success **and** a
-successful marker probe within 90 s (`client_not_routed` /
-`client_marker_not_sent` otherwise); hold for `--duration`; require the unit
-still active, stop it, read the exact size/hash/newline-bound probe log; clear
-the exit node; send the client after-control; send the router after-control;
-shut both VMs down and stop both captures only after both QEMUs exited; then
-scan.
+successful marker probe within 90 s, both from trusted prefix reads
+(`client_not_routed` / `client_marker_not_sent` otherwise); apply the fault;
+take the trusted `S_fault` sample; hold for `--duration` while taking a
+trusted sample (plus an `ExitNodeStatus` re-check) at least every 15 s of host
+monotonic time and one at the deadline (`S_end`, before any status call);
+require the unit still active, stop it and prove the stop (`is-active`
+`inactive`/`failed`, `MainPID` 0, two equal log sizes 2 s apart), read the
+exact probe log; clear the exit node; send the client after-control; send the
+router after-control; shut both VMs down and stop both captures only after
+both QEMUs exited; then scan.
 
 For every accepted phase the router is made READY before the fault, including
 `start-router` (whose action is then an idempotent `systemctl start`), because
@@ -158,10 +162,16 @@ the fix round because 48 bits over an IPv4 address is reversible.
 that accepted exception is recorded in the M3 design.
 
 Every probe line carries the phase marker id `r` and a gap-free sequence `s`.
-The runner deletes the log before launch, requires the unit to be active at the
-end of the hold, reads the stopped file only when its guest-reported size and
-SHA-256 match the bytes read and it ends with a newline, and collects the log
-on every exit path while the client VM is still up.
+The runner deletes the log before launch and requires the unit to be active at
+the end of the hold.  Every value the verdict trusts comes from one exact
+prefix read: N = `stat -c %s`, then `head -c N | sha256sum` and `head -c N`;
+it is trusted only if every exec exited 0, exactly N bytes arrived and the
+host SHA-256 equals the guest's.  Sequence numbers come only from complete
+lines of a trusted prefix; an untrusted read never sets `S_fault`, a hold
+sample or `S_end`, makes the phase INVALID, and is still parsed for a LEAK.
+The final snapshot is a trusted, non-empty, newline-terminated prefix taken
+after a proven stop, and the log is collected on every exit path while the
+client VM is still up.
 
 `clientscan.py` (invoked by the runner through the retained evidence fd) checks
 only what is provable on the client path:
@@ -184,10 +194,14 @@ LEAK, even if other lines are malformed or the log is truncated, and a leak is
 latched across later read failures; no pre-fault Mullvad success is INVALID
 `client_not_routed`; no pre-fault successful marker probe is INVALID
 `client_marker_not_sent`; a foreign run id, sequence gap, timestamp
-regression/out-of-window value, probe gap above 15 s, missing post-fault
-exit/marker attempt (`s > S_fault`), fewer than `floor(hold / 15)` post-fault
-exit attempts, an unordered clock window, overflow line or read-quality problem
-is INVALID.  Failures after the fault are expected and counted only.  The final
+regression/out-of-window value, guest-clock probe gap above 15 s, a guest
+clock that did not advance across the hold, missing post-fault exit/marker
+attempt (`s > S_fault`), missing or inconsistent hold samples, a host window
+between two samples longer than 15 s or without a new exit attempt, a
+deadline sample that is short or late, an unordered clock window, overflow
+line or read-quality problem is INVALID.  Hold coverage is decided only from
+the host-observed samples, re-derived from the evidence bytes through each
+sample's prefix SHA-256; it never depends on the guest clock.  Failures after the fault are expected and counted only.  The final
 phase result is the worst of the router scan, the client scan, the probe
 verdict and runner errors: LEAK > INVALID > PASS; a missing verdict is INVALID.
 

@@ -43,6 +43,7 @@ import datetime
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import pathlib
 import re
@@ -133,12 +134,18 @@ CLIENT_MEMORY_MIB = guest.CLIENT_MEMORY_MIB
 MIN_CLIENT_MEMORY_AVAILABLE = MIN_MEMORY_AVAILABLE + CLIENT_MEMORY_MIB * guest.MIB
 CLIENT_ROUTED_TIMEOUT = 90.0
 CLIENT_READY_TIMEOUT = 180.0
-#: A client phase must hold long enough for the probe loop to be observed.
-#: The sequence binding also requires floor(hold / 15) exit attempts.
+#: A client phase must hold long enough for the probe loop to be observed
+#: across more than one host-sampled window.
 MIN_CLIENT_HOLD_SECONDS = 30
-#: Tolerant reads of the still-running probe log; a failed read is retried for
-#: this long before the fault/end sequence boundary is declared missing.
-CLIENT_SEQUENCE_READ_TIMEOUT = 10.0
+#: Host-observed hold coverage (controller decision 2): the hold is split into
+#: equal windows no longer than this target, so every window stays below
+#: clientprobe.MAX_HOLD_SAMPLE_WINDOW (15 s) including the size-read latency,
+#: and above the traffic loop's worst-case exit spacing (two `curl -m 3`
+#: probes plus a 1 s sleep) for every hold of at least 30 s (>= 10 s).
+CLIENT_HOLD_SAMPLE_TARGET = 14.0
+#: Writer quiescence after a proven stop (controller decision 3): two trusted
+#: size reads at least this far apart must agree.
+CLIENT_STOP_QUIESCENCE_SECONDS = 2.0
 #: The traffic unit may outlive the hold by this margin; RuntimeMaxSec must
 #: cover the pre-fault wait, the fault action, a possible reboot, the hold and
 #: this margin.  The runner still stops the unit explicitly.
@@ -2929,20 +2936,30 @@ def read_client_prefs(client: QGAClient) -> dict | None:
 
 
 def client_route_advertisement_problem(document: object) -> str | None:
-    """Return a fixed code when the client advertises any route.
+    """Return a fixed code unless the client prefs keep the client role.
 
-    ``tailscale debug prefs`` is authoritative for persisted preferences: an
-    empty ``AdvertiseRoutes`` list (or JSON null) means the client never acts
-    as a subnet router, even if ``tailscale status`` has no PrimaryRoutes.
+    ``tailscale debug prefs`` is authoritative for persisted preferences:
+
+    * ``AdvertiseRoutes`` must be present and empty (``[]``, or JSON ``null``,
+      which is how Go encodes an empty slice); a missing key is a refusal
+      (Pi R3-M5), any route is ``client_advertises_routes``;
+    * ``RouteAll`` must be exactly ``false`` (``--accept-routes=false``) and
+      ``ShieldsUp`` exactly ``true`` (``--shields-up``; Opus R3-4).
     """
     if not isinstance(document, dict):
         return "client_prefs_unreadable"
+    if "AdvertiseRoutes" not in document:
+        return "client_prefs_incomplete"
     routes = document.get("AdvertiseRoutes")
-    if routes is None:
-        return None
-    if isinstance(routes, list) and not routes:
-        return None
-    return "client_advertises_routes"
+    if routes is not None and not (isinstance(routes, list) and not routes):
+        return "client_advertises_routes"
+    if "RouteAll" not in document or "ShieldsUp" not in document:
+        return "client_prefs_incomplete"
+    if document.get("RouteAll") is not False:
+        return "client_accepts_routes"
+    if document.get("ShieldsUp") is not True:
+        return "client_shields_down"
+    return None
 
 
 def wait_client_running(
@@ -3078,12 +3095,17 @@ def client_peer_ipv4(peer: dict, expected: list[str] | None = None) -> str:
 
 
 def client_peer_is_active(
-    document: object, router_id: str, address: str
+    document: object, router_id: str, address: str, *, require_online: bool = True
 ) -> bool:
     """Require an explicit ExitNodeStatus for the exact router peer.
 
     There is deliberately no ``Self.ExitNode``/HostName shortcut: only the
     status naming the router's own node ID and the selected address counts.
+    ``require_online`` is True for the pre-fault selection.  Hold samples pass
+    False: during stop-router, kill-container or kill-wireguard the router's
+    Tailscale is legitimately offline, and what a sample must prove is that
+    the client still has exactly this router selected (no switch to another
+    exit node), not that the router is healthy.
     """
     if not isinstance(document, dict):
         return False
@@ -3092,7 +3114,7 @@ def client_peer_is_active(
         return False
     if status.get("ID") != router_id:
         return False
-    if status.get("Online") is not True:
+    if require_online and status.get("Online") is not True:
         return False
     addresses = status.get("TailscaleIPs")
     if not isinstance(addresses, list):
@@ -3233,18 +3255,39 @@ def client_traffic_unit_state(client: QGAClient) -> str | None:
     return text or None
 
 
+def client_traffic_main_pid(client: QGAClient) -> int | None:
+    """Return the unit's ``MainPID`` (0 when no process or no unit), or None."""
+    result = client.execute(
+        "/bin/sh",
+        [
+            "-c",
+            f"systemctl show -p MainPID --value {guest.CLIENT_TRAFFIC_UNIT}.service",
+        ],
+        timeout=15.0,
+    )
+    if result.exitcode != 0:
+        return None
+    text = result.stdout.decode("ascii", "replace").strip()
+    if not text.isdigit():
+        return None
+    return int(text)
+
+
 def stop_client_traffic(client: QGAClient) -> bool:
     """Stop the unit and return True only when it is proven not running.
 
-    The old shell form ended in ``|| true; ...; true`` and hid every failure.
-    Here the stop result is kept, and the postcondition is a separate
-    ``systemctl is-active`` read: only ``inactive``/``failed`` (or a unit the
-    manager no longer knows) proves that the writer cannot run any more.  A
-    stop that returns success while the unit stays active is a failure.
+    The stop result is kept, and the postcondition is two separate reads:
+    ``systemctl is-active`` must print exactly ``inactive`` or ``failed``
+    (``inactive`` is also what it prints for a unit the manager no longer
+    knows), and ``systemctl show -p MainPID --value`` must print ``0`` (also
+    what it prints for an absent unit).  ``unknown``, ``deactivating``, an
+    empty answer or any other word is not proof (Pi R3-M1).  Writer
+    quiescence is proven separately by :func:`client_probe_writer_quiescent`
+    before any snapshot is trusted.
     """
     # The stop exit status is deliberately not the proof: `systemctl stop`
-    # can return non-zero for an already-gone unit.  The state read below is
-    # authoritative, and it is never skipped.
+    # can return non-zero for an already-gone unit.  The state reads below
+    # are authoritative, and they are never skipped.
     client.execute(
         "/bin/sh",
         ["-c", f"systemctl stop {guest.CLIENT_TRAFFIC_UNIT}.service"],
@@ -3258,7 +3301,9 @@ def stop_client_traffic(client: QGAClient) -> bool:
         timeout=15.0,
     )
     state = client_traffic_unit_state(client)
-    return state in ("inactive", "failed", "unknown")
+    if state not in ("inactive", "failed"):
+        return False
+    return client_traffic_main_pid(client) == 0
 
 
 def stop_client_login_unit(client: QGAClient) -> None:
@@ -3275,117 +3320,180 @@ def stop_client_login_unit(client: QGAClient) -> None:
     )
 
 
-def read_client_probe_log(client: QGAClient) -> tuple[bytes | None, str | None]:
-    """Read the bounded probe log while the unit may still be writing.
-
-    This tolerant read is used for the pre-fault wait and for the fault/end
-    sequence boundaries.  A ``cat`` that exited non-zero still returns its
-    bounded stdout: those bytes may contain a recognised LEAK and must never
-    be discarded.  The final evidence read is
-    :func:`read_client_probe_log_exact`.
-    """
-    stat = client.execute(
-        "/bin/sh",
-        ["-c", f"stat -c %s {guest.CLIENT_PROBE_LOG} 2>/dev/null || true"],
-        timeout=15.0,
-    )
-    size_text = stat.stdout.decode("ascii", "replace").strip()
-    if not size_text.isdigit():
-        return None, "probe_log_missing"
-    size = int(size_text)
-    if size > CLIENT_PROBE_READ_LIMIT:
-        return None, "probe_log_oversized"
+def read_client_probe_size(client: QGAClient) -> int | None:
+    """Return the guest-reported log size, or None unless ``stat`` succeeded."""
     result = client.execute(
-        "/bin/sh", ["-c", f"cat {guest.CLIENT_PROBE_LOG}"], timeout=30.0
-    )
-    if len(result.stdout) > CLIENT_PROBE_READ_LIMIT:
-        return None, "probe_log_oversized"
-    if result.exitcode != 0:
-        return result.stdout, "probe_log_unreadable"
-    return result.stdout, None
-
-
-def read_client_probe_log_exact(client: QGAClient) -> tuple[bytes | None, str | None]:
-    """Read the stopped log and require exact size, SHA-256 and a final newline.
-
-    A prefix that happens to end on a JSON boundary is still a truncated
-    transfer; only the exact bytes the guest hashed are accepted evidence.
-    The received bytes are returned with the problem when a transfer is
-    rejected, so a well-formed leak inside them is never masked.  A ``cat``
-    that exits non-zero also returns its bounded stdout for tolerant leak
-    parsing.
-    """
-    stat = client.execute(
         "/bin/sh",
-        ["-c", f"stat -c %s {guest.CLIENT_PROBE_LOG} 2>/dev/null || true"],
+        ["-c", f"stat -c %s {guest.CLIENT_PROBE_LOG}"],
         timeout=15.0,
     )
-    size_text = stat.stdout.decode("ascii", "replace").strip()
-    if not size_text.isdigit():
-        return None, "probe_log_missing"
-    size = int(size_text)
-    if size <= 0:
-        return b"", "probe_log_empty"
+    if result.exitcode != 0:
+        return None
+    text = result.stdout.decode("ascii", "replace").strip()
+    if not text.isdigit():
+        return None
+    return int(text)
+
+
+def client_probe_writer_quiescent(client: QGAClient) -> bool:
+    """Prove the probe log stopped growing after a proven unit stop.
+
+    Two trusted size reads at least :data:`CLIENT_STOP_QUIESCENCE_SECONDS` of
+    host monotonic time apart must be equal.  A writer that survived a stop
+    which claimed success makes the snapshot untrusted.
+    """
+    first = read_client_probe_size(client)
+    if first is None:
+        return False
+    due = time.monotonic() + CLIENT_STOP_QUIESCENCE_SECONDS
+    while True:
+        remaining = due - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(0.25, remaining))
+    second = read_client_probe_size(client)
+    return second is not None and second == first
+
+
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+@dataclasses.dataclass(frozen=True)
+class ProbeLogRead:
+    """One exact prefix read of the probe log (controller decision 1).
+
+    ``data`` holds whatever bytes arrived, trusted or not, so a well-formed
+    LEAK in them is never discarded.  ``problem`` is None exactly when the
+    read is trusted: ``stat``, the guest digest and the byte transfer all
+    exited 0, ``len(data) == size`` and the host SHA-256 equals the guest's.
+    ``stat_start``/``stat_end`` are host monotonic times around the size
+    read, which fixes the prefix boundary.
+    """
+
+    data: bytes | None
+    size: int | None
+    sha256: str | None
+    problem: str | None
+    stat_start: float
+    stat_end: float
+
+    @property
+    def trusted(self) -> bool:
+        return self.problem is None
+
+
+def read_client_probe_prefix(client: QGAClient) -> ProbeLogRead:
+    """Read the first N bytes of the append-only log, N = ``stat -c %s``.
+
+    Three bounded QGA execs: the size, ``head -c N | sha256sum`` and
+    ``head -c N``.  The log is append-only after launch, so its first N bytes
+    are stable while the unit keeps appending; a short, failed or altered
+    transfer cannot match both the length and the guest digest.  This is the
+    only read whose bytes the verdict trusts: the pre-fault controls, the
+    fault boundary, every hold sample, the deadline sample and the final
+    snapshot all use it.
+    """
+    stat_start = time.monotonic()
+    size = read_client_probe_size(client)
+    stat_end = time.monotonic()
+
+    def outcome(
+        data: bytes | None, digest: str | None, problem: str | None
+    ) -> ProbeLogRead:
+        return ProbeLogRead(
+            data=data,
+            size=size,
+            sha256=digest,
+            problem=problem,
+            stat_start=stat_start,
+            stat_end=stat_end,
+        )
+
+    if size is None:
+        return outcome(None, None, "probe_log_missing")
     if size > CLIENT_PROBE_READ_LIMIT:
-        return None, "probe_log_oversized"
+        return outcome(None, None, "probe_log_oversized")
+    if size == 0:
+        return outcome(b"", hashlib.sha256(b"").hexdigest(), None)
     digest_result = client.execute(
         "/bin/sh",
-        ["-c", f"sha256sum {guest.CLIENT_PROBE_LOG} 2>/dev/null || true"],
+        ["-c", f"head -c {size} {guest.CLIENT_PROBE_LOG} | sha256sum"],
         timeout=30.0,
     )
     digest_text = digest_result.stdout.decode("ascii", "replace").strip()
-    digest = digest_text.split(None, 1)[0] if digest_text else ""
-    digest_ok = digest_result.exitcode == 0 and len(digest) == 64
-    result = client.execute(
-        "/bin/sh", ["-c", f"cat {guest.CLIENT_PROBE_LOG}"], timeout=30.0
+    token = digest_text.split(None, 1)[0] if digest_text else ""
+    digest = (
+        token
+        if digest_result.exitcode == 0 and _SHA256_HEX_RE.fullmatch(token)
+        else None
     )
-    if len(result.stdout) > CLIENT_PROBE_READ_LIMIT:
-        return None, "probe_log_oversized"
-    if not digest_ok:
-        # The digest read failed, but the bounded bytes are still parsed for a
-        # leak; they are never accepted as exact evidence.
-        return result.stdout, "probe_log_unreadable"
-    if result.exitcode != 0:
-        return result.stdout, "probe_log_unreadable"
-    data = result.stdout
+    data_result = client.execute(
+        "/bin/sh",
+        ["-c", f"head -c {size} {guest.CLIENT_PROBE_LOG}"],
+        timeout=30.0,
+    )
+    data = data_result.stdout
+    if len(data) > CLIENT_PROBE_READ_LIMIT:
+        return outcome(data[:CLIENT_PROBE_READ_LIMIT], digest, "probe_log_oversized")
+    if data_result.exitcode != 0 or digest is None:
+        # Bounded bytes are still returned for tolerant LEAK parsing; they
+        # are never trusted.
+        return outcome(data, digest, "probe_log_unreadable")
     if len(data) != size:
-        return data, "probe_log_truncated"
+        return outcome(data, digest, "probe_log_truncated")
     if hashlib.sha256(data).hexdigest() != digest:
-        return data, "probe_log_hash_mismatch"
+        return outcome(data, digest, "probe_log_hash_mismatch")
+    return outcome(data, digest, None)
+
+
+def read_client_probe_log(client: QGAClient) -> tuple[bytes | None, str | None]:
+    """Prefix read returning ``(bytes, problem)``; problem None iff trusted."""
+    read = read_client_probe_prefix(client)
+    return read.data, read.problem
+
+
+def read_client_probe_log_exact(client: QGAClient) -> tuple[bytes | None, str | None]:
+    """The final snapshot: a trusted prefix that is non-empty and ends in a newline.
+
+    Only called after the writer was proven stopped and quiescent, so the
+    prefix is the whole log.  Received bytes are returned with the problem
+    when the read is rejected, so a well-formed leak inside them is never
+    masked.
+    """
+    read = read_client_probe_prefix(client)
+    if read.problem is not None:
+        return read.data, read.problem
+    data = read.data if read.data is not None else b""
+    if not data:
+        return b"", "probe_log_empty"
     if not data.endswith(b"\n"):
         return data, "probe_log_truncated"
     return data, None
 
 
-def read_client_probe_sequence(
-    client: QGAClient, run_id: str
-) -> tuple[int | None, dict[str, bool] | None, str | None]:
-    """Return the last complete matching sequence number and tolerant flags.
+def take_client_probe_sample(
+    client: QGAClient, run_id: str, *, base: float | None
+) -> tuple[dict[str, Any] | None, ProbeLogRead]:
+    """Take one trusted hold sample; an untrusted read yields no sample.
 
-    The read is repeated for :data:`CLIENT_SEQUENCE_READ_TIMEOUT` so a single
-    transient QGA/``cat`` failure does not erase the fault boundary.  Bytes
-    from a failed ``cat`` are still parsed for a LEAK.
+    The sample's sequence numbers come only from complete newline-terminated
+    lines of a trusted prefix.  Host times are seconds relative to ``base``
+    (the S_fault sample's size read), or to this read when ``base`` is None.
     """
-    deadline = time.monotonic() + CLIENT_SEQUENCE_READ_TIMEOUT
-    problem = "probe_log_missing"
-    flags: dict[str, bool] | None = None
-    while True:
-        data, read_problem = read_client_probe_log(client)
-        if data is not None:
-            flags = clientprobe.probe_prefix_flags(data, run_id=run_id)
-            entries, _problems = clientprobe.parse_probe_log_partial(data)
-            last = 0
-            for _number, entry in entries:
-                if entry["r"] == run_id:
-                    last = max(last, int(entry["s"]))
-            if last > 0:
-                return last, flags, read_problem
-            problem = read_problem or "probe_log_missing"
-        else:
-            problem = read_problem or "probe_log_missing"
-        if time.monotonic() >= deadline:
-            return None, flags, problem
-        time.sleep(0.5)
+    read = read_client_probe_prefix(client)
+    if not read.trusted or read.data is None:
+        return None, read
+    observation = clientprobe.prefix_observation(read.data, run_id=run_id)
+    origin = read.stat_start if base is None else base
+    sample = {
+        "sequence": observation["sequence"],
+        "exit_sequence": observation["exit_sequence"],
+        "size": read.size,
+        "sha256": read.sha256,
+        "stat_start": round(max(0.0, read.stat_start - origin), 3),
+        "stat_end": round(max(0.0, read.stat_end - origin), 3),
+    }
+    return sample, read
 
 
 def collect_client_probe(
@@ -3507,10 +3615,10 @@ def wait_client_probe_control(
 ) -> dict[str, bool]:
     """Wait for a Mullvad success and a successful marker probe.
 
-    A non-Mullvad success is returned immediately as a leak so the caller can
-    stop waiting; the final collection still runs from the ``finally`` path.
-    Bytes returned by a ``cat`` that exited non-zero are parsed as well; a
-    recognised leak is never discarded because the read reported a problem.
+    The positive controls come only from trusted prefix reads (complete,
+    run-matching lines of a size- and SHA-256-verified prefix; Opus R3-2).
+    A non-Mullvad success in any received bytes, trusted or not, is returned
+    immediately as a leak; the final collection still runs from ``finally``.
     """
     if timeout is None:
         timeout = CLIENT_ROUTED_TIMEOUT
@@ -3518,12 +3626,16 @@ def wait_client_probe_control(
     flags = {"leak": False, "mullvad": False, "marker": False}
     while time.monotonic() < deadline:
         check_interrupt()
-        data, problem = read_client_probe_log(client)
-        if data is not None:
-            flags = clientprobe.probe_prefix_flags(data, run_id=run_id)
-            if flags["leak"] or (
-                problem is None and flags["mullvad"] and flags["marker"]
-            ):
+        read = read_client_probe_prefix(client)
+        if read.data:
+            if clientprobe.probe_prefix_flags(read.data, run_id=run_id)["leak"]:
+                flags["leak"] = True
+                return flags
+        if read.trusted and read.data is not None:
+            observation = clientprobe.prefix_observation(read.data, run_id=run_id)
+            flags["mullvad"] = flags["mullvad"] or observation["mullvad"]
+            flags["marker"] = flags["marker"] or observation["marker"]
+            if flags["mullvad"] and flags["marker"]:
                 return flags
         time.sleep(1.0)
     return flags
@@ -3968,6 +4080,7 @@ def _run_client_phase_locked(
         "traffic_stop_proven": None,
         "fault_sequence": None,
         "hold_sequence_end": None,
+        "hold_samples": [],
         "hold_seconds": int(arguments.duration),
         "combined": None,
     }
@@ -4340,6 +4453,11 @@ def _run_client_phase_locked(
         probe_ips = resolve_probe_ips()
         record["client"]["probe_ips"] = dict(probe_ips)
         record["client"]["probe_clock_start"] = read_guest_clock(client_client)
+        # Opus R3-1: the start counts as attempted before the call.  A start
+        # that launched the unit and then raised (a lost QGA reply) is still
+        # stopped, proven and collected from `finally`, never snapshotted
+        # while the writer may run.
+        traffic_started = True
         start_client_traffic(
             client_client,
             marker=marker,
@@ -4347,7 +4465,6 @@ def _run_client_phase_locked(
             http_ip=probe_ips["http"],
             runtime_sec=client_runtime_seconds(arguments.duration),
         )
-        traffic_started = True
         record["timestamps"]["traffic_started"] = utc_now()
         probe_flags = wait_client_probe_control(
             client_client, clientprobe.marker_run_id(marker)
@@ -4420,61 +4537,103 @@ def _run_client_phase_locked(
         record["client"]["post_fault_epoch"] = read_guest_clock(client_client)
         guard_check()
         fault_run_id = clientprobe.marker_run_id(marker)
-        # The post-fault boundary is the last complete sequence number the log
-        # actually contains after the action and its postcondition finished.
-        # A later read, a cleanup stop or a same-second clock can never move it.
-        (
-            fault_sequence,
-            boundary_flags,
-            boundary_problem,
-        ) = read_client_probe_sequence(client_client, fault_run_id)
-        if boundary_flags is not None and boundary_flags["leak"]:
-            record["client"]["probe_leak_observed"] = True
+        hold_samples: list[dict[str, Any]] = record["client"]["hold_samples"]
+        hold_base: float | None = None
+
+        def sample_hold(kind: str) -> tuple[dict[str, Any] | None, ProbeLogRead]:
+            """Take one trusted sample and re-check the exit-node binding.
+
+            Controller decisions 1 and 2: only a trusted prefix read can
+            establish S_fault, a hold sample or S_end; an untrusted one makes
+            the phase INVALID, and its bytes are still parsed for a LEAK.
+            The prefix boundary is fixed by the size read, before the status
+            call, so nothing the guest writes during that call can count for
+            this sample.
+            """
+            sample, read = take_client_probe_sample(
+                client_client, fault_run_id, base=hold_base
+            )
+            if read.data and clientprobe.probe_prefix_flags(
+                read.data, run_id=fault_run_id
+            )["leak"]:
+                record["client"]["probe_leak_observed"] = True
+            if sample is None:
+                note(f"probe_{kind}_sample_untrusted")
+                if read.problem is not None:
+                    note(read.problem)
+                return None, read
+            # Opus R3-4: every sample re-checks the exact router binding.
+            exit_ok = client_peer_is_active(
+                read_client_status(client_client),
+                router_id,
+                exit_ipv4,
+                require_online=False,
+            )
+            sample["exit_node_ok"] = exit_ok
+            if not exit_ok:
+                note("client_exit_node_lost")
+            hold_samples.append(sample)
+            return sample, read
+
+        # S_fault: a trusted prefix read after the action and its
+        # postcondition finished.  Its size read starts the host-observed hold.
+        # base=None makes the S_fault sample relative to its own size read, so
+        # its stat_start is 0.0 and every later sample is relative to it.
+        fault_sample, fault_read = sample_hold("fault")
+        hold_base = fault_read.stat_start
+        fault_sequence = fault_sample["sequence"] if fault_sample else None
         if fault_sequence is None:
-            note(boundary_problem or "probe_fault_sequence_missing")
+            note("probe_fault_sequence_missing")
         record["client"]["fault_sequence"] = fault_sequence
         record["timestamps"]["fault_sequence_read"] = utc_now()
         guard_check()
-        if arguments.phase == "login":
-            pass
-        hold_deadline = time.monotonic() + arguments.duration
-        while True:
-            check_interrupt()
-            guard_check()
-            remaining = hold_deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            time.sleep(min(0.25, remaining))
+
+        # Controller decision 2: trusted samples at most ~14 s apart in host
+        # monotonic time, the last one exactly at the hold deadline.  The
+        # deadline sample is S_end and is taken before any end-of-hold status
+        # call; lines first seen after it never count as hold coverage.
+        hold_duration = float(arguments.duration)
+        windows = max(1, math.ceil(hold_duration / CLIENT_HOLD_SAMPLE_TARGET))
+        hold_deadline = hold_base + hold_duration
+        due_times = [
+            hold_base + hold_duration * index / windows
+            for index in range(1, windows)
+        ] + [hold_deadline]
+        record["client"]["hold_windows"] = windows
+        end_sample: dict[str, Any] | None = None
+        for index, due in enumerate(due_times):
+            while True:
+                check_interrupt()
+                guard_check()
+                remaining = due - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(0.25, remaining))
+            last = index == len(due_times) - 1
+            taken, _read = sample_hold("end" if last else "hold")
+            if last:
+                end_sample = taken
+        end_sequence = end_sample["sequence"] if end_sample else None
+        if end_sequence is None:
+            note("probe_end_sequence_missing")
+        record["client"]["hold_sequence_end"] = end_sequence
+        record["client"]["exit_node"]["reverified"] = bool(
+            len(hold_samples) == windows + 1
+            and all(sample.get("exit_node_ok") for sample in hold_samples)
+        )
+        record["timestamps"]["exit_node_reverified"] = utc_now()
         if arguments.phase == "kill-wireguard" and router_client is not None:
             record["recovery"] = read_wg0_state(router_client, name)
-
-        # Decision 4: the exit-node binding must still name the router's own
-        # Self.ID and IP at the end of the hold, before traffic is stopped.
-        exit_still_active = client_peer_is_active(
-            read_client_status(client_client), router_id, exit_ipv4
-        )
-        record["client"]["exit_node"]["reverified"] = exit_still_active
-        if not exit_still_active:
-            note("client_exit_node_lost")
-        record["timestamps"]["exit_node_reverified"] = utc_now()
-
-        # Decision 2: record the last complete sequence at the end of the hold.
-        (
-            end_sequence,
-            end_flags,
-            end_problem,
-        ) = read_client_probe_sequence(client_client, fault_run_id)
-        if end_flags is not None and end_flags["leak"]:
-            record["client"]["probe_leak_observed"] = True
-        if end_sequence is None:
-            note(end_problem or "probe_end_sequence_missing")
-        record["client"]["hold_sequence_end"] = end_sequence
 
         if not client_traffic_unit_active(client_client):
             note("client_traffic_unit_inactive")
             if stop_client_traffic(client_client):
-                traffic_started = False
-                record["client"]["traffic_stop_proven"] = True
+                if client_probe_writer_quiescent(client_client):
+                    traffic_started = False
+                    record["client"]["traffic_stop_proven"] = True
+                else:
+                    record["client"]["traffic_stop_proven"] = False
+                    note("client_writer_not_quiescent")
             raise hostcheck.Refusal(
                 "the client traffic unit is not active at the end of the hold"
             )
@@ -4487,9 +4646,17 @@ def _run_client_phase_locked(
             raise hostcheck.Refusal(
                 "the client traffic unit did not stop at the end of the hold"
             )
-        traffic_started = False
-        record["client"]["traffic_stop_proven"] = True
+        # Read the guest clock right after the proven stop: no probe line can
+        # follow it, and the quiescence wait does not widen the tail gap.
         record["client"]["probe_clock_stop"] = read_guest_clock(client_client)
+        if not client_probe_writer_quiescent(client_client):
+            # Decision 3: a log that still grows after a stop that claimed
+            # success has a live writer; nothing read now is exact.
+            record["client"]["traffic_stop_proven"] = False
+            note("client_writer_not_quiescent")
+            raise hostcheck.Refusal(
+                "the client probe log kept growing after the traffic unit stopped"
+            )
         collect_client_probe(
             client_client, evidence, record, note, run_id=fault_run_id
         )
@@ -4544,6 +4711,16 @@ def _run_client_phase_locked(
                     if traffic_started:
                         try:
                             stopped = stop_client_traffic(client_client)
+                            if (
+                                stopped
+                                and record["client"].get("traffic_stop_proven")
+                                is None
+                                and not client_probe_writer_quiescent(
+                                    client_client
+                                )
+                            ):
+                                note("client_writer_not_quiescent")
+                                stopped = False
                         except BaseException:  # noqa: BLE001
                             stopped = False
                         traffic_started = False
@@ -4733,6 +4910,7 @@ def _run_client_phase_locked(
             fault_sequence=record["client"].get("fault_sequence"),
             end_sequence=record["client"].get("hold_sequence_end"),
             hold_seconds=record["client"].get("hold_seconds"),
+            hold_samples=record["client"].get("hold_samples"),
         )
         if probe_report["leak"]:
             record["client"]["probe_leak_observed"] = True

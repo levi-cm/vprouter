@@ -397,6 +397,32 @@ permanent = str(entry.get("nud_state", "")).lower() == "permanent" or "permanent
 sys.exit(0 if entry.get("lladdr") == mac and permanent else 1)
 """
 
+# Client neighbour check over the COMPLETE `ip -j neigh show` inventory: an
+# entry counts only when both its dst and its dev match (Pi R3-M2), so the same
+# address on another device can neither satisfy nor block the check.
+_CLIENT_NEIGH_CHECK_CODE = """\
+import json, sys
+ip, dev, mac = sys.argv[1:4]
+try:
+    document = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(document, list):
+    sys.exit(1)
+if not all(isinstance(entry, dict) for entry in document):
+    sys.exit(1)
+entries = [entry for entry in document if entry.get("dst") == ip and entry.get("dev") == dev]
+if not entries:
+    sys.exit(0)
+if len(entries) != 1:
+    sys.exit(1)
+entry = entries[0]
+state = entry.get("state") if isinstance(entry.get("state"), list) else []
+state = [str(item).lower() for item in state]
+permanent = str(entry.get("nud_state", "")).lower() == "permanent" or "permanent" in state
+sys.exit(0 if entry.get("lladdr") == mac and permanent else 1)
+"""
+
 _NEIGH_PRESENT_CODE = """\
 import json, sys
 try:
@@ -1068,7 +1094,7 @@ def render_plan(
         "}",
         "client_neigh_ok() {",
         '  ip -j neigh show 2>/dev/null'
-        " | python3 -c '@@NEIGH_CHECK@@' \"$1\" \"$3\"",
+        " | python3 -c '@@CLIENT_NEIGH_CHECK@@' \"$1\" \"$2\" \"$3\"",
         "}",
         "client_neigh_state() {",
         '  ip -j neigh show 2>/dev/null'
@@ -1284,6 +1310,7 @@ def render_plan(
         LINK_CHECK=_LINK_CHECK_CODE,
         NFT_CHECK=_NFT_CHECK_CODE,
         NEIGH_CHECK=_NEIGH_CHECK_CODE,
+        CLIENT_NEIGH_CHECK=_CLIENT_NEIGH_CHECK_CODE,
         NEIGH_PRESENT=_NEIGH_PRESENT_CODE,
         INVENTORY_LINK=_INVENTORY_LINK_CODE,
         INVENTORY_NEIGH=_INVENTORY_NEIGH_CODE,

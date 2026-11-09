@@ -28,13 +28,21 @@ Verdict rules:
   (``client_marker_not_sent``); it proves the marker really went out;
 * every line must carry this phase's ``r``, a gap-free ``s`` sequence and a
   non-decreasing timestamp inside the observed launch/stop window; probes must
-  keep trying (no gap above 15 s) and the post-fault attempts are bound to the
-  sequence number the runner read after the fault action.  At least one exit
-  and one marker attempt must have ``s > S_fault`` and the hold must contain
-  ``floor(hold / 15)`` exit attempts with ``S_fault < s <= S_end``;
+  keep trying (no guest-clock gap above 15 s).  At least one exit and one
+  marker attempt must have ``s > S_fault``;
+* hold coverage is host-observed, never guest-clock based: the runner takes a
+  trusted prefix sample of the log (exact size + SHA-256) at the fault
+  boundary (``S_fault``), at least every 15 s of host monotonic time during
+  the hold, and at the hold deadline (``S_end``).  Every window between
+  consecutive samples must be at most 15 s long and must contain a new exit
+  attempt (an exit line with ``s`` above the previous sample's last ``s``).
+  The evaluator recomputes every sample from the evidence bytes it is given:
+  each sample's prefix hash must match, so a sample can never claim a line
+  the evidence does not contain;
 * the guest clocks must be ordered ``clock_start <= fault_epoch <=
-  post_fault_epoch <= clock_stop``; a same-second boundary can never satisfy
-  both sides of the action on its own;
+  post_fault_epoch <= clock_stop`` and must advance across the hold
+  (``clock_stop - post_fault_epoch >= hold - 2``).  These are extra INVALID
+  conditions only; coverage never depends on the guest clock;
 * otherwise PASS.  Failed probes are expected while an exit node is gone and
   are only counted.
 
@@ -44,7 +52,9 @@ never part of a reason or detail string.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import re
 import sys
 from typing import Any
@@ -55,6 +65,17 @@ RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 MAX_PROBE_LOG_BYTES = 1024 * 1024
 MAX_PROBE_LINE_BYTES = 4096
 MAX_PROBE_GAP_SECONDS = 15
+# Host-observed hold coverage: no window between two trusted prefix samples
+# may be longer than this, measured from the start of the earlier sample's
+# size read to the end of the later sample's size read.
+MAX_HOLD_SAMPLE_WINDOW = 15.0
+# The deadline sample (S_end) must finish its size read within this many
+# seconds after the hold deadline; a later sample could credit lines first
+# written after the hold.
+HOLD_DEADLINE_SLACK = 2.0
+# The guest clock must advance across the hold, within this tolerance.
+CLOCK_STALL_TOLERANCE = 2
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 _EXIT_KEYS = frozenset({"t", "k", "ok", "m", "r", "s"})
 _MARKER_KEYS = frozenset({"t", "k", "ok", "r", "s"})
@@ -193,6 +214,150 @@ def parse_probe_log(data: bytes) -> list[dict[str, Any]]:
     return [entry for _number, entry in entries]
 
 
+def complete_lines(data: bytes) -> bytes:
+    """Return only the newline-terminated part of ``data``.
+
+    A sequence boundary is taken only from complete lines: a partial last
+    line may still be being written by the guest.
+    """
+    if not isinstance(data, (bytes, bytearray)):
+        raise ProbeError("probe_log_not_bytes")
+    raw = bytes(data)
+    end = raw.rfind(b"\n")
+    return raw[: end + 1] if end >= 0 else b""
+
+
+def prefix_observation(data: bytes, *, run_id: str) -> dict[str, Any]:
+    """Observe a TRUSTED prefix: last sequence, last exit attempt, controls.
+
+    Only complete, well-formed lines carrying ``run_id`` count.  The caller
+    must only pass bytes whose size and SHA-256 the guest confirmed; leak
+    detection over untrusted bytes is :func:`probe_prefix_flags`.
+    """
+    if not isinstance(run_id, str) or RUN_ID_RE.fullmatch(run_id) is None:
+        raise ProbeError("invalid_run_id")
+    entries, _problems = parse_probe_log_partial(complete_lines(data))
+    sequence = 0
+    exit_sequence: int | None = None
+    mullvad = False
+    marker = False
+    for _number, entry in entries:
+        if entry["r"] != run_id:
+            continue
+        value = int(entry["s"])
+        sequence = max(sequence, value)
+        if entry["k"] == "exit":
+            exit_sequence = value if exit_sequence is None else max(exit_sequence, value)
+            if entry["ok"] is True and entry["m"] is True:
+                mullvad = True
+        elif entry["k"] == "marker" and entry["ok"] is True:
+            marker = True
+    return {
+        "sequence": sequence,
+        "exit_sequence": exit_sequence,
+        "mullvad": mullvad,
+        "marker": marker,
+    }
+
+
+def _is_count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_offset(value: object) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and float(value) >= 0.0
+    )
+
+
+def _valid_sample(sample: object) -> bool:
+    if not isinstance(sample, dict):
+        return False
+    if not _is_count(sample.get("sequence")) or not _is_count(sample.get("size")):
+        return False
+    exit_sequence = sample.get("exit_sequence")
+    if exit_sequence is not None and (
+        not _is_count(exit_sequence) or exit_sequence < 1
+    ):
+        return False
+    digest = sample.get("sha256")
+    if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
+        return False
+    start = sample.get("stat_start")
+    end = sample.get("stat_end")
+    if not _is_offset(start) or not _is_offset(end):
+        return False
+    return float(end) >= float(start)
+
+
+def _check_hold_samples(
+    raw: bytes,
+    samples: object,
+    *,
+    run_id: str,
+    fault_sequence: int | None,
+    end_sequence: int | None,
+    hold_seconds: int | None,
+    max_window: float,
+    reasons: list[str],
+) -> None:
+    """Verify host-observed hold coverage against the evidence bytes."""
+    if not isinstance(samples, list) or len(samples) < 2:
+        _add_reason(reasons, "probe_hold_samples_missing")
+        return
+    if not all(_valid_sample(sample) for sample in samples):
+        _add_reason(reasons, "probe_hold_samples_invalid")
+        return
+    if (
+        fault_sequence is None
+        or end_sequence is None
+        or samples[0]["sequence"] != fault_sequence
+        or samples[-1]["sequence"] != end_sequence
+    ):
+        _add_reason(reasons, "probe_hold_samples_invalid")
+    observed: list[dict[str, Any]] = []
+    for sample in samples:
+        size = int(sample["size"])
+        prefix = raw[:size]
+        if len(prefix) != size or hashlib.sha256(prefix).hexdigest() != sample["sha256"]:
+            # The sample is not a prefix of this evidence: nothing it claims
+            # can be checked, so it covers nothing.
+            _add_reason(reasons, "probe_hold_prefix_mismatch")
+            return
+        observation = prefix_observation(prefix, run_id=run_id)
+        if (
+            observation["sequence"] != sample["sequence"]
+            or observation["exit_sequence"] != sample["exit_sequence"]
+        ):
+            _add_reason(reasons, "probe_hold_samples_invalid")
+        observed.append(observation)
+    for earlier, later in zip(samples, samples[1:]):
+        if (
+            later["size"] < earlier["size"]
+            or later["sequence"] < earlier["sequence"]
+            or float(later["stat_start"]) < float(earlier["stat_start"])
+        ):
+            _add_reason(reasons, "probe_hold_samples_invalid")
+    for index in range(1, len(samples)):
+        window = float(samples[index]["stat_end"]) - float(
+            samples[index - 1]["stat_start"]
+        )
+        if window > float(max_window):
+            _add_reason(reasons, "probe_hold_window_late")
+        newest_exit = observed[index]["exit_sequence"]
+        if newest_exit is None or newest_exit <= observed[index - 1]["sequence"]:
+            _add_reason(reasons, "probe_hold_window_empty")
+    if hold_seconds is not None:
+        base = float(samples[0]["stat_start"])
+        if float(samples[-1]["stat_start"]) - base < float(hold_seconds) - 0.001:
+            _add_reason(reasons, "probe_hold_short")
+        if float(samples[-1]["stat_end"]) - base > float(hold_seconds) + HOLD_DEADLINE_SLACK:
+            _add_reason(reasons, "probe_hold_deadline_late")
+
+
 def _empty_counts() -> dict[str, dict[str, dict[str, int]]]:
     return {
         kind: {
@@ -225,7 +390,9 @@ def evaluate_probe_log(
     fault_sequence: int | None = None,
     end_sequence: int | None = None,
     hold_seconds: int | None = None,
+    hold_samples: list[dict[str, Any]] | None = None,
     max_gap: int = MAX_PROBE_GAP_SECONDS,
+    max_window: float = MAX_HOLD_SAMPLE_WINDOW,
 ) -> dict[str, Any]:
     """Return the client probe verdict, counts and fixed-code reasons.
 
@@ -238,10 +405,14 @@ def evaluate_probe_log(
     ``fault_sequence`` is the last complete probe sequence number read through
     QGA after the fault action and its postcondition finished.  A post-fault
     attempt must have a strictly greater ``s``; ``end_sequence`` is the last
-    complete sequence number read at the end of the hold.  This binds the
-    coverage to the log itself, so a same-second or frozen guest clock cannot
-    certify a hold in which no probe ran.  ``hold_seconds`` sets the required
-    exit-attempt density (one per ``MAX_PROBE_GAP_SECONDS``).
+    complete sequence number of the deadline sample.  ``hold_samples`` are the
+    runner's trusted prefix samples (first = S_fault, last = S_end), each with
+    ``sequence``, ``exit_sequence``, ``size``, ``sha256`` and the host
+    monotonic ``stat_start``/``stat_end`` of its size read (seconds relative
+    to the first sample).  Coverage is decided only from those samples,
+    re-derived from ``data``: a same-second or frozen guest clock, a burst
+    followed by silence, or lines first written after the deadline can never
+    certify the hold.
     """
     if not isinstance(run_id, str) or RUN_ID_RE.fullmatch(run_id) is None:
         raise ProbeError("invalid_run_id")
@@ -369,6 +540,10 @@ def evaluate_probe_log(
             <= int(clock_stop)
         ):
             _add_reason(invalid_reasons, "probe_clock_order")
+    if None not in (clock_stop, post_fault_epoch, hold_seconds):
+        # Extra guest-clock condition (Opus R3-3); coverage never uses it.
+        if int(clock_stop) - int(post_fault_epoch) < int(hold_seconds) - CLOCK_STALL_TOLERANCE:
+            _add_reason(invalid_reasons, "probe_clock_stalled")
     if not pre_fault_mullvad:
         _add_reason(invalid_reasons, "client_not_routed")
     if not pre_fault_marker:
@@ -378,10 +553,17 @@ def evaluate_probe_log(
             _add_reason(invalid_reasons, "probe_post_fault_exit_missing")
         if post_fault_marker_attempts == 0:
             _add_reason(invalid_reasons, "probe_post_fault_marker_missing")
-    if hold_seconds is not None:
-        required = max(1, int(hold_seconds) // int(max_gap))
-        if post_fault_exit_attempts < required:
-            _add_reason(invalid_reasons, "probe_hold_coverage")
+    raw = bytes(data[:MAX_PROBE_LOG_BYTES])
+    _check_hold_samples(
+        raw,
+        hold_samples,
+        run_id=run_id,
+        fault_sequence=fault_sequence,
+        end_sequence=end_sequence,
+        hold_seconds=hold_seconds,
+        max_window=max_window,
+        reasons=invalid_reasons,
+    )
 
     if leak:
         verdict = "LEAK"
@@ -403,6 +585,9 @@ def evaluate_probe_log(
         "fault_sequence": fault_sequence,
         "end_sequence": end_sequence,
         "hold_seconds": hold_seconds,
+        "hold_windows": max(0, len(hold_samples) - 1)
+        if isinstance(hold_samples, list)
+        else 0,
         "clock_start": clock_start,
         "clock_stop": clock_stop,
         "run_id": run_id,
@@ -453,6 +638,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fault-sequence", type=int, required=True)
     parser.add_argument("--end-sequence", type=int, required=True)
     parser.add_argument("--hold-seconds", type=int, required=True)
+    parser.add_argument(
+        "--hold-samples",
+        required=True,
+        help="JSON file with the phase record's client.hold_samples list",
+    )
     parser.add_argument("--clock-start", type=int, required=True)
     parser.add_argument("--clock-stop", type=int, required=True)
     parser.add_argument("--run-id", required=True)
@@ -465,7 +655,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         data = pathlib.Path(args.probe_log).read_bytes()
-    except OSError as exc:
+        samples = json.loads(pathlib.Path(args.hold_samples).read_bytes())
+    except (OSError, ValueError) as exc:
         print(f"clientprobe: {exc.__class__.__name__}", file=sys.stderr)
         return 2
     report = evaluate_probe_log(
@@ -477,6 +668,7 @@ def main(argv: list[str] | None = None) -> int:
         fault_sequence=args.fault_sequence,
         end_sequence=args.end_sequence,
         hold_seconds=args.hold_seconds,
+        hold_samples=samples if isinstance(samples, list) else None,
         run_id=args.run_id,
     )
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))

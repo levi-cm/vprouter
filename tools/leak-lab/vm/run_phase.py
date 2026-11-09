@@ -3373,7 +3373,8 @@ def client_traffic_process_scan_script() -> str:
         "count=0; "
         "for entry in /proc/[0-9]*; do "
         "[ -r \"$entry/cmdline\" ] || continue; "
-        "command=$(tr '\\000' ' ' < \"$entry/cmdline\" 2>/dev/null) || continue; "
+        "command=$(tr '\\000' ' ' < \"$entry/cmdline\" 2>/dev/null) || "
+        "{ [ -e \"$entry\" ] || continue; printf 'TRAFFIC-PROCS:ERROR\\n'; exit 1; }; "
         f"case \"$command\" in *'{head}'[{last}]*) count=$((count + 1)) ;; esac; "
         "done; "
         "printf 'TRAFFIC-PROCS:%s\\n' \"$count\""
@@ -3614,8 +3615,10 @@ def take_client_probe_sample(
         "exit_sequence": observation["exit_sequence"],
         "size": read.size,
         "sha256": read.sha256,
-        "stat_start": round(max(0.0, read.stat_start - origin), 3),
-        "stat_end": round(max(0.0, read.stat_end - origin), 3),
+        # GPT R5-M1: round the start down and the end up, so a persisted
+        # window is never shorter than the real one.
+        "stat_start": math.floor(max(0.0, read.stat_start - origin) * 1000) / 1000,
+        "stat_end": math.ceil(max(0.0, read.stat_end - origin) * 1000) / 1000,
     }
     return sample, read
 
@@ -4885,6 +4888,12 @@ def _run_client_phase_locked(
                 if sampler_alive:
                     client_qga_unsafe = True
                     note("client_sampler_stuck")
+                    # Opus R5 m-1: results are appended by the thread; a leak
+                    # it already saw stays latched even though nothing else
+                    # from the stuck thread is trusted.
+                    if any(result.leak for result in list(action_sampler.results)):
+                        record["client"]["probe_leak_observed"] = True
+                        note("client_real_ip")
                 else:
                     for result in action_sampler.results:
                         coverage_count["action"] += 1

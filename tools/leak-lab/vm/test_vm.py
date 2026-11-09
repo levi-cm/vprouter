@@ -5512,7 +5512,7 @@ class ClientGuestTests(unittest.TestCase):
         self.assertIn('CURL_MAX_TIME = "4"', script)
         self.assertIn("timeout=PROBE_BACKSTOP", script)
         self.assertIn("PROBE_BACKSTOP = 4.5", script)
-        self.assertIn("LOOP_SLEEP = 3.0", script)
+        self.assertIn("LOOP_SLEEP = 2.0", script)
         self.assertIn("time.sleep(LOOP_SLEEP)", script)
         self.assertNotIn("time.sleep(1.0)", script)
         worst_loop = 4.5 + 3.0 + 4.5
@@ -8074,6 +8074,82 @@ class ClientRunPhaseTests(unittest.TestCase):
         self.assertNotIn("cleanup", record["client"])
         self.assertIsNot(record["client"].get("probe_collected"), True)
         self.assertEqual(commands_after, [])
+
+    def test_opus_r5_m1_stuck_sampler_keeps_a_leak_it_already_saw(self) -> None:
+        # Opus R5 m-1: the first action sample saw a non-Mullvad success, then
+        # the sampler hung.  Nothing else from the stuck thread is trusted,
+        # but the observed leak must stay latched (LEAK, not INVALID).
+        entered = threading.Event()
+        release = threading.Event()
+        original_take = run_phase.take_client_coverage_sample
+        calls = {"action": 0}
+
+        def take(client, run_id, *, kind, **kwargs):
+            if kind == "action":
+                calls["action"] += 1
+                if calls["action"] == 1:
+                    read = run_phase.ProbeLogRead(
+                        data=None, size=None, sha256=None,
+                        problem="probe_log_unreadable",
+                        stat_start=run_phase.time.monotonic(),
+                        stat_end=run_phase.time.monotonic(),
+                    )
+                    return run_phase.ClientCoverageSample(kind, None, read, True, [])
+                entered.set()
+                release.wait(10.0)
+                raise QGAError("released")
+            return original_take(client, run_id, kind=kind, **kwargs)
+
+        original_fault = run_phase.run_router_fault
+
+        def fault(*args, **kwargs):
+            entered.wait(5.0)
+            return original_fault(*args, **kwargs)
+
+        class Fast(run_phase.ClientActionSampler):
+            poll_interval = 0.001
+
+        try:
+            with mock.patch.object(run_phase, "take_client_coverage_sample", side_effect=take), \
+                    mock.patch.object(run_phase, "run_router_fault", side_effect=fault), \
+                    mock.patch.object(run_phase, "ClientActionSampler", Fast), \
+                    mock.patch.object(run_phase, "CLIENT_ACTION_SAMPLE_INTERVAL", 0.0), \
+                    mock.patch.object(run_phase, "CLIENT_SAMPLER_JOIN_TIMEOUT", 0.05):
+                code, record, *_ = self._run("kill-container")
+        finally:
+            release.set()
+        self.assertTrue(entered.is_set())
+        self.assertIn("client_sampler_stuck", record["errors"])
+        self.assertTrue(record["client"].get("probe_leak_observed"))
+        self.assertEqual(record["result"], "LEAK")
+        self.assertEqual(code, 1)
+
+    def test_gpt_r5_m1_sample_offsets_never_shrink_a_window(self) -> None:
+        # GPT R5-M1: nearest-millisecond rounding turned a 15.0004 s window
+        # into 15.000 s.  The start rounds down and the end rounds up.
+        read = run_phase.ProbeLogRead(
+            data=b"", size=0, sha256=hashlib.sha256(b"").hexdigest(), problem=None,
+            stat_start=100.0004, stat_end=115.0008,
+        )
+        with mock.patch.object(run_phase, "read_client_probe_prefix", return_value=read):
+            sample, _ = run_phase.take_client_probe_sample(object(), "a" * 32, base=100.0)
+        self.assertEqual(sample["stat_start"], 0.0)
+        self.assertEqual(sample["stat_end"], 15.001)
+        self.assertGreaterEqual(sample["stat_end"] - sample["stat_start"], 115.0008 - 100.0004)
+
+    def test_opus_r5_m2_process_scan_error_is_never_a_stop(self) -> None:
+        class Client:
+            def __init__(self, stdout, code):
+                self.result = run_phase.ExecResult(exitcode=code, stdout=stdout, stderr=b"")
+
+            def execute(self, *args, **kwargs):
+                return self.result
+
+        for stdout, code in ((b"TRAFFIC-PROCS:ERROR\n", 1), (b"TRAFFIC-PROCS:ERROR\n", 0),
+                             (b"", 0), (b"TRAFFIC-PROCS:0\n", 0)):
+            with self.subTest(stdout=stdout, code=code):
+                count = run_phase.client_traffic_process_count(Client(stdout, code))
+                self.assertEqual(count, 0 if (stdout == b"TRAFFIC-PROCS:0\n" and code == 0) else None)
 
     def test_opus_r4_m1_slow_writer_after_a_clean_looking_stop(self) -> None:
         # Opus R4 M-1: `is-active` says inactive and MainPID is 0, but a

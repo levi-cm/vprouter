@@ -901,8 +901,9 @@ the phase marker id (``r``) and a gap-free sequence number (``s``).  It never
 records the reported IP or location: only the Mullvad boolean is kept.
 
 Cadence: each probe is ``curl -m 4`` (4.5 s subprocess backstop) and the loop
-sleeps 3 s, so consecutive exit attempts are at most about 11 s apart (12 s
-with the backstop).  The runner's host-sampled coverage windows (12-15 s) are
+sleeps 2 s, so consecutive exit attempts are at most about 11 s apart even
+with the backstop (Opus R5 m-3: at least 1 s of margin under the shortest
+12 s coverage window).  The runner's host-sampled coverage windows (12-15 s) are
 longer than that, so every window holds a completed exit attempt even while
 the exit node is down.
 """
@@ -917,7 +918,7 @@ LOG = "@@PROBE_LOG@@"
 MAX_LOG = 1024 * 1024
 CURL_MAX_TIME = "4"
 PROBE_BACKSTOP = 4.5
-LOOP_SLEEP = 3.0
+LOOP_SLEEP = 2.0
 MARKER_RE = re.compile(r"^VPRCLIENTMARK1:([0-9a-f]{32})$")
 
 

@@ -166,11 +166,12 @@ systemd-run --unit=vprlab-client-traffic -p RuntimeMaxSec=<remaining phase> \
 `RuntimeMaxSec` covers the pre-fault wait, the fault action (including a
 possible reboot), the hold and a 600 s margin; the runner still stops the unit
 explicitly after the hold.  The script loops until stopped: an exit probe, a
-marker probe, then a 3 s sleep.  Each probe is `curl -m 4` with a 4.5 s
+marker probe, then a 2 s sleep.  Each probe is `curl -m 4` with a 4.5 s
 subprocess backstop, so consecutive exit attempts are at most about 11 s apart
-(12 s with the backstop) even while the exit node is down, which is shorter
-than every 12-15 s coverage window (fix round 4, Opus B P-3; it also keeps the
-am.i.mullvad.net rate near one request every 3.5 s while healthy).  It
+even with the backstop while the exit node is down, at least 1 s shorter than
+every 12-15 s coverage window (fix round 4, Opus B P-3; sleep lowered from 3 s
+after Opus R5 m-3; the am.i.mullvad.net rate stays near one request every
+2.5-3 s while healthy).  It
 appends one JSON line per probe to `/var/lib/vprlab/client-probe.jsonl`.  It
 truncates the file at start and keeps it under 1 MiB; if a line would cross the
 cap it writes one final `{"k":"overflow",...}` line, which makes the phase
@@ -523,6 +524,26 @@ only the client 2 GiB overlay and the shared headroom.
     `/proc` scan; real-shaped `ExitNodeStatus` JSON with `/32` prefixes;
     client prefs with `CorpDNS` true and the `--accept-dns=false` login; a
     router peer that the client sees online only on the third read.
+
+## Accepted residual limits (round 5)
+
+- **Coverage resolution is one window, not one action (GPT R5-I1).** Client
+  traffic is proven per host window of at most 15 s, so up to about two
+  windows can separate completed exit attempts. A fault action shorter than a
+  window (stop-router, kill-wireguard and other actions of about 10-12 s) can
+  contain no completed attempt and still PASS when attempts before and after
+  it fall inside the window. Demanding a completed attempt inside every short
+  action would make healthy runs fail: during a fault each probe can
+  legitimately take up to about 11 s to time out. Producing GPT's case needs
+  the client to stall exactly during the action and resume right after; the
+  client VM is ours, not adversarial. Possible later strengthening: also
+  require client-originated frames on the host-side client capture inside
+  every action interval longer than a few seconds.
+- **Login URL on stderr** (GPT I5, accepted in fix round 1).
+- **Guest trust** (Opus round 4): the probe log is the only proof of attempted
+  traffic; curl's Mullvad answer is read in the guest; the log is append-only;
+  `stat`, `head`, `sha256sum`, systemd and tailscaled answer honestly. A
+  stalled or buggy guest cannot produce PASS inside the sampled interval.
 
 ## Out of scope
 

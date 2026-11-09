@@ -1371,3 +1371,10 @@ every client phase INVALID live. Fix round 4 (Claude Opus): pre-action sample an
 sampling thread during the action, deadline sample must finish before the deadline, stop proof
 with no remaining process and 12 s quiescence, /32 parsing, accept-dns=false + CorpDNS check,
 peer-lookup retry, OOMScoreAdjust, probe cadence curl -m 4 + sleep 3, /var/tmp extraction, docs.
+2026-11-09 live: root-owned tools refreshed to 9427346; the M2-era lab network was torn down with
+the new plan and set up again with --client 1 (vprlab0/vprlab-tap0 + vprlab1/vprlab-ctap1,
+owner.json clients [1], scoped forward accepts with explicit drops on both bridges, four
+owner-tagged DOCKER-USER rules; max-vprouter healthy throughout). Router-only idle on the new
+rules: PASS, release READY, 2,020 frames, 2,020/2,020/0 stats, 1,092 out + 926 in WireGuard to
+the single endpoint, 0 findings, both controls. Client VM provisioning started (pinned Tailscale
+1.104.5 tarball). Round-5 offline review (Opus + GPT) of fix round 4 running in parallel.

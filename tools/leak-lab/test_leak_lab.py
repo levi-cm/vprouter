@@ -199,13 +199,30 @@ def ipv4_frame(
     return ethernet(packet, 0x0800, src=src_mac, dst=dst_mac, vlan=vlan)
 
 
+def wg_data(blocks=1):
+    """A plausible WireGuard transport-data message (type 4)."""
+    return b"\x04\x00\x00\x00" + b"\x00" * 12 + b"\x00" * (16 * blocks)
+
+
+def wg_initiation():
+    return b"\x01\x00\x00\x00" + b"\x00" * 144
+
+
+def wg_response():
+    return b"\x02\x00\x00\x00" + b"\x00" * 88
+
+
+def wg_cookie_reply():
+    return b"\x03\x00\x00\x00" + b"\x00" * 60
+
+
 def wg_outbound(**kwargs):
-    return ipv4_frame(udp_segment(40000, WG_PORT, b"wireguard"), **kwargs)
+    return ipv4_frame(udp_segment(40000, WG_PORT, wg_data()), **kwargs)
 
 
 def wg_inbound(**kwargs):
     return ipv4_frame(
-        udp_segment(WG_PORT, 40000, b"wireguard"),
+        udp_segment(WG_PORT, 40000, wg_data()),
         src_ip=WG_IP,
         dst_ip=VM_IP,
         src_mac=GW_MAC,
@@ -977,7 +994,7 @@ class PcapScanTests(unittest.TestCase):
         # The VM can emit an inbound-shaped frame with its own MAC; that is not
         # real return traffic and must not satisfy --expect-tunnel up.
         forged = ipv4_frame(
-            udp_segment(WG_PORT, 40000, b"forged"),
+            udp_segment(WG_PORT, 40000, wg_data()),
             src_ip=WG_IP,
             dst_ip=VM_IP,
             src_mac=VM_MAC,
@@ -1000,7 +1017,7 @@ class PcapScanTests(unittest.TestCase):
             (
                 "inbound-wrong-src",
                 ipv4_frame(
-                    udp_segment(WG_PORT, 40000, b"forged"),
+                    udp_segment(WG_PORT, 40000, wg_data()),
                     src_ip=WG_IP,
                     dst_ip=VM_IP,
                     src_mac=VM_MAC,
@@ -1011,7 +1028,7 @@ class PcapScanTests(unittest.TestCase):
             (
                 "inbound-wrong-dst",
                 ipv4_frame(
-                    udp_segment(WG_PORT, 40000, b"wireguard"),
+                    udp_segment(WG_PORT, 40000, wg_data()),
                     src_ip=WG_IP,
                     dst_ip=VM_IP,
                     src_mac=GW_MAC,
@@ -1048,9 +1065,9 @@ class PcapScanTests(unittest.TestCase):
                 },
             ]
         )
-        out_a = ipv4_frame(udp_segment(40000, WG_PORT, b"a"))
+        out_a = ipv4_frame(udp_segment(40000, WG_PORT, wg_data()))
         in_b = ipv4_frame(
-            udp_segment(WG_PORT, 40000, b"b"),
+            udp_segment(WG_PORT, 40000, wg_data()),
             src_ip=second_relay,
             dst_ip=VM_IP,
             src_mac=GW_MAC,
@@ -1067,7 +1084,7 @@ class PcapScanTests(unittest.TestCase):
         self.assertEqual(evidence["labels_both_directions"], [])
         self.assertFalse(evidence["satisfied"])
         in_a = ipv4_frame(
-            udp_segment(WG_PORT, 40000, b"a"),
+            udp_segment(WG_PORT, 40000, wg_data()),
             src_ip=WG_IP,
             dst_ip=VM_IP,
             src_mac=GW_MAC,
@@ -1178,7 +1195,7 @@ class PcapScanTests(unittest.TestCase):
         self.assertEqual(reasons(report).count("udp_not_allowed"), 2)
 
     def test_i3_bad_ihl_is_a_finding_not_invalid(self):
-        bad = ipv4_frame(udp_segment(40000, WG_PORT, b"x"), ihl_bytes=0x44)
+        bad = ipv4_frame(udp_segment(40000, WG_PORT, wg_data()), ihl_bytes=0x44)
         report = scan_middle([bad, dns_outbound()])
         self.assertEqual(report["verdict"], "LEAK")
         self.assertIn("malformed_frame", reasons(report))
@@ -1192,7 +1209,7 @@ class PcapScanTests(unittest.TestCase):
         self.assertEqual(report["findings"][0]["detail"], "truncated_ipv4_header")
 
     def test_i3_bad_ipv4_total_length_is_a_finding(self):
-        bad = ipv4_frame(udp_segment(40000, WG_PORT, b"x"), total_length=10)
+        bad = ipv4_frame(udp_segment(40000, WG_PORT, wg_data()), total_length=10)
         report = scan_middle([bad])
         self.assertEqual(report["verdict"], "LEAK")
         self.assertIn("malformed_frame", reasons(report))
@@ -1260,7 +1277,8 @@ class PcapScanTests(unittest.TestCase):
         self.assertIn("ethernet_trailer", reasons(report))
 
     def test_i2_zero_padding_to_minimum_frame_is_allowed(self):
-        report = scan_middle([wg_outbound() + b"\x00" * 9])
+        arp = arp_frame(1, VM_MAC, VM_IP, GW_MAC, GW_IP)
+        report = scan_middle([arp + b"\x00" * (60 - len(arp))])
         self.assertEqual(report["verdict"], "PASS")
 
     def test_i2_nonzero_padding_is_a_finding(self):
@@ -1273,7 +1291,7 @@ class PcapScanTests(unittest.TestCase):
         for length in (0, 1, 7, 65535):
             with self.subTest(length=length):
                 frame = ipv4_frame(
-                    udp_segment(40000, WG_PORT, b"PLAIN_SECRET", length=length)
+                    udp_segment(40000, WG_PORT, wg_data(), length=length)
                 )
                 report = scan_middle([frame])
                 self.assertEqual(report["verdict"], "LEAK")
@@ -1309,7 +1327,7 @@ class PcapScanTests(unittest.TestCase):
 
     # --------------------------------------------------- IPv4 options (I5/M2)
     def test_i5_ipv4_options_are_a_finding(self):
-        l4 = udp_segment(40000, WG_PORT, b"a" * 16)
+        l4 = udp_segment(40000, WG_PORT, wg_data())
         base = bytearray(ipv4_packet(VM_IP, WG_IP, 17, l4))
         base[0] = 0x46
         base[2:4] = struct.pack("!H", len(base) + 4)
@@ -1330,23 +1348,29 @@ class PcapScanTests(unittest.TestCase):
         self.assertIn("ipv4_options", reasons(report))
 
     # ------------------------------------------------------- fragments (I4)
-    def _first(self, ident=77, udp_len=24, data=b"abcdefgh"):
+    def _first(self, ident=77, udp_len=40, data=None):
+        if data is None:
+            data = wg_data()[:8]
         return ipv4_frame(
             udp_segment(40000, WG_PORT, data, length=udp_len),
             ident=ident,
             more_fragments=True,
         )
 
+    @staticmethod
+    def _fragment_rest():
+        return wg_data()[8:]
+
     def test_i4_valid_contiguous_complete_fragments_are_allowed(self):
         report = scan_middle(
-            [self._first(), ipv4_frame(b"ijklmnop", ident=77, frag_units=2)]
+            [self._first(), ipv4_frame(self._fragment_rest(), ident=77, frag_units=2)]
         )
         self.assertEqual(report["verdict"], "PASS")
         self.assertEqual(directions(report, "mullvad-wg"), (2, 0))
 
     def test_i4_gap_fragment_is_a_finding(self):
         report = scan_middle(
-            [self._first(), ipv4_frame(b"ijklmnop", ident=77, frag_units=3)]
+            [self._first(), ipv4_frame(self._fragment_rest(), ident=77, frag_units=3)]
         )
         self.assertEqual(report["verdict"], "LEAK")
         self.assertIn("fragment_gap", reasons(report))
@@ -1355,7 +1379,7 @@ class PcapScanTests(unittest.TestCase):
         report = scan_middle(
             [
                 self._first(),
-                ipv4_frame(b"ijklmnop", ident=77, frag_units=2),
+                ipv4_frame(self._fragment_rest(), ident=77, frag_units=2),
                 ipv4_frame(b"PLAIN_SECRET" * 8, ident=77, frag_units=8000),
             ]
         )
@@ -1366,8 +1390,8 @@ class PcapScanTests(unittest.TestCase):
         report = scan_middle(
             [
                 self._first(),
-                ipv4_frame(b"ijklmnop", ident=77, frag_units=2),
-                ipv4_frame(b"cccccccc", ident=77, frag_units=2),
+                ipv4_frame(self._fragment_rest(), ident=77, frag_units=2),
+                ipv4_frame(self._fragment_rest(), ident=77, frag_units=2),
             ]
         )
         self.assertEqual(report["verdict"], "LEAK")
@@ -1375,7 +1399,7 @@ class PcapScanTests(unittest.TestCase):
 
     def test_i4_nonfirst_before_first_is_a_finding(self):
         report = scan_middle(
-            [ipv4_frame(b"ijklmnop", ident=79, frag_units=2), self._first(79)]
+            [ipv4_frame(self._fragment_rest(), ident=79, frag_units=2), self._first(79)]
         )
         self.assertEqual(report["verdict"], "LEAK")
         self.assertIn("fragment_without_first", reasons(report))
@@ -1384,7 +1408,7 @@ class PcapScanTests(unittest.TestCase):
         frames = [
             control_frame(NONCE_A),
             self._first(),
-            ipv4_frame(b"ijklmnop", ident=77, frag_units=2),
+            ipv4_frame(self._fragment_rest(), ident=77, frag_units=2),
             control_frame(NONCE_B),
         ]
         times = [1_700_000_000.0, 1_700_000_001.0, 1_700_000_040.0, 1_700_000_041.0]
@@ -1403,7 +1427,7 @@ class PcapScanTests(unittest.TestCase):
 
     def test_i4_incomplete_final_fragment_is_a_finding(self):
         report = scan_middle(
-            [self._first(udp_len=32), ipv4_frame(b"ijkl", ident=77, frag_units=2)]
+            [self._first(udp_len=32), ipv4_frame(self._fragment_rest()[:4], ident=77, frag_units=2)]
         )
         self.assertEqual(report["verdict"], "LEAK")
         self.assertIn("fragment_incomplete", reasons(report))
@@ -1433,7 +1457,7 @@ class PcapScanTests(unittest.TestCase):
             control_frame(NONCE_A),
             self._first(),
             self._first(),
-            ipv4_frame(b"ijklmnop", ident=77, frag_units=2),
+            ipv4_frame(self._fragment_rest(), ident=77, frag_units=2),
             control_frame(NONCE_B),
         ]
         times = [100.0, 101.0, 132.0, 133.0, 134.0]
@@ -1536,7 +1560,7 @@ class PcapScanTests(unittest.TestCase):
             [
                 self._first(),
                 ipv4_frame(b"", ident=77, frag_units=2, more_fragments=True),
-                ipv4_frame(b"ijklmnop", ident=77, frag_units=3),
+                ipv4_frame(self._fragment_rest(), ident=77, frag_units=3),
             ]
         )
         self.assertEqual(report["verdict"], "LEAK")
@@ -2799,7 +2823,8 @@ class NetplanTests(unittest.TestCase):
             'nft add rule inet vprlab postrouting ip saddr 10.250.0.0/24 iifname "vprlab0" oifname "eth0" masquerade',
             'nft add rule inet vprlab forward iifname "vprlab0" oifname "eth0" accept',
             'nft add rule inet vprlab forward iifname "eth0" oifname "vprlab0" accept',
-            'tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w "$RUN_DIR/manual-capture.pcap"',
+            "tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w "
+            "\"$RUN_DIR\"/'manual-capture.pcap'",
         ):
             self.assertIn(expected, plan)
         self.assertNotIn("flush ruleset", plan)
@@ -3342,9 +3367,9 @@ class NetplanTests(unittest.TestCase):
         self.assertNotIn("iptables -F", plan)
 
     def test_capture_argv_matches_printed_command(self):
-        plan = netplan.render_plan("eth0", capture_file="phase.pcap")
+        plan = netplan.render_plan("eth0", capture_file="/var/tmp/phase.pcap")
         self.assertEqual(
-            netplan.capture_argv("phase.pcap"),
+            netplan.capture_argv("/var/tmp/phase.pcap"),
             [
                 "tcpdump",
                 "-i",
@@ -3355,13 +3380,15 @@ class NetplanTests(unittest.TestCase):
                 "-s",
                 "0",
                 "-w",
-                "phase.pcap",
+                "/var/tmp/phase.pcap",
             ],
         )
-        self.assertIsNone(netplan.check_capture_argv(netplan.capture_argv("x.pcap")))
+        self.assertIsNone(
+            netplan.check_capture_argv(netplan.capture_argv("/var/tmp/x.pcap"))
+        )
         self.assertEqual(
             netplan.check_capture_argv(
-                ["tcpdump", "-i", "vprlab-tap0", "-nn", "-s", "0", "-w", "x.pcap"]
+                ["tcpdump", "-i", "vprlab-tap0", "-nn", "-s", "0", "-w", "/var/tmp/x.pcap"]
             ),
             "capture_argv_mismatch",
         )
@@ -3369,7 +3396,10 @@ class NetplanTests(unittest.TestCase):
             netplan.check_capture_argv("tcpdump"),
             "capture_argv_invalid",
         )
-        self.assertIn("tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w phase.pcap", plan)
+        self.assertIn(
+            "tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 -w /var/tmp/phase.pcap",
+            plan,
+        )
 
     def test_tap_user_option(self):
         plan = netplan.render_plan("eth0", tap_user="vprouterlab")
@@ -4009,7 +4039,7 @@ class ResourceBoundTests(unittest.TestCase):
         for ident in range(4097):
             frames.append(
                 ipv4_frame(
-                    udp_segment(40000, WG_PORT, b"wireguard", length=64),
+                    udp_segment(40000, WG_PORT, wg_data(), length=64),
                     ident=ident,
                     more_fragments=True,
                 )
@@ -4374,6 +4404,90 @@ class ControlTests(unittest.TestCase):
     def test_invalid_nonce_rejected(self):
         with self.assertRaises(policy.PolicyError):
             control.build_command("A" * 32, "eth0", VM_IP, SINK_IP, SINK_PORT)
+
+
+class WireGuardShapeTests(unittest.TestCase):
+    def test_plaintext_on_the_allowed_tuple_is_a_leak(self):
+        # GPT S4 reproducer: the outer tuple alone used to certify this.
+        frames = [
+            control_frame(NONCE_A),
+            ipv4_frame(udp_segment(40000, WG_PORT, b"CLEAR_TEXT_NOT_WIREGUARD")),
+            ipv4_frame(
+                udp_segment(WG_PORT, 40000, b"CLEAR_REPLY"),
+                src_ip=WG_IP,
+                dst_ip=VM_IP,
+                src_mac=GW_MAC,
+                dst_mac=VM_MAC,
+            ),
+            control_frame(NONCE_B),
+        ]
+        report = scan(frames, expect_tunnel="up")
+        self.assertEqual(report["verdict"], "LEAK")
+        self.assertIn("allowed_tuple_not_wireguard", reasons(report))
+        self.assertEqual(directions(report, "mullvad-wg"), (0, 0))
+
+    def test_realistic_wireguard_shapes_pass(self):
+        for payload in (
+            wg_initiation(),
+            wg_response(),
+            wg_cookie_reply(),
+            wg_data(1),
+            wg_data(3),
+        ):
+            with self.subTest(length=len(payload)):
+                out = ipv4_frame(udp_segment(40000, WG_PORT, payload))
+                inbound = ipv4_frame(
+                    udp_segment(WG_PORT, 40000, payload),
+                    src_ip=WG_IP,
+                    dst_ip=VM_IP,
+                    src_mac=GW_MAC,
+                    dst_mac=VM_MAC,
+                )
+                report = scan_middle([out, inbound], expect_tunnel="up")
+                self.assertEqual(report["verdict"], "PASS", reasons(report))
+                self.assertEqual(directions(report, "mullvad-wg"), (1, 1))
+
+    def test_wrong_wireguard_shapes_are_leaks(self):
+        cases = {
+            "type 0": b"\x00\x00\x00\x00" + b"\x00" * 28,
+            "type 5": b"\x05\x00\x00\x00" + b"\x00" * 28,
+            "nonzero reserved": b"\x04\x01\x00\x00" + b"\x00" * 28,
+            "short data": b"\x04\x00\x00\x00" + b"\x00" * 12 + b"\x00" * 15,
+            "data not 16n": b"\x04\x00\x00\x00" + b"\x00" * 12 + b"\x00" * 17,
+            "initiation 147": b"\x01\x00\x00\x00" + b"\x00" * 143,
+            "response 91": b"\x02\x00\x00\x00" + b"\x00" * 87,
+            "cookie 65": b"\x03\x00\x00\x00" + b"\x00" * 61,
+        }
+        for name, payload in cases.items():
+            with self.subTest(case=name):
+                report = scan_middle(
+                    [ipv4_frame(udp_segment(40000, WG_PORT, payload))]
+                )
+                self.assertEqual(report["verdict"], "LEAK")
+                self.assertIn("allowed_tuple_not_wireguard", reasons(report))
+
+
+class NetplanInjectionTests(unittest.TestCase):
+    def test_capture_file_command_substitution_is_refused(self):
+        payloads = (
+            "$RUN_DIR/$(printf SAFETY_INJECTED).pcap",
+            "$RUN_DIR/`id`.pcap",
+            "$RUN_DIR/a;id.pcap",
+            "$RUN_DIR/../escape.pcap",
+            "/tmp/$(id).pcap",
+            "/tmp/a'b.pcap",
+            "relative.pcap",
+        )
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                with self.assertRaises(netplan.NetplanError):
+                    netplan.render_plan("eth0", capture_file=payload)
+
+    def test_run_dir_capture_is_composed_from_a_quoted_variable(self):
+        plan = netplan.render_plan("eth0", capture_file="$RUN_DIR/manual-capture.pcap")
+        self.assertIn("-w \"$RUN_DIR\"/'manual-capture.pcap'", plan)
+        self.assertNotIn("$(printf", plan)
+        self.assertNotIn("SAFETY_INJECTED", plan)
 
 
 if __name__ == "__main__":

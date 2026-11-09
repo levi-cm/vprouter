@@ -27,6 +27,10 @@ Evidence rules (M1, round 3):
   (outbound: source ``vm_wan_mac``, destination ``gateway_mac``; inbound: the
   reverse; no 802.1Q tag), otherwise it is ``allowed_tuple_wrong_l2`` and is
   not counted;
+* an allowed-tuple datagram must also have a WireGuard message shape (type
+  1/2/3/4 with zero reserved bytes and the fixed/data lengths), otherwise it
+  is ``allowed_tuple_not_wireguard``; this is a shape check, not cipher
+  authentication;
 * ``--expect-tunnel up`` requires allowed traffic in both directions inside the
   window on the same flow label, ``--expect-tunnel down`` requires no inbound
   allowed flow;
@@ -148,6 +152,7 @@ class _L4Result:
     dst_port: int | None = None
     udp_length: int | None = None
     detail: str | None = None
+    udp_data_prefix: bytes = b""
 
 
 @dataclass(slots=True)
@@ -162,6 +167,42 @@ class _FragmentState:
     proto_name: str
     complete: bool = False
     reported: bool = False
+    wg_type: int | None = None
+
+
+#: WireGuard message types and the exact total message lengths for the three
+#: fixed-size handshake/cookie messages.  Type 4 (transport data) is
+#: ``16 + 16*n`` bytes with at least one encrypted block.  This is a *shape*
+#: check only: it cannot and does not authenticate the ciphertext.
+WIREGUARD_MESSAGE_TYPE_LENGTHS = {1: 148, 2: 92, 3: 64}
+WIREGUARD_DATA_MIN = 32
+WIREGUARD_DATA_HEADER = 16
+
+
+def wireguard_payload_problem(payload: bytes, *, complete: bool = True) -> str | None:
+    """Return why ``payload`` is not a plausible WireGuard message shape."""
+    if len(payload) < 4:
+        return "short" if complete else None
+    kind = payload[0]
+    if kind not in (1, 2, 3, 4):
+        return "type"
+    if payload[1:4] != b"\x00\x00\x00":
+        return "reserved"
+    if not complete:
+        return None
+    return wireguard_length_problem(kind, len(payload))
+
+
+def wireguard_length_problem(kind: int, length: int) -> str | None:
+    if kind in WIREGUARD_MESSAGE_TYPE_LENGTHS:
+        return None if length == WIREGUARD_MESSAGE_TYPE_LENGTHS[kind] else "length"
+    if kind == 4:
+        if length < WIREGUARD_DATA_MIN:
+            return "length"
+        if (length - WIREGUARD_DATA_HEADER) % 16 != 0:
+            return "length"
+        return None
+    return "type"
 
 
 def _mac(raw: bytes) -> str:
@@ -917,6 +958,8 @@ class _Scanner:
                     detail="datagram_not_completed",
                     fragment_key=list(key),
                 )
+        prefix = result.udp_data_prefix
+        wg_type = prefix[0] if len(prefix) >= 4 else None
         self.fragment_states[key] = _FragmentState(
             first_ts=ts,
             covered_end=payload_length,
@@ -927,6 +970,7 @@ class _Scanner:
             dst=dst,
             proto_name=_proto_name(protocol),
             complete=False,
+            wg_type=wg_type,
         )
 
     def _handle_nonfirst_fragment(
@@ -1006,6 +1050,22 @@ class _Scanner:
                     reason = "fragment_incomplete"
                 elif more_fragments and end >= state.udp_length:
                     reason = "fragment_out_of_range"
+            if reason is None and not more_fragments and state.label is not None:
+                if state.wg_type is None:
+                    # A fragmented allowed datagram whose first fragment did
+                    # not even expose the four-byte WireGuard header cannot
+                    # be shape-checked; fail closed rather than certify it.
+                    reason = "allowed_tuple_not_wireguard"
+                    detail = "short"
+                elif (
+                    state.udp_length is not None
+                    and wireguard_length_problem(
+                        state.wg_type, state.udp_length - 8
+                    )
+                    is not None
+                ):
+                    reason = "allowed_tuple_not_wireguard"
+                    detail = "length"
             if reason is None:
                 state.covered_end = end
                 if not more_fragments:
@@ -1162,11 +1222,27 @@ class _Scanner:
                         dst_port=dst_port,
                         detail="udp_length_mismatch",
                     )
+                # A packet on the allowed tuple must at least look like a
+                # WireGuard message.  This stops a plaintext payload from
+                # being certified as tunnel traffic; it is not a cipher
+                # authentication check.
+                udp_data = payload[8:]
+                shape_problem = wireguard_payload_problem(
+                    udp_data, complete=not fragmented
+                )
+                if shape_problem is not None:
+                    return _L4Result(
+                        reason="allowed_tuple_not_wireguard",
+                        src_port=src_port,
+                        dst_port=dst_port,
+                        detail=shape_problem,
+                    )
                 return _L4Result(
                     label=label,
                     src_port=src_port,
                     dst_port=dst_port,
                     udp_length=udp_length,
+                    udp_data_prefix=udp_data[:4],
                 )
             return _L4Result(
                 reason="udp_not_allowed", src_port=src_port, dst_port=dst_port

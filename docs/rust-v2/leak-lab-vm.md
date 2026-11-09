@@ -63,8 +63,14 @@ The script creates:
   `/DATA/vprouter-lab/lab-tools/root`.  Every source leaf is opened
   `O_NOFOLLOW`, the exact bytes written are hashed, and both `SHA256SUMS`
   (regular files) and `SYMLINKS.json` (link path and target) are verified
-  after the copy.  The manifest is copy-fidelity evidence, not a pinned
-  upstream provenance list; only the base image has a pinned digest.  After
+  after the copy.  Every link is additionally resolved with `realpath`
+  against the source and destination roots: a chain that resolves outside the
+  tree is refused even when its lexical path stays inside.  A hardlinked
+  source file is copied as independent content, so the destination has no
+  hardlink relationship to the source (or to its other links); `verify_tree`
+  also refuses destination entries that neither manifest lists.  The manifest
+  is copy-fidelity evidence, not a pinned upstream provenance list; only the
+  base image has a pinned digest.  After
   the copy, every direct `DT_NEEDED` of `qemu-system-x86_64`, `qemu-img` and
   `genisoimage` must be present in the copied library directory or be one of
   the fixed host base libraries (`libc.so.6`, `libm.so.6`,
@@ -74,9 +80,14 @@ The script creates:
 - `/opt/vprlab-tools/leaklab` (root:root, files 0644) with the runtime copy of
   `control.py`, `netplan.py`, `pcapscan.py`, `policy.py`, `tsnames.py` and the
   `vm/*.py` modules plus their `SHA256SUMS` manifest.  `run_phase.py` executes
-  the scanner from this root-owned copy after verifying the manifest, and
-  compares its hash with the repository copy.  If they differ it refuses
-  unless the explicit `--allow-repo-scanner` developer override is given;
+  the scanner from this root-owned copy after verifying its manifest, and
+  compares **every manifest-listed file** (the scanner and all modules it can
+  import) byte-for-byte with the repository copy.  If any file differs it
+  refuses unless the explicit `--allow-repo-scanner` developer override is
+  given.  `phase.json` records `scanner.path`, `scanner.source`
+  (`installed`/`repo_override`), `scanner.certifiable` and, for the installed
+  copy, `scanner.manifest_sha256`; the override is explicitly
+  `certifiable: false`;
 - `/var/lib/vprlab/images` (root 0755, files copied 0600 and made 0644 only
   after the pinned digest and the full `SHA512SUMS`/`SYMLINKS.json` manifest
   verify) with the base image;
@@ -168,8 +179,8 @@ still bind the original fd-anchored evidence.
   refuses an existing path, and then chowns it to the QEMU user.
   `/var/lib/vprlab` itself is root-owned 0755 and is checked all the way to
   `/` before use.
-- The state directory is QEMU-owned because QEMU must create its overlay,
-  sockets and serial log there. Evidence is **not** kept below it: every run
+- The state directory is QEMU-owned because QEMU creates its overlay and
+  sockets there (and, during provisioning only, the diagnostic serial log). Evidence is **not** kept below it: every run
   writes to `/var/lib/vprlab/evidence/<phase>-<UTC>-<name>/`, created by root
   as mode 0700 and owned by root through descriptor-anchored opens.  The
   `tcpdump` process starts as root, opens the savefile (name ending `.pcap`),
@@ -243,8 +254,9 @@ python3 -B tools/leak-lab/vm/provision.py \
   `--qemu-user root`, uid 0, or an account in sudo/wheel/adm/docker/lxd/
   libvirt/disk (or any group other than its own primary and `kvm`) is refused
   before any process starts.
-- QGA (`org.qemu.guest_agent.0`), `serial.log`, `pidfile` and `-display none`
-  live in the state directory. There is deliberately **no QMP socket**: it was
+- QGA (`org.qemu.guest_agent.0`), `pidfile` and `-display none` live in the
+  state directory.  Provisioning also writes `serial.log` there; test boots
+  use `-serial none` and write no serial file. There is deliberately **no QMP socket**: it was
   unused and would let a local host process attach an uncaptured NIC.
 - The guest boots with `net.ifnames=0` and, by default, the netns-safe IPv6
   mode (no `ipv6.disable=1`; see the caveat below), no DHCP, no cloud-init, no
@@ -523,9 +535,14 @@ directory.
    ```
 
    The runner starts the router, polls the login URL through its own QGA
-   connection, writes only `https://login.tailscale.com/...` to
-   `<evidence>/login-url.txt` (0600) and prints it to stderr, then waits the
-   duration and records the Tailscale `BackendState`.
+   connection, writes the URL to `<evidence>/login-url.txt` (0600) and prints
+   it to stderr, then waits the duration and records the Tailscale
+   `BackendState`.  Only the fixed shape
+   `https://login.tailscale.com/a/[0-9a-f]{8,16}` is accepted (the length is
+   recorded); any other `login.tailscale.com` candidate is not written and is
+   recorded as `login_url_unrecognized`, making the phase INVALID.  This stops
+   a guest from using the URL path as an arbitrary secret-encoding channel.
+   `login_url.py` applies the same pattern.
 
 2. `login_url.py` remains available only when **no phase is running**. A QEMU
    socket chardev serves one QGA client, so the helper takes and **holds** the
@@ -684,24 +701,86 @@ name.
   child; a second signal during the reaper is ignored so the cleanup cannot be
   escaped.
 - Resource bounds: phase duration is at most 3600 s; admission refuses below
-  1536 MiB `MemAvailable` or below the capture cap plus 1 GiB free on the
-  evidence filesystem.  The default capture cap is 2 GiB (`--capture-size-cap`).
-  A watcher thread enforces the cap and the 1 GiB free-disk floor for the
-  **whole** capture lifetime - from before tcpdump starts through setup,
-  readiness, action, duration, teardown and the poweroff wait.  On a breach it
-  immediately brings the tap down, records INVALID (`capture_size_cap` or
-  `capture_disk_low`), still scans whatever was written, and any finding in
-  that capture is still LEAK.  `pcapscan` streams records from the file,
-  retains only counters, at most 1000 outside-window indexes (plus the total)
-  and at most 4096 unfinished fragment associations; overflow is
-  `fragment_table_overflow` and INVALID.  The runner executes the scanner with
-  `RLIMIT_AS` 1 GiB and a 300 s timeout, and the root runner itself starts
-  under `RLIMIT_AS` 2 GiB.  A single QGA reply is capped at 16 MiB and one
-  `guest-exec` output stream at 4 MiB (`reply_too_large` /
-  `exec_output_too_large`), closing the stream; the buffer search only scans
-  newly appended bytes.  A scanner crash or a missing/invalid report is
-  INVALID, never LEAK; only a parseable report whose verdict is LEAK produces
-  LEAK.
+  1536 MiB `MemAvailable`, below the capture cap plus 1 GiB free on the
+  evidence filesystem, or below the 4 GiB overlay virtual size plus 1 GiB
+  headroom on the **state** filesystem.  The default capture cap is 2 GiB
+  (`--capture-size-cap`).  A watcher thread enforces the cap and the 1 GiB
+  free-disk floor for the **whole** capture lifetime - from before tcpdump
+  starts through setup, readiness, action, duration, teardown and the poweroff
+  wait.  It also polls tcpdump itself: if tcpdump exits before the normal
+  SIGINT stop, the phase records `capture_ended_early` (with the observed
+  time) and is INVALID.  On a `capture_size_cap` or `capture_disk_low` breach
+  it brings the tap down **and** SIGKILLs our verified QEMU pid, then the
+  ordered cleanup continues; it still scans whatever was written, and any
+  finding in that capture is still LEAK.
+  - Test boots write **no serial file** (`-serial none`); only provisioning
+    writes `serial.log`, which is capped at 64 MiB in provision (`kill QEMU`
+    and fail).  The provisioning process and its QEMU child both run under
+    `RLIMIT_FSIZE` 8 GiB, so its staging copies are bounded too.  Test QEMU
+    runs under `RLIMIT_FSIZE` 6 GiB (4 GiB overlay plus headroom), so the
+    guest's own disk writes are bounded even when the tap is already down.
+  - The 2 GiB runner `RLIMIT_AS` applies only to the Python runner: each
+    spawned tcpdump/QEMU child has `RLIMIT_AS` reset to infinity with
+    `prlimit`, and every QEMU child also gets the file-size bound.  The
+    scanner runs under its own `RLIMIT_AS` 1 GiB through a trusted
+    `python -c` wrapper (`setrlimit` then `execv`), not `preexec_fn`, so it is
+    safe while the capture-guard thread exists.
+  - `pcapscan` streams records from the file, retains only counters, at most
+    1000 outside-window indexes (plus the total) and at most 4096 unfinished
+    fragment associations; overflow is `fragment_table_overflow` and INVALID.
+    A single QGA reply is capped at 16 MiB and one `guest-exec` output stream
+    at 4 MiB (`reply_too_large` / `exec_output_too_large`), closing the
+    stream; the buffer search keeps an unterminated `0xFF` sync marker while
+    it waits for the rest of the frame.  A scanner crash or a missing/invalid
+    report is INVALID, never LEAK; only a parseable report whose verdict is
+    LEAK produces LEAK.
+- Signal model: SIGTERM/SIGINT/SIGHUP handlers only set a flag and remember
+  the signal; they never raise and no signal is blocked in any thread.
+  Every blocking wait/loop calls `check_interrupt()`, which raises into the
+  single ordered `finally` cleanup on the first observation.  Children
+  therefore inherit an empty signal mask and default dispositions (SigBlk is
+  0), and the Popen handle is assigned before any checkpoint, so a signal
+  during spawn cannot orphan tcpdump or QEMU.  The capture-guard thread is
+  started only after the handlers are installed, so a process-directed signal
+  cannot be handled by a thread that bypasses the cleanup.  The first
+  checkpoint raises only once; subsequent signals during cleanup are ignored
+  so the reaper/poweroff/scan path cannot be escaped.  Teardown still stops
+  tcpdump with SIGINT after QEMU has exited and the after-control has reached
+  the pcap; the liveness check above proves the capture was still alive at
+  that point.
+
+  **Skipped Minors (with reasons, this round):**
+  - M1's foreground/manual capture still defaults under `/run/vprlab`; the M2
+    phases never start it and the lab command is `setup`, so the documented
+    path is unaffected.  Revisit before using the M1 capture mode on a host
+    where `/run` is small (opus S-4).
+  - `qemu_process_is_ours` still reads QEMU-controlled `/proc/<pid>/exe` and
+    argv[0].  The `Popen` pid cannot be reused while our un-reaped handle
+    exists, and a failed proof keeps the tap down and the run lock held, so
+    this only weakens an extra proof, not the fail-safe (opus S-5).
+  - `qga.sock` is still connected by path inside the QEMU-owned state
+    directory.  The profile is already visible to QEMU and the channel is
+    root-to-guest line JSON; a directory-fd/`S_ISSOCK` check is deferred
+    (opus S-6 / pi S-4).
+  - `hostcopy` still walks the operator-owned source by path and does not
+    anchor every directory component with `openat`; the only actor is the
+    opsec account, which is already trusted and root-equivalent here.  Leaf
+    swaps, link chains, hardlinks and extra destination entries are covered
+    (pi S-3).
+  - Provision has no host-memory admission (fixed 512 MiB guest); only the
+    disk admission and QEMU file-size bound were added.  Live memory is a
+    bring-up check (gpt S3 minor remainder).
+  - The generated hostsetup teardown still cannot `rmdir /run/vprlab` because
+    `run.lock` lives there; `rmdir … || true` leaves the root-owned
+    directory/lock, which is harmless (pi A-6).
+  - `hostcopy.check_elf_deps`, QEMU/KVM/tap, Docker/Tailscale readiness and
+    the Debian tcpdump privilege-drop order remain live gates; only offline
+    component evidence is claimed (pi A-3/A-4/A-5, opus D-3).
+  - The operator account that runs `run_phase.py`, `hostsetup.py`,
+    `provision.py` and the scanner wrapper is explicitly **trusted**: those
+    root programs execute from the operator-owned checkout.  Only the
+    scanner's installed module tree is compared with the repository (opus
+    D-4).
 - `install_guest_file` stages in a 0700 root-only directory and moves into
   place; the move from tmpfs `/run` to `/etc` may be a copy+unlink, so "atomic"
   is not guaranteed across filesystems.
@@ -754,7 +833,7 @@ is missing, or differs from the repository's current `pcapscan.py`, the phase
 refuses.  `--allow-repo-scanner` is the explicit developer override for a
 working-tree scanner; do not use it for a certification run.
 
-The suite has 161 tests, including an integration test that runs the real
+The suite has 188 tests, including an integration test that runs the real
 `pcapscan.py` CLI over evidence written by the real `rootfs` writers through an
 inherited directory fd.  It executes the real phase runner and provision
 helpers with fake process/QGA/scanner layers, the generated hostsetup script

@@ -323,11 +323,16 @@ def build_qemu_argv(
             f"virtio-net-pci,netdev=wan,romfile=,mac={VM_MAC}",
         ]
 
+    # Test boots write no serial file at all: the guest is untrusted and a
+    # compromised guest could otherwise fill the host filesystem through the
+    # emulated UART.  Provisioning needs the console marker and uses a file
+    # that is size-capped and RLIMIT_FSIZE-bounded there.
+    serial = f"file:{state / SERIAL_FILE}" if mode == "provision" else "none"
     argv += [
         "-display",
         "none",
         "-serial",
-        f"file:{state / SERIAL_FILE}",
+        serial,
         "-pidfile",
         str(state / PID_FILE),
         # No QMP socket: it is unused by the lab and would let any local

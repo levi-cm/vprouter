@@ -48,6 +48,8 @@ import argparse
 import json
 import os
 import pathlib
+import re
+import shlex
 import stat
 import sys
 from typing import Any
@@ -116,6 +118,40 @@ ROOT_DIRECTORIES = (
 
 class LayoutError(ValueError):
     """A requested value or supplied inventory cannot describe the layout."""
+
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_PATH_COMPONENT_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def _valid_name(value: object, what: str) -> str:
+    if not isinstance(value, str) or _NAME_RE.fullmatch(value) is None:
+        raise LayoutError(f"{what} must be 1..64 characters of [A-Za-z0-9._-]")
+    if value in (".", ".."):
+        raise LayoutError(f"{what} must not be . or ..")
+    return value
+
+
+def _valid_path(value: object, what: str) -> str:
+    """Accept an absolute path of strict, non-``..`` components only."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or "\n" in value
+        or "\r" in value
+        or not value.startswith("/")
+    ):
+        raise LayoutError(f"{what} must be an absolute single-line path")
+    if value == "/":
+        return value
+    parts = value.split("/")[1:]
+    if any(_PATH_COMPONENT_RE.fullmatch(part) is None for part in parts):
+        raise LayoutError(
+            f"{what} must contain only [A-Za-z0-9._-] path components"
+        )
+    if any(part in (".", "..") for part in parts):
+        raise LayoutError(f"{what} must not contain . or .. components")
+    return value
 
 
 def _mode_text(mode: Any) -> int | None:
@@ -390,36 +426,22 @@ def render_setup_script(
         raise LayoutError("indices must be integers in 1..99")
     if not _valid_sha512(base_image_sha512):
         raise LayoutError("base_image_sha512 must be 128 lowercase hex characters")
-    if not base_image_name or "/" in base_image_name or base_image_name in (".", ".."):
-        raise LayoutError("base image name must be a plain file name")
+    base_image_name = _valid_name(base_image_name, "base_image_name")
     if leak_lab_source is None:
         leak_lab_source = str(pathlib.Path(__file__).resolve().parent.parent)
+    tools_root = _valid_path(tools_root, "tools_root")
+    state_root = _valid_path(state_root, "state_root")
+    run_root = _valid_path(run_root, "run_root")
     for label, value in (
         ("tools_root", tools_root),
         ("state_root", state_root),
         ("run_root", run_root),
     ):
-        if not isinstance(value, str) or not value.startswith("/") or "\n" in value:
-            raise LayoutError(f"{label} must be an absolute single-line path")
         if value.rstrip("/") in ("", "/"):
             raise LayoutError(f"{label} must not be /")
-        if "'" in value:
-            raise LayoutError(f"{label} must not contain a single quote")
-    for label, value in (
-        ("tools_source", tools_source),
-        ("images_source", images_source),
-        ("leak_lab_source", leak_lab_source),
-    ):
-        if (
-            not isinstance(value, str)
-            or not value
-            or "\n" in value
-            or "'" in value
-            or "/" not in value
-        ):
-            raise LayoutError(f"{label} must be a single-line absolute path without quotes")
-    if not leak_lab_source.startswith("/"):
-        raise LayoutError("leak_lab_source must be absolute")
+    tools_source = _valid_path(tools_source, "tools_source")
+    images_source = _valid_path(images_source, "images_source")
+    leak_lab_source = _valid_path(leak_lab_source, "leak_lab_source")
     images_root = state_root.rstrip("/") + "/images"
     evidence_root = state_root.rstrip("/") + "/evidence"
     tools_root = tools_root.rstrip("/")
@@ -435,22 +457,22 @@ def render_setup_script(
 # account is reused and every destination file is verified after copying.
 set -eu
 
-QEMU_USER='{qemu_user}'
+QEMU_USER={shlex.quote(qemu_user)}
 QEMU_GROUP='vprlab-qemu'
 KVM_GROUP='kvm'
-TOOLS_ROOT='{tools_root}'
-LEAKLAB_ROOT='{leaklab_root}'
-STATE_ROOT='{state_root}'
-IMAGES_ROOT='{images_root}'
-EVIDENCE_ROOT='{evidence_root}'
-RUN_ROOT='{run_root}'
-TOOLS_SOURCE='{tools_source}'
-IMAGES_SOURCE='{images_source}'
-LEAKLAB_SOURCE='{leak_lab_source}'
-BASE_IMAGE_NAME='{base_image_name}'
-BASE_IMAGE_SHA512='{base_image_sha512}'
-INDICES='{index_words}'
-LEAKLAB_FILES='{leak_lab_words}'
+TOOLS_ROOT={shlex.quote(tools_root)}
+LEAKLAB_ROOT={shlex.quote(leaklab_root)}
+STATE_ROOT={shlex.quote(state_root)}
+IMAGES_ROOT={shlex.quote(images_root)}
+EVIDENCE_ROOT={shlex.quote(evidence_root)}
+RUN_ROOT={shlex.quote(run_root)}
+TOOLS_SOURCE={shlex.quote(tools_source)}
+IMAGES_SOURCE={shlex.quote(images_source)}
+LEAKLAB_SOURCE={shlex.quote(leak_lab_source)}
+BASE_IMAGE_NAME={shlex.quote(base_image_name)}
+BASE_IMAGE_SHA512={shlex.quote(base_image_sha512)}
+INDICES={shlex.quote(index_words)}
+LEAKLAB_FILES={shlex.quote(leak_lab_words)}
 {check_script}
 
 teardown() {{

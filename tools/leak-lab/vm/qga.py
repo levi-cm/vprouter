@@ -210,7 +210,12 @@ class QGAClient:
                     # Not our sync reply: keep scanning.  A greeting is safe
                     # to ignore; anything else is still bounded by the deadline.
                     continue
-            self._scan_from = max(0, len(self._buffer) - 1)
+                # The marker arrived without its terminator yet.  Keep the
+                # marker (not len(buffer)-1) so the next read can complete it,
+                # whatever byte boundary the frame was split on.
+                self._scan_from = marker
+            else:
+                self._scan_from = max(0, len(self._buffer) - 1)
             self._fill(deadline)
 
     def _read_response(self, deadline: float, expected_id: int | None = None) -> object:

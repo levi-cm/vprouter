@@ -60,10 +60,62 @@ VM_WAN_IPV4 = "10.250.0.2"
 
 _IFACE_RE = re.compile(r"^[A-Za-z0-9_.:@-]{1,15}$")
 _TAP_USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$")
+_SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 class NetplanError(ValueError):
     """A requested name or a supplied inspection document is invalid."""
+
+
+def _safe_path_parts(value: str, what: str, *, allow_run_dir: bool) -> str:
+    """Validate a shell-inserted path and return it unchanged.
+
+    Only ``[A-Za-z0-9._-]`` components are accepted and ``.``/``..`` are
+    refused, so no shell metacharacter, whitespace or command substitution can
+    reach the generated script.  ``--capture-file`` may name a path below the
+    generated ``$RUN_DIR`` variable; callers that do not create that variable
+    must require an absolute path.
+    """
+    if not isinstance(value, str) or not value or "\n" in value or "\r" in value:
+        raise NetplanError(f"{what} must be a non-empty single-line path")
+    prefix = ""
+    remainder = value
+    if allow_run_dir and value.startswith("$RUN_DIR/"):
+        prefix = "$RUN_DIR/"
+        remainder = value[len(prefix):]
+    elif value.startswith("/"):
+        prefix = "/"
+        remainder = value[1:]
+    else:
+        raise NetplanError(f"{what} must be absolute or below $RUN_DIR")
+    parts = remainder.split("/")
+    if not parts or any(_SAFE_COMPONENT_RE.fullmatch(part) is None for part in parts):
+        raise NetplanError(
+            f"{what} must contain only [A-Za-z0-9._-] path components"
+        )
+    if any(part in (".", "..") for part in parts):
+        raise NetplanError(f"{what} must not contain . or .. components")
+    return prefix + "/".join(parts)
+
+
+def _shell_quote_always(part: str) -> str:
+    """Quote every component, even one shlex would leave bare."""
+    quoted = shlex.quote(part)
+    return quoted if quoted.startswith("'") else "'" + part + "'"
+
+
+def _shell_path(path: str) -> str:
+    """Render a validated path as a quoted shell word.
+
+    ``$RUN_DIR`` is the one variable the generated script defines, so it is
+    composed as ``"$RUN_DIR"/'basename'`` rather than embedded unquoted.
+    """
+    if path.startswith("$RUN_DIR/"):
+        remainder = path[len("$RUN_DIR/"):]
+        return '"$RUN_DIR"/' + "/".join(
+            _shell_quote_always(part) for part in remainder.split("/")
+        )
+    return shlex.quote(path)
 
 
 def _validate_iface(name: str, what: str) -> str:
@@ -94,8 +146,7 @@ def capture_argv(capture_file: str = DEFAULT_CAPTURE) -> list[str]:
     There is deliberately no BPF filter expression, no ``-s`` short snaplen
     and no packet-count limit: every frame the tap sees must be written.
     """
-    if not isinstance(capture_file, str) or not capture_file or "\n" in capture_file:
-        raise NetplanError("capture_file must be a non-empty single-line path")
+    _safe_path_parts(capture_file, "capture_file", allow_run_dir=True)
     return [
         "tcpdump",
         "-i",
@@ -788,23 +839,24 @@ def render_plan(
     every object before changing anything.
     """
     wan = _validate_iface(wan_interface, "wan_interface")
+    capture_file = _safe_path_parts(
+        capture_file, "capture_file", allow_run_dir=True
+    )
     argv = capture_argv(capture_file)
     if stats_file is None:
         stats_file = capture_file + ".stderr"
-    if not isinstance(stats_file, str) or not stats_file or "\n" in stats_file:
-        raise NetplanError("stats_file must be a non-empty single-line path")
+    stats_file = _safe_path_parts(stats_file, "stats_file", allow_run_dir=True)
     if tap_user is None:
         tap_user = DEFAULT_TAP_USER
     tap_user = _validate_tap_user(tap_user)
 
-    capture_line = " ".join(shlex.quote(part) for part in argv)
-    stats_q = shlex.quote(stats_file)
-    if capture_file.startswith("$RUN_DIR/"):
-        capture_line = capture_line.replace(
-            shlex.quote(capture_file), '"' + capture_file + '"'
-        )
-    if stats_file.startswith("$RUN_DIR/"):
-        stats_q = '"' + stats_file + '"'
+    # Every argv element is quoted; the one path element below $RUN_DIR is
+    # composed from the quoted variable and its quoted basename.
+    capture_line = " ".join(
+        _shell_path(part) if part == capture_file else shlex.quote(part)
+        for part in argv
+    )
+    stats_q = _shell_path(stats_file)
 
     docker_spec_out = (
         f"-i {BRIDGE} -o {wan} -s {LAB_SUBNET_TEXT} "

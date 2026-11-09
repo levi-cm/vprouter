@@ -32,7 +32,6 @@ directory.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import dataclasses
 import datetime
 import hashlib
@@ -41,6 +40,7 @@ import json
 import os
 import pathlib
 import re
+import resource
 import secrets
 import shlex
 import shutil
@@ -50,6 +50,8 @@ import subprocess
 import sys
 import threading
 import time
+
+_REAL_POPEN = subprocess.Popen
 
 _VM_DIR = pathlib.Path(__file__).resolve().parent
 _LEAK_LAB_DIR = _VM_DIR.parent
@@ -122,8 +124,16 @@ DEFAULT_CAPTURE_SIZE_CAP = 2 * 1024 * 1024 * 1024
 CAPTURE_WATCH_INTERVAL = 0.1
 SCAN_MEMORY_LIMIT = 1024 * 1024 * 1024
 #: The root runner deliberately runs under a hard address-space bound.  It
-#: never needs anything close to this; the scanner child gets its own 1 GiB.
+#: never needs anything close to this; the scanner child gets its own 1 GiB
+#: and QEMU/tcpdump explicitly have the inherited limit reset.
 RUNNER_MEMORY_LIMIT = 2 * 1024 * 1024 * 1024
+#: QEMU's qcow2 overlay is created with a 4 GiB virtual size.  The guest may
+#: fill it, so admission reserves that much plus the shared headroom on the
+#: state filesystem.
+OVERLAY_VIRTUAL_SIZE = 4 * 1024 * 1024 * 1024
+#: A test boot writes no serial file (``-serial none``), but QEMU still gets
+#: RLIMIT_FSIZE as a seat-belt for the overlay and qemu.log.
+TEST_QEMU_FSIZE_LIMIT = 6 * 1024 * 1024 * 1024
 SCAN_TIMEOUT = 300.0
 INSTALLED_LEAKLAB = pathlib.Path("/opt/vprlab-tools/leaklab")
 TAILSCALE_BACKEND_STATES = frozenset(
@@ -167,6 +177,38 @@ def set_runner_limits() -> None:
         target = min(target, soft)
     if target > 0:
         resource.setrlimit(resource.RLIMIT_AS, (target, hard))
+
+
+def apply_child_limits(
+    pid: int,
+    *,
+    address_space: int | None = None,
+    file_size: int | None = None,
+) -> None:
+    """Apply ``prlimit`` limits to our own already-spawned child.
+
+    The root runner lives under ``RLIMIT_AS`` 2 GiB.  That limit is inherited
+    by every child, including QEMU and tcpdump, so each spawn resets it to
+    infinity here; the scanner wrapper instead tightens it to 1 GiB.  QEMU
+    also gets an ``RLIMIT_FSIZE`` bound.
+    """
+    import resource
+
+    for name, value in (
+        (resource.RLIMIT_AS, address_space),
+        (resource.RLIMIT_FSIZE, file_size),
+    ):
+        if value is None:
+            continue
+        try:
+            resource.prlimit(pid, name, (value, value))
+        except ProcessLookupError:
+            # It exited immediately; the caller's next poll records that.
+            return
+        except (OSError, ValueError):
+            # An externally imposed hard limit cannot be raised; the child
+            # then keeps it.  Never turn that into a spawn failure.
+            continue
 
 
 def _safe_manifest_path(relative: object) -> str:
@@ -258,12 +300,15 @@ def resolve_pcapscan(
 ) -> pathlib.Path:
     """Return the root-owned scanner, or the repo copy with an explicit override.
 
-    The installed copy must verify against its own manifest and be byte-for-byte
-    identical to the repository's ``pcapscan.py``.  ``--allow-repo-scanner`` is
-    the documented developer override for running a working-tree scanner before
-    re-running hostsetup.
+    Every file listed in the installed manifest must verify against its own
+    digest *and* be byte-for-byte identical to the repository copy.  That
+    includes the scanner's imports (``policy.py``, ``netplan.py``, ...), so a
+    stale module cannot silently change the verdict.  ``--allow-repo-scanner``
+    is the documented developer override for running a working-tree scanner
+    before re-running hostsetup.
     """
     repo_path = pathlib.Path(repo_path)
+    repo_root = repo_path.parent
     installed_root = pathlib.Path(installed_root)
     try:
         digests = verify_leaklab_manifest(installed_root)
@@ -271,19 +316,23 @@ def resolve_pcapscan(
         if allow_repo:
             return repo_path
         raise
-    try:
-        repo_digest = sha256_file(repo_path)
-    except OSError as exc:
-        raise hostcheck.Refusal(
-            f"repository scanner is unreadable: {exc.__class__.__name__}"
-        ) from exc
-    if digests["pcapscan.py"] != repo_digest:
-        if allow_repo:
-            return repo_path
-        raise hostcheck.Refusal(
-            "installed pcapscan.py differs from the repository copy; "
-            "re-run hostsetup.py or pass --allow-repo-scanner"
-        )
+    for relative, installed_digest in sorted(digests.items()):
+        repo_file = repo_path if relative == "pcapscan.py" else repo_root / relative
+        try:
+            repo_digest = sha256_file(repo_file)
+        except OSError as exc:
+            raise hostcheck.Refusal(
+                f"repository leak-lab file {relative} is unreadable: "
+                f"{exc.__class__.__name__}; re-run hostsetup.py or pass "
+                "--allow-repo-scanner"
+            ) from exc
+        if installed_digest != repo_digest:
+            if allow_repo:
+                return repo_path
+            raise hostcheck.Refusal(
+                f"installed {relative} differs from the repository copy; "
+                "re-run hostsetup.py or pass --allow-repo-scanner"
+            )
     return installed_root / "pcapscan.py"
 
 
@@ -684,29 +733,41 @@ def start_capture(
                 stdout=subprocess.DEVNULL,
                 stderr=error_stream,
                 start_new_session=True,
+                restore_signals=True,
                 **popen_kwargs,
             )
+            # The Popen handle exists before any deferred signal is examined.
+            if isinstance(process, _REAL_POPEN):
+                apply_child_limits(
+                    process.pid, address_space=resource.RLIM_INFINITY
+                )
     except BaseException:
         reap_after_setup_failure(process)
         raise
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        status = process.poll()
-        if status is not None:
-            raise hostcheck.Refusal(f"tcpdump exited before listening (status {status})")
-        if pcap.is_file() and pcap.stat().st_size >= 24:
-            if evidence_fd is not None:
-                for name in (pcap.name, stats.name):
-                    descriptor = rootfs.open_file_at(evidence_fd, name, os.O_RDONLY)
-                    try:
-                        os.fchmod(descriptor, 0o600)
-                    finally:
-                        os.close(descriptor)
-            else:
-                os.chmod(stats, 0o600)
-                os.chmod(pcap, 0o600)
-            return Capture(process=process, argv=argv, pcap=pcap, stats=stats)
-        time.sleep(0.05)
+    try:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            check_interrupt()
+            status = process.poll()
+            if status is not None:
+                raise hostcheck.Refusal(f"tcpdump exited before listening (status {status})")
+            if pcap.is_file() and pcap.stat().st_size >= 24:
+                if evidence_fd is not None:
+                    for name in (pcap.name, stats.name):
+                        descriptor = rootfs.open_file_at(evidence_fd, name, os.O_RDONLY)
+                        try:
+                            os.fchmod(descriptor, 0o600)
+                        finally:
+                            os.close(descriptor)
+                else:
+                    os.chmod(stats, 0o600)
+                    os.chmod(pcap, 0o600)
+                return Capture(process=process, argv=argv, pcap=pcap, stats=stats)
+            time.sleep(0.05)
+    except BaseException:
+        # Includes PhaseInterrupted: never leave the child without a handle.
+        stop_capture(Capture(process=process, argv=argv, pcap=pcap, stats=stats), timeout=5)
+        raise
     stop_capture(Capture(process=process, argv=argv, pcap=pcap, stats=stats), timeout=5)
     raise hostcheck.Refusal("tcpdump did not start listening in time")
 
@@ -726,7 +787,13 @@ def stop_capture(
         except OSError:
             pass
     try:
-        status = process.wait(timeout=timeout)
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args if hasattr(process, "args") else "tcpdump", timeout)
+            status = process.wait(timeout=min(0.5, remaining))
+            break
     except subprocess.TimeoutExpired:
         capture.forced_stop = True
         try:
@@ -802,6 +869,7 @@ def wait_for_control_in_pcap(
     needle = policy_mod.CONTROL_PREFIX + nonce.encode("ascii")
     deadline = time.monotonic() + timeout
     while True:
+        check_interrupt()
         if evidence_fd is not None and name is not None:
             found = file_contains_payload_at(evidence_fd, name, needle)
         elif path is not None:
@@ -1063,6 +1131,7 @@ def check_kill_wireguard(
     deadline = time.monotonic() + window
     state = read_wg0_state(client, name)
     while True:
+        check_interrupt()
         if state["status"] == "container_stopped":
             return {"ok": True, "proof": "container_stopped", **state}
         if state["status"] == "absent":
@@ -1101,6 +1170,7 @@ def verify_guest_image(
     deadline = time.monotonic() + timeout
     command = f"docker image inspect --format '{{{{.Id}}}}' {image_id}"
     while time.monotonic() < deadline:
+        check_interrupt()
         result = client.execute("/bin/sh", ["-c", command], timeout=30.0)
         if result.exitcode == 0 and result.stdout.decode(
             "ascii", "replace"
@@ -1212,6 +1282,7 @@ def wait_boot_control_sent(
         f"grep -qx {shlex.quote(boot_token)} {guest.BOOT_CONTROL_SENT}"
     )
     while time.monotonic() < deadline:
+        check_interrupt()
         result = client.execute("/bin/sh", ["-c", command], timeout=10.0)
         if result.exitcode == 0:
             return
@@ -1227,6 +1298,7 @@ def wait_router_active(
     deadline = time.monotonic() + timeout
     command = f"systemctl is-active --quiet vprouter@{name}.service"
     while time.monotonic() < deadline:
+        check_interrupt()
         result = client.execute("/bin/sh", ["-c", command], timeout=10.0)
         if result.exitcode == 0:
             return
@@ -1260,6 +1332,7 @@ def wait_router_handshake(
     deadline = time.monotonic() + timeout
     command = router_handshake_command(name)
     while time.monotonic() < deadline:
+        check_interrupt()
         now = read_guest_clock(client)
         result = client.execute("/bin/sh", ["-c", command], timeout=15.0)
         if result.exitcode == 0:
@@ -1332,6 +1405,7 @@ def wait_docker_restarted(
         timeout = DOCKER_RESTART_TIMEOUT
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        check_interrupt()
         try:
             current = read_docker_pid(client)
         except hostcheck.Refusal:
@@ -1423,6 +1497,7 @@ def wait_release_ready(
     command = release_status_command(name)
     last_problem = "no status"
     while time.monotonic() < deadline:
+        check_interrupt()
         result = client.execute("/bin/sh", ["-c", command], timeout=30.0)
         if result.exitcode == 0:
             try:
@@ -1450,6 +1525,7 @@ def wait_tailscale_ready(
     deadline = time.monotonic() + timeout
     problems = ["tailscale status is unavailable"]
     while time.monotonic() < deadline:
+        check_interrupt()
         problems = tailscale_readiness_problems(read_tailscale_status(client, name))
         if not problems:
             return
@@ -1469,22 +1545,32 @@ def login_phase_wait(
     evidence: EvidenceDirectory,
     record: dict,
     guard: CaptureGuard | None = None,
+    note=None,
 ) -> None:
     """Poll the login URL through the runner's own QGA connection."""
     url_path = evidence.path / "login-url.txt"
     deadline = time.monotonic() + duration
     found: str | None = None
     while True:
+        check_interrupt()
         if guard is not None:
             guard.raise_if_exceeded()
         try:
-            url = find_login_url(client, name)
+            url, unrecognized = login_url_mod.find_login_url_result(client, name)
         except (QGAError, OSError):
-            url = None
+            url, unrecognized = None, False
+        if unrecognized:
+            record["login_url_unrecognized"] = True
+            problems = record.setdefault("login_url_problems", [])
+            if "login_url_unrecognized" not in problems:
+                problems.append("login_url_unrecognized")
+                if note is not None:
+                    note("login_url_unrecognized")
         if url is not None and found is None:
             found = url
             evidence.write_text("login-url.txt", url + "\n")
             record["login_url"] = str(url_path)
+            record["login_url_length"] = len(url)
             print(f"run_phase: login URL {url}", file=sys.stderr)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -1508,6 +1594,7 @@ def wait_for_reboot(
         timeout = QGA_BOOT_TIMEOUT
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        check_interrupt()
         try:
             client = wait_for_qga(
                 socket_path,
@@ -1589,14 +1676,30 @@ def _existing_ancestor(path: pathlib.Path) -> pathlib.Path:
     return candidate
 
 
+def _free_bytes(path: pathlib.Path) -> int:
+    try:
+        stats = os.statvfs(_existing_ancestor(path))
+    except OSError as exc:
+        raise hostcheck.Refusal("cannot measure free disk space") from exc
+    return stats.f_bavail * stats.f_frsize
+
+
 def check_admission(
     evidence_root: pathlib.Path,
     capture_size_cap: int,
     *,
+    state_root: pathlib.Path | None = None,
     mem_available: int | None = None,
     free_bytes: int | None = None,
+    state_free_bytes: int | None = None,
 ) -> None:
-    """Refuse to boot a guest without host memory and disk headroom."""
+    """Refuse to boot a guest without host memory and disk headroom.
+
+    The evidence filesystem must hold the pcap cap plus 1 GiB.  The state
+    filesystem is separate evidence-wise and must hold the guest's 4 GiB
+    overlay plus the same 1 GiB headroom; a guest can fill its own disk
+    without sending a single packet.
+    """
     available = read_mem_available() if mem_available is None else mem_available
     if available < MIN_MEMORY_AVAILABLE:
         raise hostcheck.Refusal(
@@ -1604,16 +1707,21 @@ def check_admission(
             f"{MIN_MEMORY_AVAILABLE // (1024 * 1024)} MiB; refusing to boot"
         )
     if free_bytes is None:
-        try:
-            stats = os.statvfs(_existing_ancestor(evidence_root))
-        except OSError as exc:
-            raise hostcheck.Refusal("cannot measure free disk space") from exc
-        free_bytes = stats.f_bavail * stats.f_frsize
+        free_bytes = _free_bytes(evidence_root)
     required = int(capture_size_cap) + DISK_HEADROOM
     if free_bytes < required:
         raise hostcheck.Refusal(
             f"free disk is below the capture cap plus {DISK_HEADROOM // (1024 * 1024)} MiB"
         )
+    if state_root is not None or state_free_bytes is not None:
+        if state_free_bytes is None:
+            state_free_bytes = _free_bytes(state_root)
+        state_required = OVERLAY_VIRTUAL_SIZE + DISK_HEADROOM
+        if state_free_bytes < state_required:
+            raise hostcheck.Refusal(
+                "free space on the state filesystem is below the 4 GiB overlay "
+                f"plus {DISK_HEADROOM // (1024 * 1024)} MiB headroom"
+            )
 
 
 class CaptureCapExceeded(RuntimeError):
@@ -1647,19 +1755,38 @@ class CaptureGuard:
         capture_size_cap: int,
         *,
         tap: str = guest.TAP,
-        interval: float = CAPTURE_WATCH_INTERVAL,
+        interval: float | None = None,
+        capture_process=None,
+        qemu_process=None,
     ) -> None:
         self.evidence_fd = evidence_fd
         self.name = name
         self.capture_size_cap = int(capture_size_cap)
         self.tap = tap
-        self.interval = float(interval)
+        # Read the module constant at call time, so a test (or an operator
+        # patch) can shorten the interval without changing the default.
+        self.interval = float(CAPTURE_WATCH_INTERVAL if interval is None else interval)
         self.reason: str | None = None
         self.isolation_error: str | None = None
+        self.kill_error: str | None = None
+        self.capture_process = capture_process
+        self.qemu_process = qemu_process
+        self.capture_ended_early_at: str | None = None
+        self._stopping_capture = False
         self._descriptor: int | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+
+    def attach_capture(self, process) -> None:
+        self.capture_process = process
+
+    def attach_qemu(self, process) -> None:
+        self.qemu_process = process
+
+    def mark_capture_stopping(self) -> None:
+        """A normal SIGINT shutdown is about to happen; ignore that exit."""
+        self._stopping_capture = True
 
     def _open(self) -> int | None:
         if self._descriptor is None:
@@ -1694,6 +1821,30 @@ class CaptureGuard:
             isolate_tap(self.tap)
         except BaseException as exc:  # noqa: BLE001 - isolation is best effort
             self.isolation_error = exc.__class__.__name__
+        # A tap-down does not stop a compromised guest from writing its
+        # overlay/serial/qemu.log.  Kill the verified QEMU we own as well; the
+        # ordered cleanup still runs and records INVALID.
+        if self.qemu_process is not None and reason in (
+            "capture_size_cap",
+            "capture_disk_low",
+        ):
+            try:
+                kill_qemu(self.qemu_process)
+            except BaseException as exc:  # noqa: BLE001
+                self.kill_error = exc.__class__.__name__
+
+    def _capture_liveness(self) -> str | None:
+        if self.capture_process is None or self._stopping_capture:
+            return None
+        try:
+            status = self.capture_process.poll()
+        except BaseException:  # noqa: BLE001 - a broken handle is not liveness
+            return None
+        if status is None:
+            return None
+        if self.capture_ended_early_at is None:
+            self.capture_ended_early_at = utc_now()
+        return "capture_ended_early"
 
     def check(self) -> str | None:
         if self.reason is None:
@@ -1701,6 +1852,8 @@ class CaptureGuard:
                 reason = self.measure()
             except OSError:
                 reason = None
+            if reason is None:
+                reason = self._capture_liveness()
             if reason is not None:
                 self._breach(reason)
         return self.reason
@@ -1715,6 +1868,10 @@ class CaptureGuard:
             self.check()
 
     def start(self) -> None:
+        # Handlers were installed before this thread can receive a signal;
+        # handlers only set a flag, so a process-directed signal handled here
+        # cannot bypass the main thread's ordered cleanup.
+        ensure_signal_handlers()
         self._thread = threading.Thread(
             target=self._run, name="vprlab-capture-guard", daemon=True
         )
@@ -1735,6 +1892,7 @@ class CaptureGuard:
     def sleep(self, seconds: float, *, chunk: float = 0.25) -> None:
         remaining = max(0.0, float(seconds))
         while True:
+            check_interrupt()
             self.raise_if_exceeded()
             if remaining <= 0:
                 return
@@ -1753,6 +1911,7 @@ def wait_capture_room(
     """Compatibility helper used by callers without an EvidenceDirectory."""
     remaining = max(0.0, float(seconds))
     while True:
+        check_interrupt()
         try:
             size = pathlib.Path(pcap).stat().st_size
         except OSError:
@@ -1768,11 +1927,35 @@ def wait_capture_room(
 
 
 def set_scan_limits() -> None:
-    """Child pre-exec: cap the scanner's address space at 1 GiB."""
-    import resource
-
+    """Set the scanner's address-space limit (kept for direct callers)."""
     limit = SCAN_MEMORY_LIMIT
     resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
+
+#: A tiny, trusted interpreter wrapper.  The root runner may still have the
+#: capture-guard thread running while it scans, so it must not use
+#: ``preexec_fn``; the wrapper applies the scanner RLIMIT_AS and then
+#: ``execve``s the real scanner without changing its argv.
+SCAN_LIMIT_WRAPPER = """\
+import os, resource, sys
+limit = int(sys.argv[1])
+resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+os.execv(sys.argv[2], sys.argv[2:])
+"""
+
+
+def scanner_launch_argv(
+    scan_argv: list[str], *, limit: int = SCAN_MEMORY_LIMIT
+) -> list[str]:
+    """Return the wrapper argv that spawns ``scan_argv`` under 1 GiB."""
+    return [
+        sys.executable,
+        "-I",
+        "-c",
+        SCAN_LIMIT_WRAPPER,
+        str(int(limit)),
+        *scan_argv,
+    ]
 
 
 def verify_host_lab(
@@ -1948,7 +2131,14 @@ def start_vm(
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
+                restore_signals=True,
             )
+            if isinstance(process, _REAL_POPEN):
+                apply_child_limits(
+                    process.pid,
+                    address_space=resource.RLIM_INFINITY,
+                    file_size=TEST_QEMU_FSIZE_LIMIT,
+                )
     except BaseException:
         reap_after_setup_failure(process)
         raise
@@ -1963,6 +2153,7 @@ def wait_for_qga_or_exit(
 ) -> QGAClient:
     deadline = time.monotonic() + timeout
     while True:
+        check_interrupt()
         if process.poll() is not None:
             raise hostcheck.Refusal(
                 f"QEMU exited before the guest agent (status {process.returncode})"
@@ -2072,7 +2263,7 @@ def poweroff_vm(
     if process is None:
         return None, forced, False
     try:
-        return process.wait(timeout=POWEROFF_TIMEOUT), forced, False
+        return wait_process(process, POWEROFF_TIMEOUT), forced, False
     except BaseException:  # timeout or a termination signal during the wait
         forced = True
     if kill_qemu(process, state):
@@ -2095,36 +2286,73 @@ class PhaseInterrupted(RuntimeError):
     """A termination signal arrived; unwind through the ordered cleanup."""
 
 
+#: Set by the signal handler and read by every blocking wait/loop.  The
+#: handler itself never raises and never blocks anything: a signal delivered
+#: while a child is being created therefore cannot orphan it.  The Popen
+#: object is assigned as soon as the call returns and the next explicit
+#: checkpoint raises into the finally-based cleanup with a live handle.
 _signal_seen = False
+_signal_number: int | None = None
+_signal_raised = False
+_handlers_installed = False
 
 
 def _handle_signal(signum: int, _frame) -> None:
-    global _signal_seen
+    global _signal_seen, _signal_number
     if _signal_seen:
         return
     _signal_seen = True
-    raise PhaseInterrupted(f"received signal {signum}")
+    _signal_number = signum
+
+
+def check_interrupt() -> None:
+    """Raise once when a deferred termination signal has been observed.
+
+    Only the first checkpoint raises; later checkpoints (the ordered cleanup)
+    must run to completion even if another signal arrived meanwhile.
+    """
+    global _signal_raised
+    if _signal_seen and not _signal_raised:
+        _signal_raised = True
+        raise PhaseInterrupted(
+            f"received signal {_signal_number if _signal_number is not None else 'termination'}"
+        )
 
 
 def install_signal_handlers() -> None:
-    global _signal_seen
+    global _signal_seen, _signal_number, _signal_raised, _handlers_installed
     _signal_seen = False
+    _signal_number = None
+    _signal_raised = False
     for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
         signal.signal(signum, _handle_signal)
+    # Children inherit this mask.  The runner never blocks a termination
+    # signal itself, and it clears any mask inherited from its caller so a
+    # spawned tcpdump/QEMU starts with SigBlk == 0.
+    if hasattr(signal, "pthread_sigmask"):
+        signal.pthread_sigmask(signal.SIG_SETMASK, set())
+    _handlers_installed = True
 
 
-@contextlib.contextmanager
-def block_termination_signals():
-    """Keep a process handle from being orphaned between fork and assignment."""
-    if not hasattr(signal, "pthread_sigmask"):
-        yield
-        return
-    blocked = {signal.SIGTERM, signal.SIGHUP, signal.SIGINT}
-    previous = signal.pthread_sigmask(signal.SIG_BLOCK, blocked)
-    try:
-        yield
-    finally:
-        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+def ensure_signal_handlers() -> None:
+    expected = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+    if not _handlers_installed or any(
+        signal.getsignal(signum) is not _handle_signal for signum in expected
+    ):
+        install_signal_handlers()
+
+
+def wait_process(process: subprocess.Popen, timeout: float, *, chunk: float = 0.5):
+    """Wait for a child in short slices so a deferred signal is honoured."""
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return process.wait(timeout=0)
+        try:
+            return process.wait(timeout=min(chunk, remaining))
+        except subprocess.TimeoutExpired:
+            check_interrupt()
 
 
 # ---------------------------------------------------------------------------
@@ -2238,12 +2466,11 @@ def scan_evidence(
     scan_stderr = ""
     try:
         completed = subprocess.run(
-            scan_argv,
+            scanner_launch_argv(scan_argv),
             check=False,
             capture_output=True,
             timeout=SCAN_TIMEOUT,
             pass_fds=(evidence.fd,),
-            preexec_fn=set_scan_limits,
         )
         scan_exit = completed.returncode
         evidence.open_new(guest.SCAN_REPORT_FILE, completed.stdout, mode=0o600)
@@ -2322,6 +2549,7 @@ def scan_evidence(
 
 def run_phase(arguments: argparse.Namespace) -> int:
     require_root()
+    install_signal_handlers()
     if arguments.phase not in PHASES:
         raise hostcheck.Refusal(f"unknown phase {arguments.phase}")
     name = guest.validate_name(arguments.name)
@@ -2402,7 +2630,9 @@ def _run_phase_locked(
             raise hostcheck.Refusal(f"base image ancestry is not root-trusted: {exc}") from exc
     base_digest = guest.verify_base_image(base, pathlib.Path(arguments.checksum_manifest))
     check_admission(
-        pathlib.Path(arguments.evidence_root), int(arguments.capture_size_cap)
+        pathlib.Path(arguments.evidence_root),
+        int(arguments.capture_size_cap),
+        state_root=state.parent,
     )
 
     if arguments.profile_fd is not None:
@@ -2470,6 +2700,20 @@ def _run_phase_locked(
         image_id=image_id,
     )
     record["certifies"] = CERTIFICATION
+    scanner_root = pathlib.Path(arguments.scanner_root)
+    installed = str(scanner_path).startswith(str(scanner_root) + os.sep)
+    record["scanner"] = {
+        "path": str(scanner_path),
+        "source": "installed" if installed else "repo_override",
+        "certifiable": bool(installed),
+    }
+    if installed:
+        try:
+            record["scanner"]["manifest_sha256"] = sha256_file(
+                scanner_root / "SHA256SUMS"
+            )
+        except OSError:
+            record["scanner"]["manifest_sha256"] = None
     record["nonces"]["before"] = pair["before"]
     record["nonces"]["after"] = pair["after"]
     record["nonces"]["used_nonces_file"] = str(used_path)
@@ -2512,10 +2756,10 @@ def _run_phase_locked(
             evidence.fd, pcap.name, int(arguments.capture_size_cap)
         )
         capture_guard.start()
-        with block_termination_signals():
-            capture = start_capture(
-                arguments.tap, pcap, stats, tcpdump=tcpdump, evidence_fd=evidence.fd
-            )
+        capture = start_capture(
+            arguments.tap, pcap, stats, tcpdump=tcpdump, evidence_fd=evidence.fd
+        )
+        capture_guard.attach_capture(capture.process)
         record["tcpdump_argv"] = capture.argv
         record["tcpdump_argv_display"] = display_argv(capture.argv, evidence)
         record["timestamps"]["capture_started"] = utc_now()
@@ -2524,18 +2768,18 @@ def _run_phase_locked(
 
         qemu_log_fd = evidence.open_append(guest.QEMU_LOG_FILE)
         try:
-            with block_termination_signals():
-                qemu_process, qemu_argv, launch_argv = start_vm(
-                    state,
-                    name=name,
-                    tap=arguments.tap,
-                    qemu_user=arguments.qemu_user,
-                    uid=uid,
-                    gid=gid,
-                    log_fd=qemu_log_fd,
-                )
+            qemu_process, qemu_argv, launch_argv = start_vm(
+                state,
+                name=name,
+                tap=arguments.tap,
+                qemu_user=arguments.qemu_user,
+                uid=uid,
+                gid=gid,
+                log_fd=qemu_log_fd,
+            )
         finally:
             os.close(qemu_log_fd)
+        capture_guard.attach_qemu(qemu_process)
         record["qemu_argv"] = qemu_argv
         record["launch_argv"] = launch_argv
         record["timestamps"]["qemu_started"] = utc_now()
@@ -2768,6 +3012,7 @@ def _run_phase_locked(
                     evidence=evidence,
                     record=record,
                     guard=capture_guard,
+                    note=note,
                 )
                 record_tailscale_state(record, client, name)
                 if record["tailscale"]["backend_state"] != "Running":
@@ -2804,6 +3049,13 @@ def _run_phase_locked(
             if capture_guard.isolation_error is not None:
                 record["tap_isolation_error"] = capture_guard.isolation_error
                 note("tap_isolation_failed")
+            if capture_guard.kill_error is not None:
+                record["capture_guard_kill_error"] = capture_guard.kill_error
+                note("capture_guard_kill_failed")
+            if capture_guard.capture_ended_early_at is not None:
+                record["capture_ended_early_at"] = (
+                    capture_guard.capture_ended_early_at
+                )
 
         note_capture_guard()
         # 1. AFTER control was sent above.  Stop/disable the router and the
@@ -2875,6 +3127,23 @@ def _run_phase_locked(
         except BaseException:  # noqa: BLE001
             pass
         if capture is not None:
+            # tcpdump must still be alive now that QEMU has exited and after
+            # the quiet drain.  An early exit means the shutdown tail was not
+            # observed, even if the counters and controls otherwise parse.
+            try:
+                capture_alive = capture.process.poll() is None
+            except BaseException:  # noqa: BLE001
+                capture_alive = False
+            record["capture_alive_before_stop"] = capture_alive
+            if not capture_alive:
+                record["capture_ended_early"] = True
+                if capture_guard is not None and capture_guard.capture_ended_early_at:
+                    record["capture_ended_early_at"] = (
+                        capture_guard.capture_ended_early_at
+                    )
+                note("capture_ended_early")
+            if capture_guard is not None:
+                capture_guard.mark_capture_stopping()
             try:
                 record["tcpdump_exit_status"] = stop_capture(
                     capture, evidence_fd=evidence.fd

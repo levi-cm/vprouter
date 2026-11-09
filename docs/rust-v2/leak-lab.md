@@ -692,10 +692,15 @@ tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 \
   -w "$RUN_DIR/manual-capture.pcap" 2> "$RUN_DIR/manual-capture.pcap.stderr"
 ```
 
-On Debian the `tcpdump` binary starts as root, opens the savefile, then drops
-to the `tcpdump` user.  Its enforcing AppArmor profile only allows savefiles
-matching `/**.pcap` (and similar patterns), so every generated capture name
-must end in `.pcap`; `netplan.py` and `guest.py` both do this.
+On Debian the `tcpdump` binary is documented to start as root, open the
+savefile, then drop to the `tcpdump` user; the exact order for this build and
+its AppArmor profile must be **qualified on the host** before the first live
+phase (this is a live gate, not an offline claim).  Its enforcing AppArmor
+profile only allows savefiles matching `/**.pcap` (and similar patterns), so
+every generated capture name must end in `.pcap`; `netplan.py` and `guest.py`
+both do this.  The M2 runner stops tcpdump with SIGINT only after QEMU has
+exited and the after-control is present; a tcpdump that exited earlier makes
+the phase INVALID (`capture_ended_early`).
 
 `--immediate-mode` makes each packet reach the file as it is read. Do not stop
 the capture immediately after sending the after-control: wait until the
@@ -793,6 +798,16 @@ What a compromised router VM can and cannot do:
 - It **cannot** make the monitor authenticate WireGuard or prove that the
   tunnel carried real traffic. Matching an allowed outer UDP tuple proves only
   the endpoint, not encryption or a working tunnel.
+- The allowed tuple has a **WireGuard shape check**, not a cryptographic one.
+  Every non-control UDP datagram on an allowed tuple must start with message
+  type 1, 2, 3 or 4, have three zero reserved bytes, and have a plausible
+  length: type 1 exactly 148 bytes, type 2 exactly 92, type 3 exactly 64, and
+  type 4 at least 32 bytes with `(length - 16) % 16 == 0`. A reassembled
+  fragmented datagram is checked with the same length rule; a first fragment
+  that does not expose the four-byte header is refused. Anything else is the
+  LEAK finding `allowed_tuple_not_wireguard`. This stops a plaintext payload
+  on the declared outer flow from being certified, but it does not
+  authenticate the ciphertext or prove a working tunnel.
 
 This milestone does **not** cover:
 
@@ -817,6 +832,13 @@ This milestone does **not** cover:
 - the outbound UDP source port. Any source port to an allowed relay endpoint is
   accepted; only the destination tuple is declared. Note this when interpreting
   a `PASS`.
+
+**Skipped Minors:** the M1 foreground/manual capture still uses
+`/run/vprlab` (tmpfs on many hosts) and has no separate size bound.  The M2
+path never starts it (it uses `netplan.py setup`), so this is deferred until
+someone uses the M1 capture mode on a host with a small `/run`.  The Debian
+tcpdump privilege-drop order/AppArmor qualification remains a live gate, as
+stated above.
 
 There is no `--allow-no-stats`, `--allow-filter` or no-control escape hatch.
 Missing stats, a mismatched capture argv, a missing control, a decreasing

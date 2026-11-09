@@ -10,9 +10,13 @@ This module is used two ways:
 It never executes another program.  Copying opens every source leaf with
 ``O_NOFOLLOW``, requires a regular file, hashes the exact bytes it writes and
 re-hashes the completed destination file before it is published.  Symbolic
-links are never followed: they must be relative, must resolve inside the
-copied tree, are recreated as links and are recorded with their targets in a
-separate link manifest.
+links are never followed: they must be relative and their full ``realpath``
+chain must stay inside the copied tree (a chain that only resolves inside
+lexically is still refused).  Links are recreated as links and recorded with
+their targets in a separate link manifest.  A hardlinked source is copied as
+independent content: the destination has no hardlink relationship to the
+source or to another destination file.  ``verify_tree`` also reports any
+destination entry that neither manifest lists.
 """
 
 from __future__ import annotations
@@ -269,6 +273,23 @@ def _resolve_link(relative: str, target: str) -> str:
     return "/".join(parts)
 
 
+def _verify_link_confinement(root: str, links: dict[str, str]) -> None:
+    """Resolve every link's full chain and refuse one that leaves ``root``.
+
+    The lexical :func:`_resolve_link` check cannot see a chain such as
+    ``a/b/s -> ../../top`` plus ``a/b/k -> s/../..`` which resolves outside
+    the tree.  ``realpath`` follows the chain, so it closes that gap.
+    """
+    root_real = os.path.realpath(root)
+    for relative in sorted(links):
+        path = os.path.join(root, *relative.split("/"))
+        resolved = os.path.realpath(path)
+        if resolved != root_real and not resolved.startswith(root_real + os.sep):
+            raise HostcopyError(
+                f"{relative} resolves outside the copied tree ({resolved})"
+            )
+
+
 def _collect(
     source: str,
     only: Iterable[str] | None = None,
@@ -507,6 +528,7 @@ def copy_tree(
     files, links, directories = _collect(
         source, None if only is None else list(only)
     )
+    _verify_link_confinement(source, links)
     os.makedirs(destination, mode=0o755, exist_ok=True)
     if os.path.islink(destination):
         raise HostcopyError(f"destination {destination} is a symlink")
@@ -540,6 +562,9 @@ def copy_tree(
         _copy_link(
             os.path.join(source, *relative.split("/")), destination_path, target
         )
+    # The links now exist in the destination; verify their full chains there
+    # too, so a link whose target is another planted link cannot escape.
+    _verify_link_confinement(destination, links)
     _remove_manifest_leftovers(destination, manifest, links_manifest)
     _write_manifests(manifest, links_manifest, digests, links)
     return {"files": sorted(digests), "links": dict(sorted(links.items()))}
@@ -660,6 +685,33 @@ def verify_tree(
             _resolve_link(relative, actual)
         except HostcopyError as exc:
             problems.append(str(exc))
+    try:
+        _verify_link_confinement(directory, links)
+    except HostcopyError as exc:
+        problems.append(str(exc))
+    # A destination entry that neither manifest lists was not produced by
+    # this copy.  It may be stale from an earlier run or a planted file; a
+    # root-owned tree must not silently publish it.
+    manifest_path = os.path.abspath(os.fspath(manifest))
+    links_path = os.path.abspath(os.fspath(links_manifest))
+    known = set(digests) | set(links)
+    known_directories: set[str] = set()
+    for relative in known:
+        parts = relative.split("/")
+        for index in range(1, len(parts)):
+            known_directories.add("/".join(parts[:index]))
+    for current, directories, entries in os.walk(directory, followlinks=False):
+        symlinked_directories = [
+            name for name in directories if os.path.islink(os.path.join(current, name))
+        ]
+        for name in entries + symlinked_directories:
+            path = os.path.join(current, name)
+            relative = os.path.relpath(path, directory).replace(os.sep, "/")
+            if os.path.abspath(path) in (manifest_path, links_path):
+                continue
+            if relative in known or relative in known_directories:
+                continue
+            problems.append(f"{relative} is an extra destination entry")
     return problems
 
 

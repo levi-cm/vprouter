@@ -29,6 +29,8 @@ import subprocess
 import sys
 import time
 
+_REAL_POPEN = subprocess.Popen
+
 import guest
 import hostcheck
 import rootfs
@@ -36,6 +38,11 @@ import runlock
 
 PROVISION_TIMEOUT = 1800.0
 POWEROFF_TIMEOUT = 180.0
+#: Provision writes a diagnostic serial file.  The guest is untrusted, so the
+#: file is capped (and QEMU has RLIMIT_FSIZE below as a second bound).
+SERIAL_SIZE_CAP = 64 * 1024 * 1024
+PROVISION_QEMU_FSIZE_LIMIT = 8 * 1024 * 1024 * 1024
+PROVISION_DISK_REQUIRED = 8 * 1024 * 1024 * 1024
 
 
 class ProvisionInterrupted(RuntimeError):
@@ -103,6 +110,69 @@ def _qemu_identity(user: str) -> tuple[int, int]:
         return guest.resolve_unprivileged_user(user)
     except guest.GeneratorError as exc:
         raise hostcheck.Refusal(str(exc)) from exc
+
+
+def set_provision_limits() -> None:
+    """Bound the provisioning process's own file writes at 8 GiB.
+
+    QEMU gets the same limit explicitly after spawn.  The staging copies this
+    process writes (image tar/release payload) are therefore capped too.
+    """
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
+    target = PROVISION_QEMU_FSIZE_LIMIT
+    if hard != resource.RLIM_INFINITY:
+        target = min(target, hard)
+    if soft != resource.RLIM_INFINITY:
+        target = min(target, soft)
+    if target > 0:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (target, hard))
+
+
+def _free_bytes(path: pathlib.Path) -> int:
+    candidate = pathlib.Path(path)
+    while not candidate.exists():
+        if candidate.parent == candidate:
+            break
+        candidate = candidate.parent
+    try:
+        stats = os.statvfs(candidate)
+    except OSError as exc:
+        raise hostcheck.Refusal("cannot measure free disk space") from exc
+    return stats.f_bavail * stats.f_frsize
+
+
+def check_provision_admission(
+    state_root: pathlib.Path, *, free_bytes: int | None = None
+) -> None:
+    """Refuse provisioning without room for the overlay, serial and staging."""
+    if free_bytes is None:
+        free_bytes = _free_bytes(state_root)
+    if free_bytes < PROVISION_DISK_REQUIRED:
+        raise hostcheck.Refusal(
+            "free space on the state filesystem is below "
+            f"{PROVISION_DISK_REQUIRED // (1024 * 1024 * 1024)} GiB; "
+            "refusing to provision"
+        )
+
+
+def _apply_qemu_limits(process: subprocess.Popen) -> None:
+    """Reset inherited RLIMIT_AS and bound the guest-writable host files."""
+    import resource
+
+    if not isinstance(process, _REAL_POPEN):
+        return
+    for name, value in (
+        (resource.RLIMIT_AS, resource.RLIM_INFINITY),
+        (resource.RLIMIT_FSIZE, PROVISION_QEMU_FSIZE_LIMIT),
+    ):
+        try:
+            resource.prlimit(process.pid, name, (value, value))
+        except (ProcessLookupError, PermissionError):
+            return
+        except (OSError, ValueError):
+            continue
 
 
 def _require_tool(path: pathlib.Path) -> None:
@@ -235,6 +305,13 @@ def _wait_for_marker(process: subprocess.Popen, serial: pathlib.Path, timeout: f
                 with os.fdopen(descriptor, "rb") as stream:
                     stream.seek(0, os.SEEK_END)
                     size = stream.tell()
+                    if size > SERIAL_SIZE_CAP:
+                        # The guest filled the diagnostic console file.  Stop
+                        # QEMU now; the caller's failure path also reaps it.
+                        _terminate(process)
+                        raise hostcheck.Refusal(
+                            "guest serial output exceeded the 64 MiB cap"
+                        )
                     stream.seek(max(0, size - 262144))
                     collected = stream.read()
             except OSError:
@@ -292,6 +369,7 @@ def provision(arguments: argparse.Namespace) -> int:
 
 def _provision_locked(arguments: argparse.Namespace, state: pathlib.Path) -> int:
     uid, gid = _qemu_identity(arguments.qemu_user)
+    check_provision_admission(pathlib.Path(arguments.state_root))
     base = pathlib.Path(arguments.base_image)
     digest = guest.verify_base_image(base, pathlib.Path(arguments.checksum_manifest))
 
@@ -433,7 +511,9 @@ def _provision_locked(arguments: argparse.Namespace, state: pathlib.Path) -> int
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
+                restore_signals=True,
             )
+            _apply_qemu_limits(process)
         record["qemu_pid"] = process.pid
         record["qemu_started_at"] = _utc_now()
         _write_json_fd(record_fd, record)
@@ -512,6 +592,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
     install_signal_handlers()
+    try:
+        set_provision_limits()
+    except (OSError, ValueError) as exc:
+        print(f"provision: cannot set the file-size limit: {exc}", file=sys.stderr)
+        return 2
     try:
         guest.validate_name(arguments.name)
         guest.validate_image_id(arguments.image_id)

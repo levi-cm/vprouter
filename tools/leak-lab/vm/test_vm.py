@@ -72,6 +72,7 @@ class FakeQGAServer(threading.Thread):
         hang_status: bool = False,
         error_on: frozenset[str] = frozenset(),
         error_desc: str | None = None,
+        sync_split_at: int | None = None,
     ):
         super().__init__(daemon=True)
         self.path = path
@@ -81,6 +82,7 @@ class FakeQGAServer(threading.Thread):
         self.hang_status = hang_status
         self.error_on = error_on
         self.error_desc = error_desc
+        self.sync_split_at = sync_split_at
         self.commands: list[str] = []
         self.exec_arguments: list[dict] = []
         self.files: dict[str, bytearray] = {}
@@ -155,7 +157,20 @@ class FakeQGAServer(threading.Thread):
             self._error(connection, name)
             return True
         if name == "guest-sync-delimited":
-            self._send(connection, {"return": arguments.get("id")}, delimited=True)
+            if self.sync_split_at is None:
+                self._send(connection, {"return": arguments.get("id")}, delimited=True)
+            else:
+                wire = (
+                    b"\xff"
+                    + json.dumps(
+                        {"return": arguments.get("id")}, separators=(",", ":")
+                    ).encode("ascii")
+                    + b"\n"
+                )
+                cut = max(0, min(int(self.sync_split_at), len(wire)))
+                connection.sendall(wire[:cut])
+                time.sleep(0.02)
+                connection.sendall(wire[cut:])
         elif name == "guest-sync":
             self._send(connection, {"return": arguments.get("id")})
         elif name == "guest-ping":
@@ -244,6 +259,27 @@ class QGATestCase(unittest.TestCase):
         self.assertIn("guest-sync-delimited", server.commands)
         self.assertIn("guest-ping", server.commands)
         self.assertIsNone(server.failure)
+
+    def test_sync_delimiter_survives_every_split_position(self) -> None:
+        # Build the exact frame the fake agent will send, then split it at
+        # every byte boundary.  The marker must be rescanned, not skipped.
+        frame = b"\xff" + json.dumps(
+            {"return": 2}, separators=(",", ":")
+        ).encode("ascii") + b"\n"
+        for cut in range(len(frame) + 1):
+            with self.subTest(cut=cut):
+                if self.socket_path.exists():
+                    self.socket_path.unlink()
+                server = FakeQGAServer(self.socket_path, sync_split_at=cut)
+                server.start()
+                client = QGAClient(self.socket_path)
+                try:
+                    client.connect(timeout=5.0)
+                    client.ping(timeout=5.0)
+                finally:
+                    client.close()
+                    server.close()
+                self.assertIsNone(server.failure)
 
     def test_exec_captures_streams_and_exit_code(self) -> None:
         server = self.start_server(
@@ -434,7 +470,8 @@ class QemuArgvTests(unittest.TestCase):
         self.assertIn("virtserialport,chardev=qga0,name=org.qemu.guest_agent.0", argv)
         self.assertNotIn("-qmp", argv)
         self.assertNotIn("qmp.sock", joined)
-        self.assertIn("file:/state/serial.log", argv)
+        self.assertNotIn("file:/state/serial.log", argv)
+        self.assertEqual(argv[argv.index("-serial") + 1], "none")
         self.assertIn("/state/qemu.pid", argv)
 
     def test_provision_mode_is_user_net_only(self) -> None:
@@ -1308,6 +1345,8 @@ class ProvisionPipelineTests(unittest.TestCase):
             ), mock.patch.object(
                 provision, "_qemu_identity", return_value=(uid, gid)
             ), mock.patch.object(
+                provision, "check_provision_admission"
+            ), mock.patch.object(
                 provision.os, "chown"
             ), mock.patch.object(
                 provision.subprocess, "run", side_effect=fake_run
@@ -1377,6 +1416,7 @@ class ProvisionPipelineTests(unittest.TestCase):
             mock.patch.object(provision.hostcheck, "refuse_if_qemu_running"),
             mock.patch.object(provision, "_require_tool"),
             mock.patch.object(provision, "_qemu_identity", return_value=(uid, gid)),
+            mock.patch.object(provision, "check_provision_admission"),
             mock.patch.object(provision.os, "chown"),
             mock.patch.object(provision.subprocess, "run", side_effect=fake_run),
             mock.patch.object(provision.subprocess, "Popen", fake_qemu),
@@ -1702,9 +1742,10 @@ class FakeCaptureProcess:
         self.events = events
         self.pid = 5151
         self.returncode = None
+        self.exited = False
 
     def poll(self):
-        return None
+        return 0 if self.exited else None
 
     def send_signal(self, _signum):
         self.events.append(("capture_sigint",))
@@ -1964,6 +2005,7 @@ class RunPhaseTests(unittest.TestCase):
         scan_kwargs: dict | None = None,
         admission_raises: bool = False,
         watch_quiet_delay: float = 0.0,
+        capture_dies_after_qemu: bool = False,
         **argument_overrides,
     ):
         arguments = self._arguments(phase, duration, **argument_overrides)
@@ -2054,13 +2096,31 @@ class RunPhaseTests(unittest.TestCase):
             )
 
         pcap_slot: list[pathlib.Path | None] = [None]
+        capture_slot: list = [None]
         client = HarnessQGA(self.events, pcap_slot, **client_kwargs)
+
+        original_capture_factory = start_capture
+
+        def capturing(interface, pcap, stats, *, tcpdump, evidence_fd=None, popen=None, timeout=15.0):
+            capture = original_capture_factory(
+                interface,
+                pcap,
+                stats,
+                tcpdump=tcpdump,
+                evidence_fd=evidence_fd,
+                popen=popen,
+                timeout=timeout,
+            )
+            capture_slot[0] = capture
+            return capture
 
         def fake_poweroff(client_arg, process, *, state=None, tap=None):
             del client_arg, state, tap
             self.events.append(("guest_poweroff",))
             if process is not None:
                 process.wait()
+            if capture_dies_after_qemu and capture_slot[0] is not None:
+                capture_slot[0].process.exited = True
             return (0, False, False)
 
         with contextlib.ExitStack() as stack:
@@ -2101,7 +2161,7 @@ class RunPhaseTests(unittest.TestCase):
             enter(mock.patch.object(run_phase, "ROUTER_ACTIVE_TIMEOUT", 0.05))
             enter(mock.patch.object(run_phase, "ROUTER_HANDSHAKE_TIMEOUT", 0.05))
             enter(mock.patch.object(run_phase, "DOCKER_RESTART_TIMEOUT", 0.05))
-            enter(mock.patch.object(run_phase, "start_capture", side_effect=start_capture))
+            enter(mock.patch.object(run_phase, "start_capture", side_effect=capturing))
             enter(mock.patch.object(run_phase, "stop_capture", side_effect=stop_capture))
             enter(mock.patch.object(run_phase, "start_vm", side_effect=start_vm))
             enter(mock.patch.object(
@@ -2114,6 +2174,8 @@ class RunPhaseTests(unittest.TestCase):
                 enter(mock.patch.object(run_phase, "wait_for_reboot", return_value=client))
             if poweroff_override is not None:
                 enter(mock.patch.object(run_phase, "poweroff_vm", side_effect=poweroff_override))
+            elif capture_dies_after_qemu:
+                enter(mock.patch.object(run_phase, "poweroff_vm", side_effect=fake_poweroff))
             enter(mock.patch.object(run_phase.subprocess, "run", side_effect=fake_run))
             stdout = io.StringIO()
             stderr = io.StringIO()
@@ -2799,7 +2861,7 @@ class RunPhaseTests(unittest.TestCase):
             "start-router", scan_kwargs=scan_kwargs
         )
         self.assertEqual(code, 0)
-        self.assertIs(scan_kwargs.get("preexec_fn"), run_phase.set_scan_limits)
+        self.assertNotIn("preexec_fn", scan_kwargs)
         self.assertEqual(scan_kwargs.get("timeout"), run_phase.SCAN_TIMEOUT)
         pass_fds = scan_kwargs.get("pass_fds")
         self.assertIsInstance(pass_fds, tuple)
@@ -3126,32 +3188,160 @@ class MainExitTests(unittest.TestCase):
             for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
                 signal.signal(signum, signal.SIG_DFL)
 
-    def test_signal_handler_raises_into_the_cleanup_path(self) -> None:
+    def test_signal_handler_only_sets_a_deferred_flag(self) -> None:
         run_phase.install_signal_handlers()
         try:
-            run_phase._signal_seen = False
-            with self.assertRaises(run_phase.PhaseInterrupted):
-                run_phase._handle_signal(signal.SIGTERM, None)
-            # A second signal during cleanup is ignored, not re-raised.
+            # The handler must never raise or block: a signal during Popen
+            # simply sets the flag, and the next checkpoint raises.
             run_phase._handle_signal(signal.SIGTERM, None)
+            self.assertTrue(run_phase._signal_seen)
+            self.assertEqual(run_phase._signal_number, signal.SIGTERM)
+            with self.assertRaises(run_phase.PhaseInterrupted):
+                run_phase.check_interrupt()
+            # The first checkpoint owns the raise; cleanup checkpoints do not.
+            run_phase.check_interrupt()
         finally:
             run_phase._signal_seen = False
+            run_phase._signal_number = None
+            run_phase._signal_raised = False
             for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
                 signal.signal(signum, signal.SIG_DFL)
 
-    def test_pending_signal_is_blocked_until_the_child_handle_exists(self) -> None:
+    def test_signal_during_child_spawn_keeps_a_live_handle_for_cleanup(self) -> None:
         run_phase.install_signal_handlers()
-        try:
-            run_phase._signal_seen = False
-            with self.assertRaises(run_phase.PhaseInterrupted):
-                with run_phase.block_termination_signals():
-                    os.kill(os.getpid(), signal.SIGTERM)
-                    self.assertFalse(run_phase._signal_seen)
-            self.assertTrue(run_phase._signal_seen)
-        finally:
-            run_phase._signal_seen = False
-            for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
-                signal.signal(signum, signal.SIG_DFL)
+        with tempfile.TemporaryDirectory() as temporary:
+            pcap = pathlib.Path(temporary) / "capture.pcap"
+            pcap.write_bytes(b"\xd4\xc3\xb2\xa1" + b"\x00" * 20)
+            stats = pathlib.Path(temporary) / "capture.stderr"
+            spawled = []
+            real_popen = subprocess.Popen
+
+            def popen_then_signal(argv, **kwargs):
+                del argv
+                child = real_popen(
+                    [sys.executable, "-c", "import time; time.sleep(30)"],
+                    start_new_session=True,
+                    **{k: v for k, v in kwargs.items() if k in ("stdin", "stdout", "stderr")},
+                )
+                spawled.append(child)
+                os.kill(os.getpid(), signal.SIGTERM)
+                return child
+
+            try:
+                with self.assertRaises(run_phase.PhaseInterrupted):
+                    run_phase.start_capture(
+                        guest.TAP,
+                        pcap,
+                        stats,
+                        tcpdump="/bin/sleep",
+                        popen=popen_then_signal,
+                    )
+                self.assertEqual(len(spawled), 1)
+                self.assertIsNotNone(spawled[0].poll())
+            finally:
+                for child in spawled:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=10)
+                run_phase._signal_seen = False
+                run_phase._signal_number = None
+                run_phase._signal_raised = False
+                for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                    signal.signal(signum, signal.SIG_DFL)
+
+    def test_spawned_tcpdump_like_child_has_empty_sigmask_and_default_signals(self) -> None:
+        run_phase.install_signal_handlers()
+        with tempfile.TemporaryDirectory() as temporary:
+            pcap = pathlib.Path(temporary) / "capture.pcap"
+            pcap.write_bytes(b"\xd4\xc3\xb2\xa1" + b"\x00" * 20)
+            stats = pathlib.Path(temporary) / "capture.stderr"
+            spawned = []
+
+            def fake_popen(argv, **kwargs):
+                del argv
+                child = subprocess.Popen(
+                    ["/bin/sleep", "30"], start_new_session=True
+                )
+                spawned.append(child)
+                return child
+
+            try:
+                capture = run_phase.start_capture(
+                    guest.TAP, pcap, stats, tcpdump="/bin/sleep", popen=fake_popen
+                )
+                status = pathlib.Path(f"/proc/{capture.process.pid}/status").read_text()
+                fields = dict(
+                    line.split(":", 1) for line in status.splitlines() if ":" in line
+                )
+                self.assertEqual(int(fields["SigBlk"].strip(), 16), 0)
+                ignored = int(fields["SigIgn"].strip(), 16)
+                for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+                    self.assertEqual(ignored & (1 << (signum - 1)), 0)
+                run_phase.stop_capture(capture, timeout=5)
+            finally:
+                for child in spawned:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=10)
+                run_phase._signal_seen = False
+                run_phase._signal_number = None
+                run_phase._signal_raised = False
+                for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                    signal.signal(signum, signal.SIG_DFL)
+
+    def test_capture_guard_thread_has_no_blocked_termination_signals(self) -> None:
+        run_phase.install_signal_handlers()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / "capture.pcap").write_bytes(b"x" * 24)
+            descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                guard = run_phase.CaptureGuard(
+                    descriptor, "capture.pcap", 1024 * 1024, interval=0.01
+                )
+                guard.start()
+                ident = guard._thread.native_id
+                status = pathlib.Path(f"/proc/self/task/{ident}/status").read_text()
+                fields = dict(
+                    line.split(":", 1) for line in status.splitlines() if ":" in line
+                )
+                self.assertEqual(int(fields["SigBlk"].strip(), 16), 0)
+                guard.stop()
+            finally:
+                os.close(descriptor)
+                run_phase._signal_seen = False
+                run_phase._signal_number = None
+                run_phase._signal_raised = False
+                for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                    signal.signal(signum, signal.SIG_DFL)
+
+    def test_process_signal_with_a_running_guard_is_deferred_not_raised_in_thread(self) -> None:
+        run_phase.install_signal_handlers()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / "capture.pcap").write_bytes(b"x" * 24)
+            descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                guard = run_phase.CaptureGuard(
+                    descriptor, "capture.pcap", 1024 * 1024, interval=0.01
+                )
+                guard.start()
+                os.kill(os.getpid(), signal.SIGTERM)
+                deadline = time.monotonic() + 2.0
+                while not run_phase._signal_seen and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(run_phase._signal_seen)
+                self.assertTrue(guard._thread.is_alive())
+                with self.assertRaises(run_phase.PhaseInterrupted):
+                    run_phase.check_interrupt()
+                guard.stop()
+            finally:
+                os.close(descriptor)
+                run_phase._signal_seen = False
+                run_phase._signal_number = None
+                run_phase._signal_raised = False
+                for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                    signal.signal(signum, signal.SIG_DFL)
 
 
 class CaptureFileTests(unittest.TestCase):
@@ -3634,6 +3824,9 @@ esac
                         provision.guest, "verify_base_image", return_value="0" * 128
                     )
                 )
+                stack.enter_context(
+                    mock.patch.object(provision, "check_provision_admission")
+                )
                 stack.enter_context(mock.patch.object(provision, "_require_tool"))
                 stack.enter_context(
                     mock.patch.object(provision.guest, "verify_tool_ancestry")
@@ -3724,13 +3917,13 @@ esac
     def test_plan_is_plan_only_and_has_no_relative_destinations(self) -> None:
         text = hostsetup.render_setup_script()
         self.assertTrue(text.startswith("#!/bin/sh\n"))
-        self.assertIn("QEMU_USER='vprlab-qemu'", text)
+        self.assertIn("QEMU_USER=vprlab-qemu", text)
         self.assertIn("useradd --system --no-create-home", text)
         self.assertIn("usermod -aG \"$KVM_GROUP\"", text)
-        self.assertIn("TOOLS_ROOT='/opt/vprlab-tools'", text)
-        self.assertIn("STATE_ROOT='/var/lib/vprlab'", text)
-        self.assertIn("EVIDENCE_ROOT='/var/lib/vprlab/evidence'", text)
-        self.assertIn("RUN_ROOT='/run/vprlab'", text)
+        self.assertIn("TOOLS_ROOT=/opt/vprlab-tools", text)
+        self.assertIn("STATE_ROOT=/var/lib/vprlab", text)
+        self.assertIn("EVIDENCE_ROOT=/var/lib/vprlab/evidence", text)
+        self.assertIn("RUN_ROOT=/run/vprlab", text)
         self.assertIn("SHA256SUMS", text)
         self.assertIn("SHA512SUMS", text)
         self.assertIn("teardown", text)
@@ -3852,6 +4045,9 @@ def _pcap_bytes(frames: list[bytes]) -> bytes:
     return bytes(data)
 
 
+WG_DATA = b"\x04\x00\x00\x00" + b"\x00" * 12 + b"\x00" * 16
+
+
 class RealScannerIntegrationTests(unittest.TestCase):
     """Run the real pcapscan CLI over evidence written by the real writers."""
 
@@ -3870,14 +4066,14 @@ class RealScannerIntegrationTests(unittest.TestCase):
                 dst_mac=guest.GATEWAY_MAC,
             ),
             _ipv4_frame(
-                b"wireguard",
+                WG_DATA,
                 src_ip=guest.VM_IPV4,
                 dst_ip="185.65.134.10",
                 src_mac=guest.VM_MAC,
                 dst_mac=guest.GATEWAY_MAC,
             ),
             _udp_frame(
-                b"wireguard",
+                WG_DATA,
                 src_ip="185.65.134.10",
                 dst_ip=guest.VM_IPV4,
                 sport=51820,
@@ -4216,6 +4412,570 @@ class ProvisionDefaultsTests(unittest.TestCase):
             code = provision.main(["--image-tar", "/tmp/image.tar"])
         self.assertEqual(code, 0)
         self.assertEqual(captured["ipv6_mode"], "netns-safe")
+
+
+
+class ResourceLimitContractTests(unittest.TestCase):
+    """QEMU/tcpdump must not inherit the runner's 2 GiB RLIMIT_AS."""
+
+    def _set_runner_as(self, value: int):
+        import resource
+
+        previous = resource.getrlimit(resource.RLIMIT_AS)
+        soft, hard = previous
+        target = value if hard == resource.RLIM_INFINITY else min(value, hard)
+        resource.setrlimit(resource.RLIMIT_AS, (target, hard))
+        self.addCleanup(resource.setrlimit, resource.RLIMIT_AS, previous)
+
+    @staticmethod
+    def _limit(pid: int, name: str) -> str:
+        text = pathlib.Path(f"/proc/{pid}/limits").read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.startswith(name):
+                return line
+        raise AssertionError(f"{name} not found")
+
+    def test_tcpdump_like_child_starts_with_unlimited_address_space(self) -> None:
+        self._set_runner_as(2 * 1024 * 1024 * 1024)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            pcap = root / "capture.pcap"
+            pcap.write_bytes(b"\xd4\xc3\xb2\xa1" + b"\x00" * 20)
+            stats = root / "capture.stderr"
+            spawned = []
+
+            def fake_popen(argv, **kwargs):
+                del argv
+                child = subprocess.Popen(
+                    ["/bin/sleep", "30"], start_new_session=True
+                )
+                spawned.append(child)
+                return child
+
+            capture = run_phase.start_capture(
+                guest.TAP, pcap, stats, tcpdump="/bin/sleep", popen=fake_popen
+            )
+            try:
+                line = self._limit(capture.process.pid, "Max address space")
+                self.assertIn("unlimited", line)
+                self.assertNotIn(str(2 * 1024 * 1024 * 1024), line)
+            finally:
+                run_phase.stop_capture(capture, timeout=5)
+                for child in spawned:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=10)
+
+    def test_qemu_like_child_gets_fsize_and_unlimited_address_space(self) -> None:
+        self._set_runner_as(2 * 1024 * 1024 * 1024)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            state = root / "vm-001"
+            state.mkdir()
+            log = root / "qemu.log"
+            real_popen = subprocess.Popen
+            spawned = []
+
+            def fake_popen(argv, **kwargs):
+                del argv, kwargs
+                child = real_popen(["/bin/sleep", "30"], start_new_session=True)
+                spawned.append(child)
+                return child
+
+            with mock.patch.object(run_phase.subprocess, "Popen", side_effect=fake_popen):
+                process, _argv, _launch = run_phase.start_vm(
+                    state,
+                    name=guest.DEFAULT_NAME,
+                    tap=guest.TAP,
+                    qemu_user=guest.QEMU_USER,
+                    uid=1000,
+                    gid=1000,
+                    log_path=log,
+                )
+            try:
+                self.assertIn(
+                    "unlimited", self._limit(process.pid, "Max address space")
+                )
+                fsize = self._limit(process.pid, "Max file size")
+                self.assertIn(
+                    str(run_phase.TEST_QEMU_FSIZE_LIMIT), fsize
+                )
+                status = pathlib.Path(
+                    f"/proc/{process.pid}/status"
+                ).read_text(encoding="utf-8")
+                fields = dict(
+                    line.split(":", 1)
+                    for line in status.splitlines()
+                    if ":" in line
+                )
+                self.assertEqual(int(fields["SigBlk"].strip(), 16), 0)
+                ignored = int(fields["SigIgn"].strip(), 16)
+                for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+                    self.assertEqual(ignored & (1 << (signum - 1)), 0)
+            finally:
+                for child in spawned:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=10)
+
+
+class CaptureLivenessTests(unittest.TestCase):
+    def test_run_phase_marks_a_capture_that_exited_before_stop_invalid(self) -> None:
+        case = RunPhaseTests("test_idle_starts_the_router_and_expects_a_tunnel")
+        case.setUp()
+        try:
+            code, record, _client, _events, _stdout, _stderr, _dir = case._run(
+                "start-router", capture_dies_after_qemu=True
+            )
+            self.assertEqual(code, 2)
+            self.assertEqual(record["result"], "INVALID")
+            self.assertIn("capture_ended_early", record["result_reason"])
+            self.assertFalse(record["capture_alive_before_stop"])
+        finally:
+            case.doCleanups()
+
+    def test_guard_records_the_time_of_an_early_capture_exit(self) -> None:
+        class Exited:
+            def poll(self):
+                return 0
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / "capture.pcap").write_bytes(b"x" * 24)
+            descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            events = []
+            try:
+                guard = run_phase.CaptureGuard(
+                    descriptor,
+                    "capture.pcap",
+                    1024 * 1024,
+                    interval=0.01,
+                    capture_process=Exited(),
+                )
+                with mock.patch.object(
+                    run_phase,
+                    "isolate_tap",
+                    side_effect=lambda tap: events.append(("isolate_tap", tap)),
+                ):
+                    guard.start()
+                    deadline = time.monotonic() + 2.0
+                    while guard.reason is None and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    guard.stop()
+                self.assertEqual(guard.reason, "capture_ended_early")
+                self.assertIsNotNone(guard.capture_ended_early_at)
+                self.assertIn(("isolate_tap", guest.TAP), events)
+            finally:
+                os.close(descriptor)
+
+    def test_guard_kills_the_verified_qemu_on_a_capture_size_breach(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            fake_qemu = root / "qemu-system-x86_64"
+            fake_qemu.write_bytes(pathlib.Path("/bin/sleep").read_bytes())
+            fake_qemu.chmod(0o755)
+            (root / "capture.pcap").write_bytes(b"x" * 64)
+            process = subprocess.Popen(
+                [str(fake_qemu), "30"], start_new_session=True
+            )
+            descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                guard = run_phase.CaptureGuard(
+                    descriptor,
+                    "capture.pcap",
+                    32,
+                    interval=0.01,
+                    qemu_process=process,
+                )
+                with mock.patch.object(guest, "QEMU", fake_qemu), mock.patch.object(
+                    run_phase,
+                    "isolate_tap",
+                    side_effect=lambda tap: None,
+                ):
+                    guard.start()
+                    deadline = time.monotonic() + 3.0
+                    while guard.reason is None and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    guard.stop()
+                self.assertEqual(guard.reason, "capture_size_cap")
+                process.wait(timeout=10)
+                self.assertIsNotNone(process.poll())
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=10)
+                os.close(descriptor)
+
+
+class LoginUrlShapeTests(unittest.TestCase):
+    class Client:
+        def __init__(self, auth_url=None, logs=b""):
+            self.auth_url = auth_url
+            self.logs = logs
+
+        def execute(self, program, args=(), **_kwargs):
+            del program
+            command = args[-1] if args else ""
+            if "tailscale status --json" in command:
+                return ExecResult(
+                    0,
+                    json.dumps({"AuthURL": self.auth_url or ""}).encode(),
+                    b"",
+                )
+            if "docker logs" in command:
+                return ExecResult(0, self.logs, b"")
+            return ExecResult(0, b"", b"")
+
+    def test_empty_auth_url_is_not_unrecognized(self) -> None:
+        found, unrecognized = login_url.find_login_url_result(
+            self.Client(auth_url=""), guest.DEFAULT_NAME
+        )
+        self.assertIsNone(found)
+        self.assertFalse(unrecognized)
+
+    def test_only_the_fixed_login_path_shape_is_accepted(self) -> None:
+        for length in range(8, 17):
+            with self.subTest(length=length):
+                url = "https://login.tailscale.com/a/" + "a" * length
+                found, unrecognized = login_url.find_login_url_result(
+                    self.Client(auth_url=url), guest.DEFAULT_NAME
+                )
+                self.assertEqual(found, url)
+                self.assertFalse(unrecognized)
+        for bad in (
+            "https://login.tailscale.com/a/" + "a" * 7,
+            "https://login.tailscale.com/a/" + "a" * 17,
+            "https://login.tailscale.com/a/" + "A" * 16,
+            "https://login.tailscale.com/a/" + "a" * 8 + "/extra",
+            "https://login.tailscale.com/a/" + "a" * 8 + "%00",
+            "https://login.tailscale.com/other/" + "a" * 16,
+        ):
+            with self.subTest(bad=bad):
+                found, unrecognized = login_url.find_login_url_result(
+                    self.Client(auth_url=bad), guest.DEFAULT_NAME
+                )
+                self.assertIsNone(found)
+                self.assertTrue(unrecognized)
+
+    def test_invalid_login_url_is_not_written_and_is_an_error(self) -> None:
+        invalid = "https://login.tailscale.com/a/" + "a" * 24
+        case = RunPhaseTests("test_login_phase_writes_only_the_url_to_a_root_only_file")
+        case.setUp()
+        try:
+            code, record, _client, _events, _stdout, stderr, evidence = case._run(
+                "login", duration=0.0, client_kwargs={"login_url": invalid}
+            )
+            self.assertEqual(code, 2)
+            self.assertIn("login_url_unrecognized", record["result_reason"])
+            self.assertTrue(record["login_url_unrecognized"])
+            self.assertFalse((evidence / "login-url.txt").exists())
+            self.assertNotIn(invalid, stderr)
+        finally:
+            case.doCleanups()
+
+    def test_valid_login_url_records_its_length(self) -> None:
+        case = RunPhaseTests("test_login_phase_writes_only_the_url_to_a_root_only_file")
+        case.setUp()
+        try:
+            code, record, _client, _events, _stdout, _stderr, evidence = case._run(
+                "login", duration=0.0
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(record["login_url_length"], len(LOGIN_URL))
+            self.assertEqual(
+                (evidence / "login-url.txt").read_text(encoding="utf-8"),
+                LOGIN_URL + "\n",
+            )
+        finally:
+            case.doCleanups()
+
+
+class HostsetupInjectionTests(unittest.TestCase):
+    def test_gpt_shell_payloads_are_refused(self) -> None:
+        injections = (
+            {"base_image_name": "x'; printf SAFETY_INJECTED; : '"},
+            {"tools_source": "/tmp/$(printf SAFETY_INJECTED)"},
+            {"images_source": "/tmp/a'b"},
+            {"leak_lab_source": "/tmp/a\nb"},
+            {"tools_root": "/opt/../etc"},
+            {"state_root": "/var/lib/vprlab;id"},
+            {"run_root": "/run/$(id)"},
+            {"qemu_user": "user;id"},
+        )
+        for kwargs in injections:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(hostsetup.LayoutError):
+                    hostsetup.render_setup_script(**kwargs)
+
+    def test_default_script_has_no_unquoted_metacharacters(self) -> None:
+        text = hostsetup.render_setup_script()
+        self.assertNotIn("SAFETY_INJECTED", text)
+        self.assertNotIn("printf SAFETY", text)
+
+
+class ProvisionBoundTests(unittest.TestCase):
+    def test_provision_process_sets_the_eight_gib_file_size_limit(self) -> None:
+        script = (
+            "import resource, provision; provision.set_provision_limits(); "
+            "print(resource.getrlimit(resource.RLIMIT_FSIZE)[0])"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-B", "-c", script],
+            cwd=pathlib.Path(__file__).resolve().parent,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            int(completed.stdout.strip()), provision.PROVISION_QEMU_FSIZE_LIMIT
+        )
+
+    def test_provision_admission_requires_eight_gib(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            with self.assertRaises(hostcheck.Refusal):
+                provision.check_provision_admission(
+                    root, free_bytes=provision.PROVISION_DISK_REQUIRED - 1
+                )
+            provision.check_provision_admission(
+                root, free_bytes=provision.PROVISION_DISK_REQUIRED
+            )
+
+    def test_provision_serial_cap_kills_qemu_and_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            serial = root / guest.SERIAL_FILE
+            serial.write_bytes(b"x" * (provision.SERIAL_SIZE_CAP + 1))
+            events = []
+
+            class FakeProcess:
+                returncode = None
+
+                def poll(self):
+                    return None
+
+                def wait(self, timeout=None):
+                    del timeout
+                    return 0
+
+            def terminate(process):
+                events.append(("terminate", process))
+
+            with mock.patch.object(provision, "_terminate", side_effect=terminate):
+                with self.assertRaises(hostcheck.Refusal) as raised:
+                    provision._wait_for_marker(FakeProcess(), serial, 1.0)
+            self.assertIn("64 MiB", str(raised.exception))
+            self.assertEqual(len(events), 1)
+
+    def test_provision_qemu_gets_eight_gib_fsize_and_no_as_limit(self) -> None:
+        import resource
+
+        previous = resource.getrlimit(resource.RLIMIT_AS)
+        soft, hard = previous
+        target = 2 * 1024 * 1024 * 1024 if hard == resource.RLIM_INFINITY else min(
+            2 * 1024 * 1024 * 1024, hard
+        )
+        resource.setrlimit(resource.RLIMIT_AS, (target, hard))
+        child = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)
+        try:
+            provision._apply_qemu_limits(child)
+            text = pathlib.Path(f"/proc/{child.pid}/limits").read_text()
+            address = next(
+                line for line in text.splitlines() if line.startswith("Max address space")
+            )
+            fsize = next(
+                line for line in text.splitlines() if line.startswith("Max file size")
+            )
+            self.assertIn("unlimited", address)
+            self.assertIn(str(provision.PROVISION_QEMU_FSIZE_LIMIT), fsize)
+        finally:
+            resource.setrlimit(resource.RLIMIT_AS, previous)
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=10)
+
+
+class HostcopyConfinementTests(unittest.TestCase):
+    def test_chained_symlinks_that_escape_the_source_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary)
+            source = base / "source"
+            (source / "a/b").mkdir(parents=True)
+            (source / "top").mkdir()
+            (source / "a/b/s").symlink_to("../../top")
+            (source / "a/b/k").symlink_to("s/../..")
+            with self.assertRaises(hostcopy.HostcopyError):
+                hostcopy.copy_tree(
+                    source,
+                    base / "dest",
+                    base / "dest/SHA256SUMS",
+                    base / "dest/SYMLINKS.json",
+                )
+
+    def test_verify_tree_reports_a_chained_link_escape_and_extra_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary)
+            source = base / "source"
+            source.mkdir()
+            (source / "file").write_bytes(b"data")
+            destination = base / "dest"
+            manifest = destination / "SHA256SUMS"
+            links = destination / "SYMLINKS.json"
+            hostcopy.copy_tree(source, destination, manifest, links)
+            self.assertEqual(hostcopy.verify_tree(destination, manifest, links), [])
+            # Plant an extra file and a chained link after the copy; the
+            # verifier must report both even if the link manifest matches.
+            (destination / "extra").write_bytes(b"planted")
+            (destination / "a/b").mkdir(parents=True)
+            (destination / "top").mkdir()
+            (destination / "a/b/s").symlink_to("../../top")
+            (destination / "a/b/k").symlink_to("s/../..")
+            document = json.loads(links.read_text(encoding="utf-8"))
+            document["links"]["a/b/s"] = "../../top"
+            document["links"]["a/b/k"] = "s/../.."
+            links.write_text(json.dumps(document), encoding="utf-8")
+            problems = hostcopy.verify_tree(destination, manifest, links)
+            self.assertTrue(any("extra" in problem for problem in problems))
+            self.assertTrue(any("k" in problem and "outside" in problem for problem in problems))
+
+    def test_hardlinked_sources_are_copied_as_independent_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary)
+            source = base / "source"
+            source.mkdir()
+            first = source / "first"
+            first.write_bytes(b"same-bytes")
+            os.link(first, source / "second")
+            destination = base / "dest"
+            hostcopy.copy_tree(
+                source,
+                destination,
+                destination / "SHA256SUMS",
+                destination / "SYMLINKS.json",
+            )
+            one = (destination / "first").stat()
+            two = (destination / "second").stat()
+            self.assertNotEqual((one.st_dev, one.st_ino), (two.st_dev, two.st_ino))
+            self.assertEqual((destination / "first").read_bytes(), b"same-bytes")
+            self.assertEqual((destination / "second").read_bytes(), b"same-bytes")
+
+
+class ScannerClosureTests(unittest.TestCase):
+    def _tree(self, base: pathlib.Path):
+        import hashlib
+
+        repo = base / "repo"
+        installed = base / "installed"
+        repo.mkdir()
+        installed.mkdir()
+        for name in ("pcapscan.py", "policy.py", "netplan.py"):
+            text = f"# {name} original\n".encode()
+            (repo / name).write_bytes(text)
+            (installed / name).write_bytes(text)
+        manifest = "".join(
+            f"{hashlib.sha256((installed / name).read_bytes()).hexdigest()}  {name}\n"
+            for name in ("pcapscan.py", "policy.py", "netplan.py")
+        )
+        (installed / "SHA256SUMS").write_text(manifest, encoding="utf-8")
+        return repo, installed
+
+    def test_stale_installed_import_module_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary)
+            repo, installed = self._tree(base)
+            (installed / "netplan.py").write_bytes(b"# stale module\n")
+            import hashlib
+
+            lines = []
+            for name in ("pcapscan.py", "policy.py", "netplan.py"):
+                lines.append(
+                    f"{hashlib.sha256((installed / name).read_bytes()).hexdigest()}  {name}"
+                )
+            (installed / "SHA256SUMS").write_text(
+                "\n".join(lines) + "\n", encoding="utf-8"
+            )
+            with self.assertRaises(hostcheck.Refusal) as raised:
+                run_phase.resolve_pcapscan(
+                    repo / "pcapscan.py", installed_root=installed
+                )
+            self.assertIn("netplan.py", str(raised.exception))
+            self.assertEqual(
+                run_phase.resolve_pcapscan(
+                    repo / "pcapscan.py", installed_root=installed, allow_repo=True
+                ),
+                repo / "pcapscan.py",
+            )
+
+    def test_every_manifest_file_matches_the_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary)
+            repo, installed = self._tree(base)
+            self.assertEqual(
+                run_phase.resolve_pcapscan(
+                    repo / "pcapscan.py", installed_root=installed
+                ),
+                installed / "pcapscan.py",
+            )
+            (repo / "policy.py").write_bytes(b"# developer change\n")
+            with self.assertRaises(hostcheck.Refusal):
+                run_phase.resolve_pcapscan(
+                    repo / "pcapscan.py", installed_root=installed
+                )
+
+
+class AdmissionStateTests(unittest.TestCase):
+    def test_state_filesystem_needs_overlay_plus_headroom(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            required = run_phase.OVERLAY_VIRTUAL_SIZE + run_phase.DISK_HEADROOM
+            with self.assertRaises(hostcheck.Refusal):
+                run_phase.check_admission(
+                    root,
+                    1024 * 1024 * 1024,
+                    state_root=root,
+                    mem_available=run_phase.MIN_MEMORY_AVAILABLE,
+                    free_bytes=2 * 1024 * 1024 * 1024,
+                    state_free_bytes=required - 1,
+                )
+            run_phase.check_admission(
+                root,
+                1024 * 1024 * 1024,
+                state_root=root,
+                mem_available=run_phase.MIN_MEMORY_AVAILABLE,
+                free_bytes=2 * 1024 * 1024 * 1024,
+                state_free_bytes=required,
+            )
+
+    def test_scanner_wrapper_applies_one_gib_without_preexec(self) -> None:
+        argv = run_phase.scanner_launch_argv(
+            [
+                sys.executable,
+                "-c",
+                "import resource; print(resource.getrlimit(resource.RLIMIT_AS)[0])",
+            ]
+        )
+        completed = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            int(completed.stdout.strip()), run_phase.SCAN_MEMORY_LIMIT
+        )
+
+
+class CaptureWatchIntervalTests(unittest.TestCase):
+    def test_interval_is_read_when_the_guard_is_constructed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / "capture.pcap").write_bytes(b"x" * 24)
+            descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                with mock.patch.object(run_phase, "CAPTURE_WATCH_INTERVAL", 0.0123):
+                    guard = run_phase.CaptureGuard(
+                        descriptor, "capture.pcap", 1024 * 1024
+                    )
+                self.assertEqual(guard.interval, 0.0123)
+            finally:
+                os.close(descriptor)
 
 
 if __name__ == "__main__":

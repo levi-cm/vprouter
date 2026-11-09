@@ -414,7 +414,7 @@ argv `netplan.py` prints:
 
 ```json
 ["tcpdump", "-i", "vprlab-tap0", "-nn", "-U", "--immediate-mode",
- "-s", "0", "-w", "/var/lib/vprlab/manual-capture.pcap"]
+ "-s", "0", "-w", "/run/vprlab/manual-capture.pcap"]
 ```
 
 Only the value after `-w` may differ from the printed command, and that value
@@ -423,8 +423,11 @@ missing element, a BPF filter expression, a different interface, a short
 snaplen, a missing `--immediate-mode`/`-U`, or a `-w` path such as `/dev/null`
 or `-` that does not resolve to the submitted capture is
 `capture_argv_mismatch` (or `capture_argv_invalid` when the value is not a
-non-empty list of non-empty strings). The submitted argv and its canonical-JSON
-SHA-256 are recorded in `capture_meta`.
+non-empty list of non-empty strings). The submitted argv is recorded in
+`capture_meta` together with `capture_argv_sha256`, the SHA-256 of the exact
+argv-file bytes, and `capture_argv_canonical_sha256`, the SHA-256 of the
+compact canonical re-encoding.  Only the first is an evidence hash: the VM
+runner compares it with its own exact-byte hash of `capture-argv.json`.
 
 ### Frame classification
 
@@ -607,7 +610,9 @@ to paste into an interactive shell. It contains:
   **not** proof that a link is absent: teardown retains the protections and
   exits nonzero unless a complete successful inventory lacks the object or a
   down/detach operation is read back.  Teardown also refuses (nonzero, no
-  changes) while `/run/vprlab/run.lock` is held by a phase.
+  changes) while `/run/vprlab/run.lock` is held by a phase, and it acquires
+  and **holds** that lock for the whole teardown rather than probing and
+  releasing it.
 
 ```sh
 python3 -B tools/leak-lab/netplan.py --wan-interface eno1 > lab.sh
@@ -687,6 +692,11 @@ tcpdump -i vprlab-tap0 -nn -U --immediate-mode -s 0 \
   -w "$RUN_DIR/manual-capture.pcap" 2> "$RUN_DIR/manual-capture.pcap.stderr"
 ```
 
+On Debian the `tcpdump` binary starts as root, opens the savefile, then drops
+to the `tcpdump` user.  Its enforcing AppArmor profile only allows savefiles
+matching `/**.pcap` (and similar patterns), so every generated capture name
+must end in `.pcap`; `netplan.py` and `guest.py` both do this.
+
 `--immediate-mode` makes each packet reach the file as it is read. Do not stop
 the capture immediately after sending the after-control: wait until the
 after-control nonce has appeared in the pcap, then wait 2 s of quiet, then send
@@ -702,13 +712,13 @@ that wrote somewhere else is `INVALID`:
 ```sh
 cat > capture-argv.json <<'JSON'
 ["tcpdump", "-i", "vprlab-tap0", "-nn", "-U", "--immediate-mode",
- "-s", "0", "-w", "/var/lib/vprlab/manual-capture.pcap"]
+ "-s", "0", "-w", "/run/vprlab/manual-capture.pcap"]
 JSON
 
 python3 -B tools/leak-lab/pcapscan.py \
   --policy policy.json \
-  --pcap /var/lib/vprlab/manual-capture.pcap \
-  --tcpdump-stats /var/lib/vprlab/manual-capture.pcap.stderr \
+  --pcap /run/vprlab/manual-capture.pcap \
+  --tcpdump-stats /run/vprlab/manual-capture.pcap.stderr \
   --capture-argv-file capture-argv.json \
   --expect-tunnel up \
   --control-before <before-nonce> --control-after <after-nonce>

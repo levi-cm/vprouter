@@ -415,7 +415,10 @@ teardown_locked() {
       echo "netplan: cannot verify $RUN_LOCK without flock; refusing teardown" >&2
       return 1
     fi
-    if ! flock -n "$RUN_LOCK" true 2>/dev/null; then
+    # Hold the descriptor for the whole teardown.  A test-and-release probe
+    # would let a phase start while protections are being removed.
+    exec 9>>"$RUN_LOCK"
+    if ! flock -n 9 2>/dev/null; then
       echo "netplan: a leak-lab phase holds $RUN_LOCK; refusing teardown" >&2
       return 1
     fi

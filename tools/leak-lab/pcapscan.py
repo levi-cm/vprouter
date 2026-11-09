@@ -1373,6 +1373,7 @@ def scan_capture_stream(
     stats_source: str | None = None,
     source: str | None = None,
     policy_sha256: str | None = None,
+    capture_argv_file_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Scan a classic pcap from a stream and return the canonical report.
 
@@ -1440,11 +1441,22 @@ def scan_capture_stream(
     argv_problem = netplan_mod.check_capture_argv(capture_argv, pcap_path)
     if argv_problem is not None:
         invalid_reasons.append(argv_problem)
-    capture_argv_sha256: str | None = None
+    # Evidence hashes always cover the exact file bytes.  The controller
+    # hashes the argv file as written (which may be indented and newline
+    # terminated); this value must therefore come from the caller that read
+    # the file, never from a re-encoding of the parsed list.
+    if capture_argv_file_sha256 is not None and (
+        not isinstance(capture_argv_file_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", capture_argv_file_sha256) is None
+    ):
+        raise ValueError(
+            "capture_argv_file_sha256 must be 64 lowercase hexadecimal characters"
+        )
+    capture_argv_canonical_sha256: str | None = None
     if isinstance(capture_argv, list) and all(
         isinstance(item, str) for item in capture_argv
     ):
-        capture_argv_sha256 = hashlib.sha256(
+        capture_argv_canonical_sha256 = hashlib.sha256(
             json.dumps(capture_argv, sort_keys=True, separators=(",", ":")).encode(
                 "utf-8"
             )
@@ -1553,7 +1565,8 @@ def scan_capture_stream(
             "stats_sha256": stats_sha256,
             "stats_banner_ok": stats_banner_ok,
             "capture_argv": capture_argv,
-            "capture_argv_sha256": capture_argv_sha256,
+            "capture_argv_sha256": capture_argv_file_sha256,
+            "capture_argv_canonical_sha256": capture_argv_canonical_sha256,
             "invalid_reasons": invalid_reasons,
         }
     )
@@ -1677,15 +1690,16 @@ def main(argv: list[str] | None = None) -> int:
         stats_error = "stats_unreadable"
 
     try:
-        capture_argv = json.loads(
-            pathlib.Path(args.capture_argv_file).read_text(encoding="utf-8")
-        )
+        capture_argv_bytes = pathlib.Path(args.capture_argv_file).read_bytes()
     except OSError as exc:
         print(f"pcapscan: capture argv file: {exc}", file=sys.stderr)
         return 2
-    except json.JSONDecodeError as exc:
+    try:
+        capture_argv = json.loads(capture_argv_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         print(f"pcapscan: capture argv file is not valid JSON: {exc}", file=sys.stderr)
         return 2
+    capture_argv_file_sha256 = hashlib.sha256(capture_argv_bytes).hexdigest()
 
     try:
         with stream:
@@ -1702,6 +1716,7 @@ def main(argv: list[str] | None = None) -> int:
                 stats_source=args.tcpdump_stats,
                 source=args.pcap,
                 policy_sha256=hashlib.sha256(policy_bytes).hexdigest(),
+                capture_argv_file_sha256=capture_argv_file_sha256,
             )
     except OSError as exc:
         print(f"pcapscan: capture: {exc}", file=sys.stderr)

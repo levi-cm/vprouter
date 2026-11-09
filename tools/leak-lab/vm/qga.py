@@ -30,6 +30,13 @@ from dataclasses import dataclass
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_CONNECT_TIMEOUT = 120.0
 MAX_FILE_CHUNK = 65536
+#: A single reply frame may never exceed this many bytes.  The root runner is
+#: an untrusted-guest boundary; a guest that stops qemu-ga and streams to the
+#: virtio port must not be able to grow our buffer without bound.
+MAX_REPLY_BYTES = 16 * 1024 * 1024
+#: Captured stdout/stderr of one command.  Huge guest-exec output is not
+#: evidence and is refused before decoding into a second allocation.
+MAX_EXEC_OUTPUT_BYTES = 4 * 1024 * 1024
 #: Guest-provided error text is never rendered.  Only a known QGA error class
 #: may be named; everything else becomes a local ``guest_error``.  A 44-byte
 #: WireGuard key fits comfortably inside any truncation limit, so length
@@ -86,11 +93,16 @@ def _decode_field(value: object) -> bytes:
     if not isinstance(value, str):
         raise QGAProtocolError("guest-exec-status returned a non-string output field")
     try:
-        return base64.b64decode(value.encode("ascii"), validate=True)
+        decoded = base64.b64decode(value.encode("ascii"), validate=True)
     except (ValueError, UnicodeEncodeError) as exc:
         raise QGAProtocolError(
             "guest-exec-status returned malformed base64 output"
         ) from exc
+    if len(decoded) > MAX_EXEC_OUTPUT_BYTES:
+        raise QGAProtocolError(
+            "reply_too_large: exec_output_too_large"
+        )
+    return decoded
 
 
 class QGAClient:
@@ -101,6 +113,7 @@ class QGAClient:
         self.timeout = float(timeout)
         self._socket: socket.socket | None = None
         self._buffer = b""
+        self._scan_from = 0
         self._next_id = 1
 
     # -- connection -----------------------------------------------------
@@ -115,6 +128,7 @@ class QGAClient:
             sock.connect(str(self.path))
             self._socket = sock
             self._buffer = b""
+            self._scan_from = 0
             self._handshake(deadline)
         except BaseException:
             sock.close()
@@ -128,6 +142,7 @@ class QGAClient:
             finally:
                 self._socket = None
                 self._buffer = b""
+                self._scan_from = 0
 
     def __enter__(self) -> "QGAClient":
         self.connect()
@@ -159,6 +174,11 @@ class QGAClient:
         if not chunk:
             raise QGAError("guest agent closed the connection")
         self._buffer += chunk
+        if len(self._buffer) > MAX_REPLY_BYTES:
+            # Close immediately: the peer is not speaking the framed protocol
+            # and delaying only grows the buffer and the O(n) rescan cost.
+            self.close()
+            raise QGAProtocolError("reply_too_large")
 
     @staticmethod
     def _parse(payload: bytes) -> dict:
@@ -177,26 +197,29 @@ class QGAClient:
             {"execute": "guest-sync-delimited", "arguments": {"id": sync_id}}
         )
         while True:
-            marker = self._buffer.find(b"\xff")
+            marker = self._buffer.find(b"\xff", self._scan_from)
             if marker >= 0:
                 end = self._buffer.find(b"\n", marker)
                 if end >= 0:
                     frame = self._buffer[marker + 1 : end]
                     self._buffer = self._buffer[end + 1 :]
+                    self._scan_from = 0
                     document = self._parse(frame)
                     if document.get("return") == sync_id:
                         return
                     # Not our sync reply: keep scanning.  A greeting is safe
                     # to ignore; anything else is still bounded by the deadline.
                     continue
+            self._scan_from = max(0, len(self._buffer) - 1)
             self._fill(deadline)
 
     def _read_response(self, deadline: float, expected_id: int | None = None) -> object:
         while True:
-            end = self._buffer.find(b"\n")
+            end = self._buffer.find(b"\n", self._scan_from)
             if end >= 0:
                 line = self._buffer[:end]
                 self._buffer = self._buffer[end + 1 :]
+                self._scan_from = 0
                 if not line.strip():
                     continue
                 document = self._parse(line)
@@ -225,6 +248,7 @@ class QGAClient:
                 if "return" not in document:
                     raise QGAProtocolError("guest agent frame has no return value")
                 return document["return"]
+            self._scan_from = max(0, len(self._buffer) - 1)
             self._fill(deadline)
 
     # -- commands -------------------------------------------------------
@@ -246,6 +270,10 @@ class QGAClient:
             self.close()
             raise
         except QGAError as exc:
+            if isinstance(exc, QGAProtocolError):
+                # A malformed/oversized frame desynchronises the stream; never
+                # keep reading stale bytes from it.
+                self.close()
             raise QGAError(f"{name}: {exc}") from exc
 
     def ping(self, *, timeout: float | None = None) -> None:
@@ -287,11 +315,18 @@ class QGAClient:
             if status.get("exited") is True:
                 exitcode = status.get("exitcode")
                 if exitcode is not None and not isinstance(exitcode, int):
+                    self.close()
                     raise QGAProtocolError("guest-exec-status returned a bad exit code")
+                try:
+                    stdout = _decode_field(status.get("out-data"))
+                    stderr = _decode_field(status.get("err-data"))
+                except QGAProtocolError:
+                    self.close()
+                    raise
                 return ExecResult(
                     exitcode=exitcode,
-                    stdout=_decode_field(status.get("out-data")),
-                    stderr=_decode_field(status.get("err-data")),
+                    stdout=stdout,
+                    stderr=stderr,
                 )
             time.sleep(min(delay, max(0.0, deadline - time.monotonic())))
             delay = min(delay * 1.5, 0.5)

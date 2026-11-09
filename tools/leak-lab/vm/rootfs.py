@@ -295,7 +295,7 @@ def ancestry_records(path: str | os.PathLike[str]) -> list[dict[str, Any]]:
     """Return lstat-shaped ancestry records for tests and ``--check`` tools."""
     target = pathlib.Path(os.path.abspath(os.fspath(path)))
     records: list[dict[str, Any]] = []
-    for component in reversed(target.parents) + [target]:
+    for component in list(reversed(target.parents)) + [target]:
         try:
             info = component.lstat()
         except OSError:

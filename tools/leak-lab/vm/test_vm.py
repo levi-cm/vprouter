@@ -21,6 +21,7 @@ import re
 import signal
 import socket
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -29,11 +30,20 @@ import time
 import unittest
 from unittest import mock
 
+HERE = pathlib.Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+if str(HERE.parent) not in sys.path:
+    sys.path.insert(0, str(HERE.parent))
+
 import guest
 import hostcheck
+import hostcopy
 import hostsetup
 import login_url
+import policy
 import provision
+import rootfs
 import runlock
 import run_phase
 import tsnames
@@ -314,6 +324,61 @@ class QGATestCase(unittest.TestCase):
                 else:
                     self.assertIn("guest_error", message)
 
+    def test_unbounded_gqa_reply_stream_is_refused_before_memory_grows(self) -> None:
+        import qga
+
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(self.socket_path))
+        listener.listen(1)
+        listener.settimeout(5)
+        sent = {"bytes": 0}
+        failure: list[BaseException] = []
+
+        def serve():
+            try:
+                connection, _ = listener.accept()
+                connection.settimeout(5)
+                chunk = b"x" * 65536
+                for _ in range(1600):  # 100 MiB with no newline
+                    try:
+                        connection.sendall(chunk)
+                    except OSError:
+                        break
+                    sent["bytes"] += len(chunk)
+                connection.close()
+            except BaseException as exc:  # pragma: no cover - reported below
+                failure.append(exc)
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        client = QGAClient(self.socket_path, timeout=10)
+        try:
+            with self.assertRaises(qga.QGAProtocolError) as raised:
+                client.connect(timeout=10)
+        finally:
+            client.close()
+            listener.close()
+            thread.join(timeout=5)
+        self.assertIn("reply_too_large", str(raised.exception))
+        self.assertFalse(failure)
+        self.assertLessEqual(sent["bytes"], qga.MAX_REPLY_BYTES + 2 * 65536)
+
+    def test_guest_exec_output_larger_than_4_mib_is_refused(self) -> None:
+        server = self.start_server(
+            exec_stdout=b"x" * (4 * 1024 * 1024 + 1)
+        )
+        client = QGAClient(self.socket_path)
+        try:
+            client.connect()
+            with self.assertRaises(QGAError) as raised:
+                client.execute("/bin/true", timeout=5)
+            self.assertIsNone(client._socket)
+        finally:
+            client.close()
+            server.close()
+        self.assertIn("reply_too_large", str(raised.exception))
+        self.assertIn("exec_output_too_large", str(raised.exception))
+
     def test_guest_error_through_command_is_mapped_only_to_a_class(self) -> None:
         key = "B" * 43 + "="
         client = QGAClient("/not-connected")
@@ -385,6 +450,9 @@ class QemuArgvTests(unittest.TestCase):
         self.assertIn("seed.iso", joined)
         self.assertIn("payload.iso", joined)
         self.assertIn("media=cdrom,readonly=on", joined)
+
+    def test_dead_qemu_env_helper_is_gone(self) -> None:
+        self.assertFalse(hasattr(guest, "qemu_env"))
 
     def test_unprivileged_launch_drops_every_privilege(self) -> None:
         argv = guest.build_qemu_argv("test", pathlib.Path("/state"))
@@ -1838,6 +1906,16 @@ class RunPhaseTests(unittest.TestCase):
         os.chmod(self.profile, 0o600)
         self.evidence = self.root / "evidence"
         self.lock = self.root / "run.lock"
+        self.scanner_root = self.root / "leaklab"
+        self.scanner_root.mkdir()
+        import hashlib
+
+        scanner_bytes = (pathlib.Path(__file__).resolve().parent / ".." / "pcapscan.py").read_bytes()
+        (self.scanner_root / "pcapscan.py").write_bytes(scanner_bytes)
+        (self.scanner_root / "SHA256SUMS").write_text(
+            f"{hashlib.sha256(scanner_bytes).hexdigest()}  pcapscan.py\n",
+            encoding="utf-8",
+        )
         self.events: list = []
         self.sleeps: list[float] = []
         self.pcap: pathlib.Path | None = None
@@ -1866,6 +1944,8 @@ class RunPhaseTests(unittest.TestCase):
             capture_size_cap=2 * 1024 * 1024 * 1024,
             run_lock=str(self.lock),
             owner_file=str(self.root / "owner.json"),
+            scanner_root=str(self.scanner_root),
+            allow_repo_scanner=False,
         )
         values.update(overrides)
         return argparse.Namespace(**values)
@@ -1883,6 +1963,7 @@ class RunPhaseTests(unittest.TestCase):
         scan_report_override=None,
         scan_kwargs: dict | None = None,
         admission_raises: bool = False,
+        watch_quiet_delay: float = 0.0,
         **argument_overrides,
     ):
         arguments = self._arguments(phase, duration, **argument_overrides)
@@ -2011,8 +2092,11 @@ class RunPhaseTests(unittest.TestCase):
                 self.sleeps.append(seconds)
                 if seconds == run_phase.QUIET_SECONDS:
                     self.events.append(("quiet", seconds))
+                    if watch_quiet_delay:
+                        threading.Event().wait(watch_quiet_delay)
 
             enter(mock.patch.object(run_phase.time, "sleep", side_effect=fake_sleep))
+            enter(mock.patch.object(run_phase, "CAPTURE_WATCH_INTERVAL", 0.01))
             enter(mock.patch.object(run_phase, "AFTER_CAPTURE_TIMEOUT", 0.05))
             enter(mock.patch.object(run_phase, "ROUTER_ACTIVE_TIMEOUT", 0.05))
             enter(mock.patch.object(run_phase, "ROUTER_HANDSHAKE_TIMEOUT", 0.05))
@@ -2100,6 +2184,14 @@ class RunPhaseTests(unittest.TestCase):
         self.assertIn("router_not_ready", record["result_reason"])
         self.assertFalse(record["setup"]["active"])
 
+    def test_scanner_crash_is_invalid_never_leak(self) -> None:
+        code, record, _client, _events, _stdout, _stderr, _dir = self._run(
+            "start-router", scan_rc=1, scan_report_override=b"not a report"
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("scan_report_invalid", record["result_reason"])
+
     def test_leak_stays_leak_when_the_phase_also_failed(self) -> None:
         action = f"docker kill {guest.DEFAULT_NAME}"
         code, record, _client, _events, stdout, _stderr, _dir = self._run(
@@ -2146,6 +2238,41 @@ class RunPhaseTests(unittest.TestCase):
         self.assertEqual(record["action"]["exitcode"], 0)
         self.assertTrue(record["setup"]["active"])
         self.assertEqual(record["errors"], [])
+
+    def test_guest_backend_state_is_allowlisted_and_never_leaks_a_sentinel(self) -> None:
+        sentinel = "PrivateKey=" + "A" * 43 + "="
+        code, record, _client, _events, stdout, stderr, evidence = self._run(
+            "start-router", client_kwargs={"tailscale_state": sentinel}
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(record["result"], "PASS")
+        self.assertEqual(record["tailscale"]["backend_state"], "unrecognized")
+        phase_text = (evidence / guest.PHASE_RECORD_FILE).read_text(encoding="utf-8")
+        for text in (phase_text, stdout, stderr):
+            self.assertNotIn("PrivateKey", text)
+            self.assertNotIn("A" * 20, text)
+
+    def test_backend_state_fixed_vocabulary(self) -> None:
+        for state in (
+            "NoState",
+            "NeedsLogin",
+            "NeedsMachineAuth",
+            "Stopped",
+            "Starting",
+            "Running",
+        ):
+            self.assertEqual(run_phase.normalize_backend_state(state), state)
+        for value in (
+            "Running ",
+            "running",
+            "PrivateKey=" + "A" * 43,
+            None,
+            7,
+            {"state": "Running"},
+        ):
+            self.assertEqual(
+                run_phase.normalize_backend_state(value), "unrecognized"
+            )
 
     def test_idle_starts_the_router_and_expects_a_tunnel(self) -> None:
         code, record, _client, _events, _stdout, _stderr, _dir = self._run("idle")
@@ -2570,6 +2697,102 @@ class RunPhaseTests(unittest.TestCase):
         self.assertIn("scan", [entry[0] for entry in events])
         self.assertEqual(record["scan"]["exitcode"], 0)
 
+    def test_capture_cap_breach_during_teardown_isolates_and_invalidates(self) -> None:
+        cleanup_prefix = "rc=0; systemctl stop"
+        calls = {"count": 0}
+
+        def grow_during_final_cleanup(command):
+            if command.startswith(cleanup_prefix):
+                calls["count"] += 1
+                if calls["count"] >= 2 and self.pcap is not None:
+                    self.pcap.write_bytes(self.pcap.read_bytes() + b"x" * 50_000)
+            return ExecResult(exitcode=0, stdout=b"", stderr=b"")
+
+        code, record, _client, events, _stdout, _stderr, _dir = self._run(
+            "stop-router",
+            capture_size_cap=1000,
+            watch_quiet_delay=0.1,
+            client_kwargs={
+                "overrides": [(cleanup_prefix, grow_during_final_cleanup)]
+            },
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("capture_size_cap", record["result_reason"])
+        labels = [entry[0] for entry in events]
+        self.assertIn("isolate_tap", labels)
+        self.assertLess(labels.index("isolate_tap"), labels.index("capture_stop"))
+        self.assertIn("scan", labels)
+        self.assertGreater(self.pcap.stat().st_size, 1000)
+
+    def test_host_network_tools_never_resolve_through_root_path(self) -> None:
+        captured: dict = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(argv, 0, stdout=b"", stderr=b"")
+
+        with mock.patch.object(run_phase.subprocess, "run", side_effect=fake_run):
+            run_phase.isolate_tap()
+        self.assertEqual(captured["argv"], ["/usr/sbin/ip", "link", "set", "dev", guest.TAP, "down"])
+        self.assertEqual(run_phase.IP, "/usr/sbin/ip")
+        self.assertEqual(run_phase.NFT, "/usr/sbin/nft")
+
+    def test_disk_low_guard_isolates_before_any_further_capture(self) -> None:
+        import types
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            pcap = root / "capture.pcap"
+            pcap.write_bytes(b"x" * 24)
+            descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                guard = run_phase.CaptureGuard(
+                    descriptor, pcap.name, 1024 * 1024, interval=0.01
+                )
+                with mock.patch.object(
+                    run_phase.os,
+                    "fstatvfs",
+                    return_value=types.SimpleNamespace(
+                        f_bavail=0, f_frsize=4096
+                    ),
+                ), mock.patch.object(
+                    run_phase,
+                    "isolate_tap",
+                    side_effect=lambda tap: self.events.append(("isolate_tap", tap)),
+                ):
+                    guard.start()
+                    deadline = time.monotonic() + 2.0
+                    while guard.reason is None and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    guard.stop()
+                self.assertEqual(guard.reason, "capture_disk_low")
+                self.assertIn(("isolate_tap", guest.TAP), self.events)
+                with self.assertRaises(run_phase.CaptureCapExceeded) as raised:
+                    guard.raise_if_exceeded()
+                self.assertIn("capture_disk_low", str(raised.exception))
+            finally:
+                os.close(descriptor)
+
+    def test_capture_filename_matches_the_apparmor_pcap_pattern(self) -> None:
+        # Debian's enforcing tcpdump AppArmor profile only permits savefiles
+        # matching /**.pcap (and similar); the generated name must end .pcap.
+        self.assertTrue(guest.CAPTURE_FILE.endswith(".pcap"))
+        self.assertTrue(guest.CAPTURE_STATS_FILE.endswith(".stderr"))
+        code, record, _client, _events, _stdout, _stderr, evidence_dir = self._run(
+            "start-router"
+        )
+        self.assertEqual(code, 0)
+        self.assertTrue((evidence_dir / guest.CAPTURE_FILE).name.endswith(".pcap"))
+        self.assertTrue(str(record["tcpdump_argv"][-1]).endswith(".pcap"))
+        self.assertEqual(
+            record["tcpdump_argv_display"][-1],
+            str(evidence_dir / guest.CAPTURE_FILE),
+        )
+        self.assertNotIn(
+            "/proc/self/fd/", " ".join(record["pcapscan_argv_display"])
+        )
+
     def test_scan_runs_with_address_space_limit_and_timeout(self) -> None:
         scan_kwargs: dict = {}
         code, _record, _client, _events, _stdout, _stderr, _dir = self._run(
@@ -2694,32 +2917,32 @@ class AdmissionTests(unittest.TestCase):
                 free_bytes=2 * 1024 * 1024 * 1024 + 1,
             )
 
-    def test_qemu_kill_verifies_pidfile_and_cmdline(self) -> None:
+    def test_qemu_kill_uses_the_popen_pid_and_proc_exe_not_the_pidfile(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             state = root / "vm-001"
             state.mkdir()
-            fake = root / "qemu-system-fake"
-            fake.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
+            fake = root / "qemu-system-x86_64"
+            fake.write_bytes(pathlib.Path("/bin/sleep").read_bytes())
             fake.chmod(0o755)
             process = subprocess.Popen(
-                [str(fake), str(state)], start_new_session=True
+                [str(fake), "30"], start_new_session=True
             )
             try:
+                # A foreign, QEMU-controlled pidfile must be irrelevant.
                 (state / guest.PID_FILE).write_text(
-                    f"{process.pid}\n", encoding="ascii"
+                    f"{process.pid + 1}\n", encoding="ascii"
                 )
-                self.assertTrue(
-                    run_phase.qemu_pid_is_ours(process, state)
-                )
-                self.assertTrue(run_phase.kill_qemu(process, state))
+                with mock.patch.object(guest, "QEMU", fake):
+                    self.assertTrue(run_phase.qemu_process_is_ours(process))
+                    self.assertTrue(run_phase.kill_qemu(process, state))
                 self.assertIsNotNone(process.poll())
             finally:
                 if process.poll() is None:
                     process.kill()
                     process.wait(timeout=10)
 
-    def test_qemu_kill_refuses_a_foreign_pidfile(self) -> None:
+    def test_qemu_kill_refuses_a_process_that_is_not_the_staged_binary(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             state = root / "vm-001"
@@ -2727,9 +2950,9 @@ class AdmissionTests(unittest.TestCase):
             process = subprocess.Popen(["sleep", "30"])
             try:
                 (state / guest.PID_FILE).write_text(
-                    f"{process.pid + 1}\n", encoding="ascii"
+                    f"{process.pid}\n", encoding="ascii"
                 )
-                self.assertFalse(run_phase.qemu_pid_is_ours(process, state))
+                self.assertFalse(run_phase.qemu_process_is_ours(process))
                 self.assertFalse(run_phase.kill_qemu(process, state))
                 self.assertIsNone(process.poll())
             finally:
@@ -2884,9 +3107,24 @@ class MainExitTests(unittest.TestCase):
             pass
 
         with mock.patch.object(run_phase, "install_signal_handlers"), mock.patch.object(
+            run_phase, "set_runner_limits"
+        ), mock.patch.object(
             run_phase, "run_phase", side_effect=Boom("unexpected")
         ), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(run_phase.main(argv), 2)
+
+    def test_provision_signal_handler_ignores_a_second_signal(self) -> None:
+        provision.install_signal_handlers()
+        try:
+            provision._signal_seen = False
+            handler = signal.getsignal(signal.SIGTERM)
+            with self.assertRaises(provision.ProvisionInterrupted):
+                handler(signal.SIGTERM, None)
+            handler(signal.SIGTERM, None)
+        finally:
+            provision._signal_seen = False
+            for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                signal.signal(signum, signal.SIG_DFL)
 
     def test_signal_handler_raises_into_the_cleanup_path(self) -> None:
         run_phase.install_signal_handlers()
@@ -2917,6 +3155,13 @@ class MainExitTests(unittest.TestCase):
 
 
 class CaptureFileTests(unittest.TestCase):
+    def test_setup_failure_reaps_a_child_that_never_reached_the_caller(self) -> None:
+        process = subprocess.Popen(
+            ["sleep", "30"], start_new_session=True
+        )
+        run_phase.reap_after_setup_failure(process)
+        self.assertIsNotNone(process.poll())
+
     def test_after_nonce_is_found_in_a_growing_pcap(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             pcap = pathlib.Path(temporary) / "capture.pcap"
@@ -2970,6 +3215,17 @@ class RootPathTests(unittest.TestCase):
             with self.assertRaises(rootfs.PathError):
                 rootfs.open_directory(base / "link" / "evidence", create=True, anchor=base)
 
+    def test_ancestry_records_are_produced_for_an_existing_path(self) -> None:
+        import rootfs
+
+        records = rootfs.ancestry_records("/var/lib")
+        self.assertTrue(records)
+        self.assertEqual(records[-1]["path"], "/var/lib")
+        self.assertTrue(records[-1]["exists"])
+        self.assertIn("/", [record["path"] for record in records])
+        problems = rootfs.ancestry_problems(records, expected_uid=0)
+        self.assertIsInstance(problems, list)
+
     def test_ancestry_records_refuse_user_owned_writable_or_symlink(self) -> None:
         import rootfs
 
@@ -3014,6 +3270,7 @@ class HostsetupTests(unittest.TestCase):
             ("/", "0755"),
             ("/opt", "0755"),
             (hostsetup.TOOLS_ROOT, "0755"),
+            (hostsetup.LEAKLAB_ROOT, "0755"),
             ("/var", "0755"),
             ("/var/lib", "0755"),
             (hostsetup.STATE_ROOT, "0755"),
@@ -3030,6 +3287,18 @@ class HostsetupTests(unittest.TestCase):
             "mode": "0700",
         }
         stats[hostsetup.TOOLS_ROOT + "/SHA256SUMS"] = {
+            "type": "file",
+            "uid": 0,
+            "gid": 0,
+            "mode": "0644",
+        }
+        stats[hostsetup.TOOLS_ROOT + "/usr/bin/qemu-system-x86_64"] = {
+            "type": "file",
+            "uid": 0,
+            "gid": 0,
+            "mode": "0755",
+        }
+        stats[hostsetup.LEAKLAB_ROOT + "/pcapscan.py"] = {
             "type": "file",
             "uid": 0,
             "gid": 0,
@@ -3106,7 +3375,39 @@ class HostsetupTests(unittest.TestCase):
             with self.subTest(label=label):
                 self.assertTrue(mutate(change))
 
-    def test_generated_plan_runs_with_stubbed_privileges_and_refuses_locked_teardown(self):
+    def test_check_mode_accepts_installed_executables_and_absent_vm_state(self) -> None:
+        import copy
+
+        stat_inventory, group_inventory = self._valid_inventory()
+        # A 0755 executable is exactly what the plan installs.
+        self.assertEqual(
+            hostsetup.check_layout(stat_inventory, group_inventory), []
+        )
+        # Before provisioning, vm-NNN is absent and that is valid.
+        stats = copy.deepcopy(stat_inventory)
+        stats["stat"].pop(hostsetup.STATE_ROOT + "/vm-001")
+        self.assertEqual(hostsetup.check_layout(stats, group_inventory), [])
+        # A hardened root mode is accepted as long as / is trusted.
+        stats["stat"]["/"]["mode"] = "0700"
+        self.assertEqual(hostsetup.check_layout(stats, group_inventory), [])
+        stats["stat"]["/"]["mode"] = "0777"
+        self.assertTrue(hostsetup.check_layout(stats, group_inventory))
+        # But a present vm-NNN must still be the QEMU user's 0700 directory.
+        stats["stat"][hostsetup.STATE_ROOT + "/vm-001"] = {
+            "type": "dir",
+            "uid": 0,
+            "gid": 0,
+            "mode": "0755",
+        }
+        self.assertTrue(hostsetup.check_layout(stats, group_inventory))
+        # Group-writable executables remain refused.
+        stats = copy.deepcopy(stat_inventory)
+        stats["stat"][
+            hostsetup.TOOLS_ROOT + "/usr/bin/qemu-system-x86_64"
+        ]["mode"] = "0775"
+        self.assertTrue(hostsetup.check_layout(stats, group_inventory))
+
+    def test_generated_plan_runs_with_stubbed_privileges_and_keeps_evidence(self):
         import hashlib
 
         with tempfile.TemporaryDirectory() as directory:
@@ -3114,9 +3415,21 @@ class HostsetupTests(unittest.TestCase):
             tools_source = root / "source-tools"
             image_source = root / "source-images"
             (tools_source / "usr/bin").mkdir(parents=True)
-            qemu = tools_source / "usr/bin/qemu-system-x86_64"
-            qemu.write_bytes(b"qemu")
-            qemu.chmod(0o755)
+            library = tools_source / "usr/lib/x86_64-linux-gnu"
+            library.mkdir(parents=True)
+            (library / "libslirp.so.0.4.0").write_bytes(b"slirp")
+            (library / "libslirp.so.0").symlink_to("libslirp.so.0.4.0")
+            for name, needed in (
+                ("qemu-system-x86_64", ["libc.so.6", "libslirp.so.0"]),
+                ("qemu-img", ["libc.so.6"]),
+                ("genisoimage", ["libc.so.6"]),
+            ):
+                binary = tools_source / "usr/bin" / name
+                binary.write_bytes(_synthetic_elf(needed))
+                binary.chmod(0o755)
+            (tools_source / "usr/bin/qemu-system-amd64").symlink_to(
+                "qemu-system-x86_64"
+            )
             image_source.mkdir()
             image_bytes = b"base-image"
             image = image_source / hostsetup.BASE_IMAGE_NAME
@@ -3157,7 +3470,13 @@ case "$name" in
       passwd) [ -f "$STUB_ROOT/user-created" ] && exit 0 ;;
     esac
     exit 1 ;;
-  python3) exit 0 ;;
+  python3)
+    # Embedded check_ancestry/check_account helpers (one argument); the
+    # hostcopy helper is invoked with a verb and further arguments.
+    if [ "$#" -eq 2 ]; then
+      exit 0
+    fi
+    exec "$STUB_REAL_PYTHON" "$@" ;;
   install)
     mode=0755
     expect_mode=0
@@ -3169,11 +3488,24 @@ case "$name" in
       esac
     done
     exit 0 ;;
-  flock) exit "${STUB_FLOCK:-0}" ;;
+  flock)
+    if [ "${STUB_FLOCK:-0}" != "0" ]; then exit "$STUB_FLOCK"; fi
+    exec /usr/bin/flock "$@" ;;
   pgrep) exit 1 ;;
   groupadd) touch "$STUB_ROOT/group-created"; exit 0 ;;
   useradd|usermod) touch "$STUB_ROOT/user-created"; exit 0 ;;
-  userdel|chown) exit 0 ;;
+  userdel|chown)
+    if [ "$name" = "userdel" ] && [ -n "$STUB_LOCK_PROBE" ]; then
+      if /usr/bin/flock -n "$STUB_LOCK_PROBE" true 2>/dev/null; then
+        printf 'LOCKPROBE free\\n' >> "$STUB_LOG"
+      else
+        printf 'LOCKPROBE held\\n' >> "$STUB_LOG"
+      fi
+    fi
+    if [ "$name" = "userdel" ] && [ "${STUB_USERDEL_FAIL:-0}" = "1" ]; then
+      exit 1
+    fi
+    exit 0 ;;
   *) exit 0 ;;
 esac
 """,
@@ -3199,6 +3531,20 @@ esac
             environment["PATH"] = str(bin_dir) + ":" + environment.get("PATH", "")
             environment["STUB_LOG"] = str(log)
             environment["STUB_ROOT"] = str(root / "dest")
+            environment["STUB_REAL_PYTHON"] = sys.executable
+            environment["STUB_LOCK_PROBE"] = str(run_root / "run.lock")
+            busy_setup = dict(environment, STUB_FLOCK="1")
+            result = subprocess.run(
+                ["sh", str(script)],
+                cwd=root,
+                env=busy_setup,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("refusing setup", result.stderr)
+            self.assertFalse(tools_root.exists())
             result = subprocess.run(
                 ["sh", str(script)],
                 cwd=root,
@@ -3217,16 +3563,130 @@ esac
                 (tools_root / "SHA256SUMS").read_text(encoding="utf-8"),
             )
             self.assertTrue((tools_root / "usr/bin/qemu-system-x86_64").is_file())
+            # The complete tree keeps confined relative links as links.
+            self.assertTrue((tools_root / "usr/bin/qemu-system-amd64").is_symlink())
+            self.assertEqual(
+                os.readlink(tools_root / "usr/bin/qemu-system-amd64"),
+                "qemu-system-x86_64",
+            )
+            self.assertTrue(
+                (tools_root / "usr/lib/x86_64-linux-gnu/libslirp.so.0").is_symlink()
+            )
+            link_manifest = json.loads(
+                (tools_root / "SYMLINKS.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                link_manifest["links"]["usr/lib/x86_64-linux-gnu/libslirp.so.0"],
+                "libslirp.so.0.4.0",
+            )
+            # The root-owned scanner copy is installed with its manifest.
+            copied_pcapscan = tools_root / "leaklab/pcapscan.py"
+            self.assertTrue(copied_pcapscan.is_file())
+            self.assertIn(
+                "pcapscan.py",
+                (tools_root / "leaklab/SHA256SUMS").read_text(encoding="utf-8"),
+            )
+            self.assertTrue((tools_root / "leaklab/vm/run_phase.py").is_file())
+            self.assertFalse((tools_root / "leaklab/test_leak_lab.py").exists())
             self.assertTrue((image_source / hostsetup.BASE_IMAGE_NAME).is_file())
             self.assertTrue((state_root / "images" / hostsetup.BASE_IMAGE_NAME).is_file())
             self.assertIn(
                 hostsetup.BASE_IMAGE_NAME,
                 (state_root / "images" / "SHA512SUMS").read_text(encoding="utf-8"),
             )
+            image_mode = stat.S_IMODE(
+                (state_root / "images" / hostsetup.BASE_IMAGE_NAME).stat().st_mode
+            )
+            self.assertEqual(image_mode, 0o644)
             self.assertTrue((state_root / "evidence").is_dir())
             self.assertEqual(stat.S_IMODE((state_root / "evidence").stat().st_mode), 0o700)
-            self.assertTrue((state_root / "vm-001").is_dir())
-            self.assertEqual(stat.S_IMODE((state_root / "vm-001").stat().st_mode), 0o700)
+            # provision.py, not hostsetup, owns each state directory.
+            self.assertFalse((state_root / "vm-001").exists())
+            # The documented setup -> provision sequence reaches provision's
+            # exclusive state-directory creation instead of refusing an
+            # existing directory.
+            image_tar = root / "vprouter-image.tar"
+            image_tar.write_bytes(b"image-tar")
+            arguments = argparse.Namespace(
+                index=1,
+                state_root=str(state_root),
+                name=guest.DEFAULT_NAME,
+                image_id=guest.DEPLOYED_IMAGE_ID,
+                image_tar=str(image_tar),
+                release_dir=str(root / "release"),
+                base_image=str(root / "base.qcow2"),
+                checksum_manifest=str(root / "SHA512SUMS"),
+                qemu_user="vprlab-qemu",
+                run_lock=str(run_root / "run.lock"),
+                ipv6_mode="netns-safe",
+            )
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(mock.patch.object(provision, "require_root"))
+                stack.enter_context(
+                    mock.patch.object(
+                        provision,
+                        "_qemu_identity",
+                        return_value=(os.geteuid(), os.getegid()),
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        provision.guest, "verify_base_image", return_value="0" * 128
+                    )
+                )
+                stack.enter_context(mock.patch.object(provision, "_require_tool"))
+                stack.enter_context(
+                    mock.patch.object(provision.guest, "verify_tool_ancestry")
+                )
+                stack.enter_context(
+                    mock.patch.object(provision.hostcheck, "refuse_if_qemu_running")
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        provision,
+                        "_stage_payload",
+                        side_effect=hostcheck.Refusal("stop after state creation"),
+                    )
+                )
+                with self.assertRaises(hostcheck.Refusal) as raised:
+                    provision.provision(arguments)
+            self.assertIn("stop after state creation", str(raised.exception))
+            state = state_root / "vm-001"
+            self.assertTrue(state.is_dir())
+            self.assertEqual(stat.S_IMODE(state.stat().st_mode), 0o700)
+
+            # Missing pgrep must fail closed, not silently skip the QEMU check.
+            minimal_bin = root / "bin-minimal"
+            minimal_bin.mkdir()
+            for name in ("id", "flock"):
+                (minimal_bin / name).symlink_to(bin_dir / "stub")
+            no_pgrep = dict(environment)
+            no_pgrep["PATH"] = str(minimal_bin)
+            result = subprocess.run(
+                ["/bin/sh", str(script), "teardown"],
+                cwd=root,
+                env=no_pgrep,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("without pgrep", result.stderr)
+            self.assertTrue(tools_root.exists())
+            self.assertTrue((state_root / "evidence").is_dir())
+
+            # A failing userdel must be reported instead of "complete".
+            failing = dict(environment, STUB_USERDEL_FAIL="1")
+            result = subprocess.run(
+                ["sh", str(script), "teardown"],
+                cwd=root,
+                env=failing,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("userdel vprlab-qemu failed", result.stderr)
 
             busy = dict(environment, STUB_FLOCK="1")
             (run_root / "run.lock").write_text("", encoding="utf-8")
@@ -3252,9 +3712,14 @@ esac
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(tools_root.exists())
-            self.assertFalse((state_root / "evidence").exists())
+            # Evidence is deliberately retained across teardown.
+            self.assertTrue((state_root / "evidence").is_dir())
+            self.assertIn("retaining evidence", result.stderr)
             self.assertIn("teardown complete", result.stdout)
-            self.assertIn("userdel vprlab-qemu", log.read_text(encoding="utf-8"))
+            final_log = log.read_text(encoding="utf-8")
+            self.assertIn("userdel vprlab-qemu", final_log)
+            self.assertIn("LOCKPROBE held", final_log)
+            self.assertNotIn("LOCKPROBE free", final_log)
 
     def test_plan_is_plan_only_and_has_no_relative_destinations(self) -> None:
         text = hostsetup.render_setup_script()
@@ -3269,6 +3734,474 @@ esac
         self.assertIn("SHA256SUMS", text)
         self.assertIn("SHA512SUMS", text)
         self.assertIn("teardown", text)
+
+
+def _synthetic_elf(needed, *, bits=64, endian="<") -> bytes:
+    """Build a tiny ET_EXEC with one PT_DYNAMIC and a DT_NEEDED string table."""
+    is64 = bits == 64
+    ehsize = 64 if is64 else 52
+    phentsize = 56 if is64 else 32
+    dynent = 16 if is64 else 8
+    phoff = ehsize
+    dynoff = phoff + phentsize
+    strtab = b"\x00"
+    offsets = []
+    for name in needed:
+        offsets.append(len(strtab))
+        strtab += name.encode("ascii") + b"\x00"
+    stroff = dynoff + dynent * (len(needed) + 3)
+    dynamic = bytearray()
+    fmt = endian + ("qQ" if is64 else "iI")
+    for name_offset in offsets:
+        dynamic += struct.pack(fmt, 1, name_offset)
+    dynamic += struct.pack(fmt, 5, stroff)
+    dynamic += struct.pack(fmt, 10, len(strtab))
+    dynamic += struct.pack(fmt, 0, 0)
+    assert len(dynamic) == dynent * (len(needed) + 3)
+    total = stroff + len(strtab)
+    data = bytearray(total)
+    ident = bytearray(16)
+    ident[:4] = b"\x7fELF"
+    ident[4] = 2 if is64 else 1
+    ident[5] = 1 if endian == "<" else 2
+    ident[6] = 1
+    data[:16] = ident
+    if is64:
+        struct.pack_into(endian + "HHIQQQIHHHHHH", data, 16, 2, 62, 1,
+                         dynoff, phoff, 0, 0, ehsize, phentsize, 1, 0, 0, 0)
+        struct.pack_into(endian + "IIQQQQQQ", data, phoff,
+                         2, 0, dynoff, dynoff, dynoff, len(dynamic), len(dynamic), 8)
+    else:
+        struct.pack_into(endian + "HHIIIIIHHHHHH", data, 16, 2, 3, 1,
+                         dynoff, phoff, 0, 0, ehsize, phentsize, 1, 0, 0, 0)
+        struct.pack_into(endian + "IIIIIIII", data, phoff,
+                         2, dynoff, dynoff, dynoff, len(dynamic), len(dynamic), 0, 4)
+    data[dynoff:dynoff + len(dynamic)] = dynamic
+    data[stroff:stroff + len(strtab)] = strtab
+    return bytes(data)
+
+
+def _ipv4_frame(
+    payload: bytes,
+    *,
+    src_ip: str,
+    dst_ip: str,
+    src_mac: str,
+    dst_mac: str,
+    protocol: int = 17,
+) -> bytes:
+    ethernet = (
+        bytes.fromhex(dst_mac.replace(":", ""))
+        + bytes.fromhex(src_mac.replace(":", ""))
+        + struct.pack("!H", 0x0800)
+    )
+    udp = struct.pack("!HHHH", 40000, 51820, 8 + len(payload), 0) + payload
+    ipv4 = struct.pack(
+        "!BBHHHBBH4s4s",
+        0x45,
+        0,
+        20 + len(udp),
+        1,
+        0,
+        64,
+        protocol,
+        0,
+        socket.inet_aton(src_ip),
+        socket.inet_aton(dst_ip),
+    )
+    return ethernet + ipv4 + udp
+
+
+def _udp_frame(
+    payload: bytes,
+    *,
+    src_ip: str,
+    dst_ip: str,
+    sport: int,
+    dport: int,
+    src_mac: str,
+    dst_mac: str,
+) -> bytes:
+    ethernet = (
+        bytes.fromhex(dst_mac.replace(":", ""))
+        + bytes.fromhex(src_mac.replace(":", ""))
+        + struct.pack("!H", 0x0800)
+    )
+    udp = struct.pack("!HHHH", sport, dport, 8 + len(payload), 0) + payload
+    ipv4 = struct.pack(
+        "!BBHHHBBH4s4s",
+        0x45,
+        0,
+        20 + len(udp),
+        1,
+        0,
+        64,
+        17,
+        0,
+        socket.inet_aton(src_ip),
+        socket.inet_aton(dst_ip),
+    )
+    return ethernet + ipv4 + udp
+
+
+def _pcap_bytes(frames: list[bytes]) -> bytes:
+    data = bytearray(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 262144, 1))
+    for index, frame in enumerate(frames):
+        data += struct.pack("<IIII", 1_700_000_000 + index, 0, len(frame), len(frame))
+        data += frame
+    return bytes(data)
+
+
+class RealScannerIntegrationTests(unittest.TestCase):
+    """Run the real pcapscan CLI over evidence written by the real writers."""
+
+    @staticmethod
+    def _clean_frames() -> list[bytes]:
+        before = policy.control_payload(NONCE_A)
+        after = policy.control_payload(NONCE_B)
+        return [
+            _udp_frame(
+                before,
+                src_ip=guest.VM_IPV4,
+                dst_ip=guest.GATEWAY_IPV4,
+                sport=40000,
+                dport=39001,
+                src_mac=guest.VM_MAC,
+                dst_mac=guest.GATEWAY_MAC,
+            ),
+            _ipv4_frame(
+                b"wireguard",
+                src_ip=guest.VM_IPV4,
+                dst_ip="185.65.134.10",
+                src_mac=guest.VM_MAC,
+                dst_mac=guest.GATEWAY_MAC,
+            ),
+            _udp_frame(
+                b"wireguard",
+                src_ip="185.65.134.10",
+                dst_ip=guest.VM_IPV4,
+                sport=51820,
+                dport=40000,
+                src_mac=guest.GATEWAY_MAC,
+                dst_mac=guest.VM_MAC,
+            ),
+            _udp_frame(
+                after,
+                src_ip=guest.VM_IPV4,
+                dst_ip=guest.GATEWAY_IPV4,
+                sport=40000,
+                dport=39001,
+                src_mac=guest.VM_MAC,
+                dst_mac=guest.GATEWAY_MAC,
+            ),
+        ]
+
+    def _scan(self, frames: list[bytes]) -> run_phase.ScanOutcome:
+        evidence_root = self.root / "evidence"
+        evidence_root.mkdir()
+        root_fd = rootfs.open_directory(
+            evidence_root, create=True, expected_uid=os.geteuid()
+        )
+        try:
+            run_fd = rootfs.make_run_directory(
+                root_fd, "phase-run", expected_uid=os.geteuid()
+            )
+        finally:
+            os.close(root_fd)
+        evidence = run_phase.EvidenceDirectory(fd=run_fd, path=evidence_root / "phase-run")
+        self.addCleanup(evidence.close)
+        lab_policy = run_phase.build_lab_policy(("185.65.134.10", 51820))
+        rootfs.write_json_at(run_fd, "policy.json", lab_policy.to_dict())
+        rootfs.write_bytes_at(run_fd, guest.CAPTURE_FILE, _pcap_bytes(frames))
+        stats = (
+            "tcpdump: listening on vprlab-tap0, link-type EN10MB (Ethernet), "
+            "snapshot length 262144 bytes\n"
+            f"{len(frames)} packets captured\n"
+            f"{len(frames)} packets received by filter\n"
+            "0 packets dropped by kernel\n"
+        )
+        rootfs.write_bytes_at(
+            run_fd, guest.CAPTURE_STATS_FILE, stats.encode("ascii")
+        )
+        rootfs.write_json_at(
+            run_fd,
+            guest.CAPTURE_ARGV_FILE,
+            guest.tcpdump_argv(
+                guest.TAP, pathlib.Path(rootfs.proc_path(run_fd, guest.CAPTURE_FILE))
+            ),
+        )
+        self.scanner = pathlib.Path(__file__).resolve().parent.parent / "pcapscan.py"
+        return run_phase.scan_evidence(
+            evidence,
+            phase="idle",
+            before=NONCE_A,
+            after=NONCE_B,
+            scanner_path=self.scanner,
+        )
+
+    def setUp(self) -> None:
+        self._temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self._temporary.cleanup)
+        self.root = pathlib.Path(self._temporary.name)
+
+    def test_clean_four_record_capture_passes_end_to_end(self) -> None:
+        outcome = self._scan(self._clean_frames())
+        self.assertTrue(outcome.present)
+        self.assertEqual(outcome.exitcode, 0, outcome.stderr)
+        self.assertEqual(outcome.verdict, "PASS")
+        self.assertEqual(outcome.problems, [])
+        meta = outcome.report["capture_meta"]
+        self.assertEqual(meta["capture_argv_sha256"], outcome.hashes["capture_argv_sha256"])
+        self.assertEqual(meta["source_sha256"], outcome.hashes["pcap_sha256"])
+        self.assertEqual(meta["stats_sha256"], outcome.hashes["stats_sha256"])
+        self.assertEqual(meta["policy_sha256"], outcome.hashes["policy_sha256"])
+        self.assertNotIn("scan_report_mismatch", outcome.problems)
+
+    def test_one_dns_record_is_a_leak_end_to_end(self) -> None:
+        frames = self._clean_frames()
+        frames.insert(
+            -1,
+            _udp_frame(
+                b"\x00" * 12,
+                src_ip=guest.VM_IPV4,
+                dst_ip="1.1.1.1",
+                sport=40000,
+                dport=53,
+                src_mac=guest.VM_MAC,
+                dst_mac=guest.GATEWAY_MAC,
+            ),
+        )
+        outcome = self._scan(frames)
+        self.assertTrue(outcome.present)
+        self.assertEqual(outcome.exitcode, 1, outcome.stderr)
+        self.assertEqual(outcome.verdict, "LEAK")
+        self.assertEqual(outcome.problems, [])
+
+
+class HostcopyTests(unittest.TestCase):
+    def test_minimal_elf_reader_parses_64_and_32_bit_dynamic_needed(self) -> None:
+        for bits, endian in ((64, "<"), (64, ">"), (32, "<"), (32, ">")):
+            with self.subTest(bits=bits, endian=endian):
+                blob = _synthetic_elf(
+                    ["libc.so.6", "libslirp.so.0"], bits=bits, endian=endian
+                )
+                self.assertEqual(
+                    hostcopy.elf_needed_sonames(blob),
+                    ["libc.so.6", "libslirp.so.0"],
+                )
+        with self.assertRaises(hostcopy.ElfError):
+            hostcopy.elf_needed_sonames(b"not an elf")
+
+    def test_staged_tool_dependencies_accept_real_library_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / "usr/bin").mkdir(parents=True)
+            library = root / "usr/lib/x86_64-linux-gnu"
+            library.mkdir(parents=True)
+            # Real Debian shape: the SONAME is a relative link to the full file.
+            (library / "libslirp.so.0.4.0").write_bytes(b"library")
+            (library / "libslirp.so.0").symlink_to("libslirp.so.0.4.0")
+            for name in ("qemu-system-x86_64", "qemu-img", "genisoimage"):
+                needed = ["libc.so.6", "libm.so.6"]
+                if name == "qemu-system-x86_64":
+                    needed.append("libslirp.so.0")
+                (root / f"usr/bin/{name}").write_bytes(
+                    _synthetic_elf(needed)
+                )
+            self.assertEqual(hostcopy.check_staged_tools(root), [])
+            (library / "libslirp.so.0.4.0").unlink()
+            problems = hostcopy.check_staged_tools(root)
+            self.assertTrue(any("libslirp.so.0" in item for item in problems))
+            # A host-provided base library is explicitly allowed.
+            (root / "usr/bin/qemu-img").write_bytes(
+                _synthetic_elf(["libc.so.6", "ld-linux-x86-64.so.2"])
+            )
+            self.assertFalse(
+                any("ld-linux" in item for item in hostcopy.check_staged_tools(root))
+            )
+
+    def test_copy_preserves_links_and_verifies_both_manifests(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary)
+            source = base / "source"
+            (source / "usr/bin").mkdir(parents=True)
+            library = source / "usr/lib/x86_64-linux-gnu"
+            library.mkdir(parents=True)
+            (source / "usr/bin/qemu-system-x86_64").write_bytes(b"qemu")
+            (source / "usr/bin/qemu-system-amd64").symlink_to("qemu-system-x86_64")
+            (library / "libslirp.so.0.4.0").write_bytes(b"slirp")
+            (library / "libslirp.so.0").symlink_to("libslirp.so.0.4.0")
+            destination = base / "dest"
+            manifest = destination / "SHA256SUMS"
+            links = destination / "SYMLINKS.json"
+            hostcopy.copy_tree(source, destination, manifest, links)
+            self.assertTrue((destination / "usr/bin/qemu-system-amd64").is_symlink())
+            self.assertEqual(
+                os.readlink(destination / "usr/bin/qemu-system-amd64"),
+                "qemu-system-x86_64",
+            )
+            self.assertTrue((destination / "usr/lib/x86_64-linux-gnu/libslirp.so.0").is_symlink())
+            recorded = json.loads(links.read_text(encoding="utf-8"))
+            self.assertEqual(
+                recorded["links"]["usr/lib/x86_64-linux-gnu/libslirp.so.0"],
+                "libslirp.so.0.4.0",
+            )
+            self.assertIn(
+                "usr/lib/x86_64-linux-gnu/libslirp.so.0",
+                links.read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "usr/lib/x86_64-linux-gnu/libslirp.so.0.4.0",
+                manifest.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                hostcopy.verify_tree(destination, manifest, links), []
+            )
+            # A manifest link target mismatch is detected.
+            recorded["links"]["usr/lib/x86_64-linux-gnu/libslirp.so.0"] = (
+                "libslirp.so.0.4.1"
+            )
+            links.write_text(json.dumps(recorded), encoding="utf-8")
+            problems = hostcopy.verify_tree(destination, manifest, links)
+            self.assertTrue(any("libslirp.so.0" in item for item in problems))
+
+    def test_copy_refuses_absolute_and_escaping_links(self) -> None:
+        for target in ("/etc/passwd", "../../outside"):
+            with self.subTest(target=target):
+                with tempfile.TemporaryDirectory() as temporary:
+                    base = pathlib.Path(temporary)
+                    source = base / "source"
+                    source.mkdir()
+                    (source / "link").symlink_to(target)
+                    with self.assertRaises(hostcopy.HostcopyError):
+                        hostcopy.copy_tree(
+                            source,
+                            base / "dest",
+                            base / "dest/SHA256SUMS",
+                            base / "dest/SYMLINKS.json",
+                        )
+
+    def test_copy_refuses_a_regular_file_swapped_for_a_symlink_after_listing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary)
+            source = base / "source"
+            (source / "usr/bin").mkdir(parents=True)
+            binary = source / "usr/bin/qemu-system-x86_64"
+            binary.write_bytes(b"qemu")
+            secret = base / "secret"
+            secret.write_bytes(b"PRIVATE-KEY-SENTINEL")
+            original_collect = hostcopy._collect
+
+            def collecting(*args, **kwargs):
+                plan = original_collect(*args, **kwargs)
+                binary.unlink()
+                binary.symlink_to(secret)
+                return plan
+
+            with mock.patch.object(hostcopy, "_collect", side_effect=collecting):
+                with self.assertRaises(hostcopy.HostcopyError):
+                    hostcopy.copy_tree(
+                        source,
+                        base / "dest",
+                        base / "dest/SHA256SUMS",
+                        base / "dest/SYMLINKS.json",
+                    )
+
+
+class ScannerResolutionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import hashlib
+
+        self._temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self._temporary.cleanup)
+        self.root = pathlib.Path(self._temporary.name)
+        self.repo = self.root / "repo-pcapscan.py"
+        self.repo.write_bytes(b"# repository scanner\n")
+        self.installed_root = self.root / "installed"
+        self.installed_root.mkdir()
+        self.installed = self.installed_root / "pcapscan.py"
+        self.installed.write_bytes(self.repo.read_bytes())
+        digest = hashlib.sha256(self.installed.read_bytes()).hexdigest()
+        (self.installed_root / "SHA256SUMS").write_text(
+            f"{digest}  pcapscan.py\n", encoding="utf-8"
+        )
+
+    def resolve(self, *, allow_repo=False):
+        return run_phase.resolve_pcapscan(
+            self.repo,
+            installed_root=self.installed_root,
+            allow_repo=allow_repo,
+        )
+
+    def test_verified_root_copy_is_preferred(self) -> None:
+        self.assertEqual(self.resolve(), self.installed)
+
+    def test_tampered_installed_copy_is_refused_or_overridden(self) -> None:
+        self.installed.write_bytes(b"# tampered\n")
+        with self.assertRaises(hostcheck.Refusal):
+            self.resolve()
+        self.assertEqual(self.resolve(allow_repo=True), self.repo)
+
+    def test_missing_installed_copy_is_refused_or_overridden(self) -> None:
+        (self.installed_root / "SHA256SUMS").unlink()
+        with self.assertRaises(hostcheck.Refusal):
+            self.resolve()
+        self.assertEqual(self.resolve(allow_repo=True), self.repo)
+
+    def test_repo_drift_needs_the_explicit_flag(self) -> None:
+        self.repo.write_bytes(b"# developer working copy\n")
+        with self.assertRaises(hostcheck.Refusal) as raised:
+            self.resolve()
+        self.assertIn("--allow-repo-scanner", str(raised.exception))
+        self.assertEqual(self.resolve(allow_repo=True), self.repo)
+
+    def test_run_phase_uses_the_installed_scanner_path(self) -> None:
+        # The behavioural harness already resolves its own installed copy;
+        # assert the recorded argv names it rather than the repository file.
+        case = RunPhaseTests("test_idle_starts_the_router_and_expects_a_tunnel")
+        case.setUp()
+        try:
+            code, record, _client, _events, _stdout, _stderr, _dir = case._run(
+                "idle"
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(record["pcapscan_argv"][2], str(case.scanner_root / "pcapscan.py"))
+        finally:
+            case.doCleanups()
+
+
+class MainLimitTests(unittest.TestCase):
+    def test_runner_sets_a_two_gib_address_space_limit(self) -> None:
+        script = (
+            "import resource, run_phase; run_phase.set_runner_limits(); "
+            "print(resource.getrlimit(resource.RLIMIT_AS)[0])"
+        )
+        completed = subprocess.run(
+            [sys.executable, "-B", "-c", script],
+            cwd=pathlib.Path(__file__).resolve().parent,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(int(completed.stdout.strip()), run_phase.RUNNER_MEMORY_LIMIT)
+
+    def test_main_applies_the_runner_limit(self) -> None:
+        argv = [
+            "--phase",
+            "idle",
+            "--duration",
+            "0",
+            "--profile-fd",
+            "0",
+            "--used-nonces",
+            "/tmp/unused",
+        ]
+        with mock.patch.object(run_phase, "install_signal_handlers"), mock.patch.object(
+            run_phase, "set_runner_limits"
+        ) as limits, mock.patch.object(run_phase, "run_phase", return_value=0):
+            self.assertEqual(run_phase.main(argv), 0)
+        limits.assert_called_once_with()
 
 
 class ProvisionDefaultsTests(unittest.TestCase):

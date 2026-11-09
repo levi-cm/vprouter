@@ -48,6 +48,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 
 _VM_DIR = pathlib.Path(__file__).resolve().parent
@@ -118,9 +119,21 @@ HANDSHAKE_MAX_AGE_SECONDS = 180.0
 MIN_MEMORY_AVAILABLE = 1536 * 1024 * 1024
 DISK_HEADROOM = 1024 * 1024 * 1024
 DEFAULT_CAPTURE_SIZE_CAP = 2 * 1024 * 1024 * 1024
+CAPTURE_WATCH_INTERVAL = 0.1
 SCAN_MEMORY_LIMIT = 1024 * 1024 * 1024
+#: The root runner deliberately runs under a hard address-space bound.  It
+#: never needs anything close to this; the scanner child gets its own 1 GiB.
+RUNNER_MEMORY_LIMIT = 2 * 1024 * 1024 * 1024
 SCAN_TIMEOUT = 300.0
+INSTALLED_LEAKLAB = pathlib.Path("/opt/vprlab-tools/leaklab")
+TAILSCALE_BACKEND_STATES = frozenset(
+    {"NoState", "NeedsLogin", "NeedsMachineAuth", "Stopped", "Starting", "Running"}
+)
+UNRECOGNIZED_GUEST_STATE = "unrecognized"
 CERTIFICATION = "server_side_no_client_traffic"
+#: Absolute tools for the root runner; never resolve these through root's PATH.
+IP = "/usr/sbin/ip"
+NFT = "/usr/sbin/nft"
 
 
 def utc_now() -> str:
@@ -139,6 +152,139 @@ def require_root() -> None:
     """Separate function so offline tests can exercise the rest as non-root."""
     if os.geteuid() != 0:
         raise hostcheck.Refusal("phase execution requires root")
+
+
+def set_runner_limits() -> None:
+    """Bound the root runner's address space at 2 GiB (documented in the VM doc)."""
+    import resource
+
+    limit = RUNNER_MEMORY_LIMIT
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    target = limit
+    if hard != resource.RLIM_INFINITY:
+        target = min(target, hard)
+    if soft != resource.RLIM_INFINITY:
+        target = min(target, soft)
+    if target > 0:
+        resource.setrlimit(resource.RLIMIT_AS, (target, hard))
+
+
+def _safe_manifest_path(relative: object) -> str:
+    if not isinstance(relative, str) or not relative or "\x00" in relative:
+        raise hostcheck.Refusal("installed tool manifest has an invalid path")
+    if relative.startswith("/") or "\\" in relative:
+        raise hostcheck.Refusal("installed tool manifest has an absolute path")
+    parts = relative.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        raise hostcheck.Refusal("installed tool manifest path escapes its root")
+    return relative
+
+
+def _installed_file(root: pathlib.Path, relative: str) -> pathlib.Path:
+    """Return a manifest path after refusing symlinked components."""
+    current = root
+    parts = relative.split("/")
+    for part in parts[:-1]:
+        current = current / part
+        try:
+            info = current.lstat()
+        except OSError as exc:
+            raise hostcheck.Refusal(
+                f"installed tool directory is missing: {current}"
+            ) from exc
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise hostcheck.Refusal(
+                f"installed tool directory is not a real directory: {current}"
+            )
+    target = current / parts[-1]
+    try:
+        info = target.lstat()
+    except OSError as exc:
+        raise hostcheck.Refusal(f"installed tool file is missing: {target}") from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise hostcheck.Refusal(f"installed tool file is not a regular file: {target}")
+    return target
+
+
+def verify_leaklab_manifest(root: pathlib.Path) -> dict[str, str]:
+    """Verify the root-owned scanner copy and return ``{relative: sha256}``."""
+    root = pathlib.Path(root)
+    if os.geteuid() == 0:
+        try:
+            rootfs.validate_ancestry(root, expected_uid=0)
+        except rootfs.PathError as exc:
+            raise hostcheck.Refusal(
+                f"installed leak-lab ancestry is not root-trusted: {exc}"
+            ) from exc
+    manifest = _installed_file(root, "SHA256SUMS")
+    try:
+        text = manifest.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise hostcheck.Refusal(
+            f"installed leak-lab manifest is unreadable: {exc.__class__.__name__}"
+        ) from exc
+    digests: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line:
+            continue
+        digest, separator, relative = line.partition("  ")
+        if not separator or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise hostcheck.Refusal("installed leak-lab manifest is malformed")
+        name = _safe_manifest_path(relative)
+        if name in digests:
+            raise hostcheck.Refusal("installed leak-lab manifest has duplicates")
+        target = _installed_file(root, name)
+        try:
+            actual = sha256_file(target)
+        except OSError as exc:
+            raise hostcheck.Refusal(
+                f"installed tool is unreadable: {name}"
+            ) from exc
+        if actual != digest:
+            raise hostcheck.Refusal(
+                f"installed tool hash mismatch: {name} (re-run hostsetup)"
+            )
+        digests[name] = digest
+    if "pcapscan.py" not in digests:
+        raise hostcheck.Refusal("installed leak-lab manifest does not list pcapscan.py")
+    return digests
+
+
+def resolve_pcapscan(
+    repo_path: pathlib.Path,
+    *,
+    installed_root: pathlib.Path = INSTALLED_LEAKLAB,
+    allow_repo: bool = False,
+) -> pathlib.Path:
+    """Return the root-owned scanner, or the repo copy with an explicit override.
+
+    The installed copy must verify against its own manifest and be byte-for-byte
+    identical to the repository's ``pcapscan.py``.  ``--allow-repo-scanner`` is
+    the documented developer override for running a working-tree scanner before
+    re-running hostsetup.
+    """
+    repo_path = pathlib.Path(repo_path)
+    installed_root = pathlib.Path(installed_root)
+    try:
+        digests = verify_leaklab_manifest(installed_root)
+    except (hostcheck.Refusal, OSError):
+        if allow_repo:
+            return repo_path
+        raise
+    try:
+        repo_digest = sha256_file(repo_path)
+    except OSError as exc:
+        raise hostcheck.Refusal(
+            f"repository scanner is unreadable: {exc.__class__.__name__}"
+        ) from exc
+    if digests["pcapscan.py"] != repo_digest:
+        if allow_repo:
+            return repo_path
+        raise hostcheck.Refusal(
+            "installed pcapscan.py differs from the repository copy; "
+            "re-run hostsetup.py or pass --allow-repo-scanner"
+        )
+    return installed_root / "pcapscan.py"
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +627,27 @@ class Capture:
     forced_stop: bool = False
 
 
+def reap_after_setup_failure(process: subprocess.Popen | None) -> None:
+    """Kill and reap a child whose log-stream close failed after Popen.
+
+    Otherwise the exception from leaving the ``with`` block would orphan a
+    tcpdump/QEMU process with no handle for the caller's finally.
+    """
+    if process is None:
+        return
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except OSError:
+        try:
+            process.kill()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=5)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+
 def start_capture(
     interface: str,
     pcap: pathlib.Path,
@@ -507,16 +674,21 @@ def start_capture(
         )
         error_log = os.fdopen(error_descriptor, "wb")
         popen_kwargs = {"pass_fds": (evidence_fd,)}
-    with error_log as error_stream:
-        process = popen(
-            argv,
-            executable=tcpdump,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=error_stream,
-            start_new_session=True,
-            **popen_kwargs,
-        )
+    process = None
+    try:
+        with error_log as error_stream:
+            process = popen(
+                argv,
+                executable=tcpdump,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=error_stream,
+                start_new_session=True,
+                **popen_kwargs,
+            )
+    except BaseException:
+        reap_after_setup_failure(process)
+        raise
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         status = process.poll()
@@ -771,6 +943,18 @@ class EvidenceDirectory:
 
     def proc_path(self, name: str) -> str:
         return rootfs.proc_path(self.fd, name)
+
+
+def display_argv(argv: list[str], evidence: EvidenceDirectory) -> list[str]:
+    """Replace inherited-fd paths with the evidence display path for readers."""
+    prefix = f"/proc/self/fd/{evidence.fd}/"
+    result: list[str] = []
+    for item in argv:
+        if item.startswith(prefix):
+            result.append(str(evidence.path / item[len(prefix):]))
+        else:
+            result.append(item)
+    return result
 
 
 def ensure_root_directory(path: pathlib.Path, *, anchor: pathlib.Path | None = None) -> None:
@@ -1124,7 +1308,9 @@ def read_boot_id(client: QGAClient) -> str:
     if result.exitcode != 0:
         raise hostcheck.Refusal("cannot read the guest boot ID")
     value = result.stdout.decode("ascii", "replace").strip()
-    if not re.fullmatch(r"[0-9a-f-]{36}", value):
+    if not re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", value
+    ):
         raise hostcheck.Refusal("guest boot ID has an unexpected shape")
     return value
 
@@ -1191,23 +1377,25 @@ def tailscale_readiness_problems(document: object) -> list[str]:
     if not isinstance(node, dict):
         problems.append("tailscale status has no Self node")
         return problems
-    advertised = node.get("AdvertisedRoutes")
-    routes = advertised if isinstance(advertised, list) else []
-    exit_option = node.get("ExitNodeOption") is True
-    advertises_default = any(str(route) == "0.0.0.0/0" for route in routes)
-    if not (exit_option or advertises_default):
+    # The release's own router_runtime.tailscale_ready uses this exact field;
+    # Self.AdvertisedRoutes is not emitted by `tailscale status --json`.
+    if node.get("ExitNodeOption") is not True:
         problems.append("the node does not advertise an exit node")
     return problems
+
+
+def normalize_backend_state(value: object) -> str:
+    """Map a guest-supplied BackendState to the fixed local vocabulary."""
+    if isinstance(value, str) and value in TAILSCALE_BACKEND_STATES:
+        return value
+    return UNRECOGNIZED_GUEST_STATE
 
 
 def read_tailscale_backend_state(client: QGAClient, name: str) -> str | None:
     document = read_tailscale_status(client, name)
     if document is None:
         return None
-    state = document.get("BackendState")
-    if not isinstance(state, str):
-        return None
-    return "".join(ch for ch in state if ch.isprintable())[:64]
+    return normalize_backend_state(document.get("BackendState"))
 
 
 def record_tailscale_state(record: dict, client: QGAClient, name: str) -> None:
@@ -1280,20 +1468,15 @@ def login_phase_wait(
     duration: float,
     evidence: EvidenceDirectory,
     record: dict,
-    pcap: pathlib.Path | None = None,
-    capture_size_cap: int | None = None,
+    guard: CaptureGuard | None = None,
 ) -> None:
     """Poll the login URL through the runner's own QGA connection."""
     url_path = evidence.path / "login-url.txt"
     deadline = time.monotonic() + duration
     found: str | None = None
     while True:
-        if pcap is not None and capture_size_cap is not None:
-            try:
-                if pathlib.Path(pcap).stat().st_size > capture_size_cap:
-                    raise CaptureCapExceeded("capture_size_cap")
-            except OSError:
-                pass
+        if guard is not None:
+            guard.raise_if_exceeded()
         try:
             url = find_login_url(client, name)
         except (QGAError, OSError):
@@ -1434,7 +1617,130 @@ def check_admission(
 
 
 class CaptureCapExceeded(RuntimeError):
-    """The guest wrote more capture bytes than the phase's private quota."""
+    """The capture outgrew its byte cap or the evidence disk ran low."""
+
+
+def capture_bounds_problem(
+    size: int, capture_size_cap: int, free_bytes: int | None
+) -> str | None:
+    """Return the fixed INVALID reason for an exceeded capture/disk bound."""
+    if size > int(capture_size_cap):
+        return "capture_size_cap"
+    if free_bytes is not None and free_bytes < DISK_HEADROOM:
+        return "capture_disk_low"
+    return None
+
+
+class CaptureGuard:
+    """Watch the pcap size and evidence disk for the whole capture lifetime.
+
+    The watcher runs from ``tcpdump`` start until ``tcpdump`` exits, including
+    setup, readiness, action, teardown and poweroff waits.  On a breach it
+    brings the tap down before the main thread notices and records a fixed
+    reason; every later checkpoint re-reads the retained evidence fd.
+    """
+
+    def __init__(
+        self,
+        evidence_fd: int,
+        name: str,
+        capture_size_cap: int,
+        *,
+        tap: str = guest.TAP,
+        interval: float = CAPTURE_WATCH_INTERVAL,
+    ) -> None:
+        self.evidence_fd = evidence_fd
+        self.name = name
+        self.capture_size_cap = int(capture_size_cap)
+        self.tap = tap
+        self.interval = float(interval)
+        self.reason: str | None = None
+        self.isolation_error: str | None = None
+        self._descriptor: int | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+    def _open(self) -> int | None:
+        if self._descriptor is None:
+            try:
+                self._descriptor = rootfs.open_file_at(
+                    self.evidence_fd, self.name, os.O_RDONLY
+                )
+            except (OSError, rootfs.PathError):
+                self._descriptor = None
+        return self._descriptor
+
+    def measure(self) -> str | None:
+        descriptor = self._open()
+        if descriptor is None:
+            return None
+        size = os.fstat(descriptor).st_size
+        free_bytes: int | None = None
+        try:
+            stats = os.fstatvfs(descriptor)
+            free_bytes = stats.f_bavail * stats.f_frsize
+        except (OSError, AttributeError):
+            free_bytes = None
+        return capture_bounds_problem(size, self.capture_size_cap, free_bytes)
+
+    def _breach(self, reason: str) -> None:
+        with self._lock:
+            if self.reason is None:
+                self.reason = reason
+            elif self.reason != reason:
+                return
+        try:
+            isolate_tap(self.tap)
+        except BaseException as exc:  # noqa: BLE001 - isolation is best effort
+            self.isolation_error = exc.__class__.__name__
+
+    def check(self) -> str | None:
+        if self.reason is None:
+            try:
+                reason = self.measure()
+            except OSError:
+                reason = None
+            if reason is not None:
+                self._breach(reason)
+        return self.reason
+
+    def raise_if_exceeded(self) -> None:
+        reason = self.check()
+        if reason is not None:
+            raise CaptureCapExceeded(reason)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval):
+            self.check()
+
+    def start(self) -> None:
+        self._thread = threading.Thread(
+            target=self._run, name="vprlab-capture-guard", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self.check()
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(1.0, self.interval * 5))
+        if self._descriptor is not None:
+            try:
+                os.close(self._descriptor)
+            except OSError:
+                pass
+            self._descriptor = None
+
+    def sleep(self, seconds: float, *, chunk: float = 0.25) -> None:
+        remaining = max(0.0, float(seconds))
+        while True:
+            self.raise_if_exceeded()
+            if remaining <= 0:
+                return
+            step = min(chunk, remaining)
+            time.sleep(step)
+            remaining -= step
 
 
 def wait_capture_room(
@@ -1444,15 +1750,16 @@ def wait_capture_room(
     *,
     chunk: float = 0.25,
 ) -> None:
-    """Sleep one phase window while enforcing the capture size cap."""
+    """Compatibility helper used by callers without an EvidenceDirectory."""
     remaining = max(0.0, float(seconds))
     while True:
         try:
             size = pathlib.Path(pcap).stat().st_size
         except OSError:
             size = 0
-        if size > capture_size_cap:
-            raise CaptureCapExceeded("capture_size_cap")
+        reason = capture_bounds_problem(size, capture_size_cap, None)
+        if reason is not None:
+            raise CaptureCapExceeded(reason)
         if remaining <= 0:
             return
         step = min(chunk, remaining)
@@ -1495,13 +1802,13 @@ def verify_host_lab(
         raise hostcheck.Refusal(
             "net.ipv4.ip_forward is not 1; the host plan requires it for the phase"
         )
-    links = _run_json(["ip", "-d", "-j", "link", "show"], what="ip -d -j link show")
-    addresses = _run_json(["ip", "-j", "addr", "show"], what="ip -j addr show")
+    links = _run_json([IP, "-d", "-j", "link", "show"], what="ip -d -j link show")
+    addresses = _run_json([IP, "-j", "addr", "show"], what="ip -j addr show")
     # ``nft -j list table`` exits non-zero when the table is absent; that is a
     # refusal, not a crash.
     try:
         table = subprocess.run(
-            ["nft", "-j", "list", "table", "inet", "vprlab"],
+            [NFT, "-j", "list", "table", "inet", "vprlab"],
             check=False,
             capture_output=True,
             text=True,
@@ -1515,7 +1822,7 @@ def verify_host_lab(
         table_document = json.loads(table.stdout)
     except json.JSONDecodeError as exc:
         raise hostcheck.Refusal("nft -j list table did not return JSON") from exc
-    neighbors = _run_json(["ip", "-j", "neigh", "show"], what="ip -j neigh show")
+    neighbors = _run_json([IP, "-j", "neigh", "show"], what="ip -j neigh show")
     problems = hostcheck.verify_host_network(
         links,
         table_document,
@@ -1631,15 +1938,20 @@ def start_vm(
         descriptor = os.open(log_path, flags, 0o600)
     else:
         descriptor = os.dup(log_fd)
-    with os.fdopen(descriptor, "ab") as log:
-        process = subprocess.Popen(
-            launch_argv,
-            env=guest.clean_environment(),
-            stdin=subprocess.DEVNULL,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+    process = None
+    try:
+        with os.fdopen(descriptor, "ab") as log:
+            process = subprocess.Popen(
+                launch_argv,
+                env=guest.clean_environment(),
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+    except BaseException:
+        reap_after_setup_failure(process)
+        raise
     return process, qemu_argv, launch_argv
 
 
@@ -1666,43 +1978,46 @@ def wait_for_qga_or_exit(
             time.sleep(0.25)
 
 
-def qemu_pid_is_ours(process: subprocess.Popen, state: pathlib.Path | None) -> bool:
-    """Prove the live pid is our QEMU via its pidfile and /proc cmdline."""
-    if state is None:
+def qemu_process_is_ours(process: subprocess.Popen) -> bool:
+    """Prove the pid from our own Popen still executes the staged QEMU.
+
+    The QEMU-owned pidfile is not evidence: a compromised guest/QEMU can
+    delete or rewrite it.  ``/proc/<pid>/exe`` names the inode the kernel
+    actually executes, and the child pid cannot be reused while our un-reaped
+    Popen handle exists.
+    """
+    pid = process.pid
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
         return False
-    pid_path = pathlib.Path(state) / guest.PID_FILE
+    expected = os.path.realpath(os.fspath(guest.QEMU))
     try:
-        info = pid_path.lstat()
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-            return False
-        if info.st_uid == 0 and os.geteuid() != 0:
-            return False
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(pid_path, flags)
-        try:
-            raw = os.read(descriptor, 64)
-        finally:
-            os.close(descriptor)
-        pidfile = int(raw.decode("ascii", "replace").strip())
-    except (OSError, ValueError):
-        return False
-    if pidfile != process.pid:
-        return False
-    try:
-        cmdline = pathlib.Path(f"/proc/{process.pid}/cmdline").read_bytes()
+        executable = os.readlink(f"/proc/{pid}/exe")
     except OSError:
         return False
-    if b"qemu-system" not in cmdline:
+    if os.path.realpath(executable) != expected:
         return False
-    return str(state).encode() in cmdline
+    try:
+        cmdline = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+    argv = cmdline.split(b"\x00")
+    if not argv or argv[0] != os.fsencode(os.fspath(guest.QEMU)):
+        return False
+    return True
 
 
-def kill_qemu(process: subprocess.Popen, state: pathlib.Path | None) -> bool:
+#: Backwards-compatible name for the old private helper.
+def qemu_pid_is_ours(process: subprocess.Popen, state: pathlib.Path | None = None) -> bool:
+    del state
+    return qemu_process_is_ours(process)
+
+
+def kill_qemu(process: subprocess.Popen, state: pathlib.Path | None = None) -> bool:
     """SIGKILL our verified QEMU and reap it; return whether it is gone."""
     if process.poll() is not None:
         return True
-    if not qemu_pid_is_ours(process, state):
-        # Pid reuse: never signal a process we cannot prove is ours.
+    if not qemu_process_is_ours(process):
+        # Pid reuse, or the staged binary was replaced: never signal it.
         return False
     try:
         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
@@ -1721,7 +2036,7 @@ def kill_qemu(process: subprocess.Popen, state: pathlib.Path | None) -> bool:
 def isolate_tap(tap: str = guest.TAP) -> None:
     """Bring the lab tap down so a surviving guest cannot reach the host."""
     completed = subprocess.run(
-        ["ip", "link", "set", "dev", tap, "down"],
+        [IP, "link", "set", "dev", tap, "down"],
         check=False,
         capture_output=True,
         timeout=15,
@@ -1837,6 +2152,172 @@ def _evidence_run_dir(
 @dataclasses.dataclass
 class LifecycleState:
     qemu_alive: bool = False
+
+
+@dataclasses.dataclass
+class ScanOutcome:
+    present: bool
+    exitcode: int
+    verdict: str | None
+    stderr: str
+    argv: list[str]
+    hashes: dict[str, str]
+    problems: list[str]
+    report: dict | None
+
+
+def scan_evidence(
+    evidence: EvidenceDirectory,
+    *,
+    phase: str,
+    before: str,
+    after: str,
+    scanner_path: pathlib.Path,
+) -> ScanOutcome:
+    """Scan the retained evidence through the real scanner CLI contract.
+
+    Hashes here and the scanner's ``capture_meta`` hashes both cover the exact
+    file bytes; the argv file is written indented with a trailing newline, so
+    a canonical re-encoding would never match.
+    """
+    problems: list[str] = []
+    hashes: dict[str, str] = {}
+    try:
+        capture_present = evidence.size(guest.CAPTURE_FILE) > 0
+    except (rootfs.PathError, OSError):
+        capture_present = False
+    if not capture_present:
+        return ScanOutcome(
+            present=False,
+            exitcode=2,
+            verdict=None,
+            stderr="",
+            argv=[],
+            hashes={},
+            problems=["capture_missing"],
+            report=None,
+        )
+    try:
+        hashes = {
+            "pcap_sha256": evidence.hash(guest.CAPTURE_FILE),
+            "stats_sha256": evidence.hash(guest.CAPTURE_STATS_FILE),
+            "capture_argv_sha256": evidence.hash(guest.CAPTURE_ARGV_FILE),
+            "policy_sha256": evidence.hash("policy.json"),
+        }
+    except (rootfs.PathError, OSError) as exc:
+        return ScanOutcome(
+            present=True,
+            exitcode=2,
+            verdict=None,
+            stderr="",
+            argv=[],
+            hashes={},
+            problems=["scan_report_invalid"],
+            report=None,
+        )
+    scan_argv = [
+        sys.executable,
+        "-B",
+        str(scanner_path),
+        "--policy",
+        evidence.proc_path("policy.json"),
+        "--pcap",
+        evidence.proc_path(guest.CAPTURE_FILE),
+        "--tcpdump-stats",
+        evidence.proc_path(guest.CAPTURE_STATS_FILE),
+        "--capture-argv-file",
+        evidence.proc_path(guest.CAPTURE_ARGV_FILE),
+        "--expect-tunnel",
+        PHASE_EXPECTATIONS[phase],
+        "--control-before",
+        before,
+        "--control-after",
+        after,
+    ]
+    scan_exit = 2
+    scan_stderr = ""
+    try:
+        completed = subprocess.run(
+            scan_argv,
+            check=False,
+            capture_output=True,
+            timeout=SCAN_TIMEOUT,
+            pass_fds=(evidence.fd,),
+            preexec_fn=set_scan_limits,
+        )
+        scan_exit = completed.returncode
+        evidence.open_new(guest.SCAN_REPORT_FILE, completed.stdout, mode=0o600)
+        scan_stderr = completed.stderr[:4096].decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError) as exc:
+        scan_exit = 2
+        scan_stderr = f"pcapscan failed: {exc.__class__.__name__}"
+    try:
+        report = json.loads(evidence.read_bytes(guest.SCAN_REPORT_FILE))
+    except (rootfs.PathError, OSError, json.JSONDecodeError):
+        report = None
+        problems.append("scan_report_invalid")
+    scan_verdict: str | None = None
+    if isinstance(report, dict):
+        raw = report.get("verdict")
+        scan_verdict = raw if isinstance(raw, str) else None
+        expected_exit = {"PASS": 0, "LEAK": 1, "INVALID": 2}.get(
+            scan_verdict or ""
+        )
+        if expected_exit is None or expected_exit != scan_exit:
+            problems.append("scan_report_mismatch")
+        if report.get("control_before") not in (None, before):
+            problems.append("scan_report_mismatch")
+        if report.get("control_after") not in (None, after):
+            problems.append("scan_report_mismatch")
+        capture_meta = report.get("capture_meta")
+        if isinstance(capture_meta, dict):
+            for field in (
+                "source_sha256",
+                "stats_sha256",
+                "capture_argv_sha256",
+                "policy_sha256",
+            ):
+                declared = capture_meta.get(field)
+                expected = hashes[
+                    "pcap_sha256" if field == "source_sha256" else field
+                ]
+                if declared != expected:
+                    problems.append("scan_report_mismatch")
+        else:
+            problems.append("scan_report_mismatch")
+    else:
+        problems.append("scan_report_invalid")
+    try:
+        hashes["scan_sha256"] = evidence.hash(guest.SCAN_REPORT_FILE)
+        post_hashes = {
+            "pcap_sha256": evidence.hash(guest.CAPTURE_FILE),
+            "stats_sha256": evidence.hash(guest.CAPTURE_STATS_FILE),
+            "capture_argv_sha256": evidence.hash(guest.CAPTURE_ARGV_FILE),
+            "policy_sha256": evidence.hash("policy.json"),
+        }
+    except (rootfs.PathError, OSError):
+        post_hashes = {}
+        problems.append("scan_report_invalid")
+    if post_hashes and post_hashes != {
+        key: hashes[key]
+        for key in (
+            "pcap_sha256",
+            "stats_sha256",
+            "capture_argv_sha256",
+            "policy_sha256",
+        )
+    }:
+        problems.append("scan_report_mismatch")
+    return ScanOutcome(
+        present=True,
+        exitcode=scan_exit,
+        verdict=scan_verdict,
+        stderr=scan_stderr,
+        argv=scan_argv,
+        hashes=hashes,
+        problems=list(dict.fromkeys(problems)),
+        report=report if isinstance(report, dict) else None,
+    )
 
 
 def run_phase(arguments: argparse.Namespace) -> int:
@@ -1956,6 +2437,11 @@ def _run_phase_locked(
     tcpdump = shutil.which(arguments.tcpdump)
     if tcpdump is None:
         raise hostcheck.Refusal("tcpdump is not installed")
+    scanner_path = resolve_pcapscan(
+        _LEAK_LAB_DIR / "pcapscan.py",
+        installed_root=pathlib.Path(arguments.scanner_root),
+        allow_repo=bool(arguments.allow_repo_scanner),
+    )
 
     evidence_root = pathlib.Path(arguments.evidence_root)
     try:
@@ -2003,6 +2489,7 @@ def _run_phase_locked(
     boot_control_phase = arguments.phase == "reboot-with-router-enabled"
 
     capture: Capture | None = None
+    capture_guard: CaptureGuard | None = None
     qemu_process: subprocess.Popen | None = None
     client: QGAClient | None = None
     errors: list[str] = []
@@ -2014,14 +2501,26 @@ def _run_phase_locked(
         if reason not in errors:
             errors.append(reason)
 
+    def guard_check() -> None:
+        if capture_guard is not None:
+            capture_guard.raise_if_exceeded()
+
     try:
+        # Start the watcher before tcpdump so the 15 s readiness window is
+        # already inside the bound; measure() tolerates the missing file.
+        capture_guard = CaptureGuard(
+            evidence.fd, pcap.name, int(arguments.capture_size_cap)
+        )
+        capture_guard.start()
         with block_termination_signals():
             capture = start_capture(
                 arguments.tap, pcap, stats, tcpdump=tcpdump, evidence_fd=evidence.fd
             )
         record["tcpdump_argv"] = capture.argv
+        record["tcpdump_argv_display"] = display_argv(capture.argv, evidence)
         record["timestamps"]["capture_started"] = utc_now()
         evidence.write_json(guest.CAPTURE_ARGV_FILE, capture.argv)
+        guard_check()
 
         qemu_log_fd = evidence.open_append(guest.QEMU_LOG_FILE)
         try:
@@ -2048,6 +2547,7 @@ def _run_phase_locked(
 
         client = wait_for_qga_or_exit(state / guest.QGA_SOCKET, qemu_process)
         record["timestamps"]["qga_ready"] = utc_now()
+        guard_check()
         # A crashed earlier phase may have left a staged boot-control unit or
         # an enabled router.  Clear both before the silence check can see them.
         try:
@@ -2062,13 +2562,16 @@ def _run_phase_locked(
             {"when": "initial", "exitcode": initial_silence.exitcode, "ok": True}
         )
         record["timestamps"]["silence_checked"] = utc_now()
+        guard_check()
         verify_guest_image(client, image_id)
         record["guest"]["image_verified"] = True
+        guard_check()
 
         wan_device = resolve_wan_device(client)
         record["guest"]["wan_device"] = wan_device
         secrets_paths = prepare_vm_secrets(client, name, profile, image_id)
         record["guest"].update(secrets_paths)
+        guard_check()
 
         if boot_control_phase:
             enabled = client.execute(
@@ -2135,6 +2638,7 @@ def _run_phase_locked(
             record["controls"]["before_transport"] = "qga"
             record["timestamps"]["before_control"] = utc_now()
 
+        guard_check()
         setup_ok = boot_setup_ok if boot_control_phase else True
         if not boot_control_phase and arguments.phase in SETUP_PHASES:
             setup_command = f"systemctl start vprouter@{name}.service"
@@ -2164,6 +2668,7 @@ def _run_phase_locked(
                 else:
                     record_tailscale_state(record, client, name)
 
+        guard_check()
         action_ok = setup_ok
         if setup_ok:
             if boot_control_phase:
@@ -2253,6 +2758,7 @@ def _run_phase_locked(
                             note("postcondition_failed")
                             action_ok = False
 
+        guard_check()
         if action_ok:
             if arguments.phase == "login":
                 login_phase_wait(
@@ -2261,12 +2767,13 @@ def _run_phase_locked(
                     duration=arguments.duration,
                     evidence=evidence,
                     record=record,
-                    pcap=pcap,
-                    capture_size_cap=int(arguments.capture_size_cap),
+                    guard=capture_guard,
                 )
                 record_tailscale_state(record, client, name)
                 if record["tailscale"]["backend_state"] != "Running":
                     note("login_not_running")
+            elif capture_guard is not None:
+                capture_guard.sleep(arguments.duration)
             else:
                 wait_capture_room(
                     pcap, arguments.duration, int(arguments.capture_size_cap)
@@ -2280,13 +2787,25 @@ def _run_phase_locked(
         record["controls"]["after_transport"] = "qga"
         record["timestamps"]["after_control"] = utc_now()
         after_control_sent = True
-    except CaptureCapExceeded:
-        note("capture_size_cap")
+    except CaptureCapExceeded as exc:
+        note(str(exc) or "capture_size_cap")
     except BaseException as exc:  # noqa: BLE001 - every failure is recorded as INVALID
         record["error_class"] = exc.__class__.__name__
         note(f"phase_exception:{exc.__class__.__name__}")
     finally:
         record["timestamps"]["finally_entered"] = utc_now()
+
+        def note_capture_guard() -> None:
+            if capture_guard is None:
+                return
+            reason = capture_guard.check()
+            if reason is not None:
+                note(reason)
+            if capture_guard.isolation_error is not None:
+                record["tap_isolation_error"] = capture_guard.isolation_error
+                note("tap_isolation_failed")
+
+        note_capture_guard()
         # 1. AFTER control was sent above.  Stop/disable the router and the
         #    reboot units while the capture is still alive.
         if client is not None:
@@ -2334,6 +2853,7 @@ def _run_phase_locked(
             except BaseException as exc:  # noqa: BLE001
                 record["tap_isolation_error"] = exc.__class__.__name__
                 note("tap_isolation_failed")
+        note_capture_guard()
         # 3. Verify the AFTER marker reached the pcap before stopping tcpdump.
         if after_control_sent and capture is not None:
             try:
@@ -2368,126 +2888,58 @@ def _run_phase_locked(
                 record["capture_stop_error"] = exc.__class__.__name__
                 note("capture_stop_failed")
             capture = None
+        if capture_guard is not None:
+            try:
+                capture_guard.stop()
+            except BaseException as exc:  # noqa: BLE001
+                record["capture_guard_error"] = exc.__class__.__name__
+                note("capture_guard_failed")
+            note_capture_guard()
         if record.get("tcpdump_exit_status") not in (0, None):
             note("tcpdump_exit_status")
         record["errors"] = list(errors)
 
     # Scan even after a failed phase: missing controls and truncated windows
     # are pcapscan's INVALID, not a reason to suppress the capture.
-    scan_exit = 2
-    scan_verdict: str | None = None
-    try:
-        capture_present = evidence.size(guest.CAPTURE_FILE) > 0
-    except (rootfs.PathError, OSError):
-        capture_present = False
-    if capture_present:
-        pre_hashes = {
-            "pcap_sha256": evidence.hash(guest.CAPTURE_FILE),
-            "stats_sha256": evidence.hash(guest.CAPTURE_STATS_FILE),
-            "capture_argv_sha256": evidence.hash(guest.CAPTURE_ARGV_FILE),
-            "policy_sha256": evidence.hash("policy.json"),
-        }
-        scan_argv = [
-            sys.executable,
-            "-B",
-            str(_LEAK_LAB_DIR / "pcapscan.py"),
-            "--policy",
-            evidence.proc_path("policy.json"),
-            "--pcap",
-            evidence.proc_path(guest.CAPTURE_FILE),
-            "--tcpdump-stats",
-            evidence.proc_path(guest.CAPTURE_STATS_FILE),
-            "--capture-argv-file",
-            evidence.proc_path(guest.CAPTURE_ARGV_FILE),
-            "--expect-tunnel",
-            PHASE_EXPECTATIONS[arguments.phase],
-            "--control-before",
-            pair["before"],
-            "--control-after",
-            pair["after"],
-        ]
-        try:
-            completed = subprocess.run(
-                scan_argv,
-                check=False,
-                capture_output=True,
-                timeout=SCAN_TIMEOUT,
-                pass_fds=(evidence.fd,),
-                preexec_fn=set_scan_limits,
-            )
-            scan_exit = completed.returncode
-            evidence.open_new(guest.SCAN_REPORT_FILE, completed.stdout, mode=0o600)
-            scan_stderr = completed.stderr[:4096]
-        except (OSError, subprocess.SubprocessError) as exc:
-            scan_exit = 2
-            scan_stderr = f"pcapscan failed: {exc.__class__.__name__}".encode("ascii")
-        record["pcapscan_argv"] = scan_argv
-        record["scan"]["exitcode"] = scan_exit
-        record["scan"]["stderr"] = scan_stderr.decode("utf-8", "replace")
-        try:
-            report = json.loads(evidence.read_bytes(guest.SCAN_REPORT_FILE))
-        except (rootfs.PathError, OSError, json.JSONDecodeError):
-            report = None
-            note("scan_report_invalid")
-        if isinstance(report, dict):
-            raw = report.get("verdict")
-            scan_verdict = raw if isinstance(raw, str) else None
-            expected_exit = {"PASS": 0, "LEAK": 1, "INVALID": 2}.get(
-                scan_verdict or ""
-            )
-            if expected_exit is None or expected_exit != scan_exit:
-                note("scan_report_mismatch")
-            if report.get("control_before") not in (None, pair["before"]):
-                note("scan_report_mismatch")
-            if report.get("control_after") not in (None, pair["after"]):
-                note("scan_report_mismatch")
-            capture_meta = report.get("capture_meta")
-            if isinstance(capture_meta, dict):
-                for field in (
-                    "source_sha256",
-                    "stats_sha256",
-                    "capture_argv_sha256",
-                    "policy_sha256",
-                ):
-                    declared = capture_meta.get(field)
-                    expected = pre_hashes[
-                        "pcap_sha256" if field == "source_sha256" else field
-                    ]
-                    if declared != expected:
-                        note("scan_report_mismatch")
-            else:
-                note("scan_report_mismatch")
-        else:
-            note("scan_report_invalid")
-        record["scan"]["verdict"] = scan_verdict
-        record["hashes"]["scan_sha256"] = evidence.hash(guest.SCAN_REPORT_FILE)
-        post_hashes = {
-            "pcap_sha256": evidence.hash(guest.CAPTURE_FILE),
-            "stats_sha256": evidence.hash(guest.CAPTURE_STATS_FILE),
-            "capture_argv_sha256": evidence.hash(guest.CAPTURE_ARGV_FILE),
-            "policy_sha256": evidence.hash("policy.json"),
-        }
-        if post_hashes != pre_hashes:
-            note("scan_report_mismatch")
-        record["hashes"].update(pre_hashes)
-    else:
-        note("capture_missing")
+    outcome = scan_evidence(
+        evidence,
+        phase=arguments.phase,
+        before=pair["before"],
+        after=pair["after"],
+        scanner_path=scanner_path,
+    )
+    if outcome.present:
+        record["pcapscan_argv"] = outcome.argv
+        record["pcapscan_argv_display"] = display_argv(outcome.argv, evidence)
+        record["scan"]["exitcode"] = outcome.exitcode
+        record["scan"]["stderr"] = outcome.stderr
+        record["scan"]["verdict"] = outcome.verdict
+        record["hashes"].update(outcome.hashes)
+    for problem in outcome.problems:
+        note(problem)
 
+    scan_exit = outcome.exitcode
+    scan_verdict = outcome.verdict
     record["hashes"]["policy_sha256"] = record["policy"]["sha256"]
     record["durations"]["phase_seconds"] = round(time.monotonic() - started, 3)
     record["timestamps"]["scan_finished"] = utc_now()
 
-    # The effective phase result is unambiguous.  LEAK keeps precedence; any
-    # other phase error turns the run INVALID even when the scanner said PASS.
-    if scan_exit == 1:
+    # The effective phase result is unambiguous.  Only a parseable report that
+    # itself says LEAK may produce LEAK; a scanner crash (missing/invalid
+    # report, exit 1) is INVALID even though it fails closed.
+    if scan_verdict == "LEAK" and outcome.report is not None:
         final_result = "LEAK"
         final_exit = 1
     elif errors:
         final_result = "INVALID"
         final_exit = 2
     else:
-        final_result = "PASS" if scan_exit == 0 else "INVALID"
-        final_exit = 0 if scan_exit == 0 else 2
+        final_result = (
+            "PASS"
+            if scan_exit == 0 and scan_verdict == "PASS"
+            else "INVALID"
+        )
+        final_exit = 0 if final_result == "PASS" else 2
     record["result"] = final_result
     record["result_reason"] = "; ".join(errors) if errors else None
     record["errors"] = list(errors)
@@ -2541,12 +2993,37 @@ def main(argv: list[str] | None = None) -> int:
         "--capture-size-cap",
         type=int,
         default=DEFAULT_CAPTURE_SIZE_CAP,
-        help="stop the phase and mark it INVALID above this many pcap bytes",
+        help=(
+            "watchdog bound for the whole capture lifetime: above this many "
+            "pcap bytes the tap is isolated immediately and the phase is "
+            "INVALID (capture_size_cap)"
+        ),
     )
     parser.add_argument("--run-lock", default=str(runlock.RUN_LOCK))
     parser.add_argument("--owner-file", default=str(hostcheck.OWNER_FILE))
+    parser.add_argument(
+        "--scanner-root",
+        default=str(INSTALLED_LEAKLAB),
+        help=(
+            "root-owned leak-lab module copy installed by hostsetup.py; its "
+            "SHA256SUMS manifest is verified before the scanner is executed"
+        ),
+    )
+    parser.add_argument(
+        "--allow-repo-scanner",
+        action="store_true",
+        help=(
+            "explicit developer override: allow the working-tree pcapscan.py "
+            "when the installed copy is missing or differs from the repository"
+        ),
+    )
     arguments = parser.parse_args(argv)
     install_signal_handlers()
+    try:
+        set_runner_limits()
+    except (OSError, ValueError) as exc:
+        print(f"run_phase: cannot set the runner memory limit: {exc}", file=sys.stderr)
+        return 2
     try:
         return run_phase(arguments)
     except (

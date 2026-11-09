@@ -764,11 +764,20 @@ class PcapScanTests(unittest.TestCase):
         self.assertEqual(report["verdict"], "PASS")
         argv = report["capture_meta"]["capture_argv"]
         self.assertEqual(argv, CAPTURE_ARGV)
+        self.assertIsNone(report["capture_meta"]["capture_argv_sha256"])
         self.assertEqual(
-            report["capture_meta"]["capture_argv_sha256"],
+            report["capture_meta"]["capture_argv_canonical_sha256"],
             pcapscan.hashlib.sha256(
                 json.dumps(CAPTURE_ARGV, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest(),
+        )
+
+    def test_capture_argv_sha256_is_the_exact_file_bytes(self):
+        report = scan_middle(
+            [wg_outbound()], capture_argv_file_sha256="a" * 64
+        )
+        self.assertEqual(
+            report["capture_meta"]["capture_argv_sha256"], "a" * 64
         )
 
     def test_capture_argv_filter_or_wrong_format_is_invalid(self):
@@ -1954,6 +1963,35 @@ class CliTests(unittest.TestCase):
             result = subprocess.run(command, capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 2)
 
+    def test_cli_capture_argv_hash_covers_the_exact_file_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            stats = self._write(root, "stats.txt", zero_stats(3))
+            cap = self._write(root, "cap.pcap", pcap(phase_frames(wg_outbound())))
+            command = self._command(root, cap, stats)
+            argv_path = pathlib.Path(
+                command[command.index("--capture-argv-file") + 1]
+            )
+            # EvidenceDirectory.write_json writes indented JSON plus a newline;
+            # the scanner must hash these exact bytes, not a compact re-encoding.
+            expected_argv = CAPTURE_ARGV[:-1] + [str(cap)]
+            raw = (json.dumps(expected_argv, indent=2) + "\n").encode()
+            argv_path.write_bytes(raw)
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=30
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            parsed = json.loads(result.stdout)
+            self.assertEqual(parsed["verdict"], "PASS")
+            self.assertEqual(
+                parsed["capture_meta"]["capture_argv_sha256"],
+                pcapscan.hashlib.sha256(raw).hexdigest(),
+            )
+            self.assertNotEqual(
+                parsed["capture_meta"]["capture_argv_sha256"],
+                parsed["capture_meta"]["capture_argv_canonical_sha256"],
+            )
+
     def test_cli_opus_m7_rejects_w_path_that_differs_from_pcap(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -2310,6 +2348,22 @@ ARGS = sys.argv[1:]
 
 with open(LOG_PATH, "a", encoding="utf-8") as handle:
     handle.write(" ".join([NAME, *ARGS]) + "\\n")
+    probe = os.environ.get("STUB_LOCK_PROBE")
+    if probe:
+        import fcntl
+
+        try:
+            probe_fd = os.open(probe, os.O_RDWR)
+            try:
+                fcntl.flock(probe_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                result = "free"
+            except OSError:
+                result = "held"
+            finally:
+                os.close(probe_fd)
+        except OSError:
+            result = "unreadable"
+        handle.write("LOCKPROBE " + result + "\\n")
 
 
 def load():
@@ -3868,6 +3922,29 @@ class NetplanTests(unittest.TestCase):
             self.assertIsNotNone(state_after["table"])
             self.assertEqual(state_after, state)
             self.assertNotIn("link del", log)
+
+    def test_teardown_holds_the_run_lock_for_its_whole_duration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            owner = _valid_owner(root)
+            state = _owned_state(owner)
+            lock_path = root / "run" / "run.lock"
+            lock_path.write_text("", encoding="utf-8")
+            result, log, _state_after, owner_path = self._run_lab(
+                root,
+                netplan.render_plan("eth0"),
+                state,
+                args=("teardown",),
+                extra={"STUB_LOCK_PROBE": lock_path},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(owner_path.exists())
+            probes = [
+                line for line in log.splitlines() if line.startswith("LOCKPROBE ")
+            ]
+            self.assertGreater(len(probes), 1)
+            self.assertNotIn("LOCKPROBE free", probes)
+            self.assertEqual(set(probes), {"LOCKPROBE held"})
 
     def test_check_mode_reports_docker_forward_policy(self):
         with tempfile.TemporaryDirectory() as directory:

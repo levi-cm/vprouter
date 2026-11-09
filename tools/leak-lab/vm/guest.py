@@ -232,14 +232,6 @@ def state_path(index: int = DEFAULT_INDEX, root: pathlib.Path = STATE_ROOT) -> p
 # QEMU
 
 
-def qemu_env(base: dict[str, str] | None = None) -> dict[str, str]:
-    """Return the staged-tool environment (used **after** the privilege drop)."""
-    environment = dict(base if base is not None else {})
-    environment["LD_LIBRARY_PATH"] = str(LAB_LIBRARY_DIR)
-    environment["QEMU_MODULE_DIR"] = str(QEMU_MODULE_DIR)
-    return environment
-
-
 def clean_environment() -> dict[str, str]:
     """Return a loader-clean environment for the trusted ``setpriv`` binary.
 

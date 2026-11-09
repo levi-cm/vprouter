@@ -57,13 +57,34 @@ The script creates:
 
 - `vprlab-qemu`, a system account with no login shell and no home, member of
   `kvm` only (`hostsetup.py --check` refuses uid 0 or any other group);
-- `/opt/vprlab-tools` (root:root 0755) with the staged QEMU tools and
-  library/module trees, copied from `/DATA/vprouter-lab/lab-tools/root` and
-  verified against a written `SHA256SUMS`;
-- `/var/lib/vprlab/images` (root 0755, files 0644) with the base image and a
-  `SHA512SUMS` manifest; the pinned SHA-512 is checked again on every phase;
-- `/var/lib/vprlab/vm-NNN` (QEMU user 0700), `/var/lib/vprlab/evidence`
-  (root 0700) and `/run/vprlab` (root 0700).
+- `/opt/vprlab-tools` (root:root 0755) with the complete staged QEMU tools,
+  library/module trees and confined relative symlinks (for example
+  `libslirp.so.0 -> libslirp.so.0.4.0`), copied from
+  `/DATA/vprouter-lab/lab-tools/root`.  Every source leaf is opened
+  `O_NOFOLLOW`, the exact bytes written are hashed, and both `SHA256SUMS`
+  (regular files) and `SYMLINKS.json` (link path and target) are verified
+  after the copy.  The manifest is copy-fidelity evidence, not a pinned
+  upstream provenance list; only the base image has a pinned digest.  After
+  the copy, every direct `DT_NEEDED` of `qemu-system-x86_64`, `qemu-img` and
+  `genisoimage` must be present in the copied library directory or be one of
+  the fixed host base libraries (`libc.so.6`, `libm.so.6`,
+  `ld-linux-x86-64.so.2`, `libpthread.so.0`, `libdl.so.2`, `librt.so.1`,
+  `libresolv.so.2`).  The check uses a small in-tree ELF dynamic-section
+  reader, not `readelf`;
+- `/opt/vprlab-tools/leaklab` (root:root, files 0644) with the runtime copy of
+  `control.py`, `netplan.py`, `pcapscan.py`, `policy.py`, `tsnames.py` and the
+  `vm/*.py` modules plus their `SHA256SUMS` manifest.  `run_phase.py` executes
+  the scanner from this root-owned copy after verifying the manifest, and
+  compares its hash with the repository copy.  If they differ it refuses
+  unless the explicit `--allow-repo-scanner` developer override is given;
+- `/var/lib/vprlab/images` (root 0755, files copied 0600 and made 0644 only
+  after the pinned digest and the full `SHA512SUMS`/`SYMLINKS.json` manifest
+  verify) with the base image;
+- `/var/lib/vprlab` itself (root 0755), `/var/lib/vprlab/evidence` (root 0700)
+  and `/run/vprlab` (root 0700).  The plan deliberately **does not** create
+  `vm-NNN`: `provision.py` creates each state directory exclusively and then
+  chowns it to the QEMU user.  `--check` accepts its absence before
+  provisioning and requires QEMU ownership/0700 whenever it is present.
 
 `hostsetup.py --check --stat-json STAT.json --groups-json GROUPS.json`
 validates a supplied inventory instead of trusting the live host: every
@@ -85,7 +106,18 @@ sh /root/vprlab-lab.sh teardown
 Teardown refuses (nonzero, no changes) while `/run/vprlab/run.lock` is held by
 a phase, and it treats a failed link/neighbour inventory as **not proof of
 absence**: it keeps the DROP table and Docker accepts installed until a
-complete inventory proves the object absent or isolation is read back.
+complete inventory proves the object absent or isolation is read back.  Both
+the M1 teardown and `hostsetup.py teardown` acquire the lock and **hold it for
+the whole teardown**, and setup takes the same lock/QEMU guard before it
+replaces any tool file.  A missing `pgrep` is a refusal, not a skipped check.
+`hostsetup.py teardown` deliberately retains
+`/var/lib/vprlab/evidence` as the audit record; remove it by hand only after
+reviewing it.
+
+Debian's `tcpdump` starts as root, opens the savefile, and then drops to the
+`tcpdump` user; the enforced AppArmor profile only permits savefiles matching
+`/**.pcap` (and similar patterns).  The generated capture name therefore always
+ends in `.pcap`.
 
 `run_phase.py` reads `/run/vprlab/owner.json` (root 0600, schema 1, token 32
 lowercase hex characters) and requires both `vprlab0` and `vprlab-tap0` to
@@ -110,7 +142,14 @@ evidence file is created with a `dir_fd`-relative
 `O_NOFOLLOW|O_CREAT|O_EXCL` open.  The pcap, stats, policy and capture-argv
 files are passed to the scanner as `/proc/self/fd/<run-dir-fd>/<name>` paths,
 so renaming the evidence directory after the check cannot redirect a read or
-write.
+write.  Evidence hashes are always SHA-256 over the exact file bytes the
+runner and scanner read: `capture_argv_sha256` covers the byte-for-byte
+`capture-argv.json` (indented JSON plus its trailing newline), while the
+separate `capture_argv_canonical_sha256` field covers the compact re-encoding
+used only for semantic comparison.  `phase.json` also records
+`tcpdump_argv_display`/`pcapscan_argv_display` with the fd paths resolved to
+the display path, so a reviewer can replay the commands by name; the hashes
+still bind the original fd-anchored evidence.
 
 ## Sizing, state and base image
 
@@ -124,15 +163,19 @@ write.
   refusal. `qemu-img --backing-chain` must show exactly one qcow2 layer backed
   by that file.
 - State: `/var/lib/vprlab/vm-<NNN>/`, mode `0700`, owner the dedicated
-  unprivileged QEMU user (`vprlab-qemu`). It is created exclusively; an
-  existing state directory is refused. `/var/lib/vprlab` itself is root-owned
-  0755 and is checked all the way to `/` before use.
+  unprivileged QEMU user (`vprlab-qemu`). `hostsetup.py` creates only the
+  trusted parent; `provision.py` creates the state directory exclusively,
+  refuses an existing path, and then chowns it to the QEMU user.
+  `/var/lib/vprlab` itself is root-owned 0755 and is checked all the way to
+  `/` before use.
 - The state directory is QEMU-owned because QEMU must create its overlay,
   sockets and serial log there. Evidence is **not** kept below it: every run
   writes to `/var/lib/vprlab/evidence/<phase>-<UTC>-<name>/`, created by root
-  as mode 0700 and owned by root through descriptor-anchored opens. The root
-  `tcpdump` writes the pcap there, so an escaped guest cannot substitute it
-  between capture and scan by renaming an operator-owned ancestor. The qcow2
+  as mode 0700 and owned by root through descriptor-anchored opens.  The
+  `tcpdump` process starts as root, opens the savefile (name ending `.pcap`),
+  then drops to the `tcpdump` user; it writes through the retained directory
+  fd, so an escaped guest cannot substitute the pcap between capture and scan
+  by renaming an operator-owned ancestor. The qcow2
   intentionally becomes secret-bearing after the first phase (it contains
   `/etc/vprouter/<name>.conf` and the Tailscale login state); the state
   directory therefore also contains profile bytes after a phase, and the whole
@@ -559,6 +602,12 @@ writable, no symlink) and opened `O_DIRECTORY|O_NOFOLLOW`; every file is created
   base SHA-512, policy SHA-256, pcap/stats/argv/scan SHA-256, the raw scanner
   verdict under `scan.verdict`, the effective `result`, and
   `result_reason`/`errors`. It never contains profile bytes or key material.
+  Guest-supplied strings pass through fixed vocabularies before they reach the
+  record: `tailscale.backend_state` is one of `NoState`, `NeedsLogin`,
+  `NeedsMachineAuth`, `Stopped`, `Starting`, `Running` or `unrecognized`;
+  boot IDs are strict UUIDs, the WAN device is an interface-name regex, and
+  Docker PIDs are decimal digits.  No raw unit/docker/version string is
+  recorded.
 
 The effective result is final and unambiguous in both `phase.json` and the
 single JSON line printed to stdout: `result`/`verdict` are PASS, LEAK or
@@ -624,21 +673,35 @@ name.
   `qemu.log` are also there.
 - `poweroff_vm` waits 180 s for QEMU, above the release unit's
   `TimeoutStopSec=120s`.  A timeout, exception or termination signal during
-  the wait falls back to SIGKILL of the verified QEMU pid (pidfile and
-  `/proc/<pid>/cmdline`), then to bringing `vprlab-tap0` down if it survives;
-  the global run lock is not released while our QEMU is alive.  A forced
-  SIGKILL still makes the phase INVALID (`forced_poweroff`).  `provision.py`
-  installs SIGTERM/SIGHUP/SIGINT handlers that route into terminate+reap of
-  its QEMU child.
+  the wait falls back to SIGKILL of the pid from our own `Popen` handle.  The
+  identity check reads `/proc/<pid>/exe` (which must resolve to
+  `/opt/vprlab-tools/usr/bin/qemu-system-x86_64`) and matches argv[0] in
+  `/proc/<pid>/cmdline`; the QEMU-owned `qemu.pid` is not trusted or needed.
+  If the process still survives, `vprlab-tap0` is brought down and the global
+  run lock is not released while our QEMU is alive.  A forced SIGKILL still
+  makes the phase INVALID (`forced_poweroff`).  `provision.py` installs
+  SIGTERM/SIGHUP/SIGINT handlers that route into terminate+reap of its QEMU
+  child; a second signal during the reaper is ignored so the cleanup cannot be
+  escaped.
 - Resource bounds: phase duration is at most 3600 s; admission refuses below
   1536 MiB `MemAvailable` or below the capture cap plus 1 GiB free on the
-  evidence filesystem.  The default capture cap is 2 GiB (`--capture-size-cap`);
-  exceeding it stops the phase and makes it INVALID (`capture_size_cap`) while
-  still scanning what exists.  `pcapscan` streams records from the file,
+  evidence filesystem.  The default capture cap is 2 GiB (`--capture-size-cap`).
+  A watcher thread enforces the cap and the 1 GiB free-disk floor for the
+  **whole** capture lifetime - from before tcpdump starts through setup,
+  readiness, action, duration, teardown and the poweroff wait.  On a breach it
+  immediately brings the tap down, records INVALID (`capture_size_cap` or
+  `capture_disk_low`), still scans whatever was written, and any finding in
+  that capture is still LEAK.  `pcapscan` streams records from the file,
   retains only counters, at most 1000 outside-window indexes (plus the total)
   and at most 4096 unfinished fragment associations; overflow is
   `fragment_table_overflow` and INVALID.  The runner executes the scanner with
-  `RLIMIT_AS` 1 GiB and a 300 s timeout.
+  `RLIMIT_AS` 1 GiB and a 300 s timeout, and the root runner itself starts
+  under `RLIMIT_AS` 2 GiB.  A single QGA reply is capped at 16 MiB and one
+  `guest-exec` output stream at 4 MiB (`reply_too_large` /
+  `exec_output_too_large`), closing the stream; the buffer search only scans
+  newly appended bytes.  A scanner crash or a missing/invalid report is
+  INVALID, never LEAK; only a parseable report whose verdict is LEAK produces
+  LEAK.
 - `install_guest_file` stages in a 0700 root-only directory and moves into
   place; the move from tmpfs `/run` to `/etc` may be a copy+unlink, so "atomic"
   is not guaranteed across filesystems.
@@ -657,11 +720,12 @@ name.
 ## Commands
 
 ```sh
-# once, root (debdev): account, tool/image copies, root-owned directories
+# once, root (debdev): account, complete tool/image/module copies, root-owned
+# directories; does NOT create vm-NNN (provision does that exclusively)
 python3 -B tools/leak-lab/vm/hostsetup.py > /root/vprlab-hostsetup.sh
 sh /root/vprlab-hostsetup.sh
 
-# once, online (root, debdev); refuses an existing state directory
+# once, online (root, debdev); creates and chowns vm-001, refuses an existing one
 python3 -B tools/leak-lab/vm/provision.py --index 1 \
   --image-tar /root/vprouter-image.tar
 
@@ -675,7 +739,8 @@ python3 -B tools/leak-lab/vm/run_phase.py \
   --profile-file /root/vprouter-lab.conf \
   --used-nonces /root/leaklab-used-nonces.txt
 
-# exact removal last; refuses while a phase holds /run/vprlab/run.lock
+# exact removal last; holds /run/vprlab/run.lock for the whole teardown.
+# hostsetup teardown retains /var/lib/vprlab/evidence deliberately.
 sh /root/vprlab-lab.sh teardown
 sh /root/vprlab-hostsetup.sh teardown
 
@@ -683,7 +748,15 @@ sh /root/vprlab-hostsetup.sh teardown
 python3 -B -W error -m unittest discover -s tools/leak-lab/vm -p 'test_*.py' -v
 ```
 
-The suite has 133 tests. It executes the real phase runner and provision
+`run_phase.py` executes `pcapscan.py` from
+`/opt/vprlab-tools/leaklab/` after verifying its `SHA256SUMS`.  If that copy
+is missing, or differs from the repository's current `pcapscan.py`, the phase
+refuses.  `--allow-repo-scanner` is the explicit developer override for a
+working-tree scanner; do not use it for a certification run.
+
+The suite has 161 tests, including an integration test that runs the real
+`pcapscan.py` CLI over evidence written by the real `rootfs` writers through an
+inherited directory fd.  It executes the real phase runner and provision
 helpers with fake process/QGA/scanner layers, the generated hostsetup script
 with every privileged command stubbed in a scratch directory, plus a fake
 unix-socket guest agent; it never runs QEMU, tcpdump, ip, nft, iptables,

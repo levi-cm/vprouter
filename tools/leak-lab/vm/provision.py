@@ -42,8 +42,19 @@ class ProvisionInterrupted(RuntimeError):
     """A termination signal arrived; unwind through the child reaper."""
 
 
+_signal_seen = False
+
+
 def install_signal_handlers() -> None:
+    global _signal_seen
+    _signal_seen = False
+
     def handle(signum, _frame):
+        global _signal_seen
+        if _signal_seen:
+            # A second signal during the reaper must not escape its finally.
+            return
+        _signal_seen = True
         raise ProvisionInterrupted(f"received signal {signum}")
 
     for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):

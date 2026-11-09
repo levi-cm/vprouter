@@ -6,14 +6,19 @@ the operator).  It prints a standalone ``#!/bin/sh`` script that creates:
 
 * the dedicated ``vprlab-qemu`` system account (no login shell, no home,
   member of ``kvm`` only);
-* ``/opt/vprlab-tools`` (root:root 0755) with a verified copy of the staged
-  QEMU tools and their library/module trees;
-* ``/var/lib/vprlab/images`` (root 0755, files 0644) with the verified base
-  image and ``SHA512SUMS``;
-* ``/var/lib/vprlab/vm-NNN`` (QEMU user 0700), ``/var/lib/vprlab/evidence``
-  (root 0700) and ``/run/vprlab`` (root 0700);
-* a manifest (``SHA256SUMS`` for tools, ``SHA512SUMS`` for images) and a
-  post-copy hash verification of every copied file.
+* ``/opt/vprlab-tools`` (root:root 0755) with a complete verified copy of the
+  staged QEMU tools, their libraries/modules and confined relative symlinks;
+* ``/opt/vprlab-tools/leaklab`` with a verified root-owned copy of the leak-lab
+  runtime modules used by ``run_phase.py``;
+* ``/var/lib/vprlab/images`` (root 0755, files 0644 after verification) with
+  the verified base image and ``SHA512SUMS``;
+* ``/var/lib/vprlab/evidence`` (root 0700) and ``/run/vprlab`` (root 0700).
+  ``/var/lib/vprlab`` itself is root 0755; the plan never creates
+  ``vm-NNN``, because ``provision.py`` must create each state directory
+  exclusively and then hand it to the QEMU user;
+* file and link manifests (``SHA256SUMS``/``SHA512SUMS`` and
+  ``SYMLINKS.json``) plus a post-copy verification of every copied file hash
+  and every recreated link target.
 
 ``--check`` validates a supplied stat/group inventory instead of rendering the
 script.  Inventory JSON shapes::
@@ -29,10 +34,12 @@ script.  Inventory JSON shapes::
 ``stat`` keys must cover every ancestor of the lab paths; a missing record is
 a problem, never an assumption.
 
-Teardown is the generated script's ``teardown`` subcommand.  It refuses while
-``/run/vprlab/run.lock`` is held by a phase and while a QEMU process for the
-lab account exists, then removes exactly the lab's own directories and the
-dedicated account.
+Teardown is the generated script's ``teardown`` subcommand.  It takes and
+holds the run lock for the whole teardown, refuses while a QEMU process for the
+lab account exists (``pgrep`` must be installed), then removes exactly the
+lab's own tools/images directories, the VM state directories and the dedicated
+account.  ``/var/lib/vprlab/evidence`` is deliberately retained as audit
+evidence; remove it only by hand after reviewing it.
 """
 
 from __future__ import annotations
@@ -44,6 +51,8 @@ import pathlib
 import stat
 import sys
 from typing import Any
+
+import hostcopy
 
 QEMU_USER = "vprlab-qemu"
 QEMU_GROUP = "vprlab-qemu"
@@ -63,15 +72,38 @@ BASE_IMAGE_SHA512 = (
 )
 
 TOOLS_ROOT = "/opt/vprlab-tools"
+LEAKLAB_ROOT = TOOLS_ROOT + "/leaklab"
 STATE_ROOT = "/var/lib/vprlab"
 IMAGES_ROOT = STATE_ROOT + "/images"
 EVIDENCE_ROOT = STATE_ROOT + "/evidence"
 RUN_ROOT = "/run/vprlab"
 
+#: Runtime modules installed below ``LEAKLAB_ROOT``.  They are the only files
+#: ``run_phase.py`` is allowed to execute as the scanner.
+LEAK_LAB_FILES = (
+    "control.py",
+    "netplan.py",
+    "pcapscan.py",
+    "policy.py",
+    "policy.schema.json",
+    "tsnames.py",
+    "vm/guest.py",
+    "vm/hostcheck.py",
+    "vm/hostcopy.py",
+    "vm/hostsetup.py",
+    "vm/login_url.py",
+    "vm/provision.py",
+    "vm/qga.py",
+    "vm/rootfs.py",
+    "vm/runlock.py",
+    "vm/run_phase.py",
+)
+
 ROOT_DIRECTORIES = (
     "/",
     "/opt",
     TOOLS_ROOT,
+    LEAKLAB_ROOT,
     "/var",
     "/var/lib",
     STATE_ROOT,
@@ -179,18 +211,21 @@ def check_layout(
         required_mode = None
         if path == EVIDENCE_ROOT or path == RUN_ROOT:
             required_mode = 0o700
-        elif path in (TOOLS_ROOT, IMAGES_ROOT, STATE_ROOT):
+        elif path in (TOOLS_ROOT, LEAKLAB_ROOT, IMAGES_ROOT, STATE_ROOT):
             required_mode = 0o755
-        elif path == "/":
-            required_mode = 0o755
+        # ``/`` itself is only required to be root-owned and not group/other
+        # writable; a hardened host may use a stricter mode than 0755.
         for problem in _record_is_root_directory(record, mode=required_mode):
             problems.append(f"{path} {problem}")
 
+    # ``vm-NNN`` is created exclusively by provision.py.  Before provisioning
+    # it is absent; afterwards it must be a QEMU-owned 0700 directory.  Both
+    # lifecycle states are valid, but a present record is never taken on
+    # trust.
     for index in indices:
         vm_path = f"{STATE_ROOT}/vm-{index:03d}"
         record = stats.get(vm_path)
         if not isinstance(record, dict):
-            problems.append(f"{vm_path} is missing")
             continue
         if record.get("type") != "dir":
             problems.append(f"{vm_path} is not a directory")
@@ -216,8 +251,10 @@ def check_layout(
             problems.append(f"{path} file is not owned by root")
         if parsed is None:
             problems.append(f"{path} file has no valid mode")
-        elif parsed & 0o133:
-            # Files must never be executable/writable outside root.
+        elif parsed & 0o6022:
+            # Root may write and execute; group/other may read/execute but
+            # never write, and setuid/setgid bits are refused.  The 0755 tools
+            # this plan installs are therefore valid.
             problems.append(f"{path} file mode {parsed:04o} is unsafe")
         if path.startswith(IMAGES_ROOT + "/") and parsed != 0o644:
             problems.append(f"{path} image file mode is not 0644")
@@ -230,6 +267,9 @@ check_ancestry() {
 import os, stat, sys
 path = sys.argv[1]
 parts = os.path.abspath(path).split("/")
+root_info = os.lstat("/")
+if not stat.S_ISDIR(root_info.st_mode) or root_info.st_uid != 0 or root_info.st_mode & 0o022:
+    raise SystemExit("vprlab: / is not a trusted root directory")
 current = "/"
 for part in parts[1:]:
     current = os.path.join(current, part)
@@ -273,39 +313,59 @@ if primary in ("sudo", "wheel", "adm", "docker", "lxd", "libvirt", "disk"):
 PY
 }
 
-copy_tools() {
+hostcopy() {
+  python3 - "$@" <<'VPRLAB_PY'
+{hostcopy_source}
+VPRLAB_PY
+}
+
+copy_tree() {
   SOURCE="$1"
   DEST="$2"
   MANIFEST="$3"
-  HASHER="$4"
-  [ -d "$SOURCE" ] || { echo "vprlab: missing tool source $SOURCE" >&2; return 1; }
+  LINKS="$4"
+  shift 4
+  [ -d "$SOURCE" ] || { echo "vprlab: missing source $SOURCE" >&2; return 1; }
   mkdir -p "$(dirname "$MANIFEST")"
-  : > "$MANIFEST.tmp"
-  ( cd "$SOURCE" && find . -type f -print ) | while IFS= read -r relative; do
-    relative=${relative#./}
-    src="$SOURCE/$relative"
-    dst="$DEST/$relative"
-    mkdir -p "$(dirname "$dst")"
-    cp -p "$src" "$dst"
-    expected=$("$HASHER" "$src" | awk '{print $1}')
-    actual=$("$HASHER" "$dst" | awk '{print $1}')
-    [ "$expected" = "$actual" ] || {
-      echo "vprlab: hash mismatch after copying $relative" >&2
-      return 1
-    }
-    printf '%s  %s\n' "$actual" "$relative" >> "$MANIFEST.tmp"
-  done
-  mv "$MANIFEST.tmp" "$MANIFEST"
-  chmod 0644 "$MANIFEST"
+  hostcopy copy-tree "$SOURCE" "$DEST" "$MANIFEST" "$LINKS" "$@"
+}
+
+copy_named() {
+  SOURCE="$1"
+  DEST="$2"
+  MANIFEST="$3"
+  LINKS="$4"
+  shift 4
+  [ -d "$SOURCE" ] || { echo "vprlab: missing source $SOURCE" >&2; return 1; }
+  mkdir -p "$(dirname "$MANIFEST")"
+  hostcopy copy-named "$SOURCE" "$DEST" "$MANIFEST" "$LINKS" "$@"
 }
 
 verify_manifest() {
   DIRECTORY="$1"
   MANIFEST="$2"
-  HASHER="$3"
-  ( cd "$DIRECTORY" && "$HASHER" -c "$MANIFEST" )
+  LINKS="$3"
+  shift 3
+  hostcopy verify "$DIRECTORY" "$MANIFEST" "$LINKS" "$@"
+}
+
+check_elf_deps() {
+  hostcopy elfcheck "$1"
 }
 """
+
+
+def _hostcopy_source() -> str:
+    path = pathlib.Path(__file__).with_name("hostcopy.py")
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise LayoutError(
+            f"cannot read the embedded copy helper: {exc.__class__.__name__}"
+        ) from exc
+    if "VPRLAB_PY" in source:
+        raise LayoutError("copy helper collides with the shell heredoc delimiter")
+    return source
 
 
 def render_setup_script(
@@ -314,6 +374,7 @@ def render_setup_script(
     indices: tuple[int, ...] = (1,),
     tools_source: str = TOOLS_SOURCE,
     images_source: str = IMAGES_SOURCE,
+    leak_lab_source: str | None = None,
     base_image_name: str = BASE_IMAGE_NAME,
     base_image_sha512: str = BASE_IMAGE_SHA512,
     tools_root: str = TOOLS_ROOT,
@@ -331,6 +392,8 @@ def render_setup_script(
         raise LayoutError("base_image_sha512 must be 128 lowercase hex characters")
     if not base_image_name or "/" in base_image_name or base_image_name in (".", ".."):
         raise LayoutError("base image name must be a plain file name")
+    if leak_lab_source is None:
+        leak_lab_source = str(pathlib.Path(__file__).resolve().parent.parent)
     for label, value in (
         ("tools_root", tools_root),
         ("state_root", state_root),
@@ -345,12 +408,27 @@ def render_setup_script(
     for label, value in (
         ("tools_source", tools_source),
         ("images_source", images_source),
+        ("leak_lab_source", leak_lab_source),
     ):
-        if not isinstance(value, str) or not value or "\n" in value or "'" in value:
-            raise LayoutError(f"{label} must be a single-line path without quotes")
+        if (
+            not isinstance(value, str)
+            or not value
+            or "\n" in value
+            or "'" in value
+            or "/" not in value
+        ):
+            raise LayoutError(f"{label} must be a single-line absolute path without quotes")
+    if not leak_lab_source.startswith("/"):
+        raise LayoutError("leak_lab_source must be absolute")
     images_root = state_root.rstrip("/") + "/images"
     evidence_root = state_root.rstrip("/") + "/evidence"
+    tools_root = tools_root.rstrip("/")
+    leaklab_root = tools_root + "/leaklab"
     index_words = " ".join(str(index) for index in sorted(set(indices)))
+    leak_lab_words = " ".join(LEAK_LAB_FILES)
+    check_script = _CHECK_SCRIPT.replace(
+        "{hostcopy_source}", _hostcopy_source()
+    )
     return f"""#!/bin/sh
 # vprlab root-owned host layout (PLAN ONLY; review before running as root).
 # Generated by tools/leak-lab/vm/hostsetup.py.  Re-running setup is safe: the
@@ -361,37 +439,55 @@ QEMU_USER='{qemu_user}'
 QEMU_GROUP='vprlab-qemu'
 KVM_GROUP='kvm'
 TOOLS_ROOT='{tools_root}'
+LEAKLAB_ROOT='{leaklab_root}'
 STATE_ROOT='{state_root}'
 IMAGES_ROOT='{images_root}'
 EVIDENCE_ROOT='{evidence_root}'
 RUN_ROOT='{run_root}'
 TOOLS_SOURCE='{tools_source}'
 IMAGES_SOURCE='{images_source}'
+LEAKLAB_SOURCE='{leak_lab_source}'
 BASE_IMAGE_NAME='{base_image_name}'
 BASE_IMAGE_SHA512='{base_image_sha512}'
 INDICES='{index_words}'
-{_CHECK_SCRIPT}
+LEAKLAB_FILES='{leak_lab_words}'
+{check_script}
 
 teardown() {{
-  if [ -e "$RUN_ROOT/run.lock" ] && command -v flock >/dev/null 2>&1; then
-    if ! flock -n "$RUN_ROOT/run.lock" true 2>/dev/null; then
+  if [ -e "$RUN_ROOT" ]; then
+    if ! command -v flock >/dev/null 2>&1; then
+      echo "vprlab: cannot verify $RUN_ROOT/run.lock without flock; refusing teardown" >&2
+      return 1
+    fi
+    # Hold the lock for the whole teardown, not just for a probe.
+    exec 9>>"$RUN_ROOT/run.lock"
+    if ! flock -n 9 2>/dev/null; then
       echo "vprlab: a phase holds $RUN_ROOT/run.lock; refusing teardown" >&2
       return 1
     fi
   fi
-  if command -v pgrep >/dev/null 2>&1 && pgrep -u "$QEMU_USER" -f qemu-system >/dev/null 2>&1; then
+  if ! command -v pgrep >/dev/null 2>&1; then
+    echo "vprlab: cannot inspect QEMU processes without pgrep; refusing teardown" >&2
+    return 1
+  fi
+  if pgrep -u "$QEMU_USER" -f qemu-system >/dev/null 2>&1; then
     echo "vprlab: a QEMU process for $QEMU_USER is running; refusing teardown" >&2
     return 1
   fi
-  rm -rf -- "$EVIDENCE_ROOT" "$IMAGES_ROOT" "$TOOLS_ROOT"
+  rm -rf -- "$IMAGES_ROOT" "$TOOLS_ROOT"
   rm -rf -- "$STATE_ROOT"/vm-[0-9][0-9][0-9]
   for index in $INDICES; do
     suffix=$(printf '%03d' "$index")
     rm -rf -- "$STATE_ROOT/vm-$suffix"
   done
+  # Evidence is retained deliberately: it is the audit record of past phases.
+  echo "vprlab: retaining evidence at $EVIDENCE_ROOT" >&2
   rmdir -- "$STATE_ROOT" "$RUN_ROOT" 2>/dev/null || true
   if getent passwd "$QEMU_USER" >/dev/null 2>&1; then
-    userdel "$QEMU_USER" || true
+    if ! userdel "$QEMU_USER"; then
+      echo "vprlab: userdel $QEMU_USER failed; the account was retained" >&2
+      return 1
+    fi
   fi
   echo "vprlab: teardown complete"
   return 0
@@ -404,6 +500,27 @@ if [ "${{1:-}}" = "teardown" ]; then
 fi
 
 require_root
+
+# Setup is exclusive with a running phase or QEMU just like teardown: a
+# re-run must never copy over a tool tree that a live guest has mapped.
+install -d -m 0700 -o root -g root "$RUN_ROOT"
+if ! command -v flock >/dev/null 2>&1; then
+  echo "vprlab: cannot verify $RUN_ROOT/run.lock without flock; refusing setup" >&2
+  exit 1
+fi
+exec 9>>"$RUN_ROOT/run.lock"
+if ! flock -n 9 2>/dev/null; then
+  echo "vprlab: a phase holds $RUN_ROOT/run.lock; refusing setup" >&2
+  exit 1
+fi
+if ! command -v pgrep >/dev/null 2>&1; then
+  echo "vprlab: cannot inspect QEMU processes without pgrep; refusing setup" >&2
+  exit 1
+fi
+if pgrep -u "$QEMU_USER" -f qemu-system >/dev/null 2>&1; then
+  echo "vprlab: a QEMU process for $QEMU_USER is running; refusing setup" >&2
+  exit 1
+fi
 
 if ! getent group "$QEMU_GROUP" >/dev/null 2>&1; then
   groupadd --system "$QEMU_GROUP"
@@ -421,42 +538,61 @@ for directory in "$(dirname "$TOOLS_ROOT")" "$(dirname "$STATE_ROOT")" \\
     "$(dirname "$RUN_ROOT")"; do
   check_ancestry "$directory"
 done
-for directory in "$TOOLS_ROOT" "$STATE_ROOT" "$IMAGES_ROOT" "$EVIDENCE_ROOT" \\
-    "$RUN_ROOT"; do
+for directory in "$TOOLS_ROOT" "$LEAKLAB_ROOT" "$STATE_ROOT" "$IMAGES_ROOT" \\
+    "$EVIDENCE_ROOT" "$RUN_ROOT"; do
   if [ -e "$directory" ] || [ -L "$directory" ]; then
     check_ancestry "$directory"
   fi
 done
 
-install -d -m 0755 -o root -g root "$TOOLS_ROOT" "$STATE_ROOT" "$IMAGES_ROOT"
+install -d -m 0755 -o root -g root "$TOOLS_ROOT" "$LEAKLAB_ROOT" \\
+  "$STATE_ROOT" "$IMAGES_ROOT"
 install -d -m 0700 -o root -g root "$EVIDENCE_ROOT" "$RUN_ROOT"
-for index in $INDICES; do
-  suffix=$(printf '%03d' "$index")
-  install -d -m 0700 -o "$QEMU_USER" -g "$QEMU_GROUP" \\
-    "$STATE_ROOT/vm-$suffix"
-done
-for directory in "$TOOLS_ROOT" "$STATE_ROOT" "$IMAGES_ROOT" "$EVIDENCE_ROOT" \\
-    "$RUN_ROOT"; do
+# The plan deliberately does not create vm-NNN: provision.py must create each
+# state directory exclusively and then chown it to the QEMU user.
+for directory in "$TOOLS_ROOT" "$LEAKLAB_ROOT" "$STATE_ROOT" "$IMAGES_ROOT" \\
+    "$EVIDENCE_ROOT" "$RUN_ROOT"; do
   check_ancestry "$directory"
 done
 
-copy_tools "$TOOLS_SOURCE" "$TOOLS_ROOT" "$TOOLS_ROOT/SHA256SUMS" sha256sum
-verify_manifest "$TOOLS_ROOT" "$TOOLS_ROOT/SHA256SUMS" sha256sum
+# Complete tool tree: regular files and confined relative symlinks.  Every
+# source file is opened O_NOFOLLOW, hashed while it is copied, re-hashed after
+# writing, and then recorded in SHA256SUMS; every link target is recorded in
+# SYMLINKS.json.
+copy_tree "$TOOLS_SOURCE" "$TOOLS_ROOT" "$TOOLS_ROOT/SHA256SUMS" \\
+  "$TOOLS_ROOT/SYMLINKS.json"
+verify_manifest "$TOOLS_ROOT" "$TOOLS_ROOT/SHA256SUMS" \\
+  "$TOOLS_ROOT/SYMLINKS.json"
+check_elf_deps "$TOOLS_ROOT"
 chown -R root:root "$TOOLS_ROOT"
 find "$TOOLS_ROOT" -type d -exec chmod 0755 {{}} +
 find "$TOOLS_ROOT" -type f -exec chmod go-w {{}} +
 
-copy_tools "$IMAGES_SOURCE" "$IMAGES_ROOT" "$IMAGES_ROOT/SHA512SUMS" sha512sum
+# Root-owned runtime copy of the leak-lab modules.  run_phase executes
+# pcapscan.py from here and verifies this manifest before use.
+copy_named "$LEAKLAB_SOURCE" "$LEAKLAB_ROOT" "$LEAKLAB_ROOT/SHA256SUMS" \\
+  "$LEAKLAB_ROOT/SYMLINKS.json" $LEAKLAB_FILES
+verify_manifest "$LEAKLAB_ROOT" "$LEAKLAB_ROOT/SHA256SUMS" \\
+  "$LEAKLAB_ROOT/SYMLINKS.json"
+chown -R root:root "$LEAKLAB_ROOT"
+find "$LEAKLAB_ROOT" -type d -exec chmod 0755 {{}} +
+find "$LEAKLAB_ROOT" -type f -exec chmod 0644 {{}} +
+
+# Images are copied with a private 0600 mode and only become world-readable
+# after both the pinned digest and the full manifest verify.
+copy_tree "$IMAGES_SOURCE" "$IMAGES_ROOT" "$IMAGES_ROOT/SHA512SUMS" \\
+  "$IMAGES_ROOT/SYMLINKS.json" --file-mode=0600 --algorithm=sha512
 actual=$(sha512sum "$IMAGES_ROOT/$BASE_IMAGE_NAME" | awk '{{print $1}}')
 [ "$actual" = "$BASE_IMAGE_SHA512" ] || {{
   echo "vprlab: base image SHA-512 does not match the pinned digest" >&2
   exit 1
 }}
-verify_manifest "$IMAGES_ROOT" "$IMAGES_ROOT/SHA512SUMS" sha512sum
+verify_manifest "$IMAGES_ROOT" "$IMAGES_ROOT/SHA512SUMS" \\
+  "$IMAGES_ROOT/SYMLINKS.json" --algorithm=sha512
 chown -R root:root "$IMAGES_ROOT"
+find "$IMAGES_ROOT" -type d -exec chmod 0755 {{}} +
 find "$IMAGES_ROOT" -type f -exec chmod 0644 {{}} +
-chmod 0755 "$IMAGES_ROOT"
-echo "vprlab: host layout ready; run the phase runner as root"
+echo "vprlab: host layout ready; provision.py creates vm-NNN as the QEMU user"
 """
 
 
@@ -489,6 +625,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--tools-source", default=TOOLS_SOURCE)
     parser.add_argument("--images-source", default=IMAGES_SOURCE)
+    parser.add_argument(
+        "--leak-lab-source",
+        default=str(pathlib.Path(__file__).resolve().parent.parent),
+        help="tools/leak-lab tree installed below /opt/vprlab-tools/leaklab",
+    )
     parser.add_argument("--base-image-name", default=BASE_IMAGE_NAME)
     parser.add_argument("--base-image-sha512", default=BASE_IMAGE_SHA512)
     parser.add_argument("--tools-root", default=TOOLS_ROOT)
@@ -533,6 +674,7 @@ def main(argv: list[str] | None = None) -> int:
             indices=indices,
             tools_source=arguments.tools_source,
             images_source=arguments.images_source,
+            leak_lab_source=arguments.leak_lab_source,
             base_image_name=arguments.base_image_name,
             base_image_sha512=arguments.base_image_sha512,
             tools_root=arguments.tools_root,

@@ -1477,3 +1477,13 @@ path (source claim verified; a peer that is online in control but not forwarding
 the pre-fault Mullvad probe); 4 of its 20 mutants survived as test gaps (truthy ExitNode, online
 before address order, Online read from another peer, the router_id type guard) and are now closed.
 Not exhaustive mutation coverage.
+2026-11-10 M3 reboot-with-router-enabled rerun with --client 1 (21:53-21:57 UTC, evidence
+reboot-with-router-enabled-20261110T215314.846515Z): PASS. Router rebooted (boot_id changed),
+exit node active 21:54:05 with online_source=exit_node_status (the stale-Online case did not recur
+this time, so the peer_delta path is still unexercised live). Client probe: 4 exit + 3 marker
+attempts failed across the reboot, then 57/57 exits Mullvad, 0 non-Mullvad; 3 action samples +
+9 hold windows, all 14 samples with the router selected. Router scan 7110 packets / 0 findings /
+both controls / 2 allowed ICMP quotes to the profile endpoint; client scan 3474 packets / 0
+findings. Traffic stop proven, cleanup ok, client MemAvailable 148/129 MB, prod healthy before and
+after. M3 --client 1 now has a PASS for idle, stop-router, kill-wireguard, kill-container,
+restart-docker and reboot-with-router-enabled (lab evidence, not release acceptance).

@@ -1426,3 +1426,10 @@ exit 0, postcondition (service inactive) exit 0. Client probe: before 1/1 Mullva
 11 hold samples (so blocking, not unbinding, stopped the traffic). Router scan 638 packets / 0
 findings / both controls / 1 allowed ICMP 3/3 quote of the profile endpoint; client scan 1143
 packets / 0 findings. Traffic stop proven, cleanup ok, client MemAvailable 148/125 MB, prod healthy.
+2026-11-10 M3 kill-wireguard with --client 1 (21:08-21:12 UTC, evidence
+kill-wireguard-20261110T210830.519875Z): PASS. Action `ip link del wg0` in the container netns
+exit 0; postcondition proof wg0_absent with the container running. Client probe after the fault:
+3 exit + 3 marker attempts failed while wg0 was gone, then the router recovered by itself and
+42/42 later exits were Mullvad; 0 non-Mullvad at any point. Exit node bound in all 11 hold
+samples. Router scan 5636 packets / 0 findings / both controls / no ICMP quotes; client scan 2689
+packets / 0 findings. Traffic stop proven, cleanup ok, client MemAvailable 148/129 MB, prod healthy.

@@ -1455,3 +1455,9 @@ then the router came back by itself and 46/46 later exits were Mullvad; 0 non-Mu
 Exit node active 0.4 s after router READY (the first run's 180 s stall did not recur; cause
 unknown, now diagnosable). Router scan 5921 packets / 0 findings / both controls; client scan 2986
 packets / 0 findings. Traffic stop proven, cleanup ok, client MemAvailable 147/132 MB, prod healthy.
+2026-11-10 M3 restart-docker with --client 1 (21:26-21:30 UTC, evidence
+restart-docker-20261110T212641.415876Z): PASS. `systemctl restart docker.service` exit 0, dockerd
+pid 662 -> 2935 (postcondition). Client probe: 2 exit + 2 marker attempts failed during the
+restart, then 58/58 exits Mullvad, 0 non-Mullvad; 2 action samples + 11 hold samples all with the
+router selected. Router scan 7122 packets / 0 findings / both controls; client scan 3389 packets /
+0 findings. Traffic stop proven, cleanup ok, client MemAvailable 150/130 MB, prod healthy.

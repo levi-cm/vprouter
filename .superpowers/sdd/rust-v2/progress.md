@@ -1385,3 +1385,12 @@ than the 3 GiB genericcloud base, so the root partition was cut off and the init
 a shell (PARTUUID missing); provisioning timed out after 30 min, no secrets involved. Fixed in
 1ef841d: client overlay = 3 GiB, verify_overlay_chain refuses an overlay smaller than its base or
 without a virtual size. Failed client state removed; re-provisioning boots past the root mount.
+2026-11-09 client-001 provisioned (PROVISIONED_OFFLINE_READY, pinned Tailscale 1.104.5, 3 GiB
+overlay). First client-login printed no URL: Tailscale 1.104.5 login URLs are
+`/a/<17 lowercase alphanumerics>`, not 8-16 hex, and the persistent client journal held stale
+URLs from earlier boots. Fixed in 1210643 (URL pattern [0-9a-z]{8,24}, client journal read with
+-b for the current boot only). The second client-login (2026-11-09 20:39-21:04 UTC) ended
+INVALID login_not_running: nobody completed the login within the 25 min window (no defect).
+2026-11-10 third client-login: PASS, BackendState Running after ~5 min (15:59-16:04 UTC),
+client MemAvailable 147 MB at boot, 125 MB at end of a 256 MiB guest, cleanup ok. Lab key
+re-checked against /etc/vprouter/*.conf by hash before the first M3 phase: no overlap.

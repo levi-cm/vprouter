@@ -55,6 +55,13 @@ phase INVALID.
   - Before `client-login`, the operator deletes any older
     `zz-vprclient-NN-*` node in the Tailscale admin console; otherwise the new
     node gets a `-1` DNS suffix and every client phase refuses its identity.
+    The operator never deletes the node after the login: control then answers
+    the node key with a new auth URL and the client needs another login.
+  - The client must log in to the tailnet that holds the test exit node
+    (`zz-vprtest-NN-do-not-use` visible to that user). A login into another
+    tailnet, or one whose access policy hides the router, completes with an
+    empty netmap; `client-login` refuses it as
+    `client_router_peer_not_visible`.
 - Tailscale logins use interactive login URLs, the same way as the router's
   login phase.
 
@@ -214,8 +221,28 @@ Every line carries:
 phase `client-login` (with `--client N`) boots only the client VM, starts
 `tailscale up ...` in a transient unit instead of blocking inside QGA, shows the
 login URL the way the router login phase does, polls `BackendState`, and waits
-for `BackendState == Running`. Its admission reserves no capture and no router
-overlay, only the client overlay and headroom.
+for `BackendState == Running` with no pending `AuthURL`. It then waits up to
+30 s for a netmap that carries a peer with the router's exact HostName (online
+or not), records `peer_count` and `router_peer_visible`, and is INVALID
+(`client_router_peer_not_visible`) without it. Its admission reserves no
+capture and no router overlay, only the client overlay and headroom.
+
+**Live finding 2026-11-10 (cached Running).** tailscaled 1.104.5 loads its
+disk-cached netmap at boot and reports `BackendState` Running from it before
+control has accepted the node key. When control then answers
+`machineAuthorized=false` with a new auth URL (the node had been removed), the
+state stays Running with a non-empty status `AuthURL`, `Self.Online` false
+(`Self.Online` is `health.GetInPollNetMap()`, a live map poll) and the cached
+peers (here 0). The first M3 idle run therefore passed client readiness and
+failed later as `client_exit_peer_missing`. Readiness now also requires
+`Self.Online == true` (a startup delay, polled) and refuses at once with
+`client_needs_login` while an `AuthURL` is present (never a startup delay).
+A peer-lookup failure records only a fixed reason code `exit_peer_problem`
+(`status_unavailable`, `no_peers`, `router_id_absent`, `router_id_ambiguous`,
+`hostname_mismatch`, `hostname_collision`, `not_exit_node_option`, `offline`,
+`address_mismatch`) and the integer `peer_count`, and adds
+`client_needs_login` when the last status demands a login. These are
+fail-closed additions; none of them can turn INVALID into PASS.
 
 A `--client` phase requires `--duration >= 30` seconds, including
 `client-login`. A shorter timing window cannot be observed by the probe loop
@@ -227,8 +254,8 @@ A `--client` phase requires `--duration >= 30` seconds, including
    contract). Start the client capture on `vprlab-ctapN` with the same flags:
    `-nn -U --immediate-mode -B 8192 -s 0 -w`.
 3. **Client boot.** Boot the client in a tap-only test boot. Wait for
-   `BackendState == Running` (tailscaled must be up before `tailscale set` can
-   work), then run `tailscale set --exit-node=` to clear any persisted exit
+   `BackendState == Running` with `Self.Online == true` and no `AuthURL`
+   (tailscaled must be up before `tailscale set` can work), then run `tailscale set --exit-node=` to clear any persisted exit
    node and wait until no exit node is reported. Send the **client
    before-control**: a UDP datagram `VPRLEAKCTL1:<32hex>` from the client to
    10.251.0.1:39001.

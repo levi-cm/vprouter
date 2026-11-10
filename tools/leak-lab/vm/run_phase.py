@@ -161,6 +161,9 @@ CLIENT_ACTION_SAMPLE_INTERVAL = 13.0
 CLIENT_SAMPLER_JOIN_TIMEOUT = 180.0
 #: The router peer is looked up in the client's netmap until it appears.
 CLIENT_PEER_TIMEOUT = 60.0
+# After a completed client login, how long control may take to deliver a
+# netmap that names the router.
+CLIENT_LOGIN_PEER_TIMEOUT = 30.0
 #: Writer quiescence after a proven stop (controller decision 3, Opus R4
 #: M-1): two trusted size reads at least this far apart must agree.  Longer
 #: than one worst-case probe loop, so a surviving writer must append.
@@ -1798,7 +1801,7 @@ def login_phase_wait(
             print(f"run_phase: login URL {url}", file=sys.stderr)
         if stop_when_running and client_login:
             document = read_client_status(client)
-            if isinstance(document, dict) and document.get("BackendState") == "Running":
+            if client_login_complete(document):
                 break
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -2864,6 +2867,14 @@ def read_client_status(client: QGAClient) -> dict | None:
     return document if isinstance(document, dict) else None
 
 
+def client_status_or_none(client: QGAClient) -> dict | None:
+    """A diagnostic status read that never raises (used on failure paths)."""
+    try:
+        return read_client_status(client)
+    except (QGAError, OSError):
+        return None
+
+
 def _dns_label(document: dict) -> str | None:
     node = document.get("Self")
     if not isinstance(node, dict):
@@ -2918,6 +2929,9 @@ def _default_route_present(node: dict) -> bool:
     return False
 
 
+CLIENT_NEEDS_LOGIN = "the client needs a new Tailscale login"
+
+
 def client_readiness_problems(
     document: object, expected_name: str
 ) -> list[str]:
@@ -2927,9 +2941,19 @@ def client_readiness_problems(
     problems: list[str] = []
     if document.get("BackendState") != "Running":
         problems.append("the client Tailscale backend is not Running")
+    # A Running state can come from the disk-cached netmap while control
+    # already demands a new login (see client_needs_login).  An auth URL is
+    # not a startup delay: it never clears without a human.
+    if document.get("AuthURL") not in (None, ""):
+        problems.append(CLIENT_NEEDS_LOGIN)
     problems.extend(client_identity_problems(document, expected_name))
     node = document.get("Self")
     if isinstance(node, dict):
+        # tailscaled sets Self.Online from health.GetInPollNetMap(): true only
+        # while a map poll to control is live, which needs an accepted login.
+        # A Running state from the disk cache alone leaves it false.
+        if node.get("Online") is not True:
+            problems.append("the client has no live control session")
         # ExitNodeOption is the field `tailscale status --json` emits to say
         # this node offers itself as an exit node.  Self.ExitNode is the
         # node's own role flag as well; either set makes it an exit node.
@@ -2988,6 +3012,35 @@ def client_route_advertisement_problem(document: object) -> str | None:
     return None
 
 
+def client_login_complete(document: object) -> bool:
+    """Running from a live login: no pending auth URL (see client_needs_login)."""
+    return (
+        isinstance(document, dict)
+        and document.get("BackendState") == "Running"
+        and not client_needs_login(document)
+    )
+
+
+def wait_client_sees_router_name(
+    client: QGAClient, router_name: str, *, timeout: float | None = None
+) -> dict | None:
+    """Poll until the client's netmap carries the router HostName.
+
+    Returns the last status read (possibly without the router) at the timeout.
+    """
+    if timeout is None:
+        timeout = CLIENT_LOGIN_PEER_TIMEOUT
+    deadline = time.monotonic() + timeout
+    while True:
+        check_interrupt()
+        document = client_status_or_none(client)
+        if client_router_name_visible(document, router_name):
+            return document
+        if time.monotonic() >= deadline:
+            return document
+        time.sleep(1.0)
+
+
 def wait_client_running(
     client: QGAClient,
     expected_name: str,
@@ -3012,6 +3065,7 @@ def wait_client_running(
                 "the client name is unavailable",
                 "the client advertises an exit node",
                 "the client advertises a default route",
+                CLIENT_NEEDS_LOGIN,
             ):
                 raise hostcheck.Refusal(problem)
         last = "; ".join(problems)
@@ -3064,21 +3118,61 @@ def client_find_router_peer(
     The returned document is host-side only and never recorded: the peer's
     Tailscale address is a non-Mullvad IP.
     """
+    return _client_router_peer_match(
+        document, router_name, router_id, router_addresses
+    )[0]
+
+
+# Fixed vocabulary for why the client does not see the router peer.  Only one
+# of these strings (never a peer field) is recorded.
+CLIENT_PEER_PROBLEMS = (
+    "status_unavailable",
+    "no_peers",
+    "router_id_absent",
+    "router_id_ambiguous",
+    "hostname_mismatch",
+    "hostname_collision",
+    "not_exit_node_option",
+    "offline",
+    "address_mismatch",
+)
+
+
+def client_router_peer_problem(
+    document: object,
+    router_name: str,
+    router_id: str,
+    router_addresses: list[str],
+) -> str | None:
+    """The fixed reason :func:`client_find_router_peer` returns no peer."""
+    return _client_router_peer_match(
+        document, router_name, router_id, router_addresses
+    )[1]
+
+
+def _client_router_peer_match(
+    document: object,
+    router_name: str,
+    router_id: str,
+    router_addresses: list[str],
+) -> tuple[dict | None, str | None]:
     if not isinstance(document, dict) or not isinstance(router_id, str):
-        return None
+        return None, "status_unavailable"
     peers = document.get("Peer")
-    if not isinstance(peers, dict):
-        return None
+    if not isinstance(peers, dict) or not peers:
+        return None, "no_peers"
     by_id = [
         peer
         for peer in peers.values()
         if isinstance(peer, dict) and peer.get("ID") == router_id
     ]
+    if not by_id:
+        return None, "router_id_absent"
     if len(by_id) != 1:
-        return None
+        return None, "router_id_ambiguous"
     peer = by_id[0]
     if peer.get("HostName") != router_name:
-        return None
+        return None, "hostname_mismatch"
     hostname_collisions = [
         other
         for key, other in peers.items()
@@ -3087,13 +3181,15 @@ def client_find_router_peer(
         and other.get("HostName") == router_name
     ]
     if hostname_collisions:
-        return None
-    if peer.get("ExitNodeOption") is not True or peer.get("Online") is not True:
-        return None
+        return None, "hostname_collision"
+    if peer.get("ExitNodeOption") is not True:
+        return None, "not_exit_node_option"
+    if peer.get("Online") is not True:
+        return None, "offline"
     expected = set(router_addresses)
     addresses = peer.get("TailscaleIPs")
     if not isinstance(addresses, list):
-        return None
+        return None, "address_mismatch"
     for address in addresses:
         if not isinstance(address, str):
             continue
@@ -3102,8 +3198,53 @@ def client_find_router_peer(
         except ValueError:
             continue
         if address in expected:
-            return peer
-    return None
+            return peer, None
+    return None, "address_mismatch"
+
+
+def client_peer_count(document: object) -> int | None:
+    """Number of peers in a client status document (an int, never a name)."""
+    if not isinstance(document, dict):
+        return None
+    peers = document.get("Peer")
+    if peers is None:
+        return 0
+    return len(peers) if isinstance(peers, dict) else None
+
+
+def client_needs_login(document: object) -> bool:
+    """True when the client's control session demands a new interactive login.
+
+    Found live 2026-11-10: tailscaled 1.104.5 loads its disk-cached netmap at
+    boot and reports ``BackendState`` Running from it, while control answers
+    the registration with ``machineAuthorized=false`` and a fresh auth URL
+    (the client node had been removed).  ``BackendState`` alone therefore is
+    not proof of a live login; a present ``AuthURL`` or ``NeedsLogin`` is a
+    login that is required now.
+    """
+    if not isinstance(document, dict):
+        return False
+    if document.get("BackendState") == "NeedsLogin":
+        return True
+    url = document.get("AuthURL")
+    return url not in (None, "")
+
+
+def client_router_name_visible(document: object, router_name: str) -> bool:
+    """True when some peer carries the exact router HostName (online or not).
+
+    A client in a different tailnet, or one an access policy hides the router
+    from, sees no such peer at all.  Offline peers stay in the netmap.
+    """
+    if not isinstance(document, dict):
+        return False
+    peers = document.get("Peer")
+    if not isinstance(peers, dict):
+        return False
+    return any(
+        isinstance(peer, dict) and peer.get("HostName") == router_name
+        for peer in peers.values()
+    )
 
 
 def client_peer_ipv4(peer: dict, expected: list[str] | None = None) -> str:
@@ -4538,12 +4679,23 @@ def _run_client_phase_locked(
                 stop_when_running=True,
             )
             document = read_client_status(client_client)
-            record["client"]["running"] = (
-                isinstance(document, dict)
-                and document.get("BackendState") == "Running"
-            )
+            record["client"]["running"] = client_login_complete(document)
             if not record["client"]["running"]:
                 note("login_not_running")
+                if client_needs_login(document):
+                    note("client_needs_login")
+            else:
+                # Found live 2026-11-10: a login into a tailnet that does not
+                # hold the router (or whose policy hides it) completes with an
+                # empty netmap.  Require the router's exact HostName in the
+                # client's netmap now, not minutes later in a phase.
+                document = wait_client_sees_router_name(client_client, name)
+                record["client"]["peer_count"] = client_peer_count(document)
+                record["client"]["router_peer_visible"] = (
+                    client_router_name_visible(document, name)
+                )
+                if not record["client"]["router_peer_visible"]:
+                    note("client_router_peer_not_visible")
             problem = client_route_advertisement_problem(
                 read_client_prefs(client_client)
             )
@@ -4610,7 +4762,12 @@ def _run_client_phase_locked(
         # Tailscaled must be running before `tailscale set` is usable.  The
         # design's clear-before-wait order races the daemon socket; wait first,
         # then clear any persisted exit node and prove it is gone.
-        document = wait_client_running(client_client, client_name)
+        try:
+            document = wait_client_running(client_client, client_name)
+        except hostcheck.Refusal:
+            if client_needs_login(client_status_or_none(client_client)):
+                note("client_needs_login")
+            raise
         record["client"]["running"] = True
         record["client"]["advertises_exit_node"] = False
         route_problem = client_route_advertisement_problem(
@@ -4724,6 +4881,15 @@ def _run_client_phase_locked(
             )
         except hostcheck.Refusal:
             note("client_exit_peer_missing")
+            # Fixed-vocabulary diagnosis only: a reason code and a peer count,
+            # never a peer name, ID or address.
+            last = client_status_or_none(client_client)
+            record["client"]["exit_peer_problem"] = client_router_peer_problem(
+                last, name, router_id, router_addresses
+            )
+            record["client"]["peer_count"] = client_peer_count(last)
+            if client_needs_login(last):
+                note("client_needs_login")
             raise
         exit_ipv4 = client_peer_ipv4(peer, router_addresses)
         set_client_exit_node(client_client, exit_ipv4)

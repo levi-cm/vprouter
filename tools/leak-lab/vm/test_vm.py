@@ -5854,6 +5854,92 @@ class ClientExitBindingTests(unittest.TestCase):
         with self.assertRaises(hostcheck.Refusal):
             run_phase.router_exit_identity({"Self": {"TailscaleIPs": ["100.64.0.9"]}})
 
+    def test_live_peer_problem_codes_follow_the_lookup_rules(self) -> None:
+        name, rid, addrs = guest.DEFAULT_NAME, "router-node", ["100.64.0.9"]
+        problem = run_phase.client_router_peer_problem
+        good = self.status(Peer={"a": self.peer()})
+        self.assertIsNone(problem(good, name, rid, addrs))
+        cases = {
+            "status_unavailable": None,
+            "no_peers": self.status(Peer={}),
+            "router_id_absent": self.status(Peer={"a": self.peer(ID="other")}),
+            "router_id_ambiguous": self.status(Peer={"a": self.peer(), "b": self.peer()}),
+            "hostname_mismatch": self.status(Peer={"a": self.peer(HostName="zz-other")}),
+            "hostname_collision": self.status(
+                Peer={"a": self.peer(), "b": self.peer(ID="impostor")}),
+            "not_exit_node_option": self.status(Peer={"a": self.peer(ExitNodeOption=False)}),
+            "offline": self.status(Peer={"a": self.peer(Online=False)}),
+            "address_mismatch": self.status(Peer={"a": self.peer(TailscaleIPs=["100.64.0.10"])}),
+        }
+        self.assertEqual(set(cases), set(run_phase.CLIENT_PEER_PROBLEMS))
+        for expected, document in cases.items():
+            with self.subTest(expected=expected):
+                self.assertEqual(problem(document, name, rid, addrs), expected)
+                self.assertIsNone(
+                    run_phase.client_find_router_peer(document, name, rid, addrs))
+        self.assertEqual(problem(self.status(), name, rid, addrs), "no_peers")
+
+    def test_live_needs_login_and_netmap_helpers(self) -> None:
+        url = "https://login.tailscale.com/a/k3x9q7m2v8b4n6t1z"
+        needs = run_phase.client_needs_login
+        self.assertTrue(needs({"BackendState": "NeedsLogin"}))
+        self.assertTrue(needs({"BackendState": "Running", "AuthURL": url}))
+        self.assertTrue(needs({"BackendState": "Running", "AuthURL": 7}))
+        self.assertFalse(needs({"BackendState": "Running", "AuthURL": ""}))
+        self.assertFalse(needs({"BackendState": "Running"}))
+        self.assertFalse(needs({"BackendState": "Starting"}))
+        self.assertFalse(needs(None))
+        complete = run_phase.client_login_complete
+        self.assertTrue(complete({"BackendState": "Running", "AuthURL": ""}))
+        self.assertFalse(complete({"BackendState": "Running", "AuthURL": url}))
+        self.assertFalse(complete({"BackendState": "Starting"}))
+        self.assertFalse(complete(None))
+        count = run_phase.client_peer_count
+        self.assertIsNone(count(None))
+        self.assertEqual(count({}), 0)
+        self.assertEqual(count({"Peer": {}}), 0)
+        self.assertEqual(count({"Peer": {"a": {}, "b": {}}}), 2)
+        self.assertIsNone(count({"Peer": []}))
+        visible = run_phase.client_router_name_visible
+        offline = {"Peer": {"a": {"HostName": guest.DEFAULT_NAME, "Online": False}}}
+        self.assertTrue(visible(offline, guest.DEFAULT_NAME))
+        self.assertFalse(visible({"Peer": {"a": {"HostName": "zz-other"}}}, guest.DEFAULT_NAME))
+        self.assertFalse(visible({"Peer": {}}, guest.DEFAULT_NAME))
+        self.assertFalse(visible(None, guest.DEFAULT_NAME))
+
+    def test_live_client_readiness_needs_a_live_session_and_no_auth_url(self) -> None:
+        client = guest.client_name(1)
+
+        def status(**self_overrides):
+            node = {"HostName": client, "DNSName": client + ".tailnet.ts.net.",
+                    "Online": True, "ExitNode": False, "ExitNodeOption": False,
+                    "PrimaryRoutes": [], "AllowedIPs": []}
+            node.update(self_overrides)
+            return {"BackendState": "Running", "Self": node}
+
+        problems = run_phase.client_readiness_problems
+        self.assertEqual(problems(status(), client), [])
+        no_poll = problems(status(Online=False), client)
+        self.assertIn("the client has no live control session", no_poll)
+        missing = status()
+        del missing["Self"]["Online"]
+        self.assertIn("the client has no live control session", problems(missing, client))
+        cached = status()
+        cached["AuthURL"] = "https://login.tailscale.com/a/k3x9q7m2v8b4n6t1z"
+        self.assertIn(run_phase.CLIENT_NEEDS_LOGIN, problems(cached, client))
+
+        class Fake:
+            reads = 0
+
+            def execute(self, program, args=(), timeout=60.0, **kwargs):
+                Fake.reads += 1
+                return ExecResult(0, json.dumps(cached).encode(), b"")
+
+        with self.assertRaises(hostcheck.Refusal) as caught:
+            run_phase.wait_client_running(Fake(), client, timeout=30.0)
+        self.assertEqual(str(caught.exception), run_phase.CLIENT_NEEDS_LOGIN)
+        self.assertEqual(Fake.reads, 1)
+
     def test_peer_is_bound_by_id_and_refuses_hostname_collisions(self) -> None:
         document = self.status(Peer={"a": self.peer()})
         peer = run_phase.client_find_router_peer(
@@ -6560,6 +6646,8 @@ class ClientRunPhaseTests(unittest.TestCase):
                         "ID": "peer-client",
                         "HostName": client_name,
                         "DNSName": client_name + ".tailnet.ts.net.",
+                        # Self.Online = a live map poll (health.inMapPoll).
+                        "Online": self.authenticated,
                         "ExitNode": False,
                         "ExitNodeOption": False,
                         "PrimaryRoutes": [],
@@ -8286,6 +8374,176 @@ class ClientRunPhaseTests(unittest.TestCase):
             code, record, *_ = self._run("idle")
         self.assertEqual(state["offline_reads"], 2)
         self.assertEqual(code, 0, record["errors"])
+
+
+    # ------------------------------------------------------------------
+    # Live finding 2026-11-10: the client node had been removed from the
+    # tailnet, tailscaled reported BackendState Running from its disk-cached
+    # netmap (0 peers) and control answered machineAuthorized=false with a
+    # new auth URL.  The phase failed closed as client_exit_peer_missing
+    # without saying why.
+
+    STALE_AUTH_URL = "https://login.tailscale.com/a/k3x9q7m2v8b4n6t1z"
+
+    def test_live_cached_running_with_auth_url_is_client_needs_login(self) -> None:
+        reads = {"n": 0}
+        original_status = run_phase.read_client_status
+
+        def status(client):
+            document = original_status(client)
+            if isinstance(document, dict):
+                reads["n"] += 1
+                document["AuthURL"] = self.STALE_AUTH_URL
+                document["Peer"] = {}
+            return document
+
+        with mock.patch.object(run_phase, "read_client_status", side_effect=status):
+            code, record, *_ = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("client_needs_login", record["errors"])
+        self.assertNotIn("client_exit_peer_missing", record["errors"])
+        self.assertIsNot(record["client"].get("running"), True)
+        # An auth URL is never a startup delay: refused on the first read
+        # (plus the one diagnostic read), not after CLIENT_READY_TIMEOUT.
+        self.assertLessEqual(reads["n"], 3)
+        self.assertNotIn("login.tailscale.com", json.dumps(record))
+
+    def test_live_running_without_a_map_poll_never_becomes_ready(self) -> None:
+        original_status = run_phase.read_client_status
+
+        def status(client):
+            document = original_status(client)
+            if isinstance(document, dict):
+                document["Self"]["Online"] = False
+            return document
+
+        with mock.patch.object(run_phase, "read_client_status", side_effect=status), \
+                mock.patch.object(run_phase, "CLIENT_READY_TIMEOUT", 1.0):
+            code, record, *_ = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertIn("phase_exception:Refusal", record["errors"])
+        self.assertIsNot(record["client"].get("running"), True)
+        self.assertNotIn("client_needs_login", record["errors"])
+
+    def _peer_missing_run(self, mutate):
+        state = {"router_ready": False}
+        original_status = run_phase.read_client_status
+        original_ready = run_phase.wait_router_ready
+
+        def ready(*args, **kwargs):
+            result = original_ready(*args, **kwargs)
+            state["router_ready"] = True
+            return result
+
+        def status(client):
+            document = original_status(client)
+            if state["router_ready"] and isinstance(document, dict):
+                mutate(document)
+            return document
+
+        with mock.patch.object(run_phase, "wait_router_ready", side_effect=ready), \
+                mock.patch.object(run_phase, "read_client_status", side_effect=status), \
+                mock.patch.object(run_phase, "CLIENT_PEER_TIMEOUT", 1.0):
+            return self._run("idle")
+
+    def test_live_empty_netmap_records_a_fixed_peer_diagnosis(self) -> None:
+        def empty(document):
+            document["Peer"] = {}
+
+        code, record, *_ = self._peer_missing_run(empty)
+        self.assertEqual(code, 2)
+        self.assertIn("client_exit_peer_missing", record["errors"])
+        self.assertNotIn("client_needs_login", record["errors"])
+        self.assertEqual(record["client"]["exit_peer_problem"], "no_peers")
+        self.assertEqual(record["client"]["peer_count"], 0)
+
+    def test_live_peer_diagnosis_names_the_failed_rule_only(self) -> None:
+        cases = {
+            "not_exit_node_option": ("ExitNodeOption", False),
+            "offline": ("Online", False),
+            "hostname_mismatch": ("HostName", "zz-vprtest-02-do-not-use"),
+        }
+        for expected, (field, value) in cases.items():
+            with self.subTest(expected=expected):
+                self._fresh_evidence("peer-" + expected)
+
+                def mutate(document, field=field, value=value):
+                    for peer in document.get("Peer", {}).values():
+                        peer[field] = value
+
+                code, record, *_ = self._peer_missing_run(mutate)
+                self.assertEqual(code, 2)
+                self.assertIn("client_exit_peer_missing", record["errors"])
+                self.assertEqual(record["client"]["exit_peer_problem"], expected)
+                self.assertIn(
+                    record["client"]["exit_peer_problem"], run_phase.CLIENT_PEER_PROBLEMS
+                )
+                self.assertEqual(record["client"]["peer_count"], 1)
+                text = json.dumps(record)
+                self.assertNotIn("peer-router", text)
+                self.assertNotIn("100.64.0.9", text)
+
+    def test_live_auth_url_after_readiness_is_named_at_the_peer_failure(self) -> None:
+        # The cached Running state passes readiness first; control's auth URL
+        # arrives a moment later, so the router never appears.
+        def deauthorized(document):
+            document["AuthURL"] = self.STALE_AUTH_URL
+            document["Peer"] = {}
+
+        code, record, *_ = self._peer_missing_run(deauthorized)
+        self.assertEqual(code, 2)
+        self.assertIn("client_exit_peer_missing", record["errors"])
+        self.assertIn("client_needs_login", record["errors"])
+        self.assertNotIn("login.tailscale.com", json.dumps(record))
+
+    def test_live_client_login_records_the_visible_router(self) -> None:
+        code, record, *_ = self._run("client-login", 30.0)
+        self.assertEqual(code, 0, record["errors"])
+        self.assertIs(record["client"]["router_peer_visible"], True)
+        self.assertEqual(record["client"]["peer_count"], 1)
+
+    def test_live_client_login_into_a_tailnet_without_the_router_is_invalid(self) -> None:
+        original_status = run_phase.read_client_status
+
+        def status(client):
+            document = original_status(client)
+            if isinstance(document, dict):
+                document["Peer"] = {}
+            return document
+
+        with mock.patch.object(run_phase, "read_client_status", side_effect=status), \
+                mock.patch.object(run_phase, "CLIENT_LOGIN_PEER_TIMEOUT", 0.5):
+            code, record, *_ = self._run("client-login", 30.0)
+        self.assertEqual(code, 2)
+        self.assertEqual(record["result"], "INVALID")
+        self.assertIn("client_router_peer_not_visible", record["errors"])
+        self.assertIs(record["client"]["router_peer_visible"], False)
+        self.assertEqual(record["client"]["peer_count"], 0)
+
+    def test_live_client_login_does_not_stop_on_a_cached_running(self) -> None:
+        # The first two statuses after `tailscale up` are a cached Running
+        # that still carries an auth URL; only the third is the completed
+        # login.  Stopping on the first Running would read the second one as
+        # the final state and fail as login_not_running.
+        seen = {"after_up": 0}
+        original_status = run_phase.read_client_status
+
+        def status(client):
+            document = original_status(client)
+            if getattr(client, "login_unit_active", False) and isinstance(document, dict):
+                seen["after_up"] += 1
+                if seen["after_up"] <= 2:
+                    document["BackendState"] = "Running"
+                    document["AuthURL"] = self.STALE_AUTH_URL
+            return document
+
+        with mock.patch.object(run_phase, "read_client_status", side_effect=status):
+            code, record, *_ = self._run("client-login", 30.0)
+        self.assertEqual(code, 0, record["errors"])
+        self.assertGreaterEqual(seen["after_up"], 4)
+        self.assertIs(record["client"]["running"], True)
+
 
 class ClientProbeReadTests(unittest.TestCase):
     """Fix round 3: the exact prefix-read primitive and the stop proof."""

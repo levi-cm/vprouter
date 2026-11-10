@@ -1407,3 +1407,8 @@ AuthURL and requires the router HostName in the netmap (client_router_peer_not_v
 tests, six mutations caught. /opt/vprlab-tools refreshed to ced885b. Operator note: the client
 must log in to the tailnet that holds zz-vprtest-01-do-not-use and the node must not be deleted
 after login.
+2026-11-10 fourth client-login (16:20-16:45 UTC) INVALID login_not_running + client_needs_login
+(link expired before use; no defect). Fifth client-login (20:59 UTC), after the operator completed
+the login: PASS in 14 s on the persisted node key, Running without AuthURL, router_peer_visible
+true (router HostName present in the client netmap), client MemAvailable 149 MB at boot / 130 MB
+at end (256 MiB guest), cleanup ok, prod healthy before and after.

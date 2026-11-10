@@ -1394,3 +1394,16 @@ INVALID login_not_running: nobody completed the login within the 25 min window (
 2026-11-10 third client-login: PASS, BackendState Running after ~5 min (15:59-16:04 UTC),
 client MemAvailable 147 MB at boot, 125 MB at end of a 256 MiB guest, cleanup ok. Lab key
 re-checked against /etc/vprouter/*.conf by hash before the first M3 phase: no overlap.
+2026-11-10 first M3 idle with --client 1 (16:05-16:07 UTC): INVALID, fail-closed
+(client_exit_peer_missing; no traffic started, empty probe log, cleanup ok, prod healthy). Client
+diagnostics (masked, no evidence): the login at 16:04:56 was accepted (machineAuthorized=true) but
+delivered a netmap with 0 peers; at 16:05:56 control answered the same, unexpired node key with
+machineAuthorized=false + a new auth URL (node removed in the admin console, or a different
+tailnet). tailscaled 1.104.5 still reported Running from the disk-cached netmap, so readiness
+passed. Fixed in ced885b (fail-closed only): readiness needs Self.Online (= inMapPoll, checked in
+the v1.104.5 source) and refuses at once while AuthURL is set (client_needs_login); peer failure
+records a fixed exit_peer_problem code + peer_count; client-login stops only on Running without
+AuthURL and requires the router HostName in the netmap (client_router_peer_not_visible). 317 VM
+tests, six mutations caught. /opt/vprlab-tools refreshed to ced885b. Operator note: the client
+must log in to the tailnet that holds zz-vprtest-01-do-not-use and the node must not be deleted
+after login.

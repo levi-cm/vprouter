@@ -1419,3 +1419,10 @@ findings / no marker on the clear path. Client probe: exit before 1/1 Mullvad, a
 zz-vprtest-01-do-not-use, cleared and re-verified; traffic stop proven; client MemAvailable 148 MB
 boot / 131 MB end (256 MiB). Lab key hash re-checked vs /etc/vprouter/*.conf (no overlap); prod
 healthy before and after. First live M3 client PASS (lab evidence, not release acceptance).
+2026-11-10 M3 stop-router with --client 1 (21:04-21:08 UTC, evidence
+stop-router-20261110T210439.908389Z): PASS, fail-closed. Action `systemctl stop vprouter@...`
+exit 0, postcondition (service inactive) exit 0. Client probe: before 1/1 Mullvad; after the fault
+13/13 exit and 13/13 marker attempts failed, 0 non-Mullvad, 0 ok; the exit node stayed bound in all
+11 hold samples (so blocking, not unbinding, stopped the traffic). Router scan 638 packets / 0
+findings / both controls / 1 allowed ICMP 3/3 quote of the profile endpoint; client scan 1143
+packets / 0 findings. Traffic stop proven, cleanup ok, client MemAvailable 148/125 MB, prod healthy.

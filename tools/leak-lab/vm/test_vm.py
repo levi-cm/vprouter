@@ -6007,6 +6007,7 @@ class ClientExitBindingTests(unittest.TestCase):
         )
         offline = json.loads(self.REAL_STATUS_JSON)
         offline["ExitNodeStatus"]["Online"] = False
+        offline["Peer"]["nodekey:00"]["Online"] = False
         self.assertFalse(
             run_phase.client_peer_is_active(offline, "router-node", "100.64.0.9")
         )
@@ -6070,13 +6071,17 @@ class ClientExitBindingTests(unittest.TestCase):
             document["ExitNodeStatus"].update(fields)
             return document
 
+        def peer_offline(document):
+            document["Peer"]["nodekey:00"]["Online"] = False
+            return document
+
         no_status = json.loads(self.REAL_STATUS_JSON)
         del no_status["ExitNodeStatus"]
         cases = {
             "status_unavailable": None,
             "no_exit_node_status": no_status,
             "exit_id_mismatch": exit_status(ID="other"),
-            "exit_offline": exit_status(Online=False),
+            "exit_offline": peer_offline(exit_status(Online=False)),
             "exit_address_mismatch": exit_status(TailscaleIPs=["100.64.0.10/32"]),
         }
         self.assertEqual(set(cases), set(run_phase.CLIENT_EXIT_PROBLEMS))
@@ -6090,6 +6095,24 @@ class ClientExitBindingTests(unittest.TestCase):
             problem(exit_status(ID="other", Online=False), rid, address),
             "exit_id_mismatch",
         )
+        self.assertEqual(
+            problem(peer_offline(exit_status(ID="other", Online=False)), rid, address),
+            "exit_id_mismatch",
+        )
+        # Offline is diagnosed before the address, as in the check itself.
+        self.assertEqual(
+            problem(peer_offline(exit_status(Online=False,
+                                             TailscaleIPs=["100.64.0.10/32"])),
+                    rid, address),
+            "exit_offline",
+        )
+        # Online must be the JSON true, not merely truthy.
+        for value in ("true", 1, [True]):
+            with self.subTest(online=value):
+                self.assertEqual(
+                    problem(peer_offline(exit_status(Online=value)), rid, address),
+                    "exit_offline",
+                )
         self.assertEqual(problem({"ExitNodeStatus": None}, rid, address),
                          "no_exit_node_status")
         self.assertEqual(problem(exit_status(TailscaleIPs="100.64.0.9/32"), rid, address),
@@ -6111,6 +6134,7 @@ class ClientExitBindingTests(unittest.TestCase):
     def test_live_exit_wait_keeps_the_last_polled_status(self) -> None:
         bad = json.loads(self.REAL_STATUS_JSON)
         bad["ExitNodeStatus"]["Online"] = False
+        bad["Peer"]["nodekey:00"]["Online"] = False
         worse = json.loads(self.REAL_STATUS_JSON)
         del worse["ExitNodeStatus"]
         clock = {"t": 0.0}
@@ -6152,6 +6176,123 @@ class ClientExitBindingTests(unittest.TestCase):
                                        side_effect=error):
                     self.assertIsNone(run_phase.client_status_or_none(object()))
 
+    def test_live_stale_exit_status_is_proven_online_by_the_live_peer(self) -> None:
+        # reboot-with-router-enabled 2026-11-10: tailscaled builds
+        # ExitNodeStatus from the last full netmap (no Online deltas), the
+        # Peer map from cn.Peers() (with deltas).
+        rid, address = "router-node", "100.64.0.9"
+        source = run_phase.client_exit_online_source
+        good = json.loads(self.REAL_STATUS_JSON)
+        self.assertEqual(source(good, rid, address), "exit_node_status")
+        stale = json.loads(self.REAL_STATUS_JSON)
+        stale["ExitNodeStatus"]["Online"] = False
+        self.assertEqual(source(stale, rid, address), "peer_delta")
+        self.assertTrue(run_phase.client_peer_is_active(stale, rid, address))
+        self.assertIsNone(run_phase.client_exit_status_problem(stale, rid, address))
+        self.assertEqual(set(run_phase.CLIENT_EXIT_ONLINE_SOURCES),
+                         {"exit_node_status", "peer_delta"})
+
+        def variant(edit):
+            document = json.loads(self.REAL_STATUS_JSON)
+            document["ExitNodeStatus"]["Online"] = False
+            edit(document)
+            return document
+
+        peer_key = "nodekey:00"
+        twin = {"ID": rid, "HostName": "zz-vprtest-02-do-not-use",
+                "TailscaleIPs": ["100.64.0.9"], "Online": True,
+                "ExitNode": True, "ExitNodeOption": True}
+        refused = {
+            "peer_offline": lambda d: d["Peer"][peer_key].update(Online=False),
+            "peer_online_not_bool": lambda d: d["Peer"][peer_key].update(Online="true"),
+            "peer_not_selected": lambda d: d["Peer"][peer_key].update(ExitNode=False),
+            "peer_selection_missing": lambda d: d["Peer"][peer_key].pop("ExitNode"),
+            "peer_selection_not_bool": lambda d: d["Peer"][peer_key].update(ExitNode="true"),
+            "peer_selection_one": lambda d: d["Peer"][peer_key].update(ExitNode=1),
+            # Online and ExitNode must come from the router peer itself.
+            "other_peer_online": lambda d: (
+                d["Peer"][peer_key].update(Online=False),
+                d["Peer"].update({"nodekey:02": {
+                    "ID": "unrelated", "HostName": "laptop",
+                    "TailscaleIPs": ["100.64.0.9"], "Online": True,
+                    "ExitNode": True, "ExitNodeOption": True}}),
+            ),
+            "peer_other_id": lambda d: d["Peer"][peer_key].update(ID="other"),
+            "peer_wrong_address": lambda d: d["Peer"][peer_key].update(
+                TailscaleIPs=["100.64.0.10", "fd7a:115c:a1e0::9"]),
+            "peer_address_prefix": lambda d: d["Peer"][peer_key].update(
+                TailscaleIPs=["100.64.0.9/32"]),
+            "peer_addresses_not_list": lambda d: d["Peer"][peer_key].update(
+                TailscaleIPs="100.64.0.9"),
+            "router_id_ambiguous": lambda d: d["Peer"].update({"nodekey:01": twin}),
+            "no_peers": lambda d: d.pop("Peer"),
+            "peers_not_dict": lambda d: d.update(Peer=[d["Peer"][peer_key]]),
+            "peer_not_dict": lambda d: d["Peer"].update({peer_key: "router-node"}),
+        }
+        for name, edit in refused.items():
+            with self.subTest(refused=name):
+                document = variant(edit)
+                self.assertIsNone(source(document, rid, address))
+                self.assertFalse(run_phase.client_peer_is_active(document, rid, address))
+                self.assertEqual(run_phase.client_exit_status_problem(document, rid, address),
+                                 "exit_offline")
+        self.assertIsNone(source(stale, None, address))
+        self.assertIsNone(source(None, rid, address))
+        # The live peer never stands in for the ExitNodeStatus binding itself.
+        for name, edit, expected in (
+            ("status_missing", lambda d: d.pop("ExitNodeStatus"), "no_exit_node_status"),
+            ("status_other_id", lambda d: d["ExitNodeStatus"].update(ID="other"),
+             "exit_id_mismatch"),
+            ("status_other_address",
+             lambda d: d["ExitNodeStatus"].update(TailscaleIPs=["100.64.0.10/32"]),
+             "exit_address_mismatch"),
+            ("status_wide_prefix",
+             lambda d: d["ExitNodeStatus"].update(TailscaleIPs=["100.64.0.0/10"]),
+             "exit_address_mismatch"),
+        ):
+            with self.subTest(binding=name):
+                document = variant(edit)
+                self.assertFalse(run_phase.client_peer_is_active(document, rid, address))
+                self.assertEqual(run_phase.client_exit_status_problem(document, rid, address),
+                                 expected)
+        # A peer with the same ID but no ExitNodeStatus ID match: the router
+        # ID on the status wins, the peer view is only consulted for Online.
+        other = variant(lambda d: (d["ExitNodeStatus"].update(ID="other"),
+                                   d["Peer"][peer_key].update(ID="other")))
+        self.assertFalse(run_phase.client_peer_is_active(other, rid, address))
+        self.assertFalse(run_phase.client_peer_is_active(stale, "other", address))
+
+    def test_live_active_check_and_diagnosis_agree_on_every_shape(self) -> None:
+        # Both are _client_exit_check; this pins that they stay one rule.
+        rid, address = "router-node", "100.64.0.9"
+        shapes = []
+        for status_online in (True, False, None):
+            for peer_online in (True, False):
+                for peer_exit in (True, False, None):
+                    for status_id in (rid, "other"):
+                        document = json.loads(self.REAL_STATUS_JSON)
+                        document["ExitNodeStatus"]["ID"] = status_id
+                        if status_online is None:
+                            document["ExitNodeStatus"].pop("Online")
+                        else:
+                            document["ExitNodeStatus"]["Online"] = status_online
+                        peer = document["Peer"]["nodekey:00"]
+                        peer["Online"] = peer_online
+                        if peer_exit is None:
+                            peer.pop("ExitNode")
+                        else:
+                            peer["ExitNode"] = peer_exit
+                        shapes.append(document)
+        shapes += [None, {}, {"ExitNodeStatus": None}, {"Self": {"ExitNode": True}}]
+        for document in shapes:
+            with self.subTest(document=document):
+                problem = run_phase.client_exit_status_problem(document, rid, address)
+                self.assertIn(problem, (None, *run_phase.CLIENT_EXIT_PROBLEMS))
+                self.assertEqual(
+                    problem is None,
+                    run_phase.client_peer_is_active(document, rid, address),
+                )
+
     def test_hold_samples_accept_an_offline_router_but_never_another_peer(self) -> None:
         # During stop-router/kill-container/kill-wireguard the router's
         # Tailscale is legitimately offline; the sample proves the selection.
@@ -6161,6 +6302,13 @@ class ClientExitBindingTests(unittest.TestCase):
             offline, "router-node", "100.64.0.9", require_online=False))
         self.assertFalse(run_phase.client_peer_is_active(
             offline, "router-node", "100.64.0.9"))
+        # No router ID (never produced by router_exit_identity) never binds,
+        # not even to a status that carries no ID either.
+        no_id = {"ExitNodeStatus": {"TailscaleIPs": ["100.64.0.9/32"]}}
+        for router_id in (None, 7):
+            with self.subTest(router_id=router_id):
+                self.assertFalse(run_phase.client_peer_is_active(
+                    no_id, router_id, "100.64.0.9", require_online=False))
         for status in (
             {"ExitNodeStatus": {"ID": "wrong", "Online": False, "TailscaleIPs": ["100.64.0.9/32"]}},
             {"ExitNodeStatus": {"ID": "router-node", "Online": False, "TailscaleIPs": ["100.64.0.10/32"]}},
@@ -6728,6 +6876,8 @@ class ClientRunPhaseTests(unittest.TestCase):
                     "ID": "peer-router",
                     "HostName": guest.DEFAULT_NAME,
                     "ExitNodeOption": True,
+                    # PeerStatus.ExitNode: StableID == prefs.ExitNodeID.
+                    "ExitNode": self.exit_node_active,
                     "Online": True,
                     "TailscaleIPs": ["100.64.0.9", "fd7a:115c:a1e0::9"],
                 }
@@ -7863,6 +8013,9 @@ class ClientRunPhaseTests(unittest.TestCase):
                     status = dict(status)
                     status["Online"] = False
                     document["ExitNodeStatus"] = status
+                # Both views: the router peer itself is offline too.
+                for peer in document.get("Peer", {}).values():
+                    peer["Online"] = False
                 return document
             return None
 
@@ -8615,10 +8768,36 @@ class ClientRunPhaseTests(unittest.TestCase):
         with mock.patch.object(run_phase, "read_client_status", side_effect=status):
             return self._run("idle")
 
+    def test_live_stale_exit_node_status_after_selection_still_passes(self) -> None:
+        # reboot-with-router-enabled 2026-11-10: ExitNodeStatus.Online stays
+        # False (full netmap) while the router peer is online (delta).  The
+        # pre-fault check accepts the live peer view and records the source;
+        # PASS still needs the probe through Mullvad.
+        code, record, *_ = self._exit_inactive_run(
+            lambda d: d["ExitNodeStatus"].update(Online=False))
+        self.assertEqual(code, 0, record["errors"])
+        self.assertEqual(record["result"], "PASS")
+        self.assertIs(record["client"]["exit_node"]["router_peer_bound"], True)
+        self.assertIn("exit_node_active", record["timestamps"])
+        self.assertEqual(record["client"]["exit_node"]["online_source"], "peer_delta")
+        self.assertTrue(record["client"]["exit_node"]["reverified"])
+        self.assertNotIn("exit_status_problem", record["client"])
+
+    def test_live_fresh_exit_node_status_records_its_source(self) -> None:
+        code, record, *_ = self._run("idle")
+        self.assertEqual(code, 0, record["errors"])
+        self.assertEqual(record["client"]["exit_node"]["online_source"],
+                         "exit_node_status")
+
     def test_live_inactive_exit_node_records_a_fixed_exit_diagnosis(self) -> None:
         cases = {
             "no_exit_node_status": lambda d: d.pop("ExitNodeStatus"),
-            "exit_offline": lambda d: d["ExitNodeStatus"].update(Online=False),
+            # Both online views fail: ExitNodeStatus is offline and the
+            # peer, while online, is not flagged as the selected exit node.
+            "exit_offline": lambda d: (
+                d["ExitNodeStatus"].update(Online=False),
+                [peer.update(ExitNode=False) for peer in d["Peer"].values()],
+            ),
             "exit_id_mismatch": lambda d: d["ExitNodeStatus"].update(ID="impostor"),
             "exit_address_mismatch": lambda d: d["ExitNodeStatus"].update(
                 TailscaleIPs=["100.64.0.99/32"]),
@@ -8651,6 +8830,8 @@ class ClientRunPhaseTests(unittest.TestCase):
         def late(document, n):
             if n == 1:
                 document["ExitNodeStatus"]["Online"] = False
+                for peer in document["Peer"].values():
+                    peer["ExitNode"] = False
             return document
 
         code, record, *_ = self._exit_inactive_run(replace=late)

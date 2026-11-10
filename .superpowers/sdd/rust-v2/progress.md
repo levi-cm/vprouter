@@ -1461,3 +1461,19 @@ pid 662 -> 2935 (postcondition). Client probe: 2 exit + 2 marker attempts failed
 restart, then 58/58 exits Mullvad, 0 non-Mullvad; 2 action samples + 11 hold samples all with the
 router selected. Router scan 7122 packets / 0 findings / both controls; client scan 3389 packets /
 0 findings. Traffic stop proven, cleanup ok, client MemAvailable 150/130 MB, prod healthy.
+2026-11-10 first M3 reboot-with-router-enabled with --client 1 (21:30 UTC, evidence
+reboot-with-router-enabled-20261110T213047.848805Z): INVALID before the fault and before any
+traffic (0 non-Mullvad, 0 scan findings; tunnel_not_observed in the scan only because an aborted
+reboot phase has no control window). client_exit_node_inactive with exit_status_problem=exit_offline,
+exit_peer_problem=null, self_online=true: the router peer was online in the same status the
+ExitNodeStatus called offline. Harness false negative. tailscaled 1.104.5 source: ExitNodeStatus
+reads the last full netmap (no NodeMutationOnline deltas), Peer[*] reads cn.Peers() with deltas.
+Fix: the pre-fault online rule also accepts the single router-ID peer with Online+ExitNode true
+and the selected address ("peer_delta"); the ExitNodeStatus ID and /32 binding stay mandatory,
+online_source is recorded, the check and its diagnosis are one function (_client_exit_check).
+My 12 mutations all caught after closing three gaps (truthy Online, ID-before-online order, the
+stop-router hold test now takes the peer offline too). Narrow Opus review: no blocker, no false-PASS
+path (source claim verified; a peer that is online in control but not forwarding is still caught by
+the pre-fault Mullvad probe); 4 of its 20 mutants survived as test gaps (truthy ExitNode, online
+before address order, Online read from another peer, the router_id type guard) and are now closed.
+Not exhaustive mutation coverage.

@@ -269,6 +269,40 @@ Refusal stays the recorded cause. These are also fail-closed. In tailscaled 1.10
 `ExitNodeStatus` only once the `--exit-node` IP has been resolved to a peer's
 stable ID in the current netmap. Its `Online` comes from that netmap.
 
+**Live finding 2026-11-10 (stale `ExitNodeStatus.Online`).** The first M3
+reboot-with-router-enabled run was INVALID before the fault with
+`exit_status_problem` = `exit_offline`, while `exit_peer_problem` was null: the
+router peer was online in the same status. The tailscaled 1.104.5 source
+(`ipn/ipnlocal/local.go`) explains it. `ExitNodeStatus` is built from
+`cn.NetMap().PeerWithStableID(prefs.ExitNodeID())`, the last *full* netmap,
+which does not carry control's `NodeMutationOnline` deltas. `Peer[*]` comes
+from `cn.Peers()`, with those deltas applied (`ExitNode` is set there from
+`prefs.ExitNodeID`). After a router reboot, control often reports the router
+online only as a delta, so `ExitNodeStatus.Online` can stay false until the next
+full netmap. tailscaled's own comment in `suggestExitNodeUsingDERP` notes this
+gap.
+
+The pre-fault check (`require_online`) now accepts either view as proof that
+the router is online:
+- `exit_node_status`: `ExitNodeStatus.Online` is JSON `true`.
+- `peer_delta`: exactly one peer has the router's ID, and that peer has
+  `Online` true, `ExitNode` true, and the selected address in its
+  `TailscaleIPs`.
+
+The `ExitNodeStatus` binding is never relaxed. It must still exist, name the
+router's ID and carry the address as a `/32`. A peer view can stand in only for
+`Online`. The record keeps the view that held as
+`exit_node.online_source` (one of those two codes). `exit_offline` now means
+neither view showed the router online.
+
+`client_peer_is_active` and `client_exit_status_problem` are one function
+(`_client_exit_check`), so the check and its recorded diagnosis cannot drift
+apart. Hold samples are unchanged (`require_online=False`).
+
+This relaxation cannot create a false PASS. PASS still needs the pre-fault probe
+to egress through Mullvad, every hold sample to keep exactly this router
+selected, and the capture scan to be clean.
+
 A `--client` phase requires `--duration >= 30` seconds, including
 `client-login`. A shorter timing window cannot be observed by the probe loop
 (and a login that short is not useful), so it is refused.

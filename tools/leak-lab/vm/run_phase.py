@@ -3272,22 +3272,94 @@ def client_peer_is_active(
 
     There is deliberately no ``Self.ExitNode``/HostName shortcut: only the
     status naming the router's own node ID and the selected address counts.
-    ``require_online`` is True for the pre-fault selection.  Hold samples pass
-    False: during stop-router, kill-container or kill-wireguard the router's
-    Tailscale is legitimately offline, and what a sample must prove is that
-    the client still has exactly this router selected (no switch to another
-    exit node), not that the router is healthy.
+    ``require_online`` is True for the pre-fault selection (see
+    :func:`client_exit_online_source` for which views may prove online).
+    Hold samples pass False: during stop-router, kill-container or
+    kill-wireguard the router's Tailscale is legitimately offline, and what a
+    sample must prove is that the client still has exactly this router
+    selected (no switch to another exit node), not that the router is healthy.
+    """
+    return (
+        _client_exit_check(
+            document, router_id, address, require_online=require_online
+        )[0]
+        is None
+    )
+
+
+# Which view of tailscaled proved the selected exit node online.
+CLIENT_EXIT_ONLINE_SOURCES = ("exit_node_status", "peer_delta")
+
+
+def client_exit_online_source(
+    document: object, router_id: str, address: str
+) -> str | None:
+    """Which status view shows the selected router exit node online.
+
+    Found live 2026-11-10 (reboot-with-router-enabled): tailscaled 1.104.5
+    builds ``ExitNodeStatus`` from the last *full* netmap
+    (``cn.NetMap().PeerWithStableID``), which lacks control's
+    ``NodeMutationOnline`` deltas, while ``Peer[*]`` comes from ``cn.Peers()``
+    with those deltas applied.  After the router comes back, control often
+    reports it online only as a delta, so ``ExitNodeStatus.Online`` can stay
+    False although the router peer is online.
+
+    ``"exit_node_status"``: ``ExitNodeStatus.Online`` is True.
+    ``"peer_delta"``: the single peer with ``router_id`` is ``Online``, is the
+    selected exit node (``ExitNode``, which tailscaled sets from
+    ``prefs.ExitNodeID``) and lists ``address``.
+    None: neither.  The ExitNodeStatus ID and ``/32`` binding are checked
+    separately and are never relaxed.
     """
     if not isinstance(document, dict):
-        return False
+        return None
+    status = document.get("ExitNodeStatus")
+    if isinstance(status, dict) and status.get("Online") is True:
+        return "exit_node_status"
+    peers = document.get("Peer")
+    if not isinstance(peers, dict) or not isinstance(router_id, str):
+        return None
+    by_id = [
+        peer
+        for peer in peers.values()
+        if isinstance(peer, dict) and peer.get("ID") == router_id
+    ]
+    if len(by_id) != 1:
+        return None
+    peer = by_id[0]
+    if peer.get("Online") is not True or peer.get("ExitNode") is not True:
+        return None
+    addresses = peer.get("TailscaleIPs")
+    if not isinstance(addresses, list) or address not in addresses:
+        return None
+    return "peer_delta"
+
+
+def _client_exit_check(
+    document: object, router_id: str, address: str, *, require_online: bool
+) -> tuple[str | None, str | None]:
+    """(problem, online_source) for the client's exit-node selection.
+
+    The single implementation behind :func:`client_peer_is_active` and
+    :func:`client_exit_status_problem`, so the check and its recorded
+    diagnosis cannot drift apart.  ``online_source`` is None unless the
+    online rule was applied and held.
+    """
+    if not isinstance(document, dict):
+        return "status_unavailable", None
     status = document.get("ExitNodeStatus")
     if not isinstance(status, dict):
-        return False
-    if status.get("ID") != router_id:
-        return False
-    if require_online and status.get("Online") is not True:
-        return False
-    return _exit_status_has_address(status.get("TailscaleIPs"), address)
+        return "no_exit_node_status", None
+    if not isinstance(router_id, str) or status.get("ID") != router_id:
+        return "exit_id_mismatch", None
+    source = None
+    if require_online:
+        source = client_exit_online_source(document, router_id, address)
+        if source is None:
+            return "exit_offline", None
+    if not _exit_status_has_address(status.get("TailscaleIPs"), address):
+        return "exit_address_mismatch", None
+    return None, source
 
 
 def _exit_status_has_address(entries: object, address: str) -> bool:
@@ -3417,20 +3489,10 @@ def client_exit_status_problem(
     """The first rule of the pre-fault exit check that ``document`` fails.
 
     None exactly when ``client_peer_is_active(document, router_id, address)``
-    is True; the order follows that function.
+    is True (both are :func:`_client_exit_check`).  ``exit_offline`` means
+    neither ExitNodeStatus nor the live router peer shows it online.
     """
-    if not isinstance(document, dict):
-        return "status_unavailable"
-    status = document.get("ExitNodeStatus")
-    if not isinstance(status, dict):
-        return "no_exit_node_status"
-    if status.get("ID") != router_id:
-        return "exit_id_mismatch"
-    if status.get("Online") is not True:
-        return "exit_offline"
-    if not _exit_status_has_address(status.get("TailscaleIPs"), address):
-        return "exit_address_mismatch"
-    return None
+    return _client_exit_check(document, router_id, address, require_online=True)[0]
 
 
 def client_self_online(document: object) -> bool | None:
@@ -4949,7 +5011,7 @@ def _run_client_phase_locked(
         set_client_exit_node(client_client, exit_ipv4)
         observed: dict = {}
         try:
-            wait_client_exit_node(
+            active_document = wait_client_exit_node(
                 client_client, router_id, exit_ipv4, observed=observed
             )
         except hostcheck.Refusal:
@@ -4973,6 +5035,11 @@ def _run_client_phase_locked(
             raise
         record["client"]["exit_node"]["active"] = True
         record["client"]["exit_node"]["router_peer_bound"] = True
+        # Fixed vocabulary (CLIENT_EXIT_ONLINE_SOURCES): which tailscaled view
+        # proved the router online; "peer_delta" is the stale-ExitNodeStatus case.
+        record["client"]["exit_node"]["online_source"] = client_exit_online_source(
+            active_document, router_id, exit_ipv4
+        )
         record["timestamps"]["exit_node_active"] = utc_now()
         guard_check()
 

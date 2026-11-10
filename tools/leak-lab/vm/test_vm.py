@@ -6059,6 +6059,55 @@ class ClientExitBindingTests(unittest.TestCase):
             run_phase.client_peer_is_active(status(), "router-node", "not-an-ip")
         )
 
+    def test_live_exit_status_problem_codes_follow_the_active_check(self) -> None:
+        rid, address = "router-node", "100.64.0.9"
+        problem = run_phase.client_exit_status_problem
+        good = json.loads(self.REAL_STATUS_JSON)
+        self.assertIsNone(problem(good, rid, address))
+
+        def exit_status(**fields):
+            document = json.loads(self.REAL_STATUS_JSON)
+            document["ExitNodeStatus"].update(fields)
+            return document
+
+        no_status = json.loads(self.REAL_STATUS_JSON)
+        del no_status["ExitNodeStatus"]
+        cases = {
+            "status_unavailable": None,
+            "no_exit_node_status": no_status,
+            "exit_id_mismatch": exit_status(ID="other"),
+            "exit_offline": exit_status(Online=False),
+            "exit_address_mismatch": exit_status(TailscaleIPs=["100.64.0.10/32"]),
+        }
+        self.assertEqual(set(cases), set(run_phase.CLIENT_EXIT_PROBLEMS))
+        for expected, document in cases.items():
+            with self.subTest(expected=expected):
+                self.assertEqual(problem(document, rid, address), expected)
+                self.assertFalse(run_phase.client_peer_is_active(document, rid, address))
+        # The rule order follows client_peer_is_active: an offline exit node
+        # with the wrong ID is an ID mismatch, not merely offline.
+        self.assertEqual(
+            problem(exit_status(ID="other", Online=False), rid, address),
+            "exit_id_mismatch",
+        )
+        self.assertEqual(problem({"ExitNodeStatus": None}, rid, address),
+                         "no_exit_node_status")
+        self.assertEqual(problem(exit_status(TailscaleIPs="100.64.0.9/32"), rid, address),
+                         "exit_address_mismatch")
+        self.assertEqual(problem(good, rid, "not-an-ip"), "exit_address_mismatch")
+
+    def test_live_client_self_online_is_a_plain_bool(self) -> None:
+        document = json.loads(self.REAL_STATUS_JSON)
+        self.assertIs(run_phase.client_self_online(document), True)
+        document["Self"]["Online"] = False
+        self.assertIs(run_phase.client_self_online(document), False)
+        document["Self"]["Online"] = "true"
+        self.assertIs(run_phase.client_self_online(document), False)
+        del document["Self"]["Online"]
+        self.assertIs(run_phase.client_self_online(document), False)
+        self.assertIsNone(run_phase.client_self_online({"Self": None}))
+        self.assertIsNone(run_phase.client_self_online(None))
+
     def test_hold_samples_accept_an_offline_router_but_never_another_peer(self) -> None:
         # During stop-router/kill-container/kill-wireguard the router's
         # Tailscale is legitimately offline; the sample proves the selection.
@@ -8495,6 +8544,79 @@ class ClientRunPhaseTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("client_exit_peer_missing", record["errors"])
         self.assertIn("client_needs_login", record["errors"])
+        self.assertNotIn("login.tailscale.com", json.dumps(record))
+
+    def _exit_inactive_run(self, mutate):
+        """Run idle with ``mutate`` applied once the exit node is selected."""
+        original_status = run_phase.read_client_status
+
+        def status(client):
+            document = original_status(client)
+            if isinstance(document, dict) and isinstance(
+                document.get("ExitNodeStatus"), dict
+            ):
+                mutate(document)
+            return document
+
+        with mock.patch.object(run_phase, "read_client_status", side_effect=status), \
+                mock.patch.object(run_phase, "CLIENT_READY_TIMEOUT", 2.0):
+            return self._run("idle")
+
+    def test_live_inactive_exit_node_records_a_fixed_exit_diagnosis(self) -> None:
+        cases = {
+            "no_exit_node_status": lambda d: d.pop("ExitNodeStatus"),
+            "exit_offline": lambda d: d["ExitNodeStatus"].update(Online=False),
+            "exit_id_mismatch": lambda d: d["ExitNodeStatus"].update(ID="impostor"),
+        }
+        for expected, mutate in cases.items():
+            with self.subTest(expected=expected):
+                self._fresh_evidence("exit-" + expected)
+                code, record, *_ = self._exit_inactive_run(mutate)
+                self.assertEqual(code, 2)
+                self.assertEqual(record["result"], "INVALID")
+                self.assertIn("phase_exception:Refusal", record["errors"])
+                self.assertIn("client_exit_node_inactive", record["errors"])
+                self.assertNotIn("client_exit_peer_missing", record["errors"])
+                self.assertNotIn("client_needs_login", record["errors"])
+                self.assertEqual(record["client"]["exit_status_problem"], expected)
+                self.assertIn(
+                    record["client"]["exit_status_problem"],
+                    run_phase.CLIENT_EXIT_PROBLEMS,
+                )
+                # The router peer itself is still fine in the netmap.
+                self.assertIsNone(record["client"]["exit_peer_problem"])
+                self.assertIs(record["client"]["self_online"], True)
+                self.assertIsNot(record["client"]["exit_node"].get("active"), True)
+                self.assertNotIn("exit_node_active", record["timestamps"])
+                self.assertNotIn("traffic_started", record["timestamps"])
+                text = json.dumps(record)
+                self.assertNotIn("impostor", text)
+                self.assertNotIn("100.64.0.9", text)
+
+    def test_live_exit_node_lost_with_the_peer_names_both(self) -> None:
+        def gone(document):
+            document["ExitNodeStatus"]["Online"] = False
+            for peer in document.get("Peer", {}).values():
+                peer["Online"] = False
+
+        code, record, *_ = self._exit_inactive_run(gone)
+        self.assertEqual(code, 2)
+        self.assertIn("client_exit_node_inactive", record["errors"])
+        self.assertEqual(record["client"]["exit_status_problem"], "exit_offline")
+        self.assertEqual(record["client"]["exit_peer_problem"], "offline")
+
+    def test_live_exit_node_inactive_after_a_lost_login_is_named(self) -> None:
+        def deauthorized(document):
+            document.pop("ExitNodeStatus")
+            document["AuthURL"] = self.STALE_AUTH_URL
+            document["Self"]["Online"] = False
+
+        code, record, *_ = self._exit_inactive_run(deauthorized)
+        self.assertEqual(code, 2)
+        self.assertIn("client_exit_node_inactive", record["errors"])
+        self.assertIn("client_needs_login", record["errors"])
+        self.assertEqual(record["client"]["exit_status_problem"], "no_exit_node_status")
+        self.assertIs(record["client"]["self_online"], False)
         self.assertNotIn("login.tailscale.com", json.dumps(record))
 
     def test_live_client_login_records_the_visible_router(self) -> None:

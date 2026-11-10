@@ -3389,6 +3389,50 @@ def wait_client_exit_node(
     raise hostcheck.Refusal("the client did not report the test exit node as active")
 
 
+# Fixed vocabulary for why :func:`client_peer_is_active` (with the pre-fault
+# ``require_online``) is False.  Only one of these strings, never a status
+# field, is recorded.
+CLIENT_EXIT_PROBLEMS = (
+    "status_unavailable",
+    "no_exit_node_status",
+    "exit_id_mismatch",
+    "exit_offline",
+    "exit_address_mismatch",
+)
+
+
+def client_exit_status_problem(
+    document: object, router_id: str, address: str
+) -> str | None:
+    """The first rule of the pre-fault exit check that ``document`` fails.
+
+    None exactly when ``client_peer_is_active(document, router_id, address)``
+    is True; the order follows that function.
+    """
+    if not isinstance(document, dict):
+        return "status_unavailable"
+    status = document.get("ExitNodeStatus")
+    if not isinstance(status, dict):
+        return "no_exit_node_status"
+    if status.get("ID") != router_id:
+        return "exit_id_mismatch"
+    if status.get("Online") is not True:
+        return "exit_offline"
+    if not _exit_status_has_address(status.get("TailscaleIPs"), address):
+        return "exit_address_mismatch"
+    return None
+
+
+def client_self_online(document: object) -> bool | None:
+    """``Self.Online`` (a live map poll) as a bool, None when unreadable."""
+    if not isinstance(document, dict):
+        return None
+    node = document.get("Self")
+    if not isinstance(node, dict):
+        return None
+    return node.get("Online") is True
+
+
 def client_exit_node_cleared(document: object) -> bool:
     if not isinstance(document, dict):
         return False
@@ -4893,7 +4937,22 @@ def _run_client_phase_locked(
             raise
         exit_ipv4 = client_peer_ipv4(peer, router_addresses)
         set_client_exit_node(client_client, exit_ipv4)
-        wait_client_exit_node(client_client, router_id, exit_ipv4)
+        try:
+            wait_client_exit_node(client_client, router_id, exit_ipv4)
+        except hostcheck.Refusal:
+            note("client_exit_node_inactive")
+            # Fixed-vocabulary diagnosis only, as for the missing peer.
+            last = client_status_or_none(client_client)
+            record["client"]["exit_status_problem"] = client_exit_status_problem(
+                last, router_id, exit_ipv4
+            )
+            record["client"]["exit_peer_problem"] = client_router_peer_problem(
+                last, name, router_id, router_addresses
+            )
+            record["client"]["self_online"] = client_self_online(last)
+            if client_needs_login(last):
+                note("client_needs_login")
+            raise
         record["client"]["exit_node"]["active"] = True
         record["client"]["exit_node"]["router_peer_bound"] = True
         record["timestamps"]["exit_node_active"] = utc_now()

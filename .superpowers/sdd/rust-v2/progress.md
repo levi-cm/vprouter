@@ -1433,3 +1433,12 @@ exit 0; postcondition proof wg0_absent with the container running. Client probe 
 42/42 later exits were Mullvad; 0 non-Mullvad at any point. Exit node bound in all 11 hold
 samples. Router scan 5636 packets / 0 findings / both controls / no ICMP quotes; client scan 2689
 packets / 0 findings. Traffic stop proven, cleanup ok, client MemAvailable 148/129 MB, prod healthy.
+2026-11-10 first M3 kill-container with --client 1 (21:12-21:16 UTC, evidence
+kill-container-20261110T211214.996462Z): INVALID, fail-closed, before the fault and before any
+traffic (action never ran, 0 non-Mullvad, 0 scan findings; missing after-controls are expected).
+The router peer was found and `tailscale set --exit-node` exited 0, but wait_client_exit_node
+refused after 180 s: no ExitNodeStatus naming the router online with its /32. The probe log read in
+`finally` was the previous kill-wireguard run's (46 lines) and was rejected as probe_run_mismatch
+(the stale-log defence working). The record could not say which exit rule failed: added a fixed
+exit_status_problem code (CLIENT_EXIT_PROBLEMS), exit_peer_problem at the same moment, self_online
+and client_needs_login on that refusal (fail-closed only). 322 VM tests, four mutations caught.

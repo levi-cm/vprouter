@@ -244,6 +244,24 @@ A peer-lookup failure records only a fixed reason code `exit_peer_problem`
 `client_needs_login` when the last status demands a login. These are
 fail-closed additions; none of them can turn INVALID into PASS.
 
+**Live finding 2026-11-10 (exit node never active).** The first M3
+kill-container run found the router peer, and `tailscale set --exit-node=`
+exited 0, but in 180 s the client never reported an `ExitNodeStatus` that
+named the router online with its `/32`. The phase was INVALID before the fault
+and before any traffic, with no leak. The record could not say which rule
+failed. Now, when the exit node does not become active, the record notes
+`client_exit_node_inactive` and stores:
+- `exit_status_problem`: one fixed code, `status_unavailable`,
+  `no_exit_node_status`, `exit_id_mismatch`, `exit_offline` or
+  `exit_address_mismatch`, the first rule of the pre-fault check that failed;
+- `exit_peer_problem`: the peer code above, for the same status;
+- `self_online`: a bool;
+- `client_needs_login`, when that applies.
+
+These are also fail-closed. In tailscaled 1.104.5 the status carries
+`ExitNodeStatus` only once the `--exit-node` IP has been resolved to a peer's
+stable ID in the current netmap. Its `Online` comes from that netmap.
+
 A `--client` phase requires `--duration >= 30` seconds, including
 `client-login`. A shorter timing window cannot be observed by the probe loop
 (and a login that short is not useful), so it is refused.

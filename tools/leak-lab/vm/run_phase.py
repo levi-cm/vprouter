@@ -2868,10 +2868,14 @@ def read_client_status(client: QGAClient) -> dict | None:
 
 
 def client_status_or_none(client: QGAClient) -> dict | None:
-    """A diagnostic status read that never raises (used on failure paths)."""
+    """A diagnostic status read that never raises (used on failure paths).
+
+    RecursionError covers deeply nested JSON from the guest: the diagnosis
+    must never replace the Refusal it is explaining.
+    """
     try:
         return read_client_status(client)
-    except (QGAError, OSError):
+    except (QGAError, OSError, RecursionError):
         return None
 
 
@@ -3376,13 +3380,19 @@ def wait_client_exit_node(
     address: str,
     *,
     timeout: float | None = None,
+    observed: dict | None = None,
 ) -> dict:
+    """Wait for the pre-fault exit check; ``observed["document"]`` keeps the
+    last polled status, so a refusal is diagnosed from the status that failed
+    rather than from a later read that may already have changed."""
     if timeout is None:
         timeout = CLIENT_READY_TIMEOUT
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         check_interrupt()
         document = read_client_status(client)
+        if observed is not None:
+            observed["document"] = document
         if client_peer_is_active(document, router_id, address):
             return document
         time.sleep(1.0)
@@ -4937,12 +4947,20 @@ def _run_client_phase_locked(
             raise
         exit_ipv4 = client_peer_ipv4(peer, router_addresses)
         set_client_exit_node(client_client, exit_ipv4)
+        observed: dict = {}
         try:
-            wait_client_exit_node(client_client, router_id, exit_ipv4)
+            wait_client_exit_node(
+                client_client, router_id, exit_ipv4, observed=observed
+            )
         except hostcheck.Refusal:
             note("client_exit_node_inactive")
-            # Fixed-vocabulary diagnosis only, as for the missing peer.
-            last = client_status_or_none(client_client)
+            # Fixed-vocabulary diagnosis only, as for the missing peer, of the
+            # last status that failed the check (a fresh read only when the
+            # deadline passed before any poll).
+            if "document" in observed:
+                last = observed["document"]
+            else:
+                last = client_status_or_none(client_client)
             record["client"]["exit_status_problem"] = client_exit_status_problem(
                 last, router_id, exit_ipv4
             )

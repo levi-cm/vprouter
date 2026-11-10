@@ -250,15 +250,22 @@ exited 0, but in 180 s the client never reported an `ExitNodeStatus` that
 named the router online with its `/32`. The phase was INVALID before the fault
 and before any traffic, with no leak. The record could not say which rule
 failed. Now, when the exit node does not become active, the record notes
-`client_exit_node_inactive` and stores:
-- `exit_status_problem`: one fixed code, `status_unavailable`,
-  `no_exit_node_status`, `exit_id_mismatch`, `exit_offline` or
-  `exit_address_mismatch`, the first rule of the pre-fault check that failed;
-- `exit_peer_problem`: the peer code above, for the same status;
-- `self_online`: a bool;
+`client_exit_node_inactive`. It diagnoses the last status the wait polled, the
+one that failed; it reads the status again only when the deadline passed before
+any poll. It stores:
+- `exit_status_problem`: the first rule of the pre-fault check that failed, as
+  one fixed code: `status_unavailable`, `no_exit_node_status`,
+  `exit_id_mismatch`, `exit_offline` or `exit_address_mismatch`. It is null
+  only when that fallback read found the exit node already active.
+- `exit_peer_problem`: the peer code above, for the same status. It is null
+  when the peer itself is fine, the usual case on this path.
+- `self_online`: a bool, or null when that status is unreadable or has no
+  `Self`.
 - `client_needs_login`, when that applies.
 
-These are also fail-closed. In tailscaled 1.104.5 the status carries
+The diagnostic read never raises. A QGA error, an OS error or a
+`RecursionError` from nested guest JSON becomes `status_unavailable`, so the
+Refusal stays the recorded cause. These are also fail-closed. In tailscaled 1.104.5 the status carries
 `ExitNodeStatus` only once the `--exit-node` IP has been resolved to a peer's
 stable ID in the current netmap. Its `Online` comes from that netmap.
 

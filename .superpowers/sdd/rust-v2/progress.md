@@ -1442,3 +1442,16 @@ refused after 180 s: no ExitNodeStatus naming the router online with its /32. Th
 (the stale-log defence working). The record could not say which exit rule failed: added a fixed
 exit_status_problem code (CLIENT_EXIT_PROBLEMS), exit_peer_problem at the same moment, self_online
 and client_needs_login on that refusal (fail-closed only). 322 VM tests, four mutations caught.
+2026-11-10 narrow Opus review of 5709341: nothing breaks fail-closed (fuzzed 72k inputs:
+client_exit_status_problem is None exactly when client_peer_is_active). Fixed: the diagnosis now
+uses the last polled status that failed (a fresh read only if no poll happened), the diagnostic read
+also absorbs RecursionError, docs state when each field is null, dead timeout patches removed, e2e
+tests for exit_address_mismatch / status_unavailable / the late-netmap race / the no-poll fallback.
+327 VM tests, three more mutations caught.
+2026-11-10 M3 kill-container rerun with --client 1 (21:20-21:24 UTC, evidence
+kill-container-20261110T212031.619631Z): PASS. `docker kill` exit 0, postcondition (container not
+running) exit 0. Client probe after the fault: 2 exit + 2 marker attempts failed during the outage,
+then the router came back by itself and 46/46 later exits were Mullvad; 0 non-Mullvad at any point.
+Exit node active 0.4 s after router READY (the first run's 180 s stall did not recur; cause
+unknown, now diagnosable). Router scan 5921 packets / 0 findings / both controls; client scan 2986
+packets / 0 findings. Traffic stop proven, cleanup ok, client MemAvailable 147/132 MB, prod healthy.

@@ -6108,6 +6108,50 @@ class ClientExitBindingTests(unittest.TestCase):
         self.assertIsNone(run_phase.client_self_online({"Self": None}))
         self.assertIsNone(run_phase.client_self_online(None))
 
+    def test_live_exit_wait_keeps_the_last_polled_status(self) -> None:
+        bad = json.loads(self.REAL_STATUS_JSON)
+        bad["ExitNodeStatus"]["Online"] = False
+        worse = json.loads(self.REAL_STATUS_JSON)
+        del worse["ExitNodeStatus"]
+        clock = {"t": 0.0}
+
+        def monotonic():
+            return clock["t"]
+
+        def sleep(seconds):
+            clock["t"] += seconds
+
+        observed: dict = {}
+        with mock.patch.object(run_phase, "read_client_status",
+                               side_effect=[bad, worse, bad, worse]), \
+                mock.patch.object(run_phase.time, "monotonic", side_effect=monotonic), \
+                mock.patch.object(run_phase.time, "sleep", side_effect=sleep), \
+                mock.patch.object(run_phase, "check_interrupt"):
+            with self.assertRaises(hostcheck.Refusal):
+                run_phase.wait_client_exit_node(
+                    object(), "router-node", "100.64.0.9", timeout=2.5,
+                    observed=observed)
+        # Polls at t=0, 1, 2: the last one (the third status) is kept.
+        self.assertIs(observed["document"], bad)
+        good = json.loads(self.REAL_STATUS_JSON)
+        observed = {}
+        with mock.patch.object(run_phase, "read_client_status", return_value=good), \
+                mock.patch.object(run_phase, "check_interrupt"):
+            self.assertIs(
+                run_phase.wait_client_exit_node(
+                    object(), "router-node", "100.64.0.9", timeout=5.0,
+                    observed=observed),
+                good,
+            )
+        self.assertIs(observed["document"], good)
+
+    def test_live_diagnostic_status_read_never_raises(self) -> None:
+        for error in (run_phase.QGAError("lost"), OSError("io"), RecursionError()):
+            with self.subTest(error=type(error).__name__):
+                with mock.patch.object(run_phase, "read_client_status",
+                                       side_effect=error):
+                    self.assertIsNone(run_phase.client_status_or_none(object()))
+
     def test_hold_samples_accept_an_offline_router_but_never_another_peer(self) -> None:
         # During stop-router/kill-container/kill-wireguard the router's
         # Tailscale is legitimately offline; the sample proves the selection.
@@ -8467,8 +8511,8 @@ class ClientRunPhaseTests(unittest.TestCase):
                 document["Self"]["Online"] = False
             return document
 
-        with mock.patch.object(run_phase, "read_client_status", side_effect=status), \
-                mock.patch.object(run_phase, "CLIENT_READY_TIMEOUT", 1.0):
+        # _run already shortens CLIENT_READY_TIMEOUT.
+        with mock.patch.object(run_phase, "read_client_status", side_effect=status):
             code, record, *_ = self._run("idle")
         self.assertEqual(code, 2)
         self.assertIn("phase_exception:Refusal", record["errors"])
@@ -8546,20 +8590,29 @@ class ClientRunPhaseTests(unittest.TestCase):
         self.assertIn("client_needs_login", record["errors"])
         self.assertNotIn("login.tailscale.com", json.dumps(record))
 
-    def _exit_inactive_run(self, mutate):
-        """Run idle with ``mutate`` applied once the exit node is selected."""
+    def _exit_inactive_run(self, mutate=None, *, replace=None):
+        """Run idle with the status altered once the exit node is selected.
+
+        ``mutate(document)`` edits it in place; ``replace(document, n)``
+        returns the status to report for the n-th such read (None:
+        unreadable).
+        """
         original_status = run_phase.read_client_status
+        reads = {"n": 0}
 
         def status(client):
             document = original_status(client)
             if isinstance(document, dict) and isinstance(
                 document.get("ExitNodeStatus"), dict
             ):
-                mutate(document)
+                reads["n"] += 1
+                if mutate is not None:
+                    mutate(document)
+                if replace is not None:
+                    return replace(document, reads["n"])
             return document
 
-        with mock.patch.object(run_phase, "read_client_status", side_effect=status), \
-                mock.patch.object(run_phase, "CLIENT_READY_TIMEOUT", 2.0):
+        with mock.patch.object(run_phase, "read_client_status", side_effect=status):
             return self._run("idle")
 
     def test_live_inactive_exit_node_records_a_fixed_exit_diagnosis(self) -> None:
@@ -8567,6 +8620,8 @@ class ClientRunPhaseTests(unittest.TestCase):
             "no_exit_node_status": lambda d: d.pop("ExitNodeStatus"),
             "exit_offline": lambda d: d["ExitNodeStatus"].update(Online=False),
             "exit_id_mismatch": lambda d: d["ExitNodeStatus"].update(ID="impostor"),
+            "exit_address_mismatch": lambda d: d["ExitNodeStatus"].update(
+                TailscaleIPs=["100.64.0.99/32"]),
         }
         for expected, mutate in cases.items():
             with self.subTest(expected=expected):
@@ -8579,10 +8634,6 @@ class ClientRunPhaseTests(unittest.TestCase):
                 self.assertNotIn("client_exit_peer_missing", record["errors"])
                 self.assertNotIn("client_needs_login", record["errors"])
                 self.assertEqual(record["client"]["exit_status_problem"], expected)
-                self.assertIn(
-                    record["client"]["exit_status_problem"],
-                    run_phase.CLIENT_EXIT_PROBLEMS,
-                )
                 # The router peer itself is still fine in the netmap.
                 self.assertIsNone(record["client"]["exit_peer_problem"])
                 self.assertIs(record["client"]["self_online"], True)
@@ -8592,6 +8643,56 @@ class ClientRunPhaseTests(unittest.TestCase):
                 text = json.dumps(record)
                 self.assertNotIn("impostor", text)
                 self.assertNotIn("100.64.0.9", text)
+
+    def test_live_exit_diagnosis_uses_the_status_that_failed(self) -> None:
+        # Opus review: a netmap arriving just after the deadline must not
+        # turn the recorded diagnosis into "no problem".  Every later read
+        # (the diagnosis would be one) is fully active.
+        def late(document, n):
+            if n == 1:
+                document["ExitNodeStatus"]["Online"] = False
+            return document
+
+        code, record, *_ = self._exit_inactive_run(replace=late)
+        self.assertEqual(code, 2)
+        self.assertIn("client_exit_node_inactive", record["errors"])
+        self.assertEqual(record["client"]["exit_status_problem"], "exit_offline")
+
+    def test_live_unreadable_status_at_the_exit_wait_is_status_unavailable(self) -> None:
+        code, record, *_ = self._exit_inactive_run(replace=lambda document, n: None)
+        self.assertEqual(code, 2)
+        self.assertIn("client_exit_node_inactive", record["errors"])
+        self.assertEqual(record["client"]["exit_status_problem"], "status_unavailable")
+        self.assertEqual(record["client"]["exit_peer_problem"], "status_unavailable")
+        self.assertIsNone(record["client"]["self_online"])
+
+    def test_live_exit_wait_without_a_poll_falls_back_to_a_safe_read(self) -> None:
+        # The deadline passed before any poll: one fresh diagnostic read,
+        # which here fails with a QGA error and must not replace the Refusal.
+        def no_poll(*args, **kwargs):
+            raise hostcheck.Refusal("the client did not report the test exit node as active")
+
+        original_status = run_phase.read_client_status
+        state = {"exit_wait_done": False}
+
+        def wait(*args, **kwargs):
+            state["exit_wait_done"] = True
+            return no_poll(*args, **kwargs)
+
+        def status(client):
+            if state["exit_wait_done"]:
+                state["exit_wait_done"] = False
+                raise run_phase.QGAError("lost")
+            return original_status(client)
+
+        with mock.patch.object(run_phase, "wait_client_exit_node", side_effect=wait), \
+                mock.patch.object(run_phase, "read_client_status", side_effect=status):
+            code, record, *_ = self._run("idle")
+        self.assertEqual(code, 2)
+        self.assertIn("phase_exception:Refusal", record["errors"])
+        self.assertIn("client_exit_node_inactive", record["errors"])
+        self.assertEqual(record["client"]["exit_status_problem"], "status_unavailable")
+        self.assertIsNone(record["client"]["self_online"])
 
     def test_live_exit_node_lost_with_the_peer_names_both(self) -> None:
         def gone(document):

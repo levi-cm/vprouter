@@ -1412,3 +1412,10 @@ after login.
 the login: PASS in 14 s on the persisted node key, Running without AuthURL, router_peer_visible
 true (router HostName present in the client netmap), client MemAvailable 149 MB at boot / 130 MB
 at end (256 MiB guest), cleanup ok, prod healthy before and after.
+2026-11-10 M3 idle with --client 1 (21:00-21:04 UTC, evidence idle-20261110T210037.178232Z): PASS.
+Router scan 6511 packets / 0 findings / both controls; client scan 3182 client packets / 0
+findings / no marker on the clear path. Client probe: exit before 1/1 Mullvad, after 56/56 Mullvad,
+0 non-Mullvad, 0 failed; marker 56/56; 9 hold windows, 10 coverage windows; exit node bound to
+zz-vprtest-01-do-not-use, cleared and re-verified; traffic stop proven; client MemAvailable 148 MB
+boot / 131 MB end (256 MiB). Lab key hash re-checked vs /etc/vprouter/*.conf (no overlap); prod
+healthy before and after. First live M3 client PASS (lab evidence, not release acceptance).
